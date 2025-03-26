@@ -632,9 +632,12 @@ export async function execute(
 	const timeout = this.getNodeParameter('timeout', index, 5000) as number;
 	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 
+	// Check if an explicit session ID was provided
+	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
+
 	// Get or create browser session
-	let page: puppeteer.Page;
-	let sessionId: string;
+	let page: puppeteer.Page | undefined;
+	let sessionId = '';
 
 	try {
 		// Create a session or reuse an existing one
@@ -644,156 +647,177 @@ export async function execute(
 			this.logger
 		);
 
-		// Try to get any existing page from the browser
-		const pages = await browser.pages();
+		// If an explicit sessionId was provided, try to get that page first
+		if (explicitSessionId) {
+			this.logger.info(`Looking for explicitly provided session ID: ${explicitSessionId}`);
+			page = Ventriloquist.getPage(workflowId, explicitSessionId);
 
-		if (pages.length > 0) {
-			// Use the first available page
-			page = pages[0];
-			sessionId = `existing_${Date.now()}`;
-			this.logger.info('Using existing page from browser session');
-		} else {
-			// Create a new page if none exists
-			page = await browser.newPage();
-			sessionId = newSessionId;
-			this.logger.info(`Created new page with session ID: ${sessionId}`);
-
-			// Store the new page for future operations
-			Ventriloquist.storePage(workflowId, sessionId, page);
-
-			// Navigate to a blank page to initialize it
-			await page.goto('about:blank');
-		}
-	} catch (error) {
-		throw new Error(`Failed to get or create a page: ${(error as Error).message}`);
-	}
-
-	// Get current page info for later use
-	const currentUrl = page.url();
-	const pageTitle = await page.title();
-	let screenshot = '';
-
-	try {
-		this.logger.info('Starting detection operations');
-
-		// Get detections
-		const detectionsData = this.getNodeParameter('detections.detection', index, []) as IDataObject[];
-
-		if (detectionsData.length === 0) {
-			throw new Error('No detections defined.');
+			if (page) {
+				sessionId = explicitSessionId;
+				this.logger.info(`Found existing page with explicit session ID: ${sessionId}`);
+			} else {
+				this.logger.warn(`Provided session ID ${explicitSessionId} not found, will create a new session`);
+			}
 		}
 
-		// Initialize results objects
-		const results: IDataObject = {};
-		const detailsInfo: IDataObject[] = [];
+		// If no explicit session or explicit session not found, proceed with normal flow
+		if (!explicitSessionId || !page) {
+			// Try to get any existing page from the browser
+			const pages = await browser.pages();
 
-		// Process each detection
-		for (const detection of detectionsData) {
-			const detectionName = detection.name as string;
-			const returnType = (detection.returnType as string) || 'boolean';
-			const successValue = (detection.successValue as string) || 'success';
-			const failureValue = (detection.failureValue as string) || 'failure';
-			const invertResult = detection.invertResult === true;
+			if (pages.length > 0) {
+				// Use the first available page
+				page = pages[0];
+				sessionId = `existing_${Date.now()}`;
+				this.logger.info('Using existing page from browser session');
+			} else {
+				// Create a new page if none exists
+				page = await browser.newPage();
+				sessionId = newSessionId;
+				this.logger.info(`Created new page with session ID: ${sessionId}`);
 
-			// Process the detection
-			const { success, actualValue, details: detectionDetails } = await processDetection(
-				page,
-				detection,
-				currentUrl,
-				waitForSelectors,
-				timeout,
-				this.logger
-			);
+				// Store the new page for future operations
+				Ventriloquist.storePage(workflowId, sessionId, page);
 
-			// Format the return value based on user preferences
-			const formattedResult = formatReturnValue(
-				success,
-				actualValue,
-				returnType,
-				successValue,
-				failureValue,
-				invertResult
-			);
-
-			// Add the results to the main output
-			results[detectionName] = formattedResult;
-
-			// Add details for debugging if needed
-			detailsInfo.push({
-				name: detectionName,
-				type: detection.detectionType,
-				success: invertResult ? !success : success,
-				result: formattedResult,
-				actualValue,
-				...detectionDetails,
-			});
+				// Navigate to a blank page to initialize it
+				await page.goto('about:blank');
+			}
 		}
 
-		// Take a screenshot if requested
-		if (takeScreenshot) {
-			const screenshotBuffer = await page.screenshot({
-				encoding: 'base64',
-				type: 'jpeg',
-				quality: 80,
-			});
-
-			screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
+		// At this point we must have a valid page
+		if (!page) {
+			throw new Error('Failed to get or create a page');
 		}
 
-		// Build the final output
-		const output: IDataObject = {
-			// Primary detection results at top level
-			...results,
+		// Get current page info for later use
+		const currentUrl = page.url();
+		const pageTitle = await page.title();
+		let screenshot = '';
 
-			// Metadata
-			success: true,
-			operation: 'detect',
-			sessionId,
-			url: currentUrl,
-			title: pageTitle,
-			timestamp: new Date().toISOString(),
-		};
+		try {
+			this.logger.info('Starting detection operations');
 
-		// Only include screenshot if requested
-		if (screenshot) {
-			output.screenshot = screenshot;
-		}
+			// Get detections
+			const detectionsData = this.getNodeParameter('detections.detection', index, []) as IDataObject[];
 
-		// Include details for debugging
-		output._details = detailsInfo;
+			if (detectionsData.length === 0) {
+				throw new Error('No detections defined.');
+			}
 
-		// Return the results
-		return {
-			json: output,
-		};
-	} catch (error) {
-		// Handle errors
-		this.logger.error(`Detect operation error: ${(error as Error).message}`);
+			// Initialize results objects
+			const results: IDataObject = {};
+			const detailsInfo: IDataObject[] = [];
 
-		// Take error screenshot if requested
-		if (takeScreenshot && page) {
-			try {
+			// Process each detection
+			for (const detection of detectionsData) {
+				const detectionName = detection.name as string;
+				const returnType = (detection.returnType as string) || 'boolean';
+				const successValue = (detection.successValue as string) || 'success';
+				const failureValue = (detection.failureValue as string) || 'failure';
+				const invertResult = detection.invertResult === true;
+
+				// Process the detection
+				const { success, actualValue, details: detectionDetails } = await processDetection(
+					page,
+					detection,
+					currentUrl,
+					waitForSelectors,
+					timeout,
+					this.logger
+				);
+
+				// Format the return value based on user preferences
+				const formattedResult = formatReturnValue(
+					success,
+					actualValue,
+					returnType,
+					successValue,
+					failureValue,
+					invertResult
+				);
+
+				// Add the results to the main output
+				results[detectionName] = formattedResult;
+
+				// Add details for debugging if needed
+				detailsInfo.push({
+					name: detectionName,
+					type: detection.detectionType,
+					success: invertResult ? !success : success,
+					result: formattedResult,
+					actualValue,
+					...detectionDetails,
+				});
+			}
+
+			// Take a screenshot if requested
+			if (takeScreenshot) {
 				const screenshotBuffer = await page.screenshot({
 					encoding: 'base64',
 					type: 'jpeg',
 					quality: 80,
 				});
-				screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
-			} catch {
-				// Ignore screenshot errors
-			}
-		}
 
-		// Return error info
-		return {
-			json: {
-				success: false,
+				screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
+			}
+
+			// Build the final output
+			const output: IDataObject = {
+				// Primary detection results at top level
+				...results,
+
+				// Metadata
+				success: true,
 				operation: 'detect',
-				error: (error as Error).message,
 				sessionId,
+				url: currentUrl,
+				title: pageTitle,
 				timestamp: new Date().toISOString(),
-				...(screenshot ? { screenshot } : {}),
-			},
-		};
+			};
+
+			// Only include screenshot if requested
+			if (screenshot) {
+				output.screenshot = screenshot;
+			}
+
+			// Include details for debugging
+			output._details = detailsInfo;
+
+			// Return the results
+			return {
+				json: output,
+			};
+		} catch (error) {
+			// Handle errors
+			this.logger.error(`Detect operation error: ${(error as Error).message}`);
+
+			// Take error screenshot if requested
+			if (takeScreenshot && page) {
+				try {
+					const screenshotBuffer = await page.screenshot({
+						encoding: 'base64',
+						type: 'jpeg',
+						quality: 80,
+					});
+					screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
+				} catch {
+					// Ignore screenshot errors
+				}
+			}
+
+			// Return error info
+			return {
+				json: {
+					success: false,
+					operation: 'detect',
+					error: (error as Error).message,
+					sessionId,
+					timestamp: new Date().toISOString(),
+					...(screenshot ? { screenshot } : {}),
+				},
+			};
+		}
+	} catch (error) {
+		throw new Error(`Failed to get or create a page: ${(error as Error).message}`);
 	}
 }

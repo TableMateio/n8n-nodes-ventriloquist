@@ -299,6 +299,18 @@ export class Ventriloquist implements INodeType {
 
 			// Properties for 'click' operation
 			{
+				displayName: 'Session ID',
+				name: 'explicitSessionId',
+				type: 'string',
+				default: '',
+				description: 'Session ID to use (if not provided, will try to use session from previous operations)',
+				displayOptions: {
+					show: {
+						operation: ['click', 'detect', 'extract', 'form', 'close'],
+					},
+				},
+			},
+			{
 				displayName: 'Selector',
 				name: 'selector',
 				type: 'string',
@@ -467,8 +479,14 @@ export class Ventriloquist implements INodeType {
 					// Try to get sessionId from previous operations
 					let sessionId = '';
 
-					// First, try to get sessionId from the current item if it was set by a previous operation
-					if (items[i].json && items[i].json.sessionId) {
+					// First, check if an explicit session ID was provided
+					const explicitSessionId = this.getNodeParameter('explicitSessionId', i, '') as string;
+					if (explicitSessionId) {
+						sessionId = explicitSessionId;
+						this.logger.info(`Using explicitly provided session ID: ${sessionId}`);
+					}
+					// If not explicit ID provided, try to get sessionId from the current item
+					else if (items[i].json && items[i].json.sessionId) {
 						sessionId = items[i].json.sessionId as string;
 					}
 					// For backward compatibility, also check for pageId
