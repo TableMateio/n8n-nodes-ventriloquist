@@ -14,6 +14,7 @@ import * as puppeteer from 'puppeteer-core';
 // Import actions
 import * as formOperation from './actions/form.operation';
 import * as extractOperation from './actions/extract.operation';
+import * as detectOperation from './actions/detect.operation';
 
 /**
  * Ventriloquist is a custom node for N8N that connects to Bright Data's Browser Scraping Browser
@@ -183,6 +184,12 @@ export class Ventriloquist implements INodeType {
 						action: 'Click on an element',
 					},
 					{
+						name: 'Detect',
+						value: 'detect',
+						description: 'Detect if elements exist or match conditions',
+						action: 'Detect if elements exist or match conditions',
+					},
+					{
 						name: 'Extract',
 						value: 'extract',
 						description: 'Extract data from a webpage',
@@ -346,6 +353,9 @@ export class Ventriloquist implements INodeType {
 
 			// Properties for 'form' operation
 			...formOperation.description,
+
+			// Properties for 'detect' operation
+			...detectOperation.description,
 
 			// Properties for 'extract' operation
 			...extractOperation.description,
@@ -629,6 +639,15 @@ export class Ventriloquist implements INodeType {
 				} else if (operation === 'form') {
 					// Execute form operation
 					const result = await formOperation.execute.call(
+						this,
+						i,
+						websocketEndpoint,
+						workflowId,
+					);
+					returnData.push(result);
+				} else if (operation === 'detect') {
+					// Execute detect operation
+					const result = await detectOperation.execute.call(
 						this,
 						i,
 						websocketEndpoint,
