@@ -32,11 +32,6 @@ export const description: INodeProperties[] = [
 				description: 'Check if an element exists on the page',
 			},
 			{
-				name: 'Multiple Conditions',
-				value: 'multipleConditions',
-				description: 'Check multiple different conditions',
-			},
-			{
 				name: 'Text Contains',
 				value: 'textContains',
 				description: 'Check if an element contains specific text',
@@ -48,7 +43,7 @@ export const description: INodeProperties[] = [
 			},
 		],
 		default: 'elementExists',
-		description: 'Type of detection to perform',
+		description: 'Type of detection to perform (you can also define multiple conditions below)',
 		displayOptions: {
 			show: {
 				operation: ['detect'],
@@ -67,15 +62,24 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ['detect'],
-				detectionType: ['multipleConditions'],
 			},
 		},
+		description: 'Define multiple detection conditions to check simultaneously (each condition returns its own independent result)',
 		default: {},
 		options: [
 			{
 				name: 'condition',
 				displayName: 'Condition',
 				values: [
+					{
+						displayName: 'Condition Name',
+						name: 'conditionName',
+						type: 'string',
+						default: '',
+						description: 'Name of this condition (used in results)',
+						placeholder: 'e.g., loginButtonExists',
+						required: true,
+					},
 					{
 						displayName: 'Condition Type',
 						name: 'conditionType',
@@ -109,14 +113,6 @@ export const description: INodeProperties[] = [
 						],
 						default: 'elementExists',
 						description: 'Type of condition to check',
-					},
-					{
-						displayName: 'Condition Name',
-						name: 'conditionName',
-						type: 'string',
-						default: '',
-						description: 'Name of this condition (used in results)',
-						placeholder: 'e.g., loginButtonExists',
 					},
 					{
 						displayName: 'Selector',
@@ -570,7 +566,7 @@ export const description: INodeProperties[] = [
 		type: 'options',
 		options: [
 			{
-				name: 'Boolean (true/false)',
+				name: 'Boolean (True/False)',
 				value: 'boolean',
 				description: 'Return true or false based on the detection result',
 			},
@@ -735,6 +731,204 @@ function formatReturnValue(
 }
 
 /**
+ * Process a single condition and return its result
+ */
+async function processCondition(
+	page: puppeteer.Page,
+	condition: IDataObject,
+	currentUrl: string,
+	logger: any, // eslint-disable-line @typescript-eslint/no-explicit-any
+): Promise<{
+	success: boolean;
+	actualValue: string | number;
+	details: IDataObject;
+}> {
+	const conditionType = condition.conditionType as string;
+
+	// Common parameters for all condition types
+	const waitForSelector = condition.waitForSelector !== false;
+	const timeout = (condition.timeout as number) || 5000;
+
+	// Variables to store the condition result
+	let detectionSuccess = false;
+	let actualValue: string | number = '';
+	const detectionDetails: IDataObject = {};
+
+	// Process the specific condition type
+	switch (conditionType) {
+		case 'elementExists': {
+			const selector = condition.selector as string;
+			let exists = false;
+
+			try {
+				if (waitForSelector) {
+					// Wait for the selector with timeout
+					await page.waitForSelector(selector, { timeout });
+					exists = true;
+				} else {
+					// Just check if the element exists without waiting
+					exists = await page.$(selector) !== null;
+				}
+			} catch (error) {
+				// If timeout occurs while waiting, element doesn't exist
+				exists = false;
+			}
+
+			detectionSuccess = exists;
+			actualValue = exists ? 'true' : 'false';
+			detectionDetails.selector = selector;
+			break;
+		}
+
+		case 'textContains': {
+			const selector = condition.selector as string;
+			const textToCheck = condition.textToCheck as string;
+			const matchType = (condition.matchType as string) || 'contains';
+			const caseSensitive = condition.caseSensitive === true;
+
+			let elementText = '';
+			let textMatches = false;
+
+			try {
+				if (waitForSelector) {
+					// Wait for the selector with timeout
+					await page.waitForSelector(selector, { timeout });
+				}
+
+				// Get the text content of the element
+				elementText = await page.$eval(selector, (el) => el.textContent?.trim() || '');
+
+				// Check if the text matches according to the match type
+				textMatches = matchStrings(elementText, textToCheck, matchType, caseSensitive);
+			} catch (error) {
+				// If error occurs, detection fails
+				textMatches = false;
+				logger.debug(`Text contains detection error: ${(error as Error).message}`);
+			}
+
+			detectionSuccess = textMatches;
+			actualValue = elementText;
+			Object.assign(detectionDetails, {
+				selector,
+				textToCheck,
+				matchType,
+				caseSensitive
+			});
+			break;
+		}
+
+		case 'attributeValue': {
+			const selector = condition.selector as string;
+			const attributeName = condition.attributeName as string;
+			const attributeValue = condition.attributeValue as string;
+			const matchType = (condition.matchType as string) || 'contains';
+			const caseSensitive = condition.caseSensitive === true;
+
+			let actualAttributeValue = '';
+			let attributeMatches = false;
+
+			try {
+				if (waitForSelector) {
+					// Wait for the selector with timeout
+					await page.waitForSelector(selector, { timeout });
+				}
+
+				// Get the attribute value
+				actualAttributeValue = await page.$eval(
+					selector,
+					(el, attr) => el.getAttribute(attr) || '',
+					attributeName
+				);
+
+				// Check if the attribute value matches according to the match type
+				attributeMatches = matchStrings(actualAttributeValue, attributeValue, matchType, caseSensitive);
+			} catch (error) {
+				// If error occurs, detection fails
+				attributeMatches = false;
+				logger.debug(`Attribute value detection error: ${(error as Error).message}`);
+			}
+
+			detectionSuccess = attributeMatches;
+			actualValue = actualAttributeValue;
+			Object.assign(detectionDetails, {
+				selector,
+				attributeName,
+				attributeValue,
+				matchType,
+				caseSensitive
+			});
+			break;
+		}
+
+		case 'elementCount': {
+			const selector = condition.selector as string;
+			const expectedCount = (condition.expectedCount as number) || 1;
+			const countComparison = (condition.countComparison as string) || 'equal';
+
+			let actualCount = 0;
+			let countMatches = false;
+
+			try {
+				if (waitForSelector) {
+					try {
+						// Wait for at least one element to appear
+						await page.waitForSelector(selector, { timeout });
+					} catch (error) {
+						// If timeout occurs, count is 0
+						actualCount = 0;
+					}
+				}
+
+				// Count all matching elements
+				actualCount = (await page.$$(selector)).length;
+
+				// Compare counts according to the comparison operator
+				countMatches = compareCount(actualCount, expectedCount, countComparison);
+			} catch (error) {
+				// If error occurs, detection fails
+				countMatches = false;
+				actualCount = 0;
+				logger.debug(`Element count detection error: ${(error as Error).message}`);
+			}
+
+			detectionSuccess = countMatches;
+			actualValue = actualCount;
+			Object.assign(detectionDetails, {
+				selector,
+				expectedCount,
+				countComparison,
+				actualCount
+			});
+			break;
+		}
+
+		case 'urlContains': {
+			const urlSubstring = condition.urlSubstring as string;
+			const matchType = (condition.matchType as string) || 'contains';
+			const caseSensitive = condition.caseSensitive === true;
+
+			// Check if the URL matches according to the match type
+			const urlMatches = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
+
+			detectionSuccess = urlMatches;
+			actualValue = currentUrl;
+			Object.assign(detectionDetails, {
+				urlSubstring,
+				matchType,
+				caseSensitive
+			});
+			break;
+		}
+	}
+
+	return {
+		success: detectionSuccess,
+		actualValue,
+		details: detectionDetails,
+	};
+}
+
+/**
  * Execute the detect operation
  */
 export async function execute(
@@ -745,6 +939,7 @@ export async function execute(
 ): Promise<INodeExecutionData> {
 	// Get parameters
 	const detectionType = this.getNodeParameter('detectionType', index, 'elementExists') as string;
+	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 
 	// Get or create browser session
 	let page: puppeteer.Page;
@@ -788,436 +983,59 @@ export async function execute(
 	let screenshot = '';
 
 	try {
-		this.logger.info(`Starting detection operation of type: ${detectionType}`);
-
-		// If the detection type is multiple conditions, handle those separately
-		if (detectionType === 'multipleConditions') {
-			const conditionsData = this.getNodeParameter('conditions.condition', index, []) as IDataObject[];
-
-			if (conditionsData.length === 0) {
-				throw new Error('No conditions defined for Multiple Conditions detection');
-			}
-
-			const conditionResults: IDataObject = {};
-			const conditionDetails: IDataObject[] = [];
-
-			// Process each condition
-			for (const condition of conditionsData) {
-				const conditionType = condition.conditionType as string;
-				const conditionName = condition.conditionName as string || `condition_${conditionType}_${Date.now()}`;
-
-				// Common parameters for all condition types
-				const waitForSelector = condition.waitForSelector !== false;
-				const timeout = (condition.timeout as number) || 5000;
-				const invertResult = condition.invertResult === true;
-				const returnType = (condition.returnType as string) || 'boolean';
-				const successValue = (condition.successValue as string) || 'success';
-				const failureValue = (condition.failureValue as string) || 'failure';
-
-				// Variables to store the condition result
-				let detectionSuccess = false;
-				let actualValue: string | number = '';
-				const detectionDetails: IDataObject = {
-					conditionType,
-					conditionName,
-				};
-
-				// Process the specific condition type
-				switch (conditionType) {
-					case 'elementExists': {
-						const selector = condition.selector as string;
-						let exists = false;
-
-						try {
-							if (waitForSelector) {
-								// Wait for the selector with timeout
-								await page.waitForSelector(selector, { timeout });
-								exists = true;
-							} else {
-								// Just check if the element exists without waiting
-								exists = await page.$(selector) !== null;
-							}
-						} catch (error) {
-							// If timeout occurs while waiting, element doesn't exist
-							exists = false;
-						}
-
-						detectionSuccess = exists;
-						actualValue = exists ? 'true' : 'false';
-						detectionDetails.selector = selector;
-						break;
-					}
-
-					case 'textContains': {
-						const selector = condition.selector as string;
-						const textToCheck = condition.textToCheck as string;
-						const matchType = (condition.matchType as string) || 'contains';
-						const caseSensitive = condition.caseSensitive === true;
-
-						let elementText = '';
-						let textMatches = false;
-
-						try {
-							if (waitForSelector) {
-								// Wait for the selector with timeout
-								await page.waitForSelector(selector, { timeout });
-							}
-
-							// Get the text content of the element
-							elementText = await page.$eval(selector, (el) => el.textContent?.trim() || '');
-
-							// Check if the text matches according to the match type
-							textMatches = matchStrings(elementText, textToCheck, matchType, caseSensitive);
-						} catch (error) {
-							// If error occurs, detection fails
-							textMatches = false;
-						}
-
-						detectionSuccess = textMatches;
-						actualValue = elementText;
-						Object.assign(detectionDetails, {
-							selector,
-							textToCheck,
-							matchType,
-							caseSensitive
-						});
-						break;
-					}
-
-					case 'attributeValue': {
-						const selector = condition.selector as string;
-						const attributeName = condition.attributeName as string;
-						const attributeValue = condition.attributeValue as string;
-						const matchType = (condition.matchType as string) || 'contains';
-						const caseSensitive = condition.caseSensitive === true;
-
-						let actualAttributeValue = '';
-						let attributeMatches = false;
-
-						try {
-							if (waitForSelector) {
-								// Wait for the selector with timeout
-								await page.waitForSelector(selector, { timeout });
-							}
-
-							// Get the attribute value
-							actualAttributeValue = await page.$eval(
-								selector,
-								(el, attr) => el.getAttribute(attr) || '',
-								attributeName
-							);
-
-							// Check if the attribute value matches according to the match type
-							attributeMatches = matchStrings(actualAttributeValue, attributeValue, matchType, caseSensitive);
-						} catch (error) {
-							// If error occurs, detection fails
-							attributeMatches = false;
-						}
-
-						detectionSuccess = attributeMatches;
-						actualValue = actualAttributeValue;
-						Object.assign(detectionDetails, {
-							selector,
-							attributeName,
-							attributeValue,
-							matchType,
-							caseSensitive
-						});
-						break;
-					}
-
-					case 'elementCount': {
-						const selector = condition.selector as string;
-						const expectedCount = (condition.expectedCount as number) || 1;
-						const countComparison = (condition.countComparison as string) || 'equal';
-
-						let actualCount = 0;
-						let countMatches = false;
-
-						try {
-							if (waitForSelector) {
-								try {
-									// Wait for at least one element to appear
-									await page.waitForSelector(selector, { timeout });
-								} catch (error) {
-									// If timeout occurs, count is 0
-									actualCount = 0;
-								}
-							}
-
-							// Count all matching elements
-							actualCount = (await page.$$(selector)).length;
-
-							// Compare counts according to the comparison operator
-							countMatches = compareCount(actualCount, expectedCount, countComparison);
-						} catch (error) {
-							// If error occurs, detection fails
-							countMatches = false;
-							actualCount = 0;
-						}
-
-						detectionSuccess = countMatches;
-						actualValue = actualCount;
-						Object.assign(detectionDetails, {
-							selector,
-							expectedCount,
-							countComparison,
-							actualCount
-						});
-						break;
-					}
-
-					case 'urlContains': {
-						const urlSubstring = condition.urlSubstring as string;
-						const matchType = (condition.matchType as string) || 'contains';
-						const caseSensitive = condition.caseSensitive === true;
-
-						// Get the current URL
-						const url = currentUrl;
-
-						// Check if the URL matches according to the match type
-						const urlMatches = matchStrings(url, urlSubstring, matchType, caseSensitive);
-
-						detectionSuccess = urlMatches;
-						actualValue = url;
-						Object.assign(detectionDetails, {
-							urlSubstring,
-							matchType,
-							caseSensitive
-						});
-						break;
-					}
-				}
-
-				// Format the return value based on user preferences
-				const formattedResult = formatReturnValue(
-					detectionSuccess,
-					actualValue,
-					returnType,
-					successValue,
-					failureValue,
-					invertResult
-				);
-
-				// Add the results to the combined results object
-				conditionResults[conditionName] = formattedResult;
-
-				// Add details to the array for more comprehensive reporting
-				conditionDetails.push({
-					name: conditionName,
-					type: conditionType,
-					success: invertResult ? !detectionSuccess : detectionSuccess,
-					result: formattedResult,
-					actualValue,
-					...detectionDetails,
-				});
-			}
-
-			// Take a screenshot if any condition requested it
-			const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
-			if (takeScreenshot) {
-				const screenshotBuffer = await page.screenshot({
-					encoding: 'base64',
-					type: 'jpeg',
-					quality: 80,
-				});
-
-				screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
-			}
-
-			// Return the combined results
-			return {
-				json: {
-					success: true,
-					operation: 'detect',
-					detectionType: 'multipleConditions',
-					results: conditionResults,
-					details: conditionDetails,
-					pageId,
-					url: currentUrl,
-					title: pageTitle,
-					conditionCount: conditionsData.length,
-					timestamp: new Date().toISOString(),
-					screenshot,
-				},
-			};
-		}
-		else {
-			// Handle single detection types (original implementation)
-			const waitForSelector = this.getNodeParameter('waitForSelector', index, true) as boolean;
-			const timeout = this.getNodeParameter('timeout', index, 5000) as number;
-			const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
-			const returnType = this.getNodeParameter('returnType', index, 'boolean') as string;
-			const invertResult = this.getNodeParameter('invertResult', index, false) as boolean;
-			const successValue = this.getNodeParameter('successValue', index, 'success') as string;
-			const failureValue = this.getNodeParameter('failureValue', index, 'failure') as string;
-
-			// Variables to store results
-			let detectionSuccess = false;
-			let actualValue: string | number = '';
-			let detectionDetails: IDataObject = {};
-
-			// Process different detection types
-			switch (detectionType) {
-				case 'elementExists': {
-					const selector = this.getNodeParameter('selector', index) as string;
-					let exists = false;
-
-					try {
-						if (waitForSelector) {
-							// Wait for the selector with timeout
-							await page.waitForSelector(selector, { timeout });
-							exists = true;
-						} else {
-							// Just check if the element exists without waiting
-							exists = await page.$(selector) !== null;
-						}
-					} catch (error) {
-						// If timeout occurs while waiting, element doesn't exist
-						exists = false;
-					}
-
-					detectionSuccess = exists;
-					actualValue = exists ? 'true' : 'false';
-					detectionDetails = { selector };
-					break;
-				}
-
-				case 'textContains': {
-					const selector = this.getNodeParameter('selector', index) as string;
-					const textToCheck = this.getNodeParameter('textToCheck', index) as string;
-					const matchType = this.getNodeParameter('matchType', index, 'contains') as string;
-					const caseSensitive = this.getNodeParameter('caseSensitive', index, false) as boolean;
-
-					let elementText = '';
-					let textMatches = false;
-
-					try {
-						if (waitForSelector) {
-							// Wait for the selector with timeout
-							await page.waitForSelector(selector, { timeout });
-						}
-
-						// Get the text content of the element
-						elementText = await page.$eval(selector, (el) => el.textContent?.trim() || '');
-
-						// Check if the text matches according to the match type
-						textMatches = matchStrings(elementText, textToCheck, matchType, caseSensitive);
-					} catch (error) {
-						// If error occurs, detection fails
-						textMatches = false;
-					}
-
-					detectionSuccess = textMatches;
-					actualValue = elementText;
-					detectionDetails = { selector, textToCheck, matchType, caseSensitive };
-					break;
-				}
-
-				case 'attributeValue': {
-					const selector = this.getNodeParameter('selector', index) as string;
-					const attributeName = this.getNodeParameter('attributeName', index) as string;
-					const attributeValue = this.getNodeParameter('attributeValue', index) as string;
-					const matchType = this.getNodeParameter('matchType', index, 'contains') as string;
-					const caseSensitive = this.getNodeParameter('caseSensitive', index, false) as boolean;
-
-					let actualAttributeValue = '';
-					let attributeMatches = false;
-
-					try {
-						if (waitForSelector) {
-							// Wait for the selector with timeout
-							await page.waitForSelector(selector, { timeout });
-						}
-
-						// Get the attribute value
-						actualAttributeValue = await page.$eval(
-							selector,
-							(el, attr) => el.getAttribute(attr) || '',
-							attributeName
-						);
-
-						// Check if the attribute value matches according to the match type
-						attributeMatches = matchStrings(actualAttributeValue, attributeValue, matchType, caseSensitive);
-					} catch (error) {
-						// If error occurs, detection fails
-						attributeMatches = false;
-					}
-
-					detectionSuccess = attributeMatches;
-					actualValue = actualAttributeValue;
-					detectionDetails = { selector, attributeName, attributeValue, matchType, caseSensitive };
-					break;
-				}
-
-				case 'elementCount': {
-					const selector = this.getNodeParameter('selector', index) as string;
-					const expectedCount = this.getNodeParameter('expectedCount', index, 1) as number;
-					const countComparison = this.getNodeParameter('countComparison', index, 'equal') as string;
-
-					let actualCount = 0;
-					let countMatches = false;
-
-					try {
-						if (waitForSelector) {
-							try {
-								// Wait for at least one element to appear
-								await page.waitForSelector(selector, { timeout });
-							} catch (error) {
-								// If timeout occurs, count is 0
-								actualCount = 0;
-							}
-						}
-
-						// Count all matching elements
-						actualCount = (await page.$$(selector)).length;
-
-						// Compare counts according to the comparison operator
-						countMatches = compareCount(actualCount, expectedCount, countComparison);
-					} catch (error) {
-						// If error occurs, detection fails
-						countMatches = false;
-						actualCount = 0;
-					}
-
-					detectionSuccess = countMatches;
-					actualValue = actualCount;
-					detectionDetails = { selector, expectedCount, countComparison, actualCount };
-					break;
-				}
-
-				case 'urlContains': {
-					const urlSubstring = this.getNodeParameter('urlSubstring', index) as string;
-					const matchType = this.getNodeParameter('matchType', index, 'contains') as string;
-					const caseSensitive = this.getNodeParameter('caseSensitive', index, false) as boolean;
-
-					// Get the current URL
-					const url = currentUrl;
-
-					// Check if the URL matches according to the match type
-					const urlMatches = matchStrings(url, urlSubstring, matchType, caseSensitive);
-
-					detectionSuccess = urlMatches;
-					actualValue = url;
-					detectionDetails = { urlSubstring, matchType, caseSensitive };
-					break;
-				}
-			}
-
-			// Take a screenshot if requested
-			if (takeScreenshot) {
-				const screenshotBuffer = await page.screenshot({
-					encoding: 'base64',
-					type: 'jpeg',
-					quality: 80,
-				});
-
-				screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
-			}
+		this.logger.info(`Starting detection operation for type: ${detectionType}`);
+
+		// Check if we have explicit conditions defined
+		const conditionsData = this.getNodeParameter('conditions.condition', index, []) as IDataObject[];
+		const hasExplicitConditions = conditionsData.length > 0;
+
+		// If we have explicit conditions defined, use those
+		// Otherwise, create a single condition from the main parameters
+		const allConditions: IDataObject[] = hasExplicitConditions
+			? conditionsData
+			: [{
+				conditionName: `default_${detectionType}`,
+				conditionType: detectionType,
+				selector: this.getNodeParameter('selector', index, '') as string,
+				textToCheck: this.getNodeParameter('textToCheck', index, '') as string,
+				urlSubstring: this.getNodeParameter('urlSubstring', index, '') as string,
+				attributeName: this.getNodeParameter('attributeName', index, '') as string,
+				attributeValue: this.getNodeParameter('attributeValue', index, '') as string,
+				expectedCount: this.getNodeParameter('expectedCount', index, 1) as number,
+				countComparison: this.getNodeParameter('countComparison', index, 'equal') as string,
+				matchType: this.getNodeParameter('matchType', index, 'contains') as string,
+				caseSensitive: this.getNodeParameter('caseSensitive', index, false) as boolean,
+				waitForSelector: this.getNodeParameter('waitForSelector', index, true) as boolean,
+				timeout: this.getNodeParameter('timeout', index, 5000) as number,
+				returnType: this.getNodeParameter('returnType', index, 'boolean') as string,
+				successValue: this.getNodeParameter('successValue', index, 'success') as string,
+				failureValue: this.getNodeParameter('failureValue', index, 'failure') as string,
+				invertResult: this.getNodeParameter('invertResult', index, false) as boolean,
+			}];
+
+		// Initialize results objects
+		const conditionResults: IDataObject = {};
+		const conditionDetails: IDataObject[] = [];
+
+		// Process each condition
+		for (const condition of allConditions) {
+			const conditionName = condition.conditionName as string;
+			const returnType = (condition.returnType as string) || 'boolean';
+			const successValue = (condition.successValue as string) || 'success';
+			const failureValue = (condition.failureValue as string) || 'failure';
+			const invertResult = condition.invertResult === true;
+
+			// Process the condition
+			const { success, actualValue, details } = await processCondition(
+				page,
+				condition,
+				currentUrl,
+				this.logger
+			);
 
 			// Format the return value based on user preferences
 			const formattedResult = formatReturnValue(
-				detectionSuccess,
+				success,
 				actualValue,
 				returnType,
 				successValue,
@@ -1225,30 +1043,77 @@ export async function execute(
 				invertResult
 			);
 
-			// Return the results
+			// Add the results to the combined results object
+			conditionResults[conditionName] = formattedResult;
+
+			// Add details to the array for more comprehensive reporting
+			conditionDetails.push({
+				name: conditionName,
+				type: condition.conditionType,
+				success: invertResult ? !success : success,
+				result: formattedResult,
+				actualValue,
+				...details,
+			});
+		}
+
+		// Take a screenshot if requested
+		if (takeScreenshot) {
+			const screenshotBuffer = await page.screenshot({
+				encoding: 'base64',
+				type: 'jpeg',
+				quality: 80,
+			});
+
+			screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
+		}
+
+		// Return the combined results
+		// Special handling for single condition without explicit conditions defined
+		if (!hasExplicitConditions && allConditions.length === 1) {
+			const condition = allConditions[0];
+			const conditionName = condition.conditionName as string;
+
+			// For backward compatibility, return a simpler structure for single condition
 			return {
 				json: {
 					success: true,
 					operation: 'detect',
 					detectionType,
-					result: formattedResult,
-					detected: invertResult ? !detectionSuccess : detectionSuccess,
-					actualValue,
+					result: conditionResults[conditionName],
+					detected: conditionDetails[0].success,
+					actualValue: conditionDetails[0].actualValue,
 					pageId,
 					url: currentUrl,
 					title: pageTitle,
-					...detectionDetails,
+					...conditionDetails[0],
 					timestamp: new Date().toISOString(),
 					screenshot,
 				},
 			};
 		}
+
+		// For multiple conditions, return a more detailed structure
+		return {
+			json: {
+				success: true,
+				operation: 'detect',
+				results: conditionResults,
+				details: conditionDetails,
+				pageId,
+				url: currentUrl,
+				title: pageTitle,
+				conditionCount: allConditions.length,
+				timestamp: new Date().toISOString(),
+				screenshot,
+			},
+		};
 	} catch (error) {
 		// Handle errors
 		this.logger.error(`Detect operation error: ${(error as Error).message}`);
 
 		// Take error screenshot if requested
-		if (this.getNodeParameter('takeScreenshot', index, false) as boolean && page) {
+		if (takeScreenshot && page) {
 			try {
 				const screenshotBuffer = await page.screenshot({
 					encoding: 'base64',
