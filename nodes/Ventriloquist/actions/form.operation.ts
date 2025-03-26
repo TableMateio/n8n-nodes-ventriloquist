@@ -430,16 +430,37 @@ export async function execute(
 
 					// Type text into the field
 					await page.type(selector, value);
+
+					// Record the result
+					results.push({
+						fieldType,
+						selector,
+						value,
+						success: true,
+					});
 					break;
 				}
 
 				case 'select': {
 					const value = field.value as string;
 					const matchType = field.matchType as string;
+					let selectedValue = value;
+					let selectedText = '';
+					let matchDetails = '';
 
 					if (matchType === 'exact') {
 						// Simple exact value match
 						await page.select(selector, value);
+
+						// Try to get the text for this value
+						try {
+							selectedText = await page.$eval(`${selector} option[value="${value}"]`,
+								(el) => (el as HTMLOptionElement).textContent || '');
+						} catch {
+							// If we can't get the text, just leave it blank
+						}
+
+						matchDetails = 'exact match';
 					} else if (matchType === 'textContains' || matchType === 'fuzzy') {
 						// Get all options from the dropdown
 						const options = await page.$$eval(`${selector} option`, (options: Element[]) => {
@@ -453,8 +474,6 @@ export async function execute(
 							throw new Error(`No options found in dropdown: ${selector}`);
 						}
 
-						let selectedValue: string;
-
 						if (matchType === 'textContains') {
 							// Find an option that contains the text
 							const matchingOption = options.find(option =>
@@ -466,7 +485,9 @@ export async function execute(
 							}
 
 							selectedValue = matchingOption.value;
-							this.logger.info(`Selected option with value: ${selectedValue} (text contains match: ${matchingOption.text})`);
+							selectedText = matchingOption.text;
+							matchDetails = `text contains match: "${value}" → "${selectedText}"`;
+							this.logger.info(`Selected option with value: ${selectedValue} (${matchDetails})`);
 						} else {
 							// Fuzzy matching
 							const threshold = field.fuzzyThreshold as number || 0.5;
@@ -477,12 +498,26 @@ export async function execute(
 							}
 
 							selectedValue = bestMatch.bestMatch.value;
-							this.logger.info(`Selected option with value: ${selectedValue} (fuzzy match: ${bestMatch.bestMatch.text}, score: ${bestMatch.bestMatch.rating.toFixed(2)})`);
+							selectedText = bestMatch.bestMatch.text;
+							matchDetails = `fuzzy match: "${value}" → "${selectedText}" (score: ${bestMatch.bestMatch.rating.toFixed(2)})`;
+							this.logger.info(`Selected option with value: ${selectedValue} (${matchDetails})`);
 						}
 
 						// Select the option
 						await page.select(selector, selectedValue);
 					}
+
+					// Record the result with enhanced information
+					results.push({
+						fieldType,
+						selector,
+						requestedValue: value,
+						selectedValue,
+						selectedText,
+						matchType,
+						matchDetails,
+						success: true,
+					});
 					break;
 				}
 
@@ -498,12 +533,28 @@ export async function execute(
 					if (currentChecked !== checked) {
 						await page.click(selector);
 					}
+
+					// Record the result
+					results.push({
+						fieldType,
+						selector,
+						checked,
+						success: true,
+					});
 					break;
 				}
 
 				case 'radio': {
 					// For radio buttons, just click to select
 					await page.click(selector);
+
+					// Record the result
+					results.push({
+						fieldType,
+						selector,
+						value: field.value,
+						success: true,
+					});
 					break;
 				}
 
@@ -522,16 +573,17 @@ export async function execute(
 					// Upload the file
 					// We need to cast to a specific type for the uploadFile method
 					await (fileInput as puppeteer.ElementHandle<HTMLInputElement>).uploadFile(filePath);
+
+					// Record the result
+					results.push({
+						fieldType,
+						selector,
+						filePath,
+						success: true,
+					});
 					break;
 				}
 			}
-
-			// Record the result
-			results.push({
-				fieldType,
-				selector,
-				success: true,
-			});
 
 			// Add a human-like delay if enabled
 			if (useHumanDelays) {
