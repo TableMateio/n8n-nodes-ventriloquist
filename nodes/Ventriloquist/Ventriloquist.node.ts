@@ -30,7 +30,7 @@ export class Ventriloquist implements INodeType {
 	// Clean up old sessions (called periodically)
 	private static cleanupSessions() {
 		const now = new Date();
-		const maxAge = 10 * 60 * 1000; // 10 minutes inactivity timeout
+		const maxAge = 30 * 60 * 1000; // 30 minutes inactivity timeout
 
 		for (const [sessionId, session] of this.browserSessions.entries()) {
 			if (now.getTime() - session.lastUsed.getTime() > maxAge) {

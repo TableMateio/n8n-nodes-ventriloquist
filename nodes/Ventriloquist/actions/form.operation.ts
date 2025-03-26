@@ -24,6 +24,31 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: 'Wait for Form Elements',
+		name: 'waitForSelectors',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to wait for form elements to appear before interacting with them',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+			},
+		},
+	},
+	{
+		displayName: 'Timeout',
+		name: 'selectorTimeout',
+		type: 'number',
+		default: 30000,
+		description: 'Maximum time in milliseconds to wait for form elements to appear',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+				waitForSelectors: [true],
+			},
+		},
+	},
+	{
 		displayName: 'Form Fields',
 		name: 'formFields',
 		placeholder: 'Add Form Field',
@@ -361,10 +386,15 @@ export async function execute(
 	const waitAfterSubmit = this.getNodeParameter('waitAfterSubmit', index, 'navigationComplete') as string;
 	const waitTime = this.getNodeParameter('waitTime', index, 5000) as number;
 	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
+	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
+	const selectorTimeout = this.getNodeParameter('selectorTimeout', index, 30000) as number;
+
+	// Check if an explicit session ID was provided
+	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
 
 	// Get or create browser session
-	let page: puppeteer.Page;
-	let sessionId: string;
+	let page: puppeteer.Page | undefined;
+	let sessionId = '';
 
 	try {
 		// Create a session or reuse an existing one
@@ -374,25 +404,46 @@ export async function execute(
 			this.logger
 		);
 
-		// Try to get any existing page from the browser
-		const pages = await browser.pages();
+		// If an explicit sessionId was provided, try to get that page first
+		if (explicitSessionId) {
+			this.logger.info(`Looking for explicitly provided session ID: ${explicitSessionId}`);
+			page = Ventriloquist.getPage(workflowId, explicitSessionId);
 
-		if (pages.length > 0) {
-			// Use the first available page
-			page = pages[0];
-			sessionId = `existing_${Date.now()}`;
-			this.logger.info('Using existing page from browser session');
-		} else {
-			// Create a new page if none exists
-			page = await browser.newPage();
-			sessionId = newSessionId;
-			this.logger.info(`Created new page with session ID: ${sessionId}`);
+			if (page) {
+				sessionId = explicitSessionId;
+				this.logger.info(`Found existing page with explicit session ID: ${sessionId}`);
+			} else {
+				this.logger.warn(`Provided session ID ${explicitSessionId} not found, will create a new session`);
+			}
+		}
 
-			// Store the new page for future operations
-			Ventriloquist.storePage(workflowId, sessionId, page);
+		// If no explicit session or explicit session not found, proceed with normal flow
+		if (!explicitSessionId || !page) {
+			// Try to get any existing page from the browser
+			const pages = await browser.pages();
 
-			// Navigate to a blank page to initialize it
-			await page.goto('about:blank');
+			if (pages.length > 0) {
+				// Use the first available page
+				page = pages[0];
+				sessionId = `existing_${Date.now()}`;
+				this.logger.info('Using existing page from browser session');
+			} else {
+				// Create a new page if none exists
+				page = await browser.newPage();
+				sessionId = newSessionId;
+				this.logger.info(`Created new page with session ID: ${sessionId}`);
+
+				// Store the new page for future operations
+				Ventriloquist.storePage(workflowId, sessionId, page);
+
+				// Navigate to a blank page to initialize it
+				await page.goto('about:blank');
+			}
+		}
+
+		// At this point we must have a valid page
+		if (!page) {
+			throw new Error('Failed to get or create a page');
 		}
 	} catch (error) {
 		throw new Error(`Failed to get or create a page: ${(error as Error).message}`);
@@ -402,6 +453,12 @@ export async function execute(
 		this.logger.info('Starting form fill operation');
 		const results: IDataObject[] = [];
 
+		// Wait for form elements if enabled
+		if (waitForSelectors) {
+			this.logger.info('Waiting for form elements to appear');
+			await page.waitForSelector('*', { timeout: selectorTimeout });
+		}
+
 		// Fill each form field
 		for (const field of formFields) {
 			const fieldType = field.fieldType as string;
@@ -410,7 +467,16 @@ export async function execute(
 			this.logger.info(`Processing ${fieldType} field with selector: ${selector}`);
 
 			// Wait for the element to be available
-			await page.waitForSelector(selector);
+			if (waitForSelectors) {
+				this.logger.info(`Waiting for selector: ${selector} (timeout: ${selectorTimeout}ms)`);
+				await page.waitForSelector(selector, { timeout: selectorTimeout });
+			} else {
+				// Check if the element exists first
+				const elementExists = await page.$(selector) !== null;
+				if (!elementExists) {
+					throw new Error(`Element with selector "${selector}" not found on page`);
+				}
+			}
 
 			// Handle different field types
 			switch (fieldType) {
