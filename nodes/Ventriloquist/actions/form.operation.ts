@@ -15,8 +15,8 @@ export const description: INodeProperties[] = [
 		name: 'pageId',
 		type: 'string',
 		default: '',
-		description: 'ID of the page to use (from a previous open operation)',
-		required: true,
+		description: 'ID of the page to use (from a previous open operation). Leave empty to use the most recent page.',
+		required: false,
 		displayOptions: {
 			show: {
 				operation: ['form'],
@@ -24,7 +24,7 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: 'Use Human-like Delays',
+		displayName: 'Use Human-Like Delays',
 		name: 'useHumanDelays',
 		type: 'boolean',
 		default: true,
@@ -366,7 +366,7 @@ export async function execute(
 	workflowId: string,
 ): Promise<INodeExecutionData> {
 	// Get parameters
-	const pageId = this.getNodeParameter('pageId', index) as string;
+	const pageId = this.getNodeParameter('pageId', index, '') as string;
 	const formFields = this.getNodeParameter('formFields.fields', index, []) as IDataObject[];
 	const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
 	const submitForm = this.getNodeParameter('submitForm', index, true) as boolean;
@@ -375,11 +375,52 @@ export async function execute(
 	const waitTime = this.getNodeParameter('waitTime', index, 5000) as number;
 	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 
-	// Get page from session
-	const page = Ventriloquist.getPage(workflowId, pageId);
+	// Try to get a page based on the provided ID or fall back to any available page
+	let page;
+	let usePageId = pageId;
 
-	if (!page) {
-		throw new Error(`Page with ID "${pageId}" not found. Please run the "Open" operation first.`);
+	if (pageId) {
+		// If a specific Page ID was provided, try to get that page
+		page = Ventriloquist.getPage(workflowId, pageId);
+
+		if (!page) {
+			throw new Error(`Page with ID "${pageId}" not found. Please run the "Open" operation first or leave Page ID empty to use any available page.`);
+		}
+
+		this.logger.info(`Using specified page with ID: ${pageId}`);
+	} else {
+		// No specific page ID provided, try to get the browser session and use/create a page
+		try {
+			// Create a session or reuse an existing one
+			const { browser, pageId: newPageId } = await Ventriloquist.getOrCreateSession(
+				workflowId,
+				websocketEndpoint,
+				this.logger
+			);
+
+			// Try to get any existing page from the browser
+			const pages = await browser.pages();
+
+			if (pages.length > 0) {
+				// Use the first available page
+				page = pages[0];
+				usePageId = `existing_${Date.now()}`;
+				this.logger.info('Using existing page from browser session');
+			} else {
+				// Create a new page if none exists
+				page = await browser.newPage();
+				usePageId = newPageId;
+				this.logger.info(`Created new page with ID: ${usePageId}`);
+
+				// Store the new page for future operations
+				Ventriloquist.storePage(workflowId, usePageId, page);
+
+				// Navigate to a blank page to initialize it
+				await page.goto('about:blank');
+			}
+		} catch (error) {
+			throw new Error(`Failed to get or create a page: ${(error as Error).message}`);
+		}
 	}
 
 	try {
@@ -437,7 +478,7 @@ export async function execute(
 							throw new Error(`No options found in dropdown: ${selector}`);
 						}
 
-						let selectedValue;
+						let selectedValue: string;
 
 						if (matchType === 'textContains') {
 							// Find an option that contains the text
@@ -504,7 +545,7 @@ export async function execute(
 					}
 
 					// Upload the file
-					// We need to cast to any to avoid TypeScript errors with uploadFile
+					// We need to cast to a specific type for the uploadFile method
 					await (fileInput as any).uploadFile(filePath);
 					break;
 				}
@@ -568,7 +609,7 @@ export async function execute(
 			json: {
 				success: true,
 				operation: 'form',
-				pageId,
+				pageId: usePageId,
 				url: currentUrl,
 				title: pageTitle,
 				formFields: results,
@@ -600,7 +641,7 @@ export async function execute(
 			json: {
 				success: false,
 				operation: 'form',
-				pageId,
+				pageId: usePageId,
 				error: (error as Error).message,
 				timestamp: new Date().toISOString(),
 				screenshot,

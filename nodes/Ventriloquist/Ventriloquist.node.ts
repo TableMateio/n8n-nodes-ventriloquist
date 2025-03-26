@@ -47,7 +47,7 @@ export class Ventriloquist implements INodeType {
 	}
 
 	// Get or create a browser session
-	private static async getOrCreateSession(
+	public static async getOrCreateSession(
 		workflowId: string,
 		websocketEndpoint: string,
 		logger: any,
@@ -85,7 +85,7 @@ export class Ventriloquist implements INodeType {
 	}
 
 	// Store a page in the session
-	private static storePage(workflowId: string, pageId: string, page: puppeteer.Page) {
+	public static storePage(workflowId: string, pageId: string, page: puppeteer.Page) {
 		const session = this.browserSessions.get(workflowId);
 		if (session) {
 			session.pages.set(pageId, page);
