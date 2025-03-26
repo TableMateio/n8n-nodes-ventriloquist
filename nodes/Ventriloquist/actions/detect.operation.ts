@@ -12,48 +12,9 @@ import type * as puppeteer from 'puppeteer-core';
  */
 export const description: INodeProperties[] = [
 	{
-		displayName: 'Detection Type',
-		name: 'detectionType',
-		type: 'options',
-		options: [
-			{
-				name: 'Attribute Value',
-				value: 'attributeValue',
-				description: 'Check if an element has a specific attribute value',
-			},
-			{
-				name: 'Element Count',
-				value: 'elementCount',
-				description: 'Count how many elements match a selector',
-			},
-			{
-				name: 'Element Exists',
-				value: 'elementExists',
-				description: 'Check if an element exists on the page',
-			},
-			{
-				name: 'Text Contains',
-				value: 'textContains',
-				description: 'Check if an element contains specific text',
-			},
-			{
-				name: 'URL Contains',
-				value: 'urlContains',
-				description: 'Check if the current URL contains a specific string',
-			},
-		],
-		default: 'elementExists',
-		description: 'Type of detection to perform (you can also define multiple conditions below)',
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-			},
-		},
-	},
-	{
-		displayName: 'Conditions',
-		name: 'conditions',
-		placeholder: 'Add Condition',
+		displayName: 'Detections',
+		name: 'detections',
+		placeholder: 'Add Detection',
 		type: 'fixedCollection',
 		typeOptions: {
 			multipleValues: true,
@@ -64,25 +25,25 @@ export const description: INodeProperties[] = [
 				operation: ['detect'],
 			},
 		},
-		description: 'Define multiple detection conditions to check simultaneously (each condition returns its own independent result)',
+		description: 'Define detection conditions to check elements on the page',
 		default: {},
 		options: [
 			{
-				name: 'condition',
-				displayName: 'Condition',
+				name: 'detection',
+				displayName: 'Detection',
 				values: [
 					{
-						displayName: 'Condition Name',
-						name: 'conditionName',
+						displayName: 'Name',
+						name: 'name',
 						type: 'string',
 						default: '',
-						description: 'Name of this condition (used in results)',
-						placeholder: 'e.g., loginButtonExists',
+						description: 'Name for this detection (used as key in results)',
+						placeholder: 'e.g., loginButton',
 						required: true,
 					},
 					{
-						displayName: 'Condition Type',
-						name: 'conditionType',
+						displayName: 'Detection Type',
+						name: 'detectionType',
 						type: 'options',
 						options: [
 							{
@@ -112,7 +73,7 @@ export const description: INodeProperties[] = [
 							},
 						],
 						default: 'elementExists',
-						description: 'Type of condition to check',
+						description: 'Type of detection to perform',
 					},
 					{
 						displayName: 'Selector',
@@ -123,7 +84,7 @@ export const description: INodeProperties[] = [
 						description: 'CSS selector to target the element(s)',
 						displayOptions: {
 							show: {
-								conditionType: ['elementExists', 'textContains', 'attributeValue', 'elementCount'],
+								detectionType: ['elementExists', 'textContains', 'attributeValue', 'elementCount'],
 							},
 						},
 					},
@@ -135,7 +96,7 @@ export const description: INodeProperties[] = [
 						description: 'Text content to check for in the selected element',
 						displayOptions: {
 							show: {
-								conditionType: ['textContains'],
+								detectionType: ['textContains'],
 							},
 						},
 					},
@@ -147,7 +108,7 @@ export const description: INodeProperties[] = [
 						description: 'String to check for in the current URL',
 						displayOptions: {
 							show: {
-								conditionType: ['urlContains'],
+								detectionType: ['urlContains'],
 							},
 						},
 					},
@@ -160,7 +121,7 @@ export const description: INodeProperties[] = [
 						description: 'Name of the attribute to check',
 						displayOptions: {
 							show: {
-								conditionType: ['attributeValue'],
+								detectionType: ['attributeValue'],
 							},
 						},
 					},
@@ -172,7 +133,7 @@ export const description: INodeProperties[] = [
 						description: 'Expected value of the attribute',
 						displayOptions: {
 							show: {
-								conditionType: ['attributeValue'],
+								detectionType: ['attributeValue'],
 							},
 						},
 					},
@@ -184,7 +145,7 @@ export const description: INodeProperties[] = [
 						description: 'Expected number of elements to find',
 						displayOptions: {
 							show: {
-								conditionType: ['elementCount'],
+								detectionType: ['elementCount'],
 							},
 						},
 					},
@@ -218,7 +179,7 @@ export const description: INodeProperties[] = [
 						description: 'How to compare the actual count with the expected count',
 						displayOptions: {
 							show: {
-								conditionType: ['elementCount'],
+								detectionType: ['elementCount'],
 							},
 						},
 					},
@@ -257,7 +218,7 @@ export const description: INodeProperties[] = [
 						description: 'How to match the text or attribute value',
 						displayOptions: {
 							show: {
-								conditionType: ['textContains', 'attributeValue', 'urlContains'],
+								detectionType: ['textContains', 'attributeValue', 'urlContains'],
 							},
 						},
 					},
@@ -269,31 +230,7 @@ export const description: INodeProperties[] = [
 						description: 'Whether the matching should be case-sensitive',
 						displayOptions: {
 							show: {
-								conditionType: ['textContains', 'attributeValue', 'urlContains'],
-							},
-						},
-					},
-					{
-						displayName: 'Wait for Selector',
-						name: 'waitForSelector',
-						type: 'boolean',
-						default: true,
-						description: 'Whether to wait for the selector to appear in page before checking',
-						displayOptions: {
-							show: {
-								conditionType: ['elementExists', 'textContains', 'attributeValue', 'elementCount'],
-							},
-						},
-					},
-					{
-						displayName: 'Timeout',
-						name: 'timeout',
-						type: 'number',
-						default: 5000,
-						description: 'Maximum time to wait for the selector in milliseconds',
-						displayOptions: {
-							show: {
-								waitForSelector: [true],
+								detectionType: ['textContains', 'attributeValue', 'urlContains'],
 							},
 						},
 					},
@@ -360,190 +297,17 @@ export const description: INodeProperties[] = [
 				],
 			},
 		],
-	},
-	{
-		displayName: 'Selector',
-		name: 'selector',
-		type: 'string',
-		default: '',
-		placeholder: '#element, .class, div[data-test="value"]',
-		description: 'CSS selector to target the element(s)',
 		required: true,
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				detectionType: ['elementExists', 'textContains', 'attributeValue', 'elementCount'],
-			},
-		},
 	},
 	{
-		displayName: 'Text to Check',
-		name: 'textToCheck',
-		type: 'string',
-		default: '',
-		description: 'Text content to check for in the selected element',
-		required: true,
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				detectionType: ['textContains'],
-			},
-		},
-	},
-	{
-		displayName: 'URL Substring',
-		name: 'urlSubstring',
-		type: 'string',
-		default: '',
-		description: 'String to check for in the current URL',
-		required: true,
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				detectionType: ['urlContains'],
-			},
-		},
-	},
-	{
-		displayName: 'Attribute Name',
-		name: 'attributeName',
-		type: 'string',
-		default: '',
-		placeholder: 'data-ID, class, href',
-		description: 'Name of the attribute to check',
-		required: true,
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				detectionType: ['attributeValue'],
-			},
-		},
-	},
-	{
-		displayName: 'Attribute Value',
-		name: 'attributeValue',
-		type: 'string',
-		default: '',
-		description: 'Expected value of the attribute',
-		required: true,
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				detectionType: ['attributeValue'],
-			},
-		},
-	},
-	{
-		displayName: 'Expected Count',
-		name: 'expectedCount',
-		type: 'number',
-		default: 1,
-		description: 'Expected number of elements to find',
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				detectionType: ['elementCount'],
-			},
-		},
-	},
-	{
-		displayName: 'Count Comparison',
-		name: 'countComparison',
-		type: 'options',
-		options: [
-			{
-				name: 'Equal To',
-				value: 'equal',
-			},
-			{
-				name: 'Greater Than',
-				value: 'greater',
-			},
-			{
-				name: 'Greater Than or Equal To',
-				value: 'greaterEqual',
-			},
-			{
-				name: 'Less Than',
-				value: 'less',
-			},
-			{
-				name: 'Less Than or Equal To',
-				value: 'lessEqual',
-			},
-		],
-		default: 'equal',
-		description: 'How to compare the actual count with the expected count',
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				detectionType: ['elementCount'],
-			},
-		},
-	},
-	{
-		displayName: 'Match Type',
-		name: 'matchType',
-		type: 'options',
-		options: [
-			{
-				name: 'Contains',
-				value: 'contains',
-				description: 'Value must contain the specified string',
-			},
-			{
-				name: 'Ends With',
-				value: 'endsWith',
-				description: 'Value must end with the specified string',
-			},
-			{
-				name: 'Exact Match',
-				value: 'exact',
-				description: 'Value must match exactly',
-			},
-			{
-				name: 'RegEx',
-				value: 'regex',
-				description: 'Match using a regular expression',
-			},
-			{
-				name: 'Starts With',
-				value: 'startsWith',
-				description: 'Value must start with the specified string',
-			},
-		],
-		default: 'contains',
-		description: 'How to match the text or attribute value',
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				detectionType: ['textContains', 'attributeValue', 'urlContains'],
-			},
-		},
-	},
-	{
-		displayName: 'Case Sensitive',
-		name: 'caseSensitive',
-		type: 'boolean',
-		default: false,
-		description: 'Whether the matching should be case-sensitive',
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				detectionType: ['textContains', 'attributeValue', 'urlContains'],
-			},
-		},
-	},
-	{
-		displayName: 'Wait for Selector',
-		name: 'waitForSelector',
+		displayName: 'Wait for Selectors',
+		name: 'waitForSelectors',
 		type: 'boolean',
 		default: true,
-		description: 'Whether to wait for the selector to appear in page before checking',
+		description: 'Whether to wait for selectors to appear in page before checking',
 		displayOptions: {
 			show: {
 				operation: ['detect'],
-				detectionType: ['elementExists', 'textContains', 'attributeValue', 'elementCount'],
 			},
 		},
 	},
@@ -552,83 +316,11 @@ export const description: INodeProperties[] = [
 		name: 'timeout',
 		type: 'number',
 		default: 5000,
-		description: 'Maximum time to wait for the selector in milliseconds',
+		description: 'Maximum time to wait for selectors in milliseconds',
 		displayOptions: {
 			show: {
 				operation: ['detect'],
-				waitForSelector: [true],
-			},
-		},
-	},
-	{
-		displayName: 'Return Type',
-		name: 'returnType',
-		type: 'options',
-		options: [
-			{
-				name: 'Boolean (True/False)',
-				value: 'boolean',
-				description: 'Return true or false based on the detection result',
-			},
-			{
-				name: 'String',
-				value: 'string',
-				description: 'Return custom strings for success and failure',
-			},
-			{
-				name: 'Number',
-				value: 'number',
-				description: 'Return 1 for success, 0 for failure (useful for math operations)',
-			},
-			{
-				name: 'Actual Value',
-				value: 'value',
-				description: 'Return the actual text, attribute value, or count found',
-			},
-		],
-		default: 'boolean',
-		description: 'The type of value to return in the result',
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-			},
-		},
-	},
-	{
-		displayName: 'Success Value',
-		name: 'successValue',
-		type: 'string',
-		default: 'success',
-		description: 'Value to return when detection succeeds',
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				returnType: ['string'],
-			},
-		},
-	},
-	{
-		displayName: 'Failure Value',
-		name: 'failureValue',
-		type: 'string',
-		default: 'failure',
-		description: 'Value to return when detection fails',
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				returnType: ['string'],
-			},
-		},
-	},
-	{
-		displayName: 'Invert Result',
-		name: 'invertResult',
-		type: 'boolean',
-		default: false,
-		description: 'Whether to invert the detection result (true becomes false, false becomes true)',
-		displayOptions: {
-			show: {
-				operation: ['detect'],
+				waitForSelectors: [true],
 			},
 		},
 	},
@@ -731,37 +423,35 @@ function formatReturnValue(
 }
 
 /**
- * Process a single condition and return its result
+ * Process a single detection and return its result
  */
-async function processCondition(
+async function processDetection(
 	page: puppeteer.Page,
-	condition: IDataObject,
+	detection: IDataObject,
 	currentUrl: string,
-	logger: any, // eslint-disable-line @typescript-eslint/no-explicit-any
+	waitForSelectors: boolean,
+	timeout: number,
+	logger: IExecuteFunctions['logger'],
 ): Promise<{
 	success: boolean;
 	actualValue: string | number;
 	details: IDataObject;
 }> {
-	const conditionType = condition.conditionType as string;
+	const detectionType = detection.detectionType as string;
 
-	// Common parameters for all condition types
-	const waitForSelector = condition.waitForSelector !== false;
-	const timeout = (condition.timeout as number) || 5000;
-
-	// Variables to store the condition result
+	// Variables to store the detection result
 	let detectionSuccess = false;
 	let actualValue: string | number = '';
 	const detectionDetails: IDataObject = {};
 
-	// Process the specific condition type
-	switch (conditionType) {
+	// Process the specific detection type
+	switch (detectionType) {
 		case 'elementExists': {
-			const selector = condition.selector as string;
+			const selector = detection.selector as string;
 			let exists = false;
 
 			try {
-				if (waitForSelector) {
+				if (waitForSelectors) {
 					// Wait for the selector with timeout
 					await page.waitForSelector(selector, { timeout });
 					exists = true;
@@ -781,16 +471,16 @@ async function processCondition(
 		}
 
 		case 'textContains': {
-			const selector = condition.selector as string;
-			const textToCheck = condition.textToCheck as string;
-			const matchType = (condition.matchType as string) || 'contains';
-			const caseSensitive = condition.caseSensitive === true;
+			const selector = detection.selector as string;
+			const textToCheck = detection.textToCheck as string;
+			const matchType = (detection.matchType as string) || 'contains';
+			const caseSensitive = detection.caseSensitive === true;
 
 			let elementText = '';
 			let textMatches = false;
 
 			try {
-				if (waitForSelector) {
+				if (waitForSelectors) {
 					// Wait for the selector with timeout
 					await page.waitForSelector(selector, { timeout });
 				}
@@ -818,17 +508,17 @@ async function processCondition(
 		}
 
 		case 'attributeValue': {
-			const selector = condition.selector as string;
-			const attributeName = condition.attributeName as string;
-			const attributeValue = condition.attributeValue as string;
-			const matchType = (condition.matchType as string) || 'contains';
-			const caseSensitive = condition.caseSensitive === true;
+			const selector = detection.selector as string;
+			const attributeName = detection.attributeName as string;
+			const attributeValue = detection.attributeValue as string;
+			const matchType = (detection.matchType as string) || 'contains';
+			const caseSensitive = detection.caseSensitive === true;
 
 			let actualAttributeValue = '';
 			let attributeMatches = false;
 
 			try {
-				if (waitForSelector) {
+				if (waitForSelectors) {
 					// Wait for the selector with timeout
 					await page.waitForSelector(selector, { timeout });
 				}
@@ -861,15 +551,15 @@ async function processCondition(
 		}
 
 		case 'elementCount': {
-			const selector = condition.selector as string;
-			const expectedCount = (condition.expectedCount as number) || 1;
-			const countComparison = (condition.countComparison as string) || 'equal';
+			const selector = detection.selector as string;
+			const expectedCount = (detection.expectedCount as number) || 1;
+			const countComparison = (detection.countComparison as string) || 'equal';
 
 			let actualCount = 0;
 			let countMatches = false;
 
 			try {
-				if (waitForSelector) {
+				if (waitForSelectors) {
 					try {
 						// Wait for at least one element to appear
 						await page.waitForSelector(selector, { timeout });
@@ -903,9 +593,9 @@ async function processCondition(
 		}
 
 		case 'urlContains': {
-			const urlSubstring = condition.urlSubstring as string;
-			const matchType = (condition.matchType as string) || 'contains';
-			const caseSensitive = condition.caseSensitive === true;
+			const urlSubstring = detection.urlSubstring as string;
+			const matchType = (detection.matchType as string) || 'contains';
+			const caseSensitive = detection.caseSensitive === true;
 
 			// Check if the URL matches according to the match type
 			const urlMatches = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
@@ -938,7 +628,8 @@ export async function execute(
 	workflowId: string,
 ): Promise<INodeExecutionData> {
 	// Get parameters
-	const detectionType = this.getNodeParameter('detectionType', index, 'elementExists') as string;
+	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
+	const timeout = this.getNodeParameter('timeout', index, 5000) as number;
 	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 
 	// Get or create browser session
@@ -983,53 +674,34 @@ export async function execute(
 	let screenshot = '';
 
 	try {
-		this.logger.info(`Starting detection operation for type: ${detectionType}`);
+		this.logger.info('Starting detection operations');
 
-		// Check if we have explicit conditions defined
-		const conditionsData = this.getNodeParameter('conditions.condition', index, []) as IDataObject[];
-		const hasExplicitConditions = conditionsData.length > 0;
+		// Get detections
+		const detectionsData = this.getNodeParameter('detections.detection', index, []) as IDataObject[];
 
-		// If we have explicit conditions defined, use those
-		// Otherwise, create a single condition from the main parameters
-		const allConditions: IDataObject[] = hasExplicitConditions
-			? conditionsData
-			: [{
-				conditionName: `default_${detectionType}`,
-				conditionType: detectionType,
-				selector: this.getNodeParameter('selector', index, '') as string,
-				textToCheck: this.getNodeParameter('textToCheck', index, '') as string,
-				urlSubstring: this.getNodeParameter('urlSubstring', index, '') as string,
-				attributeName: this.getNodeParameter('attributeName', index, '') as string,
-				attributeValue: this.getNodeParameter('attributeValue', index, '') as string,
-				expectedCount: this.getNodeParameter('expectedCount', index, 1) as number,
-				countComparison: this.getNodeParameter('countComparison', index, 'equal') as string,
-				matchType: this.getNodeParameter('matchType', index, 'contains') as string,
-				caseSensitive: this.getNodeParameter('caseSensitive', index, false) as boolean,
-				waitForSelector: this.getNodeParameter('waitForSelector', index, true) as boolean,
-				timeout: this.getNodeParameter('timeout', index, 5000) as number,
-				returnType: this.getNodeParameter('returnType', index, 'boolean') as string,
-				successValue: this.getNodeParameter('successValue', index, 'success') as string,
-				failureValue: this.getNodeParameter('failureValue', index, 'failure') as string,
-				invertResult: this.getNodeParameter('invertResult', index, false) as boolean,
-			}];
+		if (detectionsData.length === 0) {
+			throw new Error('No detections defined.');
+		}
 
 		// Initialize results objects
-		const conditionResults: IDataObject = {};
-		const conditionDetails: IDataObject[] = [];
+		const results: IDataObject = {};
+		const details: IDataObject[] = [];
 
-		// Process each condition
-		for (const condition of allConditions) {
-			const conditionName = condition.conditionName as string;
-			const returnType = (condition.returnType as string) || 'boolean';
-			const successValue = (condition.successValue as string) || 'success';
-			const failureValue = (condition.failureValue as string) || 'failure';
-			const invertResult = condition.invertResult === true;
+		// Process each detection
+		for (const detection of detectionsData) {
+			const detectionName = detection.name as string;
+			const returnType = (detection.returnType as string) || 'boolean';
+			const successValue = (detection.successValue as string) || 'success';
+			const failureValue = (detection.failureValue as string) || 'failure';
+			const invertResult = detection.invertResult === true;
 
-			// Process the condition
-			const { success, actualValue, details } = await processCondition(
+			// Process the detection
+			const { success, actualValue, details: detectionDetails } = await processDetection(
 				page,
-				condition,
+				detection,
 				currentUrl,
+				waitForSelectors,
+				timeout,
 				this.logger
 			);
 
@@ -1043,17 +715,17 @@ export async function execute(
 				invertResult
 			);
 
-			// Add the results to the combined results object
-			conditionResults[conditionName] = formattedResult;
+			// Add the results
+			results[detectionName] = formattedResult;
 
-			// Add details to the array for more comprehensive reporting
-			conditionDetails.push({
-				name: conditionName,
-				type: condition.conditionType,
+			// Add details for reporting
+			details.push({
+				name: detectionName,
+				type: detection.detectionType,
 				success: invertResult ? !success : success,
 				result: formattedResult,
 				actualValue,
-				...details,
+				...detectionDetails,
 			});
 		}
 
@@ -1068,42 +740,17 @@ export async function execute(
 			screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
 		}
 
-		// Return the combined results
-		// Special handling for single condition without explicit conditions defined
-		if (!hasExplicitConditions && allConditions.length === 1) {
-			const condition = allConditions[0];
-			const conditionName = condition.conditionName as string;
-
-			// For backward compatibility, return a simpler structure for single condition
-			return {
-				json: {
-					success: true,
-					operation: 'detect',
-					detectionType,
-					result: conditionResults[conditionName],
-					detected: conditionDetails[0].success,
-					actualValue: conditionDetails[0].actualValue,
-					pageId,
-					url: currentUrl,
-					title: pageTitle,
-					...conditionDetails[0],
-					timestamp: new Date().toISOString(),
-					screenshot,
-				},
-			};
-		}
-
-		// For multiple conditions, return a more detailed structure
+		// Return the results
 		return {
 			json: {
 				success: true,
 				operation: 'detect',
-				results: conditionResults,
-				details: conditionDetails,
+				results,
+				details,
 				pageId,
 				url: currentUrl,
 				title: pageTitle,
-				conditionCount: allConditions.length,
+				detectionCount: detectionsData.length,
 				timestamp: new Date().toISOString(),
 				screenshot,
 			},
@@ -1130,7 +777,6 @@ export async function execute(
 			json: {
 				success: false,
 				operation: 'detect',
-				detectionType,
 				error: (error as Error).message,
 				pageId,
 				timestamp: new Date().toISOString(),
