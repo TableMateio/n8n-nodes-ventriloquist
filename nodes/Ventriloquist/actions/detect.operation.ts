@@ -33,15 +33,6 @@ export const description: INodeProperties[] = [
 				displayName: 'Detection',
 				values: [
 					{
-						displayName: 'Name',
-						name: 'name',
-						type: 'string',
-						default: '',
-						description: 'Name for this detection (used as key in results)',
-						placeholder: 'e.g., loginButton',
-						required: true,
-					},
-					{
 						displayName: 'Detection Type',
 						name: 'detectionType',
 						type: 'options',
@@ -74,6 +65,15 @@ export const description: INodeProperties[] = [
 						],
 						default: 'elementExists',
 						description: 'Type of detection to perform',
+					},
+					{
+						displayName: 'Output Label',
+						name: 'name',
+						type: 'string',
+						default: '',
+						description: 'Label for this detection result in the output',
+						placeholder: 'e.g., loginButton',
+						required: true,
 					},
 					{
 						displayName: 'Selector',
@@ -304,7 +304,7 @@ export const description: INodeProperties[] = [
 		name: 'waitForSelectors',
 		type: 'boolean',
 		default: true,
-		description: 'Whether to wait for selectors to appear in page before checking',
+		description: 'Whether to actively wait for selectors to appear before checking (uses timeout value)',
 		displayOptions: {
 			show: {
 				operation: ['detect'],
@@ -316,7 +316,7 @@ export const description: INodeProperties[] = [
 		name: 'timeout',
 		type: 'number',
 		default: 5000,
-		description: 'Maximum time to wait for selectors in milliseconds',
+		description: 'Maximum time in milliseconds to wait for selectors to appear (only applies if Wait for Selectors is enabled)',
 		displayOptions: {
 			show: {
 				operation: ['detect'],
@@ -685,7 +685,7 @@ export async function execute(
 
 		// Initialize results objects
 		const results: IDataObject = {};
-		const details: IDataObject[] = [];
+		const detailsInfo: IDataObject[] = [];
 
 		// Process each detection
 		for (const detection of detectionsData) {
@@ -715,11 +715,11 @@ export async function execute(
 				invertResult
 			);
 
-			// Add the results
+			// Add the results to the main output
 			results[detectionName] = formattedResult;
 
-			// Add details for reporting
-			details.push({
+			// Add details for debugging if needed
+			detailsInfo.push({
 				name: detectionName,
 				type: detection.detectionType,
 				success: invertResult ? !success : success,
@@ -740,20 +740,31 @@ export async function execute(
 			screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
 		}
 
+		// Build the final output
+		const output: IDataObject = {
+			// Primary detection results at top level
+			...results,
+
+			// Metadata
+			success: true,
+			operation: 'detect',
+			pageId,
+			url: currentUrl,
+			title: pageTitle,
+			timestamp: new Date().toISOString(),
+		};
+
+		// Only include screenshot if requested
+		if (screenshot) {
+			output.screenshot = screenshot;
+		}
+
+		// Include details for debugging
+		output._details = detailsInfo;
+
 		// Return the results
 		return {
-			json: {
-				success: true,
-				operation: 'detect',
-				results,
-				details,
-				pageId,
-				url: currentUrl,
-				title: pageTitle,
-				detectionCount: detectionsData.length,
-				timestamp: new Date().toISOString(),
-				screenshot,
-			},
+			json: output,
 		};
 	} catch (error) {
 		// Handle errors
@@ -773,6 +784,7 @@ export async function execute(
 			}
 		}
 
+		// Return error info
 		return {
 			json: {
 				success: false,
@@ -780,7 +792,7 @@ export async function execute(
 				error: (error as Error).message,
 				pageId,
 				timestamp: new Date().toISOString(),
-				screenshot,
+				...(screenshot ? { screenshot } : {}),
 			},
 		};
 	}
