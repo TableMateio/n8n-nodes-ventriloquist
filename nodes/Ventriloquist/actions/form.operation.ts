@@ -24,6 +24,18 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: 'Use Human-like Delays',
+		name: 'useHumanDelays',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to use random delays between actions to simulate human behavior (0.7-2.5 seconds)',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+			},
+		},
+	},
+	{
 		displayName: 'Form Fields',
 		name: 'formFields',
 		placeholder: 'Add Form Field',
@@ -44,24 +56,24 @@ export const description: INodeProperties[] = [
 						type: 'options',
 						options: [
 							{
-								name: 'Text',
-								value: 'text',
-							},
-							{
 								name: 'Checkbox',
 								value: 'checkbox',
 							},
 							{
-								name: 'Select',
-								value: 'select',
+								name: 'File',
+								value: 'file',
 							},
 							{
 								name: 'Radio',
 								value: 'radio',
 							},
 							{
-								name: 'File',
-								value: 'file',
+								name: 'Select',
+								value: 'select',
+							},
+							{
+								name: 'Text',
+								value: 'text',
 							},
 						],
 						default: 'text',
@@ -84,7 +96,7 @@ export const description: INodeProperties[] = [
 						description: 'Value to set for the form field',
 						displayOptions: {
 							show: {
-								fieldType: ['text', 'select', 'radio'],
+								fieldType: ['text', 'radio'],
 							},
 						},
 					},
@@ -125,11 +137,62 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
-						displayName: 'Delay After',
-						name: 'delayAfter',
+						displayName: 'Dropdown Value',
+						name: 'value',
+						type: 'string',
+						default: '',
+						description: 'Value or text to select from the dropdown',
+						displayOptions: {
+							show: {
+								fieldType: ['select'],
+							},
+						},
+					},
+					{
+						displayName: 'Match Type',
+						name: 'matchType',
+						type: 'options',
+						options: [
+							{
+								name: 'Exact (Value)',
+								value: 'exact',
+								description: 'Match exactly by option value',
+							},
+							{
+								name: 'Text Contains',
+								value: 'textContains',
+								description: 'Match if option text contains this string',
+							},
+							{
+								name: 'Fuzzy Match',
+								value: 'fuzzy',
+								description: 'Use fuzzy matching to find the closest option text',
+							},
+						],
+						default: 'exact',
+						description: 'How to match the dropdown option',
+						displayOptions: {
+							show: {
+								fieldType: ['select'],
+							},
+						},
+					},
+					{
+						displayName: 'Fuzzy Match Threshold',
+						name: 'fuzzyThreshold',
 						type: 'number',
-						default: 100,
-						description: 'Delay in ms after setting this field (simulates human behavior)',
+						typeOptions: {
+							minValue: 0,
+							maxValue: 1,
+						},
+						default: 0.5,
+						description: 'Minimum similarity score (0-1) to consider a match',
+						displayOptions: {
+							show: {
+								fieldType: ['select'],
+								matchType: ['fuzzy'],
+							},
+						},
 					},
 				],
 			},
@@ -223,6 +286,77 @@ export const description: INodeProperties[] = [
 ];
 
 /**
+ * Get a random human-like delay between 700-2500ms
+ */
+function getHumanDelay(): number {
+	return Math.floor(Math.random() * (2500 - 700 + 1) + 700);
+}
+
+/**
+ * Calculate simple string similarity (Levenshtein distance based)
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+	const track = Array(str2.length + 1).fill(null).map(() =>
+		Array(str1.length + 1).fill(null));
+
+	for (let i = 0; i <= str1.length; i += 1) {
+		track[0][i] = i;
+	}
+
+	for (let j = 0; j <= str2.length; j += 1) {
+		track[j][0] = j;
+	}
+
+	for (let j = 1; j <= str2.length; j += 1) {
+		for (let i = 1; i <= str1.length; i += 1) {
+			const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
+			track[j][i] = Math.min(
+				track[j][i - 1] + 1, // deletion
+				track[j - 1][i] + 1, // insertion
+				track[j - 1][i - 1] + indicator, // substitution
+			);
+		}
+	}
+
+	const distance = track[str2.length][str1.length];
+	const maxLength = Math.max(str1.length, str2.length);
+	if (maxLength === 0) return 1.0; // Both strings are empty
+
+	// Convert distance to similarity score (1 - normalized distance)
+	return 1 - distance / maxLength;
+}
+
+/**
+ * Find best match using similarity
+ */
+function findBestMatch(target: string, options: Array<{value: string, text: string}>): {
+	bestMatch: {value: string, text: string, rating: number};
+	bestMatchIndex: number;
+} {
+	const targetLower = target.toLowerCase();
+	const ratings = options.map(option => ({
+		value: option.value,
+		text: option.text,
+		rating: calculateSimilarity(targetLower, option.text.toLowerCase())
+	}));
+
+	let bestMatchIndex = 0;
+	let bestRating = 0;
+
+	for (let i = 0; i < ratings.length; i++) {
+		if (ratings[i].rating > bestRating) {
+			bestRating = ratings[i].rating;
+			bestMatchIndex = i;
+		}
+	}
+
+	return {
+		bestMatch: ratings[bestMatchIndex],
+		bestMatchIndex
+	};
+}
+
+/**
  * Execute the form operation
  */
 export async function execute(
@@ -234,6 +368,7 @@ export async function execute(
 	// Get parameters
 	const pageId = this.getNodeParameter('pageId', index) as string;
 	const formFields = this.getNodeParameter('formFields.fields', index, []) as IDataObject[];
+	const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
 	const submitForm = this.getNodeParameter('submitForm', index, true) as boolean;
 	const submitSelector = this.getNodeParameter('submitSelector', index, '') as string;
 	const waitAfterSubmit = this.getNodeParameter('waitAfterSubmit', index, 'navigationComplete') as string;
@@ -255,7 +390,6 @@ export async function execute(
 		for (const field of formFields) {
 			const fieldType = field.fieldType as string;
 			const selector = field.selector as string;
-			const delayAfter = field.delayAfter as number || 100;
 
 			this.logger.info(`Processing ${fieldType} field with selector: ${selector}`);
 
@@ -285,8 +419,54 @@ export async function execute(
 
 				case 'select': {
 					const value = field.value as string;
-					// Select an option from dropdown
-					await page.select(selector, value);
+					const matchType = field.matchType as string;
+
+					if (matchType === 'exact') {
+						// Simple exact value match
+						await page.select(selector, value);
+					} else if (matchType === 'textContains' || matchType === 'fuzzy') {
+						// Get all options from the dropdown
+						const options = await page.$$eval(`${selector} option`, (options) => {
+							return options.map(option => ({
+								value: option.value,
+								text: option.textContent?.trim() || '',
+							}));
+						});
+
+						if (options.length === 0) {
+							throw new Error(`No options found in dropdown: ${selector}`);
+						}
+
+						let selectedValue;
+
+						if (matchType === 'textContains') {
+							// Find an option that contains the text
+							const matchingOption = options.find(option =>
+								option.text.toLowerCase().includes(value.toLowerCase())
+							);
+
+							if (!matchingOption) {
+								throw new Error(`No option with text containing "${value}" found in dropdown: ${selector}`);
+							}
+
+							selectedValue = matchingOption.value;
+							this.logger.info(`Selected option with value: ${selectedValue} (text contains match: ${matchingOption.text})`);
+						} else {
+							// Fuzzy matching
+							const threshold = field.fuzzyThreshold as number || 0.5;
+							const bestMatch = findBestMatch(value, options);
+
+							if (bestMatch.bestMatch.rating < threshold) {
+								throw new Error(`No close matches found for "${value}" in dropdown: ${selector} (best match: "${bestMatch.bestMatch.text}" with score: ${bestMatch.bestMatch.rating.toFixed(2)})`);
+							}
+
+							selectedValue = bestMatch.bestMatch.value;
+							this.logger.info(`Selected option with value: ${selectedValue} (fuzzy match: ${bestMatch.bestMatch.text}, score: ${bestMatch.bestMatch.rating.toFixed(2)})`);
+						}
+
+						// Select the option
+						await page.select(selector, selectedValue);
+					}
 					break;
 				}
 
@@ -337,15 +517,23 @@ export async function execute(
 				success: true,
 			});
 
-			// Add delay to simulate human interaction
-			if (delayAfter > 0) {
-				await new Promise(resolve => setTimeout(resolve, delayAfter));
+			// Add a human-like delay if enabled
+			if (useHumanDelays) {
+				const delay = getHumanDelay();
+				this.logger.info(`Adding human-like delay: ${delay}ms`);
+				await new Promise(resolve => setTimeout(resolve, delay));
 			}
 		}
 
 		// Submit the form if requested
 		if (submitForm && submitSelector) {
 			this.logger.info('Submitting the form');
+
+			// Add a slight delay before submitting (feels more human)
+			if (useHumanDelays) {
+				await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
+			}
+
 			await page.click(submitSelector);
 
 			// Handle waiting after submission
