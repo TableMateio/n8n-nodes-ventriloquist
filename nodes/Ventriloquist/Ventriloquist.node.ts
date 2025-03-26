@@ -11,6 +11,9 @@ import {
 // Import puppeteer-core for browser automation
 import * as puppeteer from 'puppeteer-core';
 
+// Import actions
+import * as formOperation from './actions/form.operation';
+
 /**
  * Ventriloquist is a custom node for N8N that connects to Bright Data's Browser Scraping Browser
  * via WebSocket and performs systematic Puppeteer functions.
@@ -90,7 +93,7 @@ export class Ventriloquist implements INodeType {
 	}
 
 	// Get a page from the session
-	private static getPage(workflowId: string, pageId: string): puppeteer.Page | undefined {
+	public static getPage(workflowId: string, pageId: string): puppeteer.Page | undefined {
 		const session = this.browserSessions.get(workflowId);
 		if (session) {
 			return session.pages.get(pageId);
@@ -177,6 +180,12 @@ export class Ventriloquist implements INodeType {
 						value: 'click',
 						description: 'Click on an element',
 						action: 'Click on an element',
+					},
+					{
+						name: 'Form',
+						value: 'form',
+						description: 'Fill out a form',
+						action: 'Fill out a form',
 					},
 					{
 						name: 'Close Browser',
@@ -327,6 +336,9 @@ export class Ventriloquist implements INodeType {
 					},
 				},
 			},
+
+			// Properties for 'form' operation
+			...formOperation.description,
 		],
 	};
 
@@ -604,6 +616,15 @@ export class Ventriloquist implements INodeType {
 							},
 						});
 					}
+				} else if (operation === 'form') {
+					// Execute form operation
+					const result = await formOperation.execute.call(
+						this,
+						i,
+						websocketEndpoint,
+						workflowId,
+					);
+					returnData.push(result);
 				} else if (operation === 'close') {
 					// Close the browser session
 					await Ventriloquist.closeSession(workflowId);
