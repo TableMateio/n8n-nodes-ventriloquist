@@ -5,24 +5,12 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { Ventriloquist } from '../Ventriloquist.node';
+import type * as puppeteer from 'puppeteer-core';
 
 /**
  * Form operation description
  */
 export const description: INodeProperties[] = [
-	{
-		displayName: 'Page ID',
-		name: 'pageId',
-		type: 'string',
-		default: '',
-		description: 'ID of the page to use (from a previous open operation). Leave empty to use the most recent page.',
-		required: false,
-		displayOptions: {
-			show: {
-				operation: ['form'],
-			},
-		},
-	},
 	{
 		displayName: 'Use Human-Like Delays',
 		name: 'useHumanDelays',
@@ -366,7 +354,6 @@ export async function execute(
 	workflowId: string,
 ): Promise<INodeExecutionData> {
 	// Get parameters
-	const pageId = this.getNodeParameter('pageId', index, '') as string;
 	const formFields = this.getNodeParameter('formFields.fields', index, []) as IDataObject[];
 	const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
 	const submitForm = this.getNodeParameter('submitForm', index, true) as boolean;
@@ -375,52 +362,40 @@ export async function execute(
 	const waitTime = this.getNodeParameter('waitTime', index, 5000) as number;
 	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 
-	// Try to get a page based on the provided ID or fall back to any available page
-	let page;
-	let usePageId = pageId;
+	// Get or create browser session
+	let page: puppeteer.Page;
+	let pageId: string;
 
-	if (pageId) {
-		// If a specific Page ID was provided, try to get that page
-		page = Ventriloquist.getPage(workflowId, pageId);
+	try {
+		// Create a session or reuse an existing one
+		const { browser, pageId: newPageId } = await Ventriloquist.getOrCreateSession(
+			workflowId,
+			websocketEndpoint,
+			this.logger
+		);
 
-		if (!page) {
-			throw new Error(`Page with ID "${pageId}" not found. Please run the "Open" operation first or leave Page ID empty to use any available page.`);
+		// Try to get any existing page from the browser
+		const pages = await browser.pages();
+
+		if (pages.length > 0) {
+			// Use the first available page
+			page = pages[0];
+			pageId = `existing_${Date.now()}`;
+			this.logger.info('Using existing page from browser session');
+		} else {
+			// Create a new page if none exists
+			page = await browser.newPage();
+			pageId = newPageId;
+			this.logger.info(`Created new page with ID: ${pageId}`);
+
+			// Store the new page for future operations
+			Ventriloquist.storePage(workflowId, pageId, page);
+
+			// Navigate to a blank page to initialize it
+			await page.goto('about:blank');
 		}
-
-		this.logger.info(`Using specified page with ID: ${pageId}`);
-	} else {
-		// No specific page ID provided, try to get the browser session and use/create a page
-		try {
-			// Create a session or reuse an existing one
-			const { browser, pageId: newPageId } = await Ventriloquist.getOrCreateSession(
-				workflowId,
-				websocketEndpoint,
-				this.logger
-			);
-
-			// Try to get any existing page from the browser
-			const pages = await browser.pages();
-
-			if (pages.length > 0) {
-				// Use the first available page
-				page = pages[0];
-				usePageId = `existing_${Date.now()}`;
-				this.logger.info('Using existing page from browser session');
-			} else {
-				// Create a new page if none exists
-				page = await browser.newPage();
-				usePageId = newPageId;
-				this.logger.info(`Created new page with ID: ${usePageId}`);
-
-				// Store the new page for future operations
-				Ventriloquist.storePage(workflowId, usePageId, page);
-
-				// Navigate to a blank page to initialize it
-				await page.goto('about:blank');
-			}
-		} catch (error) {
-			throw new Error(`Failed to get or create a page: ${(error as Error).message}`);
-		}
+	} catch (error) {
+		throw new Error(`Failed to get or create a page: ${(error as Error).message}`);
 	}
 
 	try {
@@ -467,9 +442,9 @@ export async function execute(
 						await page.select(selector, value);
 					} else if (matchType === 'textContains' || matchType === 'fuzzy') {
 						// Get all options from the dropdown
-						const options = await page.$$eval(`${selector} option`, (options) => {
-							return options.map(option => ({
-								value: option.value,
+						const options = await page.$$eval(`${selector} option`, (options: Element[]) => {
+							return options.map((option: Element) => ({
+								value: (option as HTMLOptionElement).value,
 								text: option.textContent?.trim() || '',
 							}));
 						});
@@ -546,7 +521,7 @@ export async function execute(
 
 					// Upload the file
 					// We need to cast to a specific type for the uploadFile method
-					await (fileInput as any).uploadFile(filePath);
+					await (fileInput as puppeteer.ElementHandle<HTMLInputElement>).uploadFile(filePath);
 					break;
 				}
 			}
@@ -609,7 +584,7 @@ export async function execute(
 			json: {
 				success: true,
 				operation: 'form',
-				pageId: usePageId,
+				pageId: pageId,
 				url: currentUrl,
 				title: pageTitle,
 				formFields: results,
@@ -641,7 +616,7 @@ export async function execute(
 			json: {
 				success: false,
 				operation: 'form',
-				pageId: usePageId,
+				pageId: pageId,
 				error: (error as Error).message,
 				timestamp: new Date().toISOString(),
 				screenshot,
