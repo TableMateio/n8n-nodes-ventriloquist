@@ -99,7 +99,7 @@ export const description: INodeProperties[] = [
 		name: 'attributeName',
 		type: 'string',
 		default: '',
-		placeholder: 'href, src, data-id',
+		placeholder: 'href, src, data-ID',
 		description: 'Name of the attribute to extract from the element',
 		displayOptions: {
 			show: {
@@ -108,6 +108,50 @@ export const description: INodeProperties[] = [
 			},
 		},
 		required: true,
+	},
+	{
+		displayName: 'HTML Options',
+		name: 'htmlOptions',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		typeOptions: {
+			multipleValues: false,
+		},
+		displayOptions: {
+			show: {
+				operation: ['extract'],
+				extractionType: ['html'],
+			},
+		},
+		options: [
+			{
+				displayName: 'Output Format',
+				name: 'outputFormat',
+				type: 'options',
+				options: [
+					{
+						name: 'HTML (String)',
+						value: 'html',
+						description: 'Return the HTML as a raw string',
+					},
+					{
+						name: 'JSON',
+						value: 'json',
+						description: 'Return the HTML wrapped in a JSON object',
+					},
+				],
+				default: 'html',
+				description: 'Format of the output data',
+			},
+			{
+				displayName: 'Include Metadata',
+				name: 'includeMetadata',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to include metadata about the HTML (length, structure info)',
+			},
+		],
 	},
 	{
 		displayName: 'Table Options',
@@ -147,11 +191,33 @@ export const description: INodeProperties[] = [
 				description: 'CSS selector for table cells relative to row selector (default: td, th)',
 			},
 			{
-				displayName: 'Extract As JSON',
-				name: 'extractAsJson',
-				type: 'boolean',
-				default: true,
-				description: 'Whether to extract table data as an array of JSON objects',
+				displayName: 'Output Format',
+				name: 'outputFormat',
+				type: 'options',
+				options: [
+					{
+						name: 'JSON Objects',
+						value: 'json',
+						description: 'Return table as array of JSON objects using headers as keys',
+					},
+					{
+						name: 'Array of Arrays',
+						value: 'array',
+						description: 'Return table as a simple array of arrays (rows and cells)',
+					},
+					{
+						name: 'HTML',
+						value: 'html',
+						description: 'Return the original HTML of the table',
+					},
+					{
+						name: 'CSV',
+						value: 'csv',
+						description: 'Return the table formatted as CSV text',
+					},
+				],
+				default: 'json',
+				description: 'Format of the extracted table data',
 			},
 		],
 	},
@@ -214,6 +280,45 @@ export const description: INodeProperties[] = [
 				type: 'number',
 				default: 50,
 				description: 'Max number of results to return',
+				typeOptions: {
+					minValue: 1,
+				},
+			},
+			{
+				displayName: 'Output Format',
+				name: 'outputFormat',
+				type: 'options',
+				options: [
+					{
+						name: 'Array',
+						value: 'array',
+						description: 'Return results as a simple array',
+					},
+					{
+						name: 'JSON Objects',
+						value: 'json',
+						description: 'Return results as array of objects with indices as keys',
+					},
+					{
+						name: 'Concatenated String',
+						value: 'string',
+						description: 'Combine all results into one string with separator',
+					},
+				],
+				default: 'array',
+				description: 'Format of the extracted data',
+			},
+			{
+				displayName: 'Separator',
+				name: 'separator',
+				type: 'string',
+				default: ',',
+				description: 'Separator to use when concatenating results (if Output Format is String)',
+				displayOptions: {
+					show: {
+						outputFormat: ['string'],
+					},
+				},
 			},
 		],
 	},
@@ -332,9 +437,38 @@ export async function execute(
 			}
 
 			case 'html': {
+				// Get HTML options
+				const htmlOptions = this.getNodeParameter('htmlOptions', index, {}) as IDataObject;
+				const outputFormat = (htmlOptions.outputFormat as string) || 'html';
+				const includeMetadata = htmlOptions.includeMetadata === true;
+
 				// Extract HTML content (inner HTML)
-				extractedData = await page.$eval(selector, (el) => el.innerHTML);
-				extractionDetails = { htmlLength: (extractedData as string).length };
+				const htmlContent = await page.$eval(selector, (el) => el.innerHTML);
+
+				if (outputFormat === 'html') {
+					// Return as raw HTML string
+					extractedData = htmlContent;
+				} else {
+					// Return as JSON object
+					extractedData = { html: htmlContent };
+				}
+
+				// Add metadata if requested
+				if (includeMetadata) {
+					// Calculate some basic metadata about the HTML
+					const elementCount = await page.$eval(selector, (el) => el.querySelectorAll('*').length);
+					const imageCount = await page.$eval(selector, (el) => el.querySelectorAll('img').length);
+					const linkCount = await page.$eval(selector, (el) => el.querySelectorAll('a').length);
+
+					extractionDetails = {
+						htmlLength: htmlContent.length,
+						elementCount,
+						imageCount,
+						linkCount,
+					};
+				} else {
+					extractionDetails = { htmlLength: htmlContent.length };
+				}
 				break;
 			}
 
@@ -367,53 +501,64 @@ export async function execute(
 				const includeHeaders = tableOptions.includeHeaders !== false;
 				const rowSelector = (tableOptions.rowSelector as string) || 'tr';
 				const cellSelector = (tableOptions.cellSelector as string) || 'td, th';
-				const extractAsJson = tableOptions.extractAsJson !== false;
+				const outputFormat = (tableOptions.outputFormat as string) || 'json';
 
-				// Extract the table data
-				const tableData = await page.$$eval(
-					`${selector} ${rowSelector}`,
-					(rows, options) => {
-						const { cellSelector, includeHeaders, extractAsJson } = options as {
-							cellSelector: string;
-							includeHeaders: boolean;
-							extractAsJson: boolean;
-						};
+				// Handle different output formats
+				if (outputFormat === 'html') {
+					// Extract original table HTML
+					extractedData = await page.$eval(selector, (el) => el.outerHTML);
+					extractionDetails = {
+						format: 'html',
+					};
+				} else {
+					// Extract the table data as arrays first
+					const tableData = await page.$$eval(
+						`${selector} ${rowSelector}`,
+						(rows, options) => {
+							const { cellSelector } = options as {
+								cellSelector: string;
+							};
 
-						// Extract all rows
-						const extractedRows = Array.from(rows).map((row) => {
-							const cells = Array.from(row.querySelectorAll(cellSelector));
-							return cells.map((cell) => cell.textContent?.trim() || '');
-						});
-
-						if (extractedRows.length === 0) {
-							return [];
-						}
-
-						if (extractAsJson && includeHeaders && extractedRows.length > 1) {
-							// Convert to array of objects using first row as keys
-							const headers = extractedRows[0];
-							return extractedRows.slice(1).map((row) => {
-								const obj: Record<string, string> = {};
-								headers.forEach((header, i) => {
-									if (header && i < row.length) {
-										obj[header] = row[i];
-									}
-								});
-								return obj;
+							// Extract all rows
+							const extractedRows = Array.from(rows).map((row) => {
+								const cells = Array.from(row.querySelectorAll(cellSelector));
+								return cells.map((cell) => cell.textContent?.trim() || '');
 							});
-						}
 
-						// Return as array of arrays, optionally removing header row
-						return includeHeaders ? extractedRows : extractedRows.slice(1);
-					},
-					{ cellSelector, includeHeaders, extractAsJson }
-				);
+							return extractedRows;
+						},
+						{ cellSelector, includeHeaders }
+					);
 
-				extractedData = tableData as IDataObject[];
-				extractionDetails = {
-					rowCount: Array.isArray(tableData) ? tableData.length : 0,
-					format: extractAsJson ? 'json' : 'array',
-				};
+					if (tableData.length === 0) {
+						extractedData = [];
+					} else if (outputFormat === 'json' && includeHeaders && tableData.length > 1) {
+						// Convert to array of objects using first row as keys
+						const headers = tableData[0];
+						const jsonData = tableData.slice(1).map((row) => {
+							const obj: IDataObject = {};
+							headers.forEach((header, i) => {
+								if (header && i < row.length) {
+									obj[header] = row[i];
+								}
+							});
+							return obj;
+						});
+						extractedData = jsonData;
+					} else if (outputFormat === 'csv') {
+						// Convert to CSV string
+						const csvRows = tableData.map(row => row.join(','));
+						extractedData = csvRows.join('\n');
+					} else {
+						// Return as array of arrays (ensure it's properly typed)
+						extractedData = includeHeaders ? tableData as unknown as IDataObject[] : tableData.slice(1) as unknown as IDataObject[];
+					}
+
+					extractionDetails = {
+						rowCount: Array.isArray(tableData) ? tableData.length : 0,
+						format: outputFormat,
+					};
+				}
 				break;
 			}
 
@@ -423,6 +568,8 @@ export async function execute(
 				const extractionProperty = (multipleOptions.extractionProperty as string) || 'textContent';
 				const attributeName = (multipleOptions.attributeName as string) || '';
 				const limit = (multipleOptions.limit as number) || 50;
+				const outputFormat = (multipleOptions.outputFormat as string) || 'array';
+				const separator = (multipleOptions.separator as string) || ',';
 
 				// Extract data from all matching elements
 				const elementsData = await page.$$eval(
@@ -456,10 +603,24 @@ export async function execute(
 					{ extractionProperty, attributeName, limit }
 				);
 
-				extractedData = elementsData as string[];
+				if (outputFormat === 'json') {
+					// Convert to array of objects with indices as keys
+					extractedData = elementsData.map((value, index) => ({
+						index,
+						value,
+					}));
+				} else if (outputFormat === 'string') {
+					// Join all elements into one string with the specified separator
+					extractedData = elementsData.join(separator);
+				} else {
+					// Default array format
+					extractedData = elementsData;
+				}
+
 				extractionDetails = {
 					matchCount: Array.isArray(elementsData) ? elementsData.length : 0,
 					extractionProperty,
+					outputFormat,
 					...(extractionProperty === 'attribute' ? { attributeName } : {}),
 				};
 				break;
