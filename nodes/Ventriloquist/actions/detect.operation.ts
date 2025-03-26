@@ -634,11 +634,11 @@ export async function execute(
 
 	// Get or create browser session
 	let page: puppeteer.Page;
-	let pageId: string;
+	let sessionId: string;
 
 	try {
 		// Create a session or reuse an existing one
-		const { browser, pageId: newPageId } = await Ventriloquist.getOrCreateSession(
+		const { browser, sessionId: newSessionId } = await Ventriloquist.getOrCreateSession(
 			workflowId,
 			websocketEndpoint,
 			this.logger
@@ -650,16 +650,16 @@ export async function execute(
 		if (pages.length > 0) {
 			// Use the first available page
 			page = pages[0];
-			pageId = `existing_${Date.now()}`;
+			sessionId = `existing_${Date.now()}`;
 			this.logger.info('Using existing page from browser session');
 		} else {
 			// Create a new page if none exists
 			page = await browser.newPage();
-			pageId = newPageId;
-			this.logger.info(`Created new page with ID: ${pageId}`);
+			sessionId = newSessionId;
+			this.logger.info(`Created new page with session ID: ${sessionId}`);
 
 			// Store the new page for future operations
-			Ventriloquist.storePage(workflowId, pageId, page);
+			Ventriloquist.storePage(workflowId, sessionId, page);
 
 			// Navigate to a blank page to initialize it
 			await page.goto('about:blank');
@@ -748,7 +748,7 @@ export async function execute(
 			// Metadata
 			success: true,
 			operation: 'detect',
-			pageId,
+			sessionId,
 			url: currentUrl,
 			title: pageTitle,
 			timestamp: new Date().toISOString(),
@@ -790,7 +790,7 @@ export async function execute(
 				success: false,
 				operation: 'detect',
 				error: (error as Error).message,
-				pageId,
+				sessionId,
 				timestamp: new Date().toISOString(),
 				...(screenshot ? { screenshot } : {}),
 			},

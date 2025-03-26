@@ -53,7 +53,7 @@ export class Ventriloquist implements INodeType {
 		workflowId: string,
 		websocketEndpoint: string,
 		logger: any,
-	): Promise<{ browser: puppeteer.Browser; pageId: string }> {
+	): Promise<{ browser: puppeteer.Browser; sessionId: string }> {
 		// Clean up old sessions
 		this.cleanupSessions();
 
@@ -80,25 +80,25 @@ export class Ventriloquist implements INodeType {
 			logger.info('Reusing existing browser session');
 		}
 
-		// Create a unique ID for the page
-		const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+		// Create a unique ID for the session
+		const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-		return { browser: session.browser, pageId };
+		return { browser: session.browser, sessionId };
 	}
 
 	// Store a page in the session
-	public static storePage(workflowId: string, pageId: string, page: puppeteer.Page) {
+	public static storePage(workflowId: string, sessionId: string, page: puppeteer.Page) {
 		const session = this.browserSessions.get(workflowId);
 		if (session) {
-			session.pages.set(pageId, page);
+			session.pages.set(sessionId, page);
 		}
 	}
 
 	// Get a page from the session
-	public static getPage(workflowId: string, pageId: string): puppeteer.Page | undefined {
+	public static getPage(workflowId: string, sessionId: string): puppeteer.Page | undefined {
 		const session = this.browserSessions.get(workflowId);
 		if (session) {
-			return session.pages.get(pageId);
+			return session.pages.get(sessionId);
 		}
 		return undefined;
 	}
@@ -402,7 +402,7 @@ export class Ventriloquist implements INodeType {
 					const brightDataTimeout = timeout * 2;
 
 					// Get or create a browser session
-					const { browser, pageId } = await Ventriloquist.getOrCreateSession(
+					const { browser, sessionId } = await Ventriloquist.getOrCreateSession(
 						workflowId,
 						websocketEndpoint,
 						this.logger,
@@ -415,7 +415,7 @@ export class Ventriloquist implements INodeType {
 					const page = await context.newPage();
 
 					// Store the page in the session
-					Ventriloquist.storePage(workflowId, pageId, page);
+					Ventriloquist.storePage(workflowId, sessionId, page);
 
 					// Enable debugging if requested
 					let debugUrl = null;
@@ -449,7 +449,7 @@ export class Ventriloquist implements INodeType {
 						url: currentUrl,
 						title,
 						status,
-						pageId, // Include the pageId in the output for subsequent operations
+						sessionId, // Include the sessionId in the output for subsequent operations
 						screenshot: `data:image/jpeg;base64,${screenshot}`,
 						incognito,
 						timestamp: new Date().toISOString(),
@@ -464,19 +464,30 @@ export class Ventriloquist implements INodeType {
 						json: responseData,
 					});
 				} else if (operation === 'click') {
-					// Try to get pageId from previous operations
-					let pageId = '';
+					// Try to get sessionId from previous operations
+					let sessionId = '';
 
-					// First, try to get pageId from the current item if it was set by a previous operation
-					if (items[i].json && items[i].json.pageId) {
-						pageId = items[i].json.pageId as string;
+					// First, try to get sessionId from the current item if it was set by a previous operation
+					if (items[i].json && items[i].json.sessionId) {
+						sessionId = items[i].json.sessionId as string;
+					}
+					// For backward compatibility, also check for pageId
+					else if (items[i].json && items[i].json.pageId) {
+						sessionId = items[i].json.pageId as string;
+						this.logger.info('Using legacy pageId as sessionId for compatibility');
 					}
 
-					// If no pageId in current item, look at the input items for a pageId
-					if (!pageId) {
+					// If no sessionId in current item, look at the input items for a sessionId
+					if (!sessionId) {
 						for (const item of items) {
-							if (item.json && item.json.pageId) {
-								pageId = item.json.pageId as string;
+							if (item.json && item.json.sessionId) {
+								sessionId = item.json.sessionId as string;
+								break;
+							}
+							// For backward compatibility
+							else if (item.json && item.json.pageId) {
+								sessionId = item.json.pageId as string;
+								this.logger.info('Using legacy pageId as sessionId for compatibility');
 								break;
 							}
 						}
@@ -505,18 +516,18 @@ export class Ventriloquist implements INodeType {
 					// Try to get existing page from session
 					let page: puppeteer.Page | undefined;
 
-					if (pageId) {
-						page = Ventriloquist.getPage(workflowId, pageId);
-						this.logger.info(`Found existing page with ID: ${pageId}`);
+					if (sessionId) {
+						page = Ventriloquist.getPage(workflowId, sessionId);
+						this.logger.info(`Found existing page with session ID: ${sessionId}`);
 					}
 
 					// If no existing page, get the first available page or create a new one
 					if (!page) {
 						const pages = await browser.pages();
 						page = pages.length > 0 ? pages[0] : await browser.newPage();
-						pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-						Ventriloquist.storePage(workflowId, pageId, page);
-						this.logger.info(`Created new page with ID: ${pageId}`);
+						sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+						Ventriloquist.storePage(workflowId, sessionId, page);
+						this.logger.info(`Created new page with session ID: ${sessionId}`);
 					}
 
 					// Get page info for debugging
@@ -605,7 +616,7 @@ export class Ventriloquist implements INodeType {
 							attempts: attempt + 1,
 							url: updatedPageUrl,
 							title: updatedPageTitle,
-							pageId, // Include the pageId for subsequent operations
+							sessionId, // Include the sessionId for subsequent operations
 							foundInPage: selectorExists,
 							availableIds: allElementsWithIds,
 							pageHtmlPreview: pageHtml.substring(0, 500) + '...',
@@ -626,7 +637,7 @@ export class Ventriloquist implements INodeType {
 								attempts: attempt,
 								url: pageUrl,
 								title: pageTitle,
-								pageId, // Include the pageId for subsequent operations
+								sessionId, // Include the sessionId for subsequent operations
 								foundInPage: selectorExists,
 								availableIds: allElementsWithIds,
 								pageHtmlPreview: pageHtml.substring(0, 500) + '...',
