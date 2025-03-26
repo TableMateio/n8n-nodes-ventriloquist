@@ -73,7 +73,7 @@ export const description: INodeProperties[] = [
 						type: 'string',
 						default: '',
 						placeholder: '#input-field, .form-control, input[name="email"]',
-						description: 'CSS selector of the form field',
+						description: 'CSS selector to target the form field. Use "#ID" for IDs, ".class" for classes, "tag" for HTML elements, or "tag[attr=value]" for attributes.',
 						required: true,
 					},
 					{
