@@ -150,19 +150,39 @@ export class Ventriloquist implements INodeType {
 			if (inspectUrl) {
 				logger.info(`Debug URL available: ${inspectUrl}`);
 
-				// Extract the session ID component from the URL that matches Bright Data dashboard format
-				// Format is typically like: PREFIX/SESSION_ID (example: dba989bc/4319ae15-b539-4334-be7e-3bac70d0cb69)
-				const matches = inspectUrl.match(/([^\/]+\/[^\/]+)(?:\/|$)/);
+				// Extract the Bright Data session ID from the URL
+				// Need to handle URLs in the format:
+				// https://cdn.brightdata.com/static/devtools/129/inspector.html?wss=brd.superproxy.io:9223/c8d53695/5f046fe22-8a0b-477a...
+				// We need to extract parts like "c8d53695/5f046fe22-8a0b-477a-ab11-13a741c0b54f"
+
+				// First try to extract from standard format
+				let matches = inspectUrl.match(/io:\d+\/([^\/]+\/[^\/&?]+)/);
+
+				// If that doesn't work, try alternative format
+				if (!matches || !matches[1]) {
+					matches = inspectUrl.match(/io\/([^\/]+\/[^\/&?]+)/);
+				}
+
 				if (matches && matches[1]) {
 					brightDataDebugInfo = matches[1];
 					logger.info(`Bright Data dashboard session ID detected: ${brightDataDebugInfo}`);
+				} else {
+					// Fallback for other URL formats - at least extract something useful from the URL
+					logger.warn(`Could not extract Bright Data session ID from URL format: ${inspectUrl}`);
+
+					// Extract any part that might be a session ID
+					const fallbackMatches = inspectUrl.match(/\/([a-f0-9-]{36}|[a-f0-9]{7,8}\/[a-f0-9-]{36})/i);
+					if (fallbackMatches && fallbackMatches[1]) {
+						brightDataDebugInfo = fallbackMatches[1];
+						logger.info(`Extracted potential Bright Data session ID (fallback): ${brightDataDebugInfo}`);
+					}
 				}
 
 				return { debugUrl: inspectUrl, brightDataDebugInfo };
-			} else {
-				logger.warn('Could not get debug URL from Bright Data');
-				return { debugUrl: null, brightDataDebugInfo: null };
 			}
+
+			logger.warn('Could not get debug URL from Bright Data');
+			return { debugUrl: null, brightDataDebugInfo: null };
 		} catch (error) {
 			logger.warn(`Failed to enable debugger: ${error}`);
 			return { debugUrl: null, brightDataDebugInfo: null };
@@ -396,6 +416,66 @@ export class Ventriloquist implements INodeType {
 
 			// Properties for 'extract' operation
 			...extractOperation.description,
+
+			// Properties for 'close' operation
+			{
+				displayName: 'Close Mode',
+				name: 'closeMode',
+				type: 'options',
+				options: [
+					{
+						name: 'Close Session',
+						value: 'session',
+						description: 'Close a specific browser session',
+					},
+					{
+						name: 'Close All Sessions',
+						value: 'all',
+						description: 'Close all browser sessions',
+					},
+					{
+						name: 'Close Multiple Sessions',
+						value: 'multiple',
+						description: 'Close a list of specific browser sessions',
+					},
+				],
+				default: 'session',
+				description: 'How to close browser sessions',
+				displayOptions: {
+					show: {
+						operation: ['close'],
+					},
+				},
+			},
+			{
+				displayName: 'Session ID',
+				name: 'explicitSessionId',
+				type: 'string',
+				default: '',
+				description: 'Session ID to close',
+				displayOptions: {
+					show: {
+						operation: ['close'],
+						closeMode: ['session'],
+					},
+				},
+			},
+			{
+				displayName: 'Session IDs',
+				name: 'sessionIds',
+				type: 'string',
+				typeOptions: {
+					multipleValues: true,
+				},
+				default: [],
+				description: 'List of session IDs to close',
+				displayOptions: {
+					show: {
+						operation: ['close'],
+						closeMode: ['multiple'],
+					},
+				},
+			},
 		],
 	};
 
@@ -729,18 +809,115 @@ export class Ventriloquist implements INodeType {
 					);
 					returnData.push(result);
 				} else if (operation === 'close') {
-					// Close the browser session
-					await Ventriloquist.closeSession(workflowId);
+					// Close browser sessions based on the selected mode
+					const closeMode = this.getNodeParameter('closeMode', i, 'session') as string;
 
-					// Return success response
-					returnData.push({
-						json: {
-							success: true,
-							operation,
-							message: 'Browser session closed successfully',
-							timestamp: new Date().toISOString(),
-						},
-					});
+					if (closeMode === 'session') {
+						// Close a specific session
+						let sessionId = '';
+
+						// First, check if an explicit session ID was provided
+						const explicitSessionId = this.getNodeParameter('explicitSessionId', i, '') as string;
+						if (explicitSessionId) {
+							sessionId = explicitSessionId;
+							this.logger.info(`Using explicitly provided session ID: ${sessionId}`);
+						}
+						// If not, try to get sessionId from the current item
+						else if (items[i].json?.sessionId) {
+							sessionId = items[i].json.sessionId as string;
+						}
+						// For backward compatibility, also check for pageId
+						else if (items[i].json?.pageId) {
+							sessionId = items[i].json.pageId as string;
+							this.logger.info('Using legacy pageId as sessionId for compatibility');
+						}
+
+						// If we found a sessionId, close it
+						if (sessionId) {
+							// Get existing page from session
+							const page = Ventriloquist.getPage(workflowId, sessionId);
+							if (page) {
+								await page.close();
+								this.logger.info(`Closed page with session ID: ${sessionId}`);
+							} else {
+								this.logger.warn(`No page found with session ID: ${sessionId}`);
+							}
+
+							// Return success
+							returnData.push({
+								json: {
+									success: true,
+									operation,
+									closeMode,
+									sessionId,
+									message: `Browser session ${sessionId} closed successfully`,
+									timestamp: new Date().toISOString(),
+								},
+							});
+						} else {
+							// No session ID found
+							returnData.push({
+								json: {
+									success: false,
+									operation,
+									closeMode,
+									error: 'No session ID provided or found in input',
+									timestamp: new Date().toISOString(),
+								},
+							});
+						}
+					} else if (closeMode === 'all') {
+						// Close all browser sessions
+						await Ventriloquist.closeSession(workflowId);
+
+						// Return success
+						returnData.push({
+							json: {
+								success: true,
+								operation,
+								closeMode,
+								message: 'All browser sessions closed successfully',
+								timestamp: new Date().toISOString(),
+							},
+						});
+					} else if (closeMode === 'multiple') {
+						// Close a list of specific sessions
+						const sessionIds = this.getNodeParameter('sessionIds', i, []) as string[];
+						const closedSessions: string[] = [];
+						const failedSessions: string[] = [];
+
+						// Process each session ID
+						for (const sessionId of sessionIds) {
+							try {
+								// Get existing page from session
+								const page = Ventriloquist.getPage(workflowId, sessionId);
+								if (page) {
+									await page.close();
+									closedSessions.push(sessionId);
+									this.logger.info(`Closed page with session ID: ${sessionId}`);
+								} else {
+									failedSessions.push(sessionId);
+									this.logger.warn(`No page found with session ID: ${sessionId}`);
+								}
+							} catch (error) {
+								failedSessions.push(sessionId);
+								this.logger.error(`Error closing session ${sessionId}: ${error}`);
+							}
+						}
+
+						// Return result
+						returnData.push({
+							json: {
+								success: true,
+								operation,
+								closeMode,
+								closedSessions,
+								failedSessions,
+								message: `Closed ${closedSessions.length} of ${sessionIds.length} sessions successfully`,
+								timestamp: new Date().toISOString(),
+							},
+						});
+					}
 				}
 			} catch (error: any) {
 				// Clean up the session if there's an error
