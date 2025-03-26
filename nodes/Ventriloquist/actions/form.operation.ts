@@ -17,6 +17,11 @@ export const description: INodeProperties[] = [
 		default: '',
 		description: 'ID of the page to use (from a previous open operation)',
 		required: true,
+		displayOptions: {
+			show: {
+				operation: ['form'],
+			},
+		},
 	},
 	{
 		displayName: 'Form Fields',
@@ -52,6 +57,11 @@ export const description: INodeProperties[] = [
 				],
 			},
 		],
+		displayOptions: {
+			show: {
+				operation: ['form'],
+			},
+		},
 	},
 	{
 		displayName: 'Submit Form',
@@ -59,6 +69,11 @@ export const description: INodeProperties[] = [
 		type: 'boolean',
 		default: true,
 		description: 'Whether to submit the form after filling the fields',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+			},
+		},
 	},
 	{
 		displayName: 'Submit Button Selector',
@@ -69,6 +84,7 @@ export const description: INodeProperties[] = [
 		description: 'CSS selector of the submit button',
 		displayOptions: {
 			show: {
+				operation: ['form'],
 				submitForm: [true],
 			},
 		},
