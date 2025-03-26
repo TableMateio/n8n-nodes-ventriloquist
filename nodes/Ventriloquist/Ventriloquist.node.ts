@@ -53,12 +53,27 @@ export class Ventriloquist implements INodeType {
 		workflowId: string,
 		websocketEndpoint: string,
 		logger: any,
-	): Promise<{ browser: puppeteer.Browser; sessionId: string }> {
+	): Promise<{ browser: puppeteer.Browser; sessionId: string; brightDataSessionId: string }> {
 		// Clean up old sessions
 		this.cleanupSessions();
 
 		// Check if we have an existing session for this workflow
 		let session = this.browserSessions.get(workflowId);
+		let brightDataSessionId = '';
+
+		// Extract the Bright Data session ID from the WebSocket URL if possible
+		try {
+			// Bright Data WebSocket URLs typically contain the session ID in a format like:
+			// wss://brd-customer-XXX.bright.com/browser/XXX/sessionID/...
+			const matches = websocketEndpoint.match(/browser\/[^\/]+\/([^\/]+)/);
+			if (matches && matches[1]) {
+				brightDataSessionId = matches[1];
+				logger.info(`Detected Bright Data session ID: ${brightDataSessionId}`);
+			}
+		} catch (error) {
+			// Ignore errors in extraction, not critical
+			logger.debug('Failed to extract Bright Data session ID from WebSocket URL');
+		}
 
 		if (!session) {
 			// Create a new browser session
@@ -83,7 +98,7 @@ export class Ventriloquist implements INodeType {
 		// Create a unique ID for the session
 		const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-		return { browser: session.browser, sessionId };
+		return { browser: session.browser, sessionId, brightDataSessionId };
 	}
 
 	// Store a page in the session
@@ -118,7 +133,7 @@ export class Ventriloquist implements INodeType {
 	}
 
 	// Enable the debugger for a Bright Data session
-	private static async enableDebugger(page: puppeteer.Page, logger: any): Promise<string | null> {
+	private static async enableDebugger(page: puppeteer.Page, logger: any): Promise<{ debugUrl: string | null; brightDataDebugInfo: string | null }> {
 		try {
 			// Create a CDP session to interact with Chrome DevTools Protocol
 			const client = await page.target().createCDPSession();
@@ -131,16 +146,26 @@ export class Ventriloquist implements INodeType {
 			const response = await (client as any).send('Page.inspect', { frameId });
 			const inspectUrl = response?.url;
 
+			let brightDataDebugInfo = null;
 			if (inspectUrl) {
 				logger.info(`Debug URL available: ${inspectUrl}`);
-				return inspectUrl;
+
+				// Extract the session ID component from the URL that matches Bright Data dashboard format
+				// Format is typically like: PREFIX/SESSION_ID (example: dba989bc/4319ae15-b539-4334-be7e-3bac70d0cb69)
+				const matches = inspectUrl.match(/([^\/]+\/[^\/]+)(?:\/|$)/);
+				if (matches && matches[1]) {
+					brightDataDebugInfo = matches[1];
+					logger.info(`Bright Data dashboard session ID detected: ${brightDataDebugInfo}`);
+				}
+
+				return { debugUrl: inspectUrl, brightDataDebugInfo };
 			} else {
 				logger.warn('Could not get debug URL from Bright Data');
-				return null;
+				return { debugUrl: null, brightDataDebugInfo: null };
 			}
 		} catch (error) {
 			logger.warn(`Failed to enable debugger: ${error}`);
-			return null;
+			return { debugUrl: null, brightDataDebugInfo: null };
 		}
 	}
 
@@ -414,7 +439,7 @@ export class Ventriloquist implements INodeType {
 					const brightDataTimeout = timeout * 2;
 
 					// Get or create a browser session
-					const { browser, sessionId } = await Ventriloquist.getOrCreateSession(
+					const { browser, sessionId, brightDataSessionId } = await Ventriloquist.getOrCreateSession(
 						workflowId,
 						websocketEndpoint,
 						this.logger,
@@ -431,8 +456,11 @@ export class Ventriloquist implements INodeType {
 
 					// Enable debugging if requested
 					let debugUrl = null;
+					let brightDataDebugInfo = null;
 					if (enableDebug) {
-						debugUrl = await Ventriloquist.enableDebugger(page, this.logger);
+						const debugInfo = await Ventriloquist.enableDebugger(page, this.logger);
+						debugUrl = debugInfo.debugUrl;
+						brightDataDebugInfo = debugInfo.brightDataDebugInfo;
 					}
 
 					// Navigate to URL with increased timeout for Bright Data
@@ -465,11 +493,17 @@ export class Ventriloquist implements INodeType {
 						screenshot: `data:image/jpeg;base64,${screenshot}`,
 						incognito,
 						timestamp: new Date().toISOString(),
+						brightDataSessionId,
 					};
 
 					// Include debug URL if available
 					if (debugUrl) {
 						responseData.debugUrl = debugUrl;
+					}
+
+					// Include Bright Data dashboard session ID if available
+					if (brightDataDebugInfo) {
+						responseData.brightDataDebugInfo = brightDataDebugInfo;
 					}
 
 					returnData.push({
@@ -525,7 +559,7 @@ export class Ventriloquist implements INodeType {
 					const brightDataTimeout = timeout * 2;
 
 					// Get or create a browser session
-					const { browser } = await Ventriloquist.getOrCreateSession(
+					const { browser, brightDataSessionId } = await Ventriloquist.getOrCreateSession(
 						workflowId,
 						websocketEndpoint,
 						this.logger,
@@ -640,6 +674,7 @@ export class Ventriloquist implements INodeType {
 							pageHtmlPreview: pageHtml.substring(0, 500) + '...',
 							screenshot: `data:image/jpeg;base64,${screenshot}`,
 							timestamp: new Date().toISOString(),
+							brightDataSessionId,
 						};
 
 						returnData.push({
@@ -662,6 +697,7 @@ export class Ventriloquist implements INodeType {
 								error: error ? error.message : 'Click operation failed after all retries',
 								screenshot: `data:image/jpeg;base64,${screenshot}`,
 								timestamp: new Date().toISOString(),
+								brightDataSessionId,
 							},
 						});
 					}
