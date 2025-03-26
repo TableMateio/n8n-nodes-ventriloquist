@@ -55,6 +55,14 @@ export const description: INodeProperties[] = [
 								name: 'Select',
 								value: 'select',
 							},
+							{
+								name: 'Radio',
+								value: 'radio',
+							},
+							{
+								name: 'File',
+								value: 'file',
+							},
 						],
 						default: 'text',
 						description: 'The type of form field',
@@ -76,7 +84,7 @@ export const description: INodeProperties[] = [
 						description: 'Value to set for the form field',
 						displayOptions: {
 							show: {
-								fieldType: ['text', 'select'],
+								fieldType: ['text', 'select', 'radio'],
 							},
 						},
 					},
@@ -89,6 +97,30 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								fieldType: ['checkbox'],
+							},
+						},
+					},
+					{
+						displayName: 'File Path',
+						name: 'filePath',
+						type: 'string',
+						default: '',
+						description: 'Full path to the file to upload',
+						displayOptions: {
+							show: {
+								fieldType: ['file'],
+							},
+						},
+					},
+					{
+						displayName: 'Clear Field First',
+						name: 'clearField',
+						type: 'boolean',
+						default: true,
+						description: 'Whether to clear the field before setting the value (for text fields)',
+						displayOptions: {
+							show: {
+								fieldType: ['text'],
 							},
 						},
 					},
@@ -135,6 +167,47 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: 'Wait After Submit',
+		name: 'waitAfterSubmit',
+		type: 'options',
+		options: [
+			{
+				name: 'Navigation Complete',
+				value: 'navigationComplete',
+			},
+			{
+				name: 'Fixed Time',
+				value: 'fixedTime',
+			},
+			{
+				name: 'No Wait',
+				value: 'noWait',
+			},
+		],
+		default: 'navigationComplete',
+		description: 'What to wait for after submitting the form',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+				submitForm: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Wait Time',
+		name: 'waitTime',
+		type: 'number',
+		default: 5000,
+		description: 'Time to wait in milliseconds (for fixed time wait)',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+				submitForm: [true],
+				waitAfterSubmit: ['fixedTime'],
+			},
+		},
+	},
+	{
 		displayName: 'Take Screenshot After Submission',
 		name: 'takeScreenshot',
 		type: 'boolean',
@@ -163,6 +236,8 @@ export async function execute(
 	const formFields = this.getNodeParameter('formFields.fields', index, []) as IDataObject[];
 	const submitForm = this.getNodeParameter('submitForm', index, true) as boolean;
 	const submitSelector = this.getNodeParameter('submitSelector', index, '') as string;
+	const waitAfterSubmit = this.getNodeParameter('waitAfterSubmit', index, 'navigationComplete') as string;
+	const waitTime = this.getNodeParameter('waitTime', index, 5000) as number;
 	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 
 	// Get page from session
@@ -191,6 +266,18 @@ export async function execute(
 			switch (fieldType) {
 				case 'text': {
 					const value = field.value as string;
+					const clearField = field.clearField as boolean;
+
+					// Clear field if requested
+					if (clearField) {
+						await page.evaluate((sel: string) => {
+							const element = document.querySelector(sel);
+							if (element) {
+								(element as HTMLInputElement).value = '';
+							}
+						}, selector);
+					}
+
 					// Type text into the field
 					await page.type(selector, value);
 					break;
@@ -217,6 +304,30 @@ export async function execute(
 					}
 					break;
 				}
+
+				case 'radio': {
+					// For radio buttons, just click to select
+					await page.click(selector);
+					break;
+				}
+
+				case 'file': {
+					const filePath = field.filePath as string;
+					if (!filePath) {
+						throw new Error(`File path is required for file input (selector: ${selector})`);
+					}
+
+					// Get the file input element
+					const fileInput = await page.$(selector);
+					if (!fileInput) {
+						throw new Error(`File input element not found: ${selector}`);
+					}
+
+					// Upload the file
+					// We need to cast to any to avoid TypeScript errors with uploadFile
+					await (fileInput as any).uploadFile(filePath);
+					break;
+				}
 			}
 
 			// Record the result
@@ -237,8 +348,15 @@ export async function execute(
 			this.logger.info('Submitting the form');
 			await page.click(submitSelector);
 
-			// Wait for navigation to complete
-			await page.waitForNavigation();
+			// Handle waiting after submission
+			if (waitAfterSubmit === 'navigationComplete') {
+				this.logger.info('Waiting for navigation to complete');
+				await page.waitForNavigation();
+			} else if (waitAfterSubmit === 'fixedTime') {
+				this.logger.info(`Waiting ${waitTime}ms after submission`);
+				await new Promise(resolve => setTimeout(resolve, waitTime));
+			}
+			// If 'noWait', we don't wait at all
 		}
 
 		// Get current page info
