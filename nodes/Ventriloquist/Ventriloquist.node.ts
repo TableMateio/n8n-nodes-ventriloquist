@@ -65,10 +65,33 @@ export class Ventriloquist implements INodeType {
 		try {
 			// Bright Data WebSocket URLs typically contain the session ID in a format like:
 			// wss://brd-customer-XXX.bright.com/browser/XXX/sessionID/...
-			const matches = websocketEndpoint.match(/browser\/[^\/]+\/([^\/]+)/);
+			// or wss://brd.superproxy.io:9223/XXXX/XXXX-XXXX-XXXX-XXXX
+
+			// First try to extract from standard format with io:port
+			let matches = websocketEndpoint.match(/io:\d+\/([^\/]+\/[^\/\s]+)/);
+
+			// If that doesn't work, try alternative format
+			if (!matches || !matches[1]) {
+				matches = websocketEndpoint.match(/io\/([^\/]+\/[^\/\s]+)/);
+			}
+
+			// If that doesn't work, try the older format
+			if (!matches || !matches[1]) {
+				matches = websocketEndpoint.match(/browser\/[^\/]+\/([^\/]+)/);
+			}
+
 			if (matches && matches[1]) {
 				brightDataSessionId = matches[1];
-				logger.info(`Detected Bright Data session ID: ${brightDataSessionId}`);
+				logger.info(`Detected Bright Data session ID from WebSocket URL: ${brightDataSessionId}`);
+			} else {
+				// Fallback for other URL formats
+				const fallbackMatches = websocketEndpoint.match(/\/([a-f0-9-]{36}|[a-f0-9]{7,8}\/[a-f0-9-]{36})/i);
+				if (fallbackMatches && fallbackMatches[1]) {
+					brightDataSessionId = fallbackMatches[1];
+					logger.info(`Extracted Bright Data session ID (fallback): ${brightDataSessionId}`);
+				} else {
+					logger.debug('Could not extract Bright Data session ID from WebSocket URL');
+				}
 			}
 		} catch (error) {
 			// Ignore errors in extraction, not critical
@@ -171,7 +194,7 @@ export class Ventriloquist implements INodeType {
 					logger.warn(`Could not extract Bright Data session ID from URL format: ${inspectUrl}`);
 
 					// Extract any part that might be a session ID
-					const fallbackMatches = inspectUrl.match(/\/([a-f0-9-]{36}|[a-f0-9]{7,8}\/[a-f0-9-]{36})/i);
+					const fallbackMatches = inspectUrl.match(/\/([a-f0-9-]{36}|[a-f0-9-]{7,8}\/[a-f0-9-]{36})/i);
 					if (fallbackMatches && fallbackMatches[1]) {
 						brightDataDebugInfo = fallbackMatches[1];
 						logger.info(`Extracted potential Bright Data session ID (fallback): ${brightDataDebugInfo}`);
@@ -279,6 +302,18 @@ export class Ventriloquist implements INodeType {
 				displayOptions: {
 					show: {
 						operation: ['open'],
+					},
+				},
+			},
+			{
+				displayName: 'Capture Screenshot',
+				name: 'captureScreenshot',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to capture and return a screenshot in the response',
+				displayOptions: {
+					show: {
+						operation: ['open', 'click', 'form', 'detect', 'extract'],
 					},
 				},
 			},
@@ -514,6 +549,7 @@ export class Ventriloquist implements INodeType {
 					) as puppeteer.PuppeteerLifeCycleEvent;
 					const timeout = this.getNodeParameter('timeout', i, 30000) as number;
 					const enableDebug = this.getNodeParameter('enableDebug', i, false) as boolean;
+					const captureScreenshot = this.getNodeParameter('captureScreenshot', i, true) as boolean;
 
 					// Double the timeout for Bright Data as recommended in their docs
 					const brightDataTimeout = timeout * 2;
@@ -555,13 +591,6 @@ export class Ventriloquist implements INodeType {
 					const currentUrl = page.url();
 					const status = response ? response.status() : null;
 
-					// Take a screenshot (base64 encoded)
-					const screenshot = await page.screenshot({
-						encoding: 'base64',
-						type: 'jpeg',
-						quality: 80,
-					});
-
 					// Return page data
 					const responseData: IDataObject = {
 						success: true,
@@ -570,11 +599,21 @@ export class Ventriloquist implements INodeType {
 						title,
 						status,
 						sessionId, // Include the sessionId in the output for subsequent operations
-						screenshot: `data:image/jpeg;base64,${screenshot}`,
 						incognito,
 						timestamp: new Date().toISOString(),
 						brightDataSessionId,
 					};
+
+					// Capture screenshot if requested
+					if (captureScreenshot) {
+						// Take a screenshot (base64 encoded)
+						const screenshot = await page.screenshot({
+							encoding: 'base64',
+							type: 'jpeg',
+							quality: 80,
+						});
+						responseData.screenshot = `data:image/jpeg;base64,${screenshot}`;
+					}
 
 					// Include debug URL if available
 					if (debugUrl) {
@@ -592,6 +631,7 @@ export class Ventriloquist implements INodeType {
 				} else if (operation === 'click') {
 					// Try to get sessionId from previous operations
 					let sessionId = '';
+					const captureScreenshot = this.getNodeParameter('captureScreenshot', i, true) as boolean;
 
 					// First, check if an explicit session ID was provided
 					const explicitSessionId = this.getNodeParameter('explicitSessionId', i, '') as string;
@@ -728,59 +768,46 @@ export class Ventriloquist implements INodeType {
 						return document.documentElement.outerHTML.slice(0, 1000) + '...'; // First 1000 characters
 					});
 
-					// Take a screenshot after the click (or attempt)
-					const screenshot = await page.screenshot({
-						encoding: 'base64',
-						type: 'jpeg',
-						quality: 80,
-					});
-
 					// Get updated page info after click
 					const updatedPageTitle = await page.title();
 					const updatedPageUrl = page.url();
 
-					if (success) {
-						// Return successful response
-						const responseData: IDataObject = {
-							success: true,
-							operation,
-							selector,
-							attempts: attempt + 1,
-							url: updatedPageUrl,
-							title: updatedPageTitle,
-							sessionId, // Include the sessionId for subsequent operations
-							foundInPage: selectorExists,
-							availableIds: allElementsWithIds,
-							pageHtmlPreview: pageHtml.substring(0, 500) + '...',
-							screenshot: `data:image/jpeg;base64,${screenshot}`,
-							timestamp: new Date().toISOString(),
-							brightDataSessionId,
-						};
+					// Prepare base response data
+					const baseResponseData: IDataObject = {
+						success: success,
+						operation,
+						selector,
+						attempts: success ? attempt + 1 : attempt,
+						url: success ? updatedPageUrl : pageUrl,
+						title: success ? updatedPageTitle : pageTitle,
+						sessionId, // Include the sessionId for subsequent operations
+						foundInPage: selectorExists,
+						availableIds: allElementsWithIds,
+						pageHtmlPreview: pageHtml.substring(0, 500) + '...',
+						timestamp: new Date().toISOString(),
+						brightDataSessionId,
+					};
 
-						returnData.push({
-							json: responseData,
+					// Add screenshot if requested
+					if (captureScreenshot) {
+						// Take a screenshot after the click (or attempt)
+						const screenshot = await page.screenshot({
+							encoding: 'base64',
+							type: 'jpeg',
+							quality: 80,
 						});
-					} else {
-						// Return error response
-						returnData.push({
-							json: {
-								success: false,
-								operation,
-								selector,
-								attempts: attempt,
-								url: pageUrl,
-								title: pageTitle,
-								sessionId, // Include the sessionId for subsequent operations
-								foundInPage: selectorExists,
-								availableIds: allElementsWithIds,
-								pageHtmlPreview: pageHtml.substring(0, 500) + '...',
-								error: error ? error.message : 'Click operation failed after all retries',
-								screenshot: `data:image/jpeg;base64,${screenshot}`,
-								timestamp: new Date().toISOString(),
-								brightDataSessionId,
-							},
-						});
+						baseResponseData.screenshot = `data:image/jpeg;base64,${screenshot}`;
 					}
+
+					// Add error information if not successful
+					if (!success) {
+						baseResponseData.error = error ? error.message : 'Click operation failed after all retries';
+					}
+
+					// Return response
+					returnData.push({
+						json: baseResponseData,
+					});
 				} else if (operation === 'form') {
 					// Execute form operation
 					const result = await formOperation.execute.call(
