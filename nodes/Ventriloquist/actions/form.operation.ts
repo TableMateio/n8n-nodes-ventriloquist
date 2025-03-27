@@ -24,18 +24,6 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: 'Fast Typing',
-		name: 'fastTyping',
-		type: 'boolean',
-		default: true,
-		description: 'Whether to use faster typing speed (10ms between keystrokes instead of default)',
-		displayOptions: {
-			show: {
-				operation: ['form'],
-			},
-		},
-	},
-	{
 		displayName: 'Wait for Form Elements',
 		name: 'waitForSelectors',
 		type: 'boolean',
@@ -279,31 +267,31 @@ export const description: INodeProperties[] = [
 			{
 				name: 'DOM Content Loaded',
 				value: 'domContentLoaded',
-				description: 'Fastest: Wait for page DOM to be ready (interactive)',
+				description: 'Fast: Wait until the new page structure is ready for interaction (3-5 seconds)',
 			},
 			{
 				name: 'Fixed Time',
 				value: 'fixedTime',
-				description: 'Wait for a specific amount of time',
+				description: 'Simple: Just wait for a specific amount of time that you set below',
 			},
 			{
 				name: 'Navigation Complete',
 				value: 'navigationComplete',
-				description: 'Slowest: Wait for all network connections to stabilize',
+				description: 'Thorough but slow: Wait until all page resources have finished loading (10-30 seconds)',
 			},
 			{
 				name: 'No Wait',
 				value: 'noWait',
-				description: 'Don\'t wait at all after clicking submit',
+				description: 'Immediate: Do not wait at all after clicking submit (may cause issues if next steps need the new page)',
 			},
 			{
 				name: 'Page Load',
 				value: 'pageLoad',
-				description: 'Medium: Wait for page load event (most resources loaded)',
+				description: 'Medium: Wait for basic page resources to load (5-10 seconds)',
 			},
 		],
 		default: 'domContentLoaded',
-		description: 'What to wait for after submitting the form',
+		description: 'What to wait for after clicking the submit button - needed to ensure the form submission completes properly',
 		displayOptions: {
 			show: {
 				operation: ['form'],
@@ -771,7 +759,6 @@ export async function execute(
 				case 'text': {
 					const value = field.value as string;
 					const clearField = field.clearField as boolean;
-					const fastTyping = this.getNodeParameter('fastTyping', index, true) as boolean;
 
 					// Clear field if requested
 					if (clearField) {
@@ -783,12 +770,8 @@ export async function execute(
 						}, selector);
 					}
 
-					// Type text into the field with faster typing if enabled
-					if (fastTyping) {
-						await page.type(selector, value, { delay: 10 });
-					} else {
-						await page.type(selector, value);
-					}
+					// Type text with consistent 25ms delay
+					await page.type(selector, value, { delay: 25 });
 
 					// Record the result
 					results.push({
