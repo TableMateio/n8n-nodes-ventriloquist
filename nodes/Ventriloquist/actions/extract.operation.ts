@@ -451,6 +451,10 @@ export async function execute(
 			await page.waitForSelector(selector, { timeout });
 		}
 
+		// Ensure the page is properly stored in the session registry
+		Ventriloquist.storePage(workflowId, sessionId, page);
+		this.logger.info(`Ensured page reference in session store before extraction`);
+
 		let extractedData: IDataObject | string | Array<string | IDataObject> = '';
 		let extractionDetails: IDataObject = {};
 
@@ -658,6 +662,10 @@ export async function execute(
 		const currentUrl = page.url();
 		const pageTitle = await page.title();
 
+		// Ensure the page is properly stored again after extraction
+		Ventriloquist.storePage(workflowId, sessionId, page);
+		this.logger.info(`Updated page reference in session store after extraction (URL: ${currentUrl})`);
+
 		// Take a screenshot if requested
 		let screenshot = '';
 		if (takeScreenshot) {
@@ -684,6 +692,7 @@ export async function execute(
 				...extractionDetails,
 				timestamp: new Date().toISOString(),
 				screenshot,
+				pageStatus: 'active', // Indicate that the page is still active
 			},
 		};
 	} catch (error) {

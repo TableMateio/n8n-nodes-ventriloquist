@@ -336,7 +336,7 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: 'Retry Delay (ms)',
+		displayName: 'Retry Delay (MS)',
 		name: 'retryDelay',
 		type: 'number',
 		default: 1000,
@@ -769,18 +769,37 @@ export async function execute(
 			if (waitAfterSubmit === 'navigationComplete') {
 				this.logger.info('Waiting for navigation to complete');
 				try {
-					await page.waitForNavigation({ timeout: 30000 });
+					// Use a longer timeout and specific waitUntil options for more reliable navigation
+					await page.waitForNavigation({
+						timeout: 60000,  // Increased timeout to 60 seconds
+						waitUntil: ['load', 'domcontentloaded', 'networkidle2']
+					});
 					this.logger.info('Navigation completed successfully');
+
+					// Add a stabilization period to let the page fully settle
+					this.logger.info('Adding 1000ms stabilization period after navigation');
+					await new Promise(resolve => setTimeout(resolve, 1000));
+
+					// Re-store the page in case the page reference changed during navigation
+					Ventriloquist.storePage(workflowId, sessionId, page);
+					this.logger.info('Updated page reference in session store');
 				} catch (navError) {
 					this.logger.warn(`Navigation timeout or error: ${navError}`);
-					throw new Error(`Form submission navigation failed: ${navError}`);
+					// Don't throw an error, just log and continue
+					this.logger.info('Adding fallback delay of 5000ms since navigation event failed');
+					await new Promise(resolve => setTimeout(resolve, 5000));
 				}
 			} else if (waitAfterSubmit === 'fixedTime') {
 				this.logger.info(`Waiting ${waitTime}ms after submission`);
 				await new Promise(resolve => setTimeout(resolve, waitTime));
 				this.logger.info('Fixed wait time completed');
+
+				// Re-store the page in case the page reference changed during fixed wait
+				Ventriloquist.storePage(workflowId, sessionId, page);
+			} else {
+				// Even with noWait, add a minimal delay to stabilize
+				await new Promise(resolve => setTimeout(resolve, 500));
 			}
-			// If 'noWait', we don't wait at all
 
 			// After waiting (regardless of wait method), check if the page actually changed
 			const afterUrl = page.url();
@@ -844,13 +863,34 @@ export async function execute(
 						if (waitAfterSubmit === 'navigationComplete') {
 							this.logger.info('Waiting for navigation to complete after retry');
 							try {
-								await page.waitForNavigation({ timeout: 30000 });
+								// Use a longer timeout and specific waitUntil options for more reliable navigation
+								await page.waitForNavigation({
+									timeout: 60000,  // Increased timeout to 60 seconds
+									waitUntil: ['load', 'domcontentloaded', 'networkidle2']
+								});
+								this.logger.info('Navigation after retry completed successfully');
+
+								// Add a stabilization period to let the page fully settle
+								this.logger.info('Adding 1000ms stabilization period after retry navigation');
+								await new Promise(resolve => setTimeout(resolve, 1000));
+
+								// Re-store the page in case the page reference changed during navigation
+								Ventriloquist.storePage(workflowId, sessionId, page);
 							} catch (navError) {
 								this.logger.warn(`Navigation timeout or error on retry: ${navError}`);
+								// Don't throw an error, just log and continue
+								this.logger.info('Adding fallback delay of 5000ms since retry navigation event failed');
+								await new Promise(resolve => setTimeout(resolve, 5000));
 							}
 						} else if (waitAfterSubmit === 'fixedTime') {
 							this.logger.info(`Waiting ${waitTime}ms after retry submission`);
 							await new Promise(resolve => setTimeout(resolve, waitTime));
+
+							// Re-store the page in case the page reference changed during fixed wait
+							Ventriloquist.storePage(workflowId, sessionId, page);
+						} else {
+							// Even with noWait, add a minimal delay to stabilize
+							await new Promise(resolve => setTimeout(resolve, 500));
 						}
 
 						// Check if page changed after retry
@@ -906,6 +946,10 @@ export async function execute(
 		const currentUrl = page.url();
 		const pageTitle = await page.title();
 
+		// Ensure the page is properly stored in the session registry before continuing
+		Ventriloquist.storePage(workflowId, sessionId, page);
+		this.logger.info(`Final update of page reference in session store (URL: ${currentUrl})`);
+
 		// Take a screenshot if requested
 		let screenshot = '';
 		if (takeScreenshot) {
@@ -930,6 +974,7 @@ export async function execute(
 				submitted: submitForm,
 				timestamp: new Date().toISOString(),
 				screenshot,
+				pageStatus: 'active', // Indicate that the page is still active
 			},
 		};
 	} catch (error) {
