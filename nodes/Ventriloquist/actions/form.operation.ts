@@ -912,6 +912,16 @@ export async function execute(
 			const beforeTitle = await page.title();
 			this.logger.info(`Before submission - URL: ${beforeUrl}, Title: ${beforeTitle}`);
 
+			// Declaration of submission result to track throughout all code paths
+			let formSubmissionResult: IDataObject = {
+				urlChanged: false,
+				titleChanged: false,
+				beforeUrl,
+				afterUrl: '',
+				beforeTitle,
+				afterTitle: '',
+			};
+
 			this.logger.info('Preparing to submit the form');
 
 			// Add a slight delay before submitting (feels more human)
@@ -1082,15 +1092,46 @@ export async function execute(
 					// Use a longer timeout and specific waitUntil options for more reliable navigation
 					await page.waitForNavigation({
 						timeout: 60000,  // Increased timeout to 60 seconds
-						waitUntil: ['load', 'domcontentloaded', 'networkidle2']
+						waitUntil: ['domcontentloaded']  // Only wait for DOM content loaded - most reliable indicator
 					});
-					this.logger.info('Navigation completed successfully');
+					this.logger.info('Navigation completed successfully - DOM content loaded');
 
-					// Add a stabilization period to let the page fully settle
-					this.logger.info('Adding 1000ms stabilization period after navigation');
-					await new Promise(resolve => setTimeout(resolve, 1000));
+					// Immediately indicate success since DOM is ready - most important signal
+					formSubmissionResult = {
+						urlChanged: page.url() !== beforeUrl,
+						titleChanged: await page.title() !== beforeTitle,
+						beforeUrl,
+						afterUrl: page.url(),
+						beforeTitle,
+						afterTitle: await page.title(),
+						navigationCompleted: true,
+					};
 
-					// Re-store the page in case the page reference changed during navigation
+					// Immediately store the page reference - crucial for continuation
+					Ventriloquist.storePage(workflowId, sessionId, page);
+
+					// Immediately add to results to ensure we capture success
+					results.push({
+						fieldType: 'formSubmission',
+						success: true,
+						details: formSubmissionResult
+					});
+
+					// Wait for network to settle in the background so we don't hold up completion
+					try {
+						await Promise.race([
+							page.waitForNavigation({ waitUntil: ['networkidle2'], timeout: 5000 }),
+							new Promise(resolve => setTimeout(resolve, 5000))
+						]);
+						this.logger.info('Network stabilized after navigation');
+					} catch (netError) {
+						this.logger.info('Continuing without waiting for full network idle');
+					}
+
+					// Add a short stabilization period
+					await new Promise(resolve => setTimeout(resolve, 500));
+
+					// Re-store the page reference again
 					Ventriloquist.storePage(workflowId, sessionId, page);
 					this.logger.info('Updated page reference in session store');
 				} catch (navError) {
@@ -1098,6 +1139,51 @@ export async function execute(
 					// Don't throw an error, just log and continue
 					this.logger.info('Adding fallback delay of 5000ms since navigation event failed');
 					await new Promise(resolve => setTimeout(resolve, 5000));
+
+					// Check if the page actually changed despite the navigation error
+					const afterUrl = page.url();
+					const afterTitle = await page.title();
+
+					if (afterUrl !== beforeUrl || afterTitle !== beforeTitle) {
+						this.logger.info('Page changed despite navigation event timeout - considering successful');
+
+						// Store successful navigation result
+						formSubmissionResult = {
+							urlChanged: afterUrl !== beforeUrl,
+							titleChanged: afterTitle !== beforeTitle,
+							beforeUrl,
+							afterUrl,
+							beforeTitle,
+							afterTitle,
+							navigationErrorRecovered: true,
+						};
+
+						// Add result to results array
+						results.push({
+							fieldType: 'formSubmission',
+							success: true,
+							details: formSubmissionResult
+						});
+					} else {
+						// No page change, likely a real navigation failure
+						this.logger.warn('No page change detected after navigation timeout - form submission may have failed');
+
+						formSubmissionResult = {
+							error: 'Navigation timeout with no page change',
+							beforeUrl,
+							afterUrl,
+							beforeTitle,
+							afterTitle,
+							urlChanged: false,
+							titleChanged: false,
+						};
+
+						results.push({
+							fieldType: 'formSubmission',
+							success: false,
+							details: formSubmissionResult
+						});
+					}
 				}
 			} else if (waitAfterSubmit === 'fixedTime') {
 				this.logger.info(`Waiting ${waitTime}ms after submission`);
@@ -1112,33 +1198,36 @@ export async function execute(
 			}
 
 			// After waiting (regardless of wait method), check if the page actually changed
-			const afterUrl = page.url();
-			const afterTitle = await page.title();
-			this.logger.info(`After submission - URL: ${afterUrl}, Title: ${afterTitle}`);
+			// but only if we haven't already recorded a submission result
+			if (!results.some(r => r.fieldType === 'formSubmission')) {
+				const afterUrl = page.url();
+				const afterTitle = await page.title();
+				this.logger.info(`After submission - URL: ${afterUrl}, Title: ${afterTitle}`);
 
-			// Add this information to results for debugging
-			const formSubmissionResult = {
-				urlChanged: beforeUrl !== afterUrl,
-				titleChanged: beforeTitle !== afterTitle,
-				beforeUrl,
-				afterUrl,
-				beforeTitle,
-				afterTitle,
-			};
+				// Add this information to results for debugging
+				formSubmissionResult = {
+					urlChanged: beforeUrl !== afterUrl,
+					titleChanged: beforeTitle !== afterTitle,
+					beforeUrl,
+					afterUrl,
+					beforeTitle,
+					afterTitle,
+				};
 
-			// Log the submission result
-			if (formSubmissionResult.urlChanged || formSubmissionResult.titleChanged) {
-				this.logger.info('Form submission detected page change - success likely');
-			} else {
-				this.logger.warn('No page change detected after form submission - may have failed');
+				// Log the submission result
+				if (formSubmissionResult.urlChanged || formSubmissionResult.titleChanged) {
+					this.logger.info('Form submission detected page change - success likely');
+				} else {
+					this.logger.warn('No page change detected after form submission - may have failed');
+				}
+
+				// Store the submission result for the response
+				results.push({
+					fieldType: 'formSubmission',
+					success: formSubmissionResult.urlChanged || formSubmissionResult.titleChanged,
+					details: formSubmissionResult
+				});
 			}
-
-			// Store the submission result for the response
-			results.push({
-				fieldType: 'formSubmission',
-				success: formSubmissionResult.urlChanged || formSubmissionResult.titleChanged,
-				details: formSubmissionResult
-			});
 
 			// If no change detected and retries are enabled, attempt again
 			if ((!formSubmissionResult.urlChanged && !formSubmissionResult.titleChanged) && retrySubmission) {
