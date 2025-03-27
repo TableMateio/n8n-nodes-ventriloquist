@@ -556,6 +556,18 @@ export class Ventriloquist implements INodeType {
 					},
 				},
 			},
+			{
+				displayName: 'Continue On Fail',
+				name: 'continueOnFail',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to continue execution even when click operations fail (cannot find element or timeout)',
+				displayOptions: {
+					show: {
+						operation: ['click'],
+					},
+				},
+			},
 
 			// Properties for 'form' operation
 			...formOperation.description,
@@ -810,135 +822,75 @@ export class Ventriloquist implements INodeType {
 					) as string;
 					const timeout = this.getNodeParameter('timeout', i, 30000) as number;
 					const retries = this.getNodeParameter('retries', i, 0) as number;
+					const continueOnFail = this.getNodeParameter('continueOnFail', i, true) as boolean;
 
 					// Double the timeout for Bright Data as recommended in their docs
 					const brightDataTimeout = timeout * 2;
 
-					// Get or create a browser session
-					const { browser, brightDataSessionId } = await Ventriloquist.getOrCreateSession(
-						workflowId,
-						websocketEndpoint,
-						this.logger,
-						undefined, // Use the existing timeout set during open
-					);
-
-					// Try to get existing page from session
+					// Get or create browser session
 					let page: puppeteer.Page | undefined;
-
-					if (sessionId) {
-						page = Ventriloquist.getPage(workflowId, sessionId);
-						this.logger.info(`Found existing page with session ID: ${sessionId}`);
-					}
-
-					// If no existing page, get the first available page or create a new one
-					if (!page) {
-						const pages = await browser.pages();
-						page = pages.length > 0 ? pages[0] : await browser.newPage();
-						sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-						Ventriloquist.storePage(workflowId, sessionId, page);
-						this.logger.info(`Created new page with session ID: ${sessionId}`);
-					}
-
-					// Get page info for debugging
-					const pageTitle = await page.title();
-					const pageUrl = page.url();
-
-					this.logger.info(`Current page URL: ${pageUrl}, title: ${pageTitle}`);
-
-					// Ensure the page is active before clicking
-					try {
-						// Bring page to front
-						await page.bringToFront();
-
-						// Force page activation by performing a trivial interaction
-						await page.evaluate(() => {
-							// Small scroll to trigger activity
-							window.scrollBy(0, 1);
-							return document.title; // Just to ensure execution
-						});
-
-						this.logger.info('Activated page before clicking');
-					} catch (activationErr) {
-						this.logger.warn(`Failed to activate page: ${activationErr}`);
-					}
-
-					// If waitBeforeClickSelector is provided, wait for it first
-					if (waitBeforeClickSelector) {
-						this.logger.info(`Waiting for selector "${waitBeforeClickSelector}" before clicking`);
-						await page.waitForSelector(waitBeforeClickSelector, { timeout: brightDataTimeout });
-					}
-
+					let browser: puppeteer.Browser | undefined;
+					let pageTitle = '';
+					let pageUrl = '';
+					let error: Error | undefined;
 					let success = false;
 					let attempt = 0;
-					let error: Error | null = null;
 
-					// Find all available elements with IDs for debugging purposes
-					const allElementsWithIds = await page.evaluate(() => {
-						const elements = document.querySelectorAll('[id]');
-						return Array.from(elements).map((el) => ({
-							id: el.id,
-							tagName: (el as HTMLElement).tagName.toLowerCase(),
-							type: (el as HTMLElement).getAttribute('type'),
-							text: (el as HTMLElement).innerText.slice(0, 50),
-						}));
-					});
+					try {
+						// Create a session or reuse an existing one
+						const { browser: newBrowser } = await Ventriloquist.getOrCreateSession(
+							workflowId,
+							websocketEndpoint,
+							this.logger,
+							brightDataTimeout,
+						);
+						browser = newBrowser;
 
-					// Check if the selector exists on the page
-					const selectorExists = await page.evaluate((sel) => {
-						const element = document.querySelector(sel);
-						return element !== null;
-					}, selector);
+						// Try to get existing page from session
+						if (sessionId) {
+							page = Ventriloquist.getPage(workflowId, sessionId);
+							this.logger.info(`Found existing page with session ID: ${sessionId}`);
+						}
 
-					// Get more detailed information about the element for debugging
-					const elementDetails = await page.evaluate((sel) => {
-						const element = document.querySelector(sel);
-						if (!element) return null;
+						// If no existing page, get the first available page or create a new one
+						if (!page) {
+							const pages = await browser.pages();
+							page = pages.length > 0 ? pages[0] : await browser.newPage();
+							sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+							Ventriloquist.storePage(workflowId, sessionId, page);
+							this.logger.info(`Created new page with session ID: ${sessionId}`);
+						}
 
-						return {
-							tagName: element.tagName?.toLowerCase(),
-							id: element.id || null,
-							className: element.className || null,
-							text: element.textContent?.trim().substring(0, 100) || null,
-							isVisible: !!(
-								(element as HTMLElement).offsetWidth ||
-								(element as HTMLElement).offsetHeight ||
-								element.getClientRects().length
-							),
-							disabled: (element as HTMLElement).hasAttribute('disabled') ||
-								(element as HTMLElement).getAttribute('aria-disabled') === 'true',
-							attributes: Array.from(element.attributes || [])
-								.map(attr => ({ name: attr.name, value: attr.value }))
-								.filter(attr => !['style', 'class'].includes(attr.name))
-								.slice(0, 10), // Limit to 10 attributes
-							boundingRect: element.getBoundingClientRect && {
-								top: element.getBoundingClientRect().top,
-								left: element.getBoundingClientRect().left,
-								width: element.getBoundingClientRect().width,
-								height: element.getBoundingClientRect().height,
-							}
-						};
-					}, selector);
+						// Get page info for debugging
+						pageTitle = await page.title();
+						pageUrl = page.url();
 
-					this.logger.info(`Selector "${selector}" exists on page: ${selectorExists}`);
-					if (elementDetails) {
-						this.logger.info(`Element details: ${JSON.stringify(elementDetails)}`);
-					}
-					this.logger.info(`Available IDs on page: ${JSON.stringify(allElementsWithIds)}`);
+						this.logger.info(`Current page URL: ${pageUrl}, title: ${pageTitle}`);
 
-					// Try to click with retries
-					while (!success && attempt <= retries) {
-						try {
-							// Wait for the selector to be available
-							this.logger.info(
-								`Waiting for selector "${selector}" (attempt ${attempt + 1}/${retries + 1})`,
-							);
-							await page.waitForSelector(selector, { timeout: brightDataTimeout });
+						// If waiting for a specific element before clicking, wait for it first
+						if (waitBeforeClickSelector) {
+							this.logger.info(`Waiting for selector "${waitBeforeClickSelector}" before clicking`);
+							await page.waitForSelector(waitBeforeClickSelector, { timeout: brightDataTimeout });
+						}
 
-							// Try different click methods for better reliability
+						// Check if the selector exists on the page
+						const selectorExists = await page.evaluate((sel) => {
+							const element = document.querySelector(sel);
+							return element !== null;
+						}, selector);
+
+						if (!selectorExists) {
+							throw new Error(`Element with selector "${selector}" not found on page`);
+						}
+
+						// Try clicking the element with retries
+						this.logger.info(`Clicking on selector "${selector}" (attempt ${attempt + 1})`);
+
+						while (!success && attempt <= retries) {
 							try {
-								// First try Puppeteer's native click
-								this.logger.info(`Clicking on selector "${selector}" using Puppeteer's click()`);
+								// Try standard click first
 								await page.click(selector);
+								this.logger.info('Standard click was successful');
 								success = true;
 							} catch (clickErr) {
 								this.logger.warn(`Native click failed: ${clickErr.message}, trying alternative method...`);
@@ -975,66 +927,97 @@ export class Ventriloquist implements INodeType {
 									this.logger.info('JavaScript click was successful');
 									success = true;
 								} else {
-									throw new Error('All click methods failed');
+									error = new Error('All click methods failed');
+									this.logger.warn(`Click attempt ${attempt + 1} failed: All methods failed`);
+									attempt++;
+
+									// If there are more retries, wait a bit before retrying
+									if (attempt <= retries) {
+										await new Promise((resolve) => setTimeout(resolve, 1000));
+									}
 								}
 							}
-						} catch (err: any) {
-							error = err as Error;
-							this.logger.warn(`Click attempt ${attempt + 1} failed: ${err.message}`);
-							attempt++;
-
-							// If there are more retries, wait a bit before retrying
-							if (attempt <= retries) {
-								await new Promise((resolve) => setTimeout(resolve, 1000));
-							}
 						}
-					}
+					} catch (error: any) {
+						// Clean up the session if there's an error
+						try {
+							await Ventriloquist.closeSession(workflowId);
+						} catch (cleanupError) {
+							// Ignore cleanup errors
+						}
 
-					// Try to get information about the page HTML for debugging
-					const pageHtml = await page.evaluate(() => {
-						return document.documentElement.outerHTML.slice(0, 1000) + '...'; // First 1000 characters
-					});
+						if (this.continueOnFail()) {
+							returnData.push({
+								json: {
+									success: false,
+									error: error.message || 'An unknown error occurred',
+									stack: error.stack || '',
+								},
+							});
+							continue;
+						}
+						throw error;
+					}
 
 					// Get updated page info after click
 					const updatedPageTitle = await page.title();
 					const updatedPageUrl = page.url();
 
-					// Prepare base response data
-					const baseResponseData: IDataObject = {
-						success: success,
-						operation,
-						selector,
-						attempts: success ? attempt + 1 : attempt,
-						url: success ? updatedPageUrl : pageUrl,
-						title: success ? updatedPageTitle : pageTitle,
-						sessionId, // Include the sessionId for subsequent operations
-						foundInPage: selectorExists,
-						availableIds: allElementsWithIds,
-						pageHtmlPreview: pageHtml.substring(0, 500) + '...',
-						timestamp: new Date().toISOString(),
-						brightDataSessionId,
-					};
+					// Take screenshot if requested
+					let screenshot = '';
+					if (captureScreenshot && page) {
+						try {
+							const buffer = await page.screenshot({
+								encoding: 'base64',
+								type: 'jpeg',
+								quality: 80,
+							});
+							screenshot = `data:image/jpeg;base64,${buffer}`;
+						} catch (screenshotError) {
+							this.logger.warn(`Failed to take screenshot: ${(screenshotError as Error).message}`);
+						}
+					}
 
-					// Add screenshot if requested
-					if (captureScreenshot) {
-						// Take a screenshot after the click (or attempt)
-						const screenshot = await page.screenshot({
-							encoding: 'base64',
-							type: 'jpeg',
-							quality: 80,
+					if (success) {
+						// Click operation successful
+						returnData.push({
+							json: {
+								success: true,
+								operation: 'click',
+								selector,
+								sessionId,
+								attempt: attempt,
+								url: updatedPageUrl,
+								title: updatedPageTitle,
+								timestamp: new Date().toISOString(),
+								...(screenshot ? { screenshot } : {}),
+							},
 						});
-						baseResponseData.screenshot = `data:image/jpeg;base64,${screenshot}`;
-					}
+					} else {
+						// Click operation failed
+						const errorMessage = error?.message || 'Click operation failed for an unknown reason';
 
-					// Add error information if not successful
-					if (!success) {
-						baseResponseData.error = error ? error.message : 'Click operation failed after all retries';
-					}
+						if (!continueOnFail) {
+							// If continueOnFail is false, throw the error to fail the node
+							throw new Error(`Click operation failed: ${errorMessage}`);
+						}
 
-					// Return response
-					returnData.push({
-						json: baseResponseData,
-					});
+						// Otherwise, return an error response but continue execution
+						returnData.push({
+							json: {
+								success: false,
+								operation: 'click',
+								error: errorMessage,
+								selector,
+								sessionId,
+								attempt: attempt,
+								url: updatedPageUrl,
+								title: updatedPageTitle,
+								timestamp: new Date().toISOString(),
+								...(screenshot ? { screenshot } : {}),
+							},
+						});
+					}
 				} else if (operation === 'form') {
 					// Execute form operation
 					const result = await formOperation.execute.call(
