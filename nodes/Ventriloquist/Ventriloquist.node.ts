@@ -386,7 +386,7 @@ export class Ventriloquist implements INodeType {
 				description: 'Session ID to use (if not provided, will try to use session from previous operations)',
 				displayOptions: {
 					show: {
-						operation: ['click', 'detect', 'extract', 'form', 'close'],
+						operation: ['click', 'detect', 'extract', 'form'],
 					},
 				},
 			},
