@@ -155,6 +155,31 @@ export class Ventriloquist implements INodeType {
 		}
 	}
 
+	// Close all browser sessions
+	private static async closeAllSessions(logger: any) {
+		let closedCount = 0;
+		// Create an array of session entries to avoid modification during iteration
+		const sessionEntries = Array.from(this.browserSessions.entries());
+
+		logger.info(`Closing all browser sessions (${sessionEntries.length} sessions found)`);
+
+		// Close each session
+		for (const [workflowId, session] of sessionEntries) {
+			try {
+				logger.info(`Closing browser session for workflow ID: ${workflowId}`);
+				await session.browser.close();
+				closedCount++;
+			} catch (error) {
+				logger.warn(`Error closing session for workflow ${workflowId}: ${error}`);
+			} finally {
+				this.browserSessions.delete(workflowId);
+			}
+		}
+
+		logger.info(`Successfully closed ${closedCount} of ${sessionEntries.length} browser sessions`);
+		return { totalSessions: sessionEntries.length, closedSessions: closedCount };
+	}
+
 	// Enable the debugger for a Bright Data session
 	private static async enableDebugger(page: puppeteer.Page, logger: any): Promise<{ debugUrl: string | null; brightDataDebugInfo: string | null }> {
 		try {
@@ -985,15 +1010,17 @@ export class Ventriloquist implements INodeType {
 						}
 					} else if (closeMode === 'all') {
 						// Close all browser sessions
-						await Ventriloquist.closeSession(workflowId);
+						const closeResult = await Ventriloquist.closeAllSessions(this.logger);
 
-						// Return success
+						// Return success with details
 						returnData.push({
 							json: {
 								success: true,
 								operation,
 								closeMode,
-								message: 'All browser sessions closed successfully',
+								totalSessions: closeResult.totalSessions,
+								closedSessions: closeResult.closedSessions,
+								message: `Closed ${closeResult.closedSessions} of ${closeResult.totalSessions} browser sessions successfully`,
 								timestamp: new Date().toISOString(),
 							},
 						});
