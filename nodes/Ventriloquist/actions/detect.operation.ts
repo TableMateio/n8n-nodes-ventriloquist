@@ -375,6 +375,18 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: 'Continue On Fail',
+		name: 'continueOnFail',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to continue execution even when detection operations fail (cannot find element or timeout)',
+		displayOptions: {
+			show: {
+				operation: ['detect'],
+			},
+		},
+	},
 ];
 
 /**
@@ -839,6 +851,7 @@ export async function execute(
 	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
 	const timeout = this.getNodeParameter('timeout', index, 5000) as number;
 	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
+	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 
 	// Get new parameters for smart detection
 	const detectionMethod = waitForSelectors
@@ -1030,8 +1043,8 @@ export async function execute(
 				}
 			}
 
-			// Return error info
-			return {
+			// Prepare error response
+			const errorResponse = {
 				json: {
 					success: false,
 					operation: 'detect',
@@ -1041,8 +1054,28 @@ export async function execute(
 					...(screenshot ? { screenshot } : {}),
 				},
 			};
+
+			// If continueOnFail is false, throw the error to fail the node
+			if (!continueOnFail) {
+				throw new Error(`Detect operation failed: ${(error as Error).message}`);
+			}
+
+			// Otherwise, return an error result
+			return errorResponse;
 		}
 	} catch (error) {
+		// If continueOnFail is enabled, try to return a formatted error instead of throwing
+		if (continueOnFail) {
+			return {
+				json: {
+					success: false,
+					operation: 'detect',
+					error: `Failed to get or create a page: ${(error as Error).message}`,
+					timestamp: new Date().toISOString(),
+				},
+			};
+		}
+
 		throw new Error(`Failed to get or create a page: ${(error as Error).message}`);
 	}
 }

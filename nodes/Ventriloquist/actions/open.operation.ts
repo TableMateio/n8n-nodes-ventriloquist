@@ -4,7 +4,7 @@ import {
 	type INodeExecutionData,
 	type INodeProperties,
 } from 'n8n-workflow';
-import * as puppeteer from 'puppeteer-core';
+import type * as puppeteer from 'puppeteer-core';
 import { BrightDataBrowser } from '../transport/BrightDataBrowser';
 
 /**
@@ -63,6 +63,13 @@ export const description: INodeProperties[] = [
 		default: 30000,
 		description: 'Maximum navigation time in milliseconds',
 	},
+	{
+		displayName: 'Continue On Fail',
+		name: 'continueOnFail',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to continue execution even when browser operations fail (cannot connect or navigate)',
+	},
 ];
 
 /**
@@ -81,6 +88,7 @@ export async function execute(
 		'networkidle0',
 	) as puppeteer.PuppeteerLifeCycleEvent;
 	const timeout = this.getNodeParameter('timeout', index, 30000) as number;
+	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 
 	// Get the authorized domains from the credentials
 	const credentials = await this.getCredentials('brightDataApi');
@@ -163,6 +171,12 @@ export async function execute(
 			errorMessage = `This website (${domain}) requires special permission from Bright Data. Please add "${domain}" to the 'Domains For Authorization' field in your Bright Data credentials or contact Bright Data support to get this domain authorized for your account. Error details: ${(error as Error).message}`;
 		}
 
+		// If continueOnFail is false, throw the error to fail the node
+		if (!continueOnFail) {
+			throw new Error(`Open operation failed: ${errorMessage}`);
+		}
+
+		// Otherwise, return an error response
 		return {
 			json: {
 				success: false,
