@@ -155,20 +155,62 @@ export class Ventriloquist implements INodeType {
 		}
 	}
 
-	// Close all browser sessions
+	// Close all locally tracked browser sessions
 	private static async closeAllSessions(logger: any) {
 		let closedCount = 0;
+		let totalSessions = 0;
+
 		// Create an array of session entries to avoid modification during iteration
 		const sessionEntries = Array.from(this.browserSessions.entries());
 
-		logger.info(`Closing all browser sessions (${sessionEntries.length} sessions found)`);
+		logger.info(`Closing locally tracked browser sessions (${sessionEntries.length} sessions found)`);
+		logger.info(`Note: This only closes sessions tracked by this N8N instance. Check Bright Data console for orphaned sessions.`);
 
-		// Close each session
+		// Close each locally tracked session
 		for (const [workflowId, session] of sessionEntries) {
 			try {
 				logger.info(`Closing browser session for workflow ID: ${workflowId}`);
+
+				// First try to close all pages in this browser
+				try {
+					// Get all pages in this browser
+					const pages = await session.browser.pages();
+					logger.info(`Found ${pages.length} pages in browser session ${workflowId}`);
+
+					// Close each page
+					for (const page of pages) {
+						try {
+							await page.close();
+							logger.info('Successfully closed a page');
+						} catch (pageError) {
+							logger.warn(`Error closing page: ${pageError}`);
+						}
+					}
+
+					// Try to close all contexts
+					const contexts = await session.browser.browserContexts();
+					logger.info(`Found ${contexts.length} browser contexts in session ${workflowId}`);
+
+					// Close each context (except default)
+					for (const context of contexts) {
+						try {
+							// Skip default context as it can't be closed
+							if (context !== session.browser.defaultBrowserContext()) {
+								await context.close();
+								logger.info('Successfully closed a browser context');
+							}
+						} catch (contextError) {
+							logger.warn(`Error closing browser context: ${contextError}`);
+						}
+					}
+				} catch (innerError) {
+					logger.warn(`Error during detailed cleanup: ${innerError}`);
+				}
+
+				// Finally close the browser itself
 				await session.browser.close();
 				closedCount++;
+				logger.info(`Successfully closed browser for workflow ${workflowId}`);
 			} catch (error) {
 				logger.warn(`Error closing session for workflow ${workflowId}: ${error}`);
 			} finally {
@@ -176,8 +218,12 @@ export class Ventriloquist implements INodeType {
 			}
 		}
 
-		logger.info(`Successfully closed ${closedCount} of ${sessionEntries.length} browser sessions`);
-		return { totalSessions: sessionEntries.length, closedSessions: closedCount };
+		totalSessions = sessionEntries.length;
+
+		logger.info(`Successfully closed ${closedCount} of ${totalSessions} locally tracked browser sessions`);
+		logger.info(`For any remaining sessions in Bright Data, please visit their console: https://brightdata.com/cp/zones/YOUR_ZONE/stats`);
+
+		return { totalSessions, closedSessions: closedCount };
 	}
 
 	// Enable the debugger for a Bright Data session
@@ -1020,7 +1066,9 @@ export class Ventriloquist implements INodeType {
 								closeMode,
 								totalSessions: closeResult.totalSessions,
 								closedSessions: closeResult.closedSessions,
-								message: `Closed ${closeResult.closedSessions} of ${closeResult.totalSessions} browser sessions successfully`,
+								message: `Closed ${closeResult.closedSessions} of ${closeResult.totalSessions} locally tracked browser sessions`,
+								note: "This operation only closes sessions tracked by this N8N instance. To close orphaned sessions, please visit the Bright Data console.",
+								brightDataConsoleUrl: "https://brightdata.com/cp/zones",
 								timestamp: new Date().toISOString(),
 							},
 						});
