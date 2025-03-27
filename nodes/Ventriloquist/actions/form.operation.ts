@@ -16,7 +16,19 @@ export const description: INodeProperties[] = [
 		name: 'useHumanDelays',
 		type: 'boolean',
 		default: true,
-		description: 'Whether to use random delays between actions to simulate human behavior (0.7-2.5 seconds)',
+		description: 'Whether to use random delays between actions to simulate human behavior (100-300ms)',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+			},
+		},
+	},
+	{
+		displayName: 'Fast Typing',
+		name: 'fastTyping',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to use faster typing speed (10ms between keystrokes instead of default)',
 		displayOptions: {
 			show: {
 				operation: ['form'],
@@ -39,7 +51,7 @@ export const description: INodeProperties[] = [
 		displayName: 'Timeout',
 		name: 'selectorTimeout',
 		type: 'number',
-		default: 30000,
+		default: 10000,
 		description: 'Maximum time in milliseconds to wait for form elements to appear',
 		displayOptions: {
 			show: {
@@ -77,11 +89,15 @@ export const description: INodeProperties[] = [
 								value: 'file',
 							},
 							{
+								name: 'Multi-Select',
+								value: 'multiSelect',
+							},
+							{
 								name: 'Radio',
 								value: 'radio',
 							},
 							{
-								name: 'Select',
+								name: 'Select (Dropdown)',
 								value: 'select',
 							},
 							{
@@ -207,6 +223,19 @@ export const description: INodeProperties[] = [
 							},
 						},
 					},
+					{
+						displayName: 'Multi-Select Values',
+						name: 'multiSelectValues',
+						type: 'string',
+						default: '',
+						placeholder: 'value1,value2,value3',
+						description: 'Comma-separated list of values to select (for multi-select dropdowns)',
+						displayOptions: {
+							show: {
+								fieldType: ['multiSelect'],
+							},
+						},
+					},
 				],
 			},
 		],
@@ -248,19 +277,32 @@ export const description: INodeProperties[] = [
 		type: 'options',
 		options: [
 			{
-				name: 'Navigation Complete',
-				value: 'navigationComplete',
+				name: 'DOM Content Loaded',
+				value: 'domContentLoaded',
+				description: 'Fastest: Wait for page DOM to be ready (interactive)',
 			},
 			{
 				name: 'Fixed Time',
 				value: 'fixedTime',
+				description: 'Wait for a specific amount of time',
+			},
+			{
+				name: 'Navigation Complete',
+				value: 'navigationComplete',
+				description: 'Slowest: Wait for all network connections to stabilize',
 			},
 			{
 				name: 'No Wait',
 				value: 'noWait',
+				description: 'Don\'t wait at all after clicking submit',
+			},
+			{
+				name: 'Page Load',
+				value: 'pageLoad',
+				description: 'Medium: Wait for page load event (most resources loaded)',
 			},
 		],
-		default: 'navigationComplete',
+		default: 'domContentLoaded',
 		description: 'What to wait for after submitting the form',
 		displayOptions: {
 			show: {
@@ -425,10 +467,10 @@ export const description: INodeProperties[] = [
 ];
 
 /**
- * Get a random human-like delay between 300-800ms (faster than before)
+ * Get a random human-like delay between 100-300ms (much faster than before)
  */
 function getHumanDelay(): number {
-	return Math.floor(Math.random() * (800 - 300 + 1) + 300);
+	return Math.floor(Math.random() * (300 - 100 + 1) + 100);
 }
 
 /**
@@ -623,11 +665,11 @@ export async function execute(
 	const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
 	const submitForm = this.getNodeParameter('submitForm', index, true) as boolean;
 	const submitSelector = this.getNodeParameter('submitSelector', index, '') as string;
-	const waitAfterSubmit = this.getNodeParameter('waitAfterSubmit', index, 'navigationComplete') as string;
+	const waitAfterSubmit = this.getNodeParameter('waitAfterSubmit', index, 'domContentLoaded') as string;
 	const waitTime = this.getNodeParameter('waitTime', index, 5000) as number;
 	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
-	const selectorTimeout = this.getNodeParameter('selectorTimeout', index, 30000) as number;
+	const selectorTimeout = this.getNodeParameter('selectorTimeout', index, 10000) as number;
 	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 	const retrySubmission = this.getNodeParameter('retrySubmission', index, false) as boolean;
 	const maxRetries = this.getNodeParameter('maxRetries', index, 2) as number;
@@ -729,6 +771,7 @@ export async function execute(
 				case 'text': {
 					const value = field.value as string;
 					const clearField = field.clearField as boolean;
+					const fastTyping = this.getNodeParameter('fastTyping', index, true) as boolean;
 
 					// Clear field if requested
 					if (clearField) {
@@ -740,8 +783,12 @@ export async function execute(
 						}, selector);
 					}
 
-					// Type text into the field
-					await page.type(selector, value);
+					// Type text into the field with faster typing if enabled
+					if (fastTyping) {
+						await page.type(selector, value, { delay: 10 });
+					} else {
+						await page.type(selector, value);
+					}
 
 					// Record the result
 					results.push({
@@ -891,6 +938,70 @@ export async function execute(
 						fieldType,
 						selector,
 						filePath,
+						success: true,
+					});
+					break;
+				}
+
+				case 'multiSelect': {
+					const multiSelectValues = (field.multiSelectValues as string || '').split(',').map(v => v.trim()).filter(v => v);
+
+					if (multiSelectValues.length === 0) {
+						throw new Error(`No values provided for multi-select field: ${selector}`);
+					}
+
+					// Check if this is a multiple select element
+					const isMultipleSelect = await page.$eval(selector, (el) =>
+						(el as HTMLSelectElement).multiple
+					);
+
+					if (isMultipleSelect) {
+						// For real <select multiple> elements, use the select-multiple capability
+						await page.select(selector, ...multiSelectValues);
+
+						this.logger.info(`Selected ${multiSelectValues.length} options in multiple select`);
+					} else {
+						// For checkbox groups or custom multi-selects, click each value's checkbox
+						for (const value of multiSelectValues) {
+							// Try a few common patterns for checkbox selectors
+							const possibleSelectors = [
+								`${selector} input[value="${value}"]`, // Direct value
+								`${selector} input[data-value="${value}"]`, // Data attribute
+								`${selector} label:has-text("${value}") input`, // Label text
+								`${selector} *:has-text("${value}") input[type="checkbox"]` // Any element with text
+							];
+
+							let clicked = false;
+
+							// Try each selector pattern
+							for (const possibleSelector of possibleSelectors) {
+								try {
+									const exists = await page.$(possibleSelector) !== null;
+									if (exists) {
+										await page.click(possibleSelector);
+										this.logger.info(`Clicked multi-select option: ${value} with selector: ${possibleSelector}`);
+										clicked = true;
+										break;
+									}
+								} catch (error) {
+									// Continue to the next selector pattern
+								}
+							}
+
+							if (!clicked) {
+								this.logger.warn(`Could not find clickable element for value: ${value} in multi-select: ${selector}`);
+							}
+
+							// Add a tiny delay between clicks to ensure they register separately
+							await new Promise(resolve => setTimeout(resolve, 50));
+						}
+					}
+
+					// Record the result
+					results.push({
+						fieldType,
+						selector,
+						values: multiSelectValues,
 						success: true,
 					});
 					break;
@@ -1087,16 +1198,15 @@ export async function execute(
 
 			// Handle waiting after submission
 			if (waitAfterSubmit === 'navigationComplete') {
-				this.logger.info('Waiting for navigation to complete');
+				this.logger.info('Waiting for navigation to complete (all network idle)');
 				try {
-					// Use a longer timeout and specific waitUntil options for more reliable navigation
 					await page.waitForNavigation({
-						timeout: 60000,  // Increased timeout to 60 seconds
-						waitUntil: ['domcontentloaded']  // Only wait for DOM content loaded - most reliable indicator
+						timeout: 60000,
+						waitUntil: ['load', 'domcontentloaded', 'networkidle2']
 					});
-					this.logger.info('Navigation completed successfully - DOM content loaded');
+					this.logger.info('Navigation completed successfully - all resources loaded');
 
-					// Immediately indicate success since DOM is ready - most important signal
+					// Immediately indicate success since DOM is ready
 					formSubmissionResult = {
 						urlChanged: page.url() !== beforeUrl,
 						titleChanged: await page.title() !== beforeTitle,
@@ -1107,10 +1217,8 @@ export async function execute(
 						navigationCompleted: true,
 					};
 
-					// Immediately store the page reference - crucial for continuation
+					// Store the page reference and results
 					Ventriloquist.storePage(workflowId, sessionId, page);
-
-					// Immediately add to results to ensure we capture success
 					results.push({
 						fieldType: 'formSubmission',
 						success: true,
@@ -1170,6 +1278,165 @@ export async function execute(
 
 						formSubmissionResult = {
 							error: 'Navigation timeout with no page change',
+							beforeUrl,
+							afterUrl,
+							beforeTitle,
+							afterTitle,
+							urlChanged: false,
+							titleChanged: false,
+						};
+
+						results.push({
+							fieldType: 'formSubmission',
+							success: false,
+							details: formSubmissionResult
+						});
+					}
+				}
+			} else if (waitAfterSubmit === 'domContentLoaded') {
+				this.logger.info('Waiting for DOM content to be loaded (faster)');
+				try {
+					await page.waitForNavigation({
+						timeout: 30000,
+						waitUntil: ['domcontentloaded']
+					});
+					this.logger.info('DOM content loaded successfully');
+
+					// Immediately indicate success since DOM is ready
+					formSubmissionResult = {
+						urlChanged: page.url() !== beforeUrl,
+						titleChanged: await page.title() !== beforeTitle,
+						beforeUrl,
+						afterUrl: page.url(),
+						beforeTitle,
+						afterTitle: await page.title(),
+						navigationCompleted: true,
+					};
+
+					// Store the page reference and results
+					Ventriloquist.storePage(workflowId, sessionId, page);
+					results.push({
+						fieldType: 'formSubmission',
+						success: true,
+						details: formSubmissionResult
+					});
+
+					// Add a short stabilization period
+					await new Promise(resolve => setTimeout(resolve, 500));
+				} catch (navError) {
+					this.logger.warn(`DOM content load timeout or error: ${navError}`);
+					// Add fallback delay and check for page change
+					await new Promise(resolve => setTimeout(resolve, 2000));
+
+					// Check if the page actually changed despite the navigation error
+					const afterUrl = page.url();
+					const afterTitle = await page.title();
+
+					if (afterUrl !== beforeUrl || afterTitle !== beforeTitle) {
+						this.logger.info('Page changed despite DOM content load timeout - considering successful');
+
+						// Store successful navigation result
+						formSubmissionResult = {
+							urlChanged: afterUrl !== beforeUrl,
+							titleChanged: afterTitle !== beforeTitle,
+							beforeUrl,
+							afterUrl,
+							beforeTitle,
+							afterTitle,
+							navigationErrorRecovered: true,
+						};
+
+						// Add result to results array
+						results.push({
+							fieldType: 'formSubmission',
+							success: true,
+							details: formSubmissionResult
+						});
+					} else {
+						// No page change, likely a real navigation failure
+						this.logger.warn('No page change detected after DOM content load timeout - form submission may have failed');
+
+						formSubmissionResult = {
+							error: 'DOM content load timeout with no page change',
+							beforeUrl,
+							afterUrl,
+							beforeTitle,
+							afterTitle,
+							urlChanged: false,
+							titleChanged: false,
+						};
+
+						results.push({
+							fieldType: 'formSubmission',
+							success: false,
+							details: formSubmissionResult
+						});
+					}
+				}
+			} else if (waitAfterSubmit === 'pageLoad') {
+				this.logger.info('Waiting for page load event');
+				try {
+					await page.waitForNavigation({
+						timeout: 30000,
+						waitUntil: ['load']
+					});
+					this.logger.info('Page load completed successfully');
+
+					// Similar success handling as domContentLoaded
+					formSubmissionResult = {
+						urlChanged: page.url() !== beforeUrl,
+						titleChanged: await page.title() !== beforeTitle,
+						beforeUrl,
+						afterUrl: page.url(),
+						beforeTitle,
+						afterTitle: await page.title(),
+						navigationCompleted: true,
+					};
+
+					Ventriloquist.storePage(workflowId, sessionId, page);
+					results.push({
+						fieldType: 'formSubmission',
+						success: true,
+						details: formSubmissionResult
+					});
+
+					// Brief stabilization
+					await new Promise(resolve => setTimeout(resolve, 500));
+				} catch (navError) {
+					this.logger.warn(`Page load timeout or error: ${navError}`);
+					// Fallback handling
+					await new Promise(resolve => setTimeout(resolve, 2000));
+
+					// Check if the page actually changed despite the navigation error
+					const afterUrl = page.url();
+					const afterTitle = await page.title();
+
+					if (afterUrl !== beforeUrl || afterTitle !== beforeTitle) {
+						this.logger.info('Page changed despite page load timeout - considering successful');
+
+						// Store successful navigation result
+						formSubmissionResult = {
+							urlChanged: afterUrl !== beforeUrl,
+							titleChanged: afterTitle !== beforeTitle,
+							beforeUrl,
+							afterUrl,
+							beforeTitle,
+							afterTitle,
+							navigationErrorRecovered: true,
+						};
+
+						// Add result to results array
+						results.push({
+							fieldType: 'formSubmission',
+							success: true,
+							details: formSubmissionResult
+						});
+					} else {
+						// No page change, likely a real navigation failure
+						this.logger.warn('No page change detected after page load timeout - form submission may have failed');
+
+						formSubmissionResult = {
+							error: 'Page load timeout with no page change',
 							beforeUrl,
 							afterUrl,
 							beforeTitle,
