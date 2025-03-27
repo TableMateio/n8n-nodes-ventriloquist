@@ -373,10 +373,10 @@ export const description: INodeProperties[] = [
 ];
 
 /**
- * Get a random human-like delay between 700-2500ms
+ * Get a random human-like delay between 300-800ms (faster than before)
  */
 function getHumanDelay(): number {
-	return Math.floor(Math.random() * (2500 - 700 + 1) + 700);
+	return Math.floor(Math.random() * (800 - 300 + 1) + 300);
 }
 
 /**

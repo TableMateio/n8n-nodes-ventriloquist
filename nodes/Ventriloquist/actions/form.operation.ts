@@ -308,13 +308,54 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: 'Retry Form Submission',
+		name: 'retrySubmission',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to retry form submission if no page change is detected after first attempt',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+				submitForm: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Max Retries',
+		name: 'maxRetries',
+		type: 'number',
+		default: 2,
+		description: 'Maximum number of submission attempts if no page change is detected',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+				submitForm: [true],
+				retrySubmission: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Retry Delay (ms)',
+		name: 'retryDelay',
+		type: 'number',
+		default: 1000,
+		description: 'Delay in milliseconds between submission attempts',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+				submitForm: [true],
+				retrySubmission: [true],
+			},
+		},
+	},
 ];
 
 /**
- * Get a random human-like delay between 700-2500ms
+ * Get a random human-like delay between 300-800ms (faster than before)
  */
 function getHumanDelay(): number {
-	return Math.floor(Math.random() * (2500 - 700 + 1) + 700);
+	return Math.floor(Math.random() * (800 - 300 + 1) + 300);
 }
 
 /**
@@ -401,6 +442,9 @@ export async function execute(
 	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
 	const selectorTimeout = this.getNodeParameter('selectorTimeout', index, 30000) as number;
 	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
+	const retrySubmission = this.getNodeParameter('retrySubmission', index, false) as boolean;
+	const maxRetries = this.getNodeParameter('maxRetries', index, 2) as number;
+	const retryDelay = this.getNodeParameter('retryDelay', index, 1000) as number;
 
 	// Check if an explicit session ID was provided
 	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
@@ -675,24 +719,187 @@ export async function execute(
 
 		// Submit the form if requested
 		if (submitForm && submitSelector) {
-			this.logger.info('Submitting the form');
+			// Capture the current URL and title before submission for comparison
+			const beforeUrl = page.url();
+			const beforeTitle = await page.title();
+			this.logger.info(`Before submission - URL: ${beforeUrl}, Title: ${beforeTitle}`);
+
+			this.logger.info('Preparing to submit the form');
 
 			// Add a slight delay before submitting (feels more human)
 			if (useHumanDelays) {
-				await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
+				const delay = getHumanDelay();
+				this.logger.info(`Adding human-like delay before submission: ${delay}ms`);
+				await new Promise(resolve => setTimeout(resolve, delay));
 			}
 
+			// Always add a short mandatory delay (500ms) before clicking submit
+			// This helps with form validation and button state changes
+			this.logger.info('Adding mandatory delay before form submission to allow for validation (500ms)');
+			await new Promise(resolve => setTimeout(resolve, 500));
+
+			// Check if the submit button exists and is clickable
+			const submitButtonExists = await page.$(submitSelector) !== null;
+			if (!submitButtonExists) {
+				this.logger.warn(`Submit button with selector "${submitSelector}" not found on page`);
+				throw new Error(`Submit button with selector "${submitSelector}" not found on page`);
+			}
+
+			// Get details about the submit button for debugging
+			try {
+				const buttonDetails = await page.$eval(submitSelector, (el) => ({
+					tagName: el.tagName,
+					id: el.id || '',
+					className: el.className || '',
+					disabled: el.hasAttribute('disabled'),
+					type: el.getAttribute('type') || '',
+					text: el.textContent?.trim() || '',
+				}));
+				this.logger.info(`Found submit button: ${JSON.stringify(buttonDetails)}`);
+			} catch (buttonError) {
+				this.logger.warn(`Error getting submit button details: ${buttonError}`);
+			}
+
+			// Now click the submit button
+			this.logger.info(`Clicking submit button with selector: ${submitSelector}`);
 			await page.click(submitSelector);
+			this.logger.info('Submit button clicked');
 
 			// Handle waiting after submission
 			if (waitAfterSubmit === 'navigationComplete') {
 				this.logger.info('Waiting for navigation to complete');
-				await page.waitForNavigation();
+				try {
+					await page.waitForNavigation({ timeout: 30000 });
+					this.logger.info('Navigation completed successfully');
+				} catch (navError) {
+					this.logger.warn(`Navigation timeout or error: ${navError}`);
+					throw new Error(`Form submission navigation failed: ${navError}`);
+				}
 			} else if (waitAfterSubmit === 'fixedTime') {
 				this.logger.info(`Waiting ${waitTime}ms after submission`);
 				await new Promise(resolve => setTimeout(resolve, waitTime));
+				this.logger.info('Fixed wait time completed');
 			}
 			// If 'noWait', we don't wait at all
+
+			// After waiting (regardless of wait method), check if the page actually changed
+			const afterUrl = page.url();
+			const afterTitle = await page.title();
+			this.logger.info(`After submission - URL: ${afterUrl}, Title: ${afterTitle}`);
+
+			// Add this information to results for debugging
+			const formSubmissionResult = {
+				urlChanged: beforeUrl !== afterUrl,
+				titleChanged: beforeTitle !== afterTitle,
+				beforeUrl,
+				afterUrl,
+				beforeTitle,
+				afterTitle,
+			};
+
+			// Log the submission result
+			if (formSubmissionResult.urlChanged || formSubmissionResult.titleChanged) {
+				this.logger.info('Form submission detected page change - success likely');
+			} else {
+				this.logger.warn('No page change detected after form submission - may have failed');
+			}
+
+			// Store the submission result for the response
+			results.push({
+				fieldType: 'formSubmission',
+				success: formSubmissionResult.urlChanged || formSubmissionResult.titleChanged,
+				details: formSubmissionResult
+			});
+
+			// If no change detected and retries are enabled, attempt again
+			if ((!formSubmissionResult.urlChanged && !formSubmissionResult.titleChanged) && retrySubmission) {
+				this.logger.info(`No page change detected, will retry submission up to ${maxRetries} times`);
+
+				let retryCount = 0;
+				let retrySuccess = false;
+
+				while (retryCount < maxRetries && !retrySuccess) {
+					retryCount++;
+					this.logger.info(`Retry attempt ${retryCount}/${maxRetries} after ${retryDelay}ms delay`);
+
+					// Wait before retrying
+					await new Promise(resolve => setTimeout(resolve, retryDelay));
+
+					// Try to click the submit button again
+					try {
+						// Check if button is still there and get updated info
+						const retryButtonDetails = await page.$eval(submitSelector, (el) => ({
+							tagName: el.tagName,
+							id: el.id || '',
+							disabled: el.hasAttribute('disabled'),
+						}));
+
+						this.logger.info(`Retry submit button state: ${JSON.stringify(retryButtonDetails)}`);
+
+						// Click again
+						this.logger.info(`Clicking submit button again (retry ${retryCount})`);
+						await page.click(submitSelector);
+
+						// Handle waiting based on selected method
+						if (waitAfterSubmit === 'navigationComplete') {
+							this.logger.info('Waiting for navigation to complete after retry');
+							try {
+								await page.waitForNavigation({ timeout: 30000 });
+							} catch (navError) {
+								this.logger.warn(`Navigation timeout or error on retry: ${navError}`);
+							}
+						} else if (waitAfterSubmit === 'fixedTime') {
+							this.logger.info(`Waiting ${waitTime}ms after retry submission`);
+							await new Promise(resolve => setTimeout(resolve, waitTime));
+						}
+
+						// Check if page changed after retry
+						const retryUrl = page.url();
+						const retryTitle = await page.title();
+
+						retrySuccess = (retryUrl !== beforeUrl) || (retryTitle !== beforeTitle);
+
+						if (retrySuccess) {
+							this.logger.info(`Retry ${retryCount} successful! Page changed.`);
+
+							// Update the submission result
+							formSubmissionResult.urlChanged = retryUrl !== beforeUrl;
+							formSubmissionResult.titleChanged = retryTitle !== beforeTitle;
+							formSubmissionResult.afterUrl = retryUrl;
+							formSubmissionResult.afterTitle = retryTitle;
+
+							// Update the results entry
+							results[results.length - 1] = {
+								fieldType: 'formSubmission',
+								success: true,
+								details: {
+									...formSubmissionResult,
+									retryAttempt: retryCount,
+									retrySuccess: true
+								}
+							};
+						} else {
+							this.logger.warn(`Retry ${retryCount} did not result in page change`);
+						}
+					} catch (retryError) {
+						this.logger.error(`Error during retry ${retryCount}: ${retryError}`);
+					}
+				}
+
+				if (!retrySuccess) {
+					this.logger.warn(`All ${maxRetries} retry attempts failed to trigger page change`);
+					// Update the results entry with retry information
+					results[results.length - 1] = {
+						fieldType: 'formSubmission',
+						success: false,
+						details: {
+							...formSubmissionResult,
+							retriesAttempted: retryCount,
+							retrySuccess: false
+						}
+					};
+				}
+			}
 		}
 
 		// Get current page info
