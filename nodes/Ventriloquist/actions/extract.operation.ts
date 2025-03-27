@@ -346,6 +346,30 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: 'Continue On Fail',
+		name: 'continueOnFail',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to continue execution even when the extraction fails (selector not found or timeout)',
+		displayOptions: {
+			show: {
+				operation: ['extract'],
+			},
+		},
+	},
+	{
+		displayName: 'Debug Page Content',
+		name: 'debugPageContent',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to include debug information about page content when extraction fails (helpful for debugging)',
+		displayOptions: {
+			show: {
+				operation: ['extract'],
+			},
+		},
+	},
 ];
 
 /**
@@ -371,6 +395,8 @@ export async function execute(
 	const timeout = this.getNodeParameter('timeout', index, 30000) as number;
 	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 	const useHumanDelays = this.getNodeParameter('useHumanDelays', index, false) as boolean;
+	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
+	const debugPageContent = this.getNodeParameter('debugPageContent', index, false) as boolean;
 
 	// Get or create browser session
 	let page: puppeteer.Page;
@@ -679,7 +705,63 @@ export async function execute(
 			}
 		}
 
-		return {
+		// Add debug information if requested
+		const debugInfo: IDataObject = {};
+		if (debugPageContent && page) {
+			try {
+				// Get page content info
+				debugInfo.pageUrl = await page.url();
+				debugInfo.pageTitle = await page.title();
+
+				// Get all IDs on the page to help find the right selector
+				debugInfo.allIdsOnPage = await page.evaluate(() => {
+					const elements = document.querySelectorAll('[id]');
+					return Array.from(elements).map(el => el.id);
+				});
+
+				// Get all tables on the page
+				debugInfo.allTablesInfo = await page.evaluate(() => {
+					const tables = document.querySelectorAll('table');
+					return Array.from(tables).map((table, index) => {
+						const id = table.id || '';
+						const className = table.className || '';
+						const rowCount = table.rows.length;
+						return { index, id, className, rowCount };
+					});
+				});
+
+				// Try to get a snippet of HTML to help with debugging
+				debugInfo.pageSnippet = await page.evaluate(() =>
+					document.documentElement.innerHTML.substring(0, 5000)
+				);
+
+				// Check if selector exists in any iframes
+				const frames = page.frames();
+				const frameInfo = [];
+				for (const frame of frames) {
+					try {
+						const hasElement = await frame.evaluate((sel) => {
+							return document.querySelector(sel) !== null;
+						}, selector);
+
+						if (hasElement) {
+							frameInfo.push({
+								url: frame.url(),
+								hasElement: true
+							});
+						}
+					} catch (e) {
+						// Ignore errors checking frames
+					}
+				}
+				debugInfo.framesWithElement = frameInfo;
+
+			} catch (debugError) {
+				debugInfo.debugError = (debugError as Error).message;
+			}
+		}
+
+		const errorResponse = {
 			json: {
 				success: false,
 				operation: 'extract',
@@ -689,7 +771,16 @@ export async function execute(
 				error: (error as Error).message,
 				timestamp: new Date().toISOString(),
 				screenshot,
+				...(Object.keys(debugInfo).length > 0 ? { debugInfo } : {}),
 			},
 		};
+
+		// If continueOnFail is false, throw the error to fail the node
+		if (!continueOnFail) {
+			throw new Error(`Extract operation failed: ${(error as Error).message}`);
+		}
+
+		// Otherwise, return an error result
+		return errorResponse;
 	}
 }

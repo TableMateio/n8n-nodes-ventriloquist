@@ -478,6 +478,18 @@ export class Ventriloquist implements INodeType {
 					},
 				},
 			},
+			{
+				displayName: 'Continue On Fail',
+				name: 'continueOnFail',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to continue execution even when browser operations fail (cannot connect or navigate)',
+				displayOptions: {
+					show: {
+						operation: ['open'],
+					},
+				},
+			},
 
 			// Properties for 'click' operation
 			{
@@ -653,85 +665,105 @@ export class Ventriloquist implements INodeType {
 					const enableDebug = this.getNodeParameter('enableDebug', i, false) as boolean;
 					const captureScreenshot = this.getNodeParameter('captureScreenshot', i, true) as boolean;
 					const sessionTimeout = this.getNodeParameter('sessionTimeout', i, 3) as number;
+					const continueOnFail = this.getNodeParameter('continueOnFail', i, true) as boolean;
 
 					// Double the timeout for Bright Data as recommended in their docs
 					const brightDataTimeout = timeout * 2;
 
-					// Get or create a browser session
-					const { browser, sessionId, brightDataSessionId } = await Ventriloquist.getOrCreateSession(
-						workflowId,
-						websocketEndpoint,
-						this.logger,
-						sessionTimeout,
-					);
+					try {
+						// Get or create a browser session
+						const { browser, sessionId, brightDataSessionId } = await Ventriloquist.getOrCreateSession(
+							workflowId,
+							websocketEndpoint,
+							this.logger,
+							sessionTimeout,
+						);
 
-					// Create a new page
-					const context = incognito
-						? (await browser.browserContexts()[0]) || browser.defaultBrowserContext()
-						: browser.defaultBrowserContext();
-					const page = await context.newPage();
+						// Create a new page
+						const context = incognito
+							? (await browser.browserContexts()[0]) || browser.defaultBrowserContext()
+							: browser.defaultBrowserContext();
+						const page = await context.newPage();
 
-					// Store the page in the session
-					Ventriloquist.storePage(workflowId, sessionId, page);
+						// Store the page in the session
+						Ventriloquist.storePage(workflowId, sessionId, page);
 
-					// Enable debugging if requested
-					let debugUrl = null;
-					let brightDataDebugInfo = null;
-					if (enableDebug) {
-						const debugInfo = await Ventriloquist.enableDebugger(page, this.logger);
-						debugUrl = debugInfo.debugUrl;
-						brightDataDebugInfo = debugInfo.brightDataDebugInfo;
-					}
+						// Enable debugging if requested
+						let debugUrl = null;
+						let brightDataDebugInfo = null;
+						if (enableDebug) {
+							const debugInfo = await Ventriloquist.enableDebugger(page, this.logger);
+							debugUrl = debugInfo.debugUrl;
+							brightDataDebugInfo = debugInfo.brightDataDebugInfo;
+						}
 
-					// Navigate to URL with increased timeout for Bright Data
-					this.logger.info(`Navigating to ${url} with timeout ${brightDataTimeout}ms`);
-					const response = await page.goto(url, {
-						waitUntil,
-						timeout: brightDataTimeout,
-					});
-
-					// Extract some basic page information
-					const title = await page.title();
-					const currentUrl = page.url();
-					const status = response ? response.status() : null;
-
-					// Return page data
-					const responseData: IDataObject = {
-						success: true,
-						operation,
-						url: currentUrl,
-						title,
-						status,
-						sessionId, // Include the sessionId in the output for subsequent operations
-						incognito,
-						timestamp: new Date().toISOString(),
-						brightDataSessionId,
-					};
-
-					// Capture screenshot if requested
-					if (captureScreenshot) {
-						// Take a screenshot (base64 encoded)
-						const screenshot = await page.screenshot({
-							encoding: 'base64',
-							type: 'jpeg',
-							quality: 80,
+						// Navigate to URL with increased timeout for Bright Data
+						this.logger.info(`Navigating to ${url} with timeout ${brightDataTimeout}ms`);
+						const response = await page.goto(url, {
+							waitUntil,
+							timeout: brightDataTimeout,
 						});
-						responseData.screenshot = `data:image/jpeg;base64,${screenshot}`;
-					}
 
-					// Include debug URL if available
-					if (debugUrl) {
-						responseData.debugUrl = debugUrl;
-					}
+						// Extract some basic page information
+						const title = await page.title();
+						const currentUrl = page.url();
+						const status = response ? response.status() : null;
 
-					// Include Bright Data dashboard session ID if available
-					if (brightDataDebugInfo) {
-						responseData.brightDataDebugInfo = brightDataDebugInfo;
-					}
+						// Return page data
+						const responseData: IDataObject = {
+							success: true,
+							operation,
+							url: currentUrl,
+							title,
+							status,
+							sessionId, // Include the sessionId in the output for subsequent operations
+							incognito,
+							timestamp: new Date().toISOString(),
+							brightDataSessionId,
+						};
 
-					returnData.push({
-						json: responseData,
-					});
+						// Capture screenshot if requested
+						if (captureScreenshot) {
+							// Take a screenshot (base64 encoded)
+							const screenshot = await page.screenshot({
+								encoding: 'base64',
+								type: 'jpeg',
+								quality: 80,
+							});
+							responseData.screenshot = `data:image/jpeg;base64,${screenshot}`;
+						}
+
+						// Include debug URL if available
+						if (debugUrl) {
+							responseData.debugUrl = debugUrl;
+						}
+
+						// Include Bright Data dashboard session ID if available
+						if (brightDataDebugInfo) {
+							responseData.brightDataDebugInfo = brightDataDebugInfo;
+						}
+
+						returnData.push({
+							json: responseData,
+						});
+					} catch (error) {
+						// Handle the error based on continueOnFail setting
+						if (!continueOnFail) {
+							// If we shouldn't continue on fail, rethrow the error
+							throw new Error(`Open browser operation failed: ${(error as Error).message}`);
+						}
+
+						// Otherwise, return an error response and continue
+						returnData.push({
+							json: {
+								success: false,
+								operation,
+								error: (error as Error).message,
+								url,
+								timestamp: new Date().toISOString(),
+							},
+						});
+					}
 				} else if (operation === 'click') {
 					// Try to get sessionId from previous operations
 					let sessionId = '';

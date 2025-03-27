@@ -296,6 +296,18 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: 'Continue On Fail',
+		name: 'continueOnFail',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to continue execution even when form operations fail (selector not found or timeout)',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+			},
+		},
+	},
 ];
 
 /**
@@ -388,6 +400,7 @@ export async function execute(
 	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
 	const selectorTimeout = this.getNodeParameter('selectorTimeout', index, 30000) as number;
+	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 
 	// Check if an explicit session ID was provided
 	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
@@ -731,7 +744,7 @@ export async function execute(
 			}
 		}
 
-		return {
+		const errorResponse = {
 			json: {
 				success: false,
 				operation: 'form',
@@ -741,5 +754,13 @@ export async function execute(
 				screenshot,
 			},
 		};
+
+		// If continueOnFail is false, throw the error to fail the node
+		if (!continueOnFail) {
+			throw new Error(`Form operation failed: ${(error as Error).message}`);
+		}
+
+		// Otherwise, return an error result
+		return errorResponse;
 	}
 }
