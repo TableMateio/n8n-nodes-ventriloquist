@@ -312,6 +312,31 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: 'Detection Method',
+		name: 'detectionMethod',
+		type: 'options',
+		options: [
+			{
+				name: 'Smart Detection (DOM-aware)',
+				value: 'smart',
+				description: 'Intelligently detects when the page is fully loaded before checking for elements (faster for elements that don\'t exist)',
+			},
+			{
+				name: 'Fixed Timeout',
+				value: 'fixed',
+				description: 'Simply waits for the specified timeout (may be slower but more thorough)',
+			},
+		],
+		default: 'smart',
+		description: 'Method to use when checking for elements',
+		displayOptions: {
+			show: {
+				operation: ['detect'],
+				waitForSelectors: [true],
+			},
+		},
+	},
+	{
 		displayName: 'Timeout',
 		name: 'timeout',
 		type: 'number',
@@ -321,6 +346,20 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ['detect'],
 				waitForSelectors: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Early Exit Delay (MS)',
+		name: 'earlyExitDelay',
+		type: 'number',
+		default: 500,
+		description: 'Time in milliseconds to wait after DOM is loaded before checking for elements (for Smart Detection only)',
+		displayOptions: {
+			show: {
+				operation: ['detect'],
+				waitForSelectors: [true],
+				detectionMethod: ['smart'],
 			},
 		},
 	},
@@ -423,6 +462,120 @@ function formatReturnValue(
 }
 
 /**
+ * Smart wait for element with DOM-aware early exit strategy
+ */
+async function smartWaitForSelector(
+	page: puppeteer.Page,
+	selector: string,
+	timeout: number,
+	earlyExitDelay: number,
+	logger: IExecuteFunctions['logger'],
+): Promise<boolean> {
+	// Create a promise that resolves when the element is found
+	const elementPromise = page.waitForSelector(selector, { timeout })
+		.then(() => {
+			logger.debug(`Element found: ${selector}`);
+			return true;
+		})
+		.catch(() => {
+			logger.debug(`Element not found within timeout: ${selector}`);
+			return false;
+		});
+
+	// Check if the DOM is already loaded
+	const domState = await page.evaluate(() => {
+		return {
+			readyState: document.readyState,
+			domContentLoaded: document.readyState === 'interactive' || document.readyState === 'complete',
+			loaded: document.readyState === 'complete',
+		};
+	});
+
+	logger.debug(`Current DOM state: ${JSON.stringify(domState)}`);
+
+	// If DOM is already loaded, do a quick check first
+	if (domState.domContentLoaded) {
+		// Do an immediate check
+		const elementExists = await page.evaluate((sel) => {
+			return document.querySelector(sel) !== null;
+		}, selector);
+
+		if (elementExists) {
+			logger.debug(`Element found immediately (DOM already loaded): ${selector}`);
+			return true;
+		}
+
+		// If DOM is fully loaded and element doesn't exist, we can exit early
+		if (domState.loaded) {
+			logger.debug(`DOM fully loaded but element not found, waiting short delay: ${selector}`);
+			await new Promise(resolve => setTimeout(resolve, earlyExitDelay));
+
+			// Check one more time after the delay
+			const elementExistsAfterDelay = await page.evaluate((sel) => {
+				return document.querySelector(sel) !== null;
+			}, selector);
+
+			if (elementExistsAfterDelay) {
+				logger.debug(`Element found after delay: ${selector}`);
+				return true;
+			}
+
+			logger.debug(`Element not found after DOM load and delay, exiting early: ${selector}`);
+			return false;
+		}
+	}
+
+	// If we got here, either:
+	// 1. DOM is not fully loaded, so we need to wait
+	// 2. DOM is interactive but not complete, so we should wait a bit longer
+
+	// Wait for DOM content to be fully loaded first (if it isn't already)
+	if (!domState.loaded) {
+		const domLoadPromise = page.waitForFunction(
+			() => document.readyState === 'complete',
+			{ timeout: Math.min(timeout, 5000) } // Use smaller timeout for DOM wait
+		).catch(() => {
+			logger.debug('Timed out waiting for DOM to be complete');
+		});
+
+		// Wait for either the element to appear or the DOM to load
+		const winner = await Promise.race([
+			elementPromise,
+			domLoadPromise.then(() => 'DOM-Loaded')
+		]);
+
+		// If element was found during this race, return true
+		if (winner === true) {
+			return true;
+		}
+
+		// If DOM loaded but element wasn't found, do one quick check
+		if (winner === 'DOM-Loaded') {
+			logger.debug('DOM loaded, performing final element check');
+
+			// Wait short additional time for any final elements to appear
+			await new Promise(resolve => setTimeout(resolve, earlyExitDelay));
+
+			// Final check
+			const elementExistsAfterDOM = await page.evaluate((sel) => {
+				return document.querySelector(sel) !== null;
+			}, selector);
+
+			if (elementExistsAfterDOM) {
+				logger.debug(`Element found after DOM loaded: ${selector}`);
+				return true;
+			}
+
+			logger.debug(`DOM loaded but element still not found: ${selector}`);
+			return false;
+		}
+	}
+
+	// If we reach here, we need to just wait for the element promise
+	return elementPromise;
+}
+
+/**
  * Process a single detection and return its result
  */
 async function processDetection(
@@ -431,6 +584,8 @@ async function processDetection(
 	currentUrl: string,
 	waitForSelectors: boolean,
 	timeout: number,
+	detectionMethod: string,
+	earlyExitDelay: number,
 	logger: IExecuteFunctions['logger'],
 ): Promise<{
 	success: boolean;
@@ -452,9 +607,14 @@ async function processDetection(
 
 			try {
 				if (waitForSelectors) {
-					// Wait for the selector with timeout
-					await page.waitForSelector(selector, { timeout });
-					exists = true;
+					if (detectionMethod === 'smart') {
+						// Use smart detection approach
+						exists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger);
+					} else {
+						// Use traditional fixed timeout approach
+						await page.waitForSelector(selector, { timeout });
+						exists = true;
+					}
 				} else {
 					// Just check if the element exists without waiting
 					exists = await page.$(selector) !== null;
@@ -481,8 +641,25 @@ async function processDetection(
 
 			try {
 				if (waitForSelectors) {
-					// Wait for the selector with timeout
-					await page.waitForSelector(selector, { timeout });
+					let elementExists = false;
+
+					if (detectionMethod === 'smart') {
+						// Use smart detection approach
+						elementExists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger);
+					} else {
+						// Use traditional approach with fixed timeout
+						try {
+							await page.waitForSelector(selector, { timeout });
+							elementExists = true;
+						} catch {
+							elementExists = false;
+						}
+					}
+
+					// Only proceed if element exists
+					if (!elementExists) {
+						throw new Error(`Element with selector "${selector}" not found`);
+					}
 				}
 
 				// Get the text content of the element
@@ -519,8 +696,25 @@ async function processDetection(
 
 			try {
 				if (waitForSelectors) {
-					// Wait for the selector with timeout
-					await page.waitForSelector(selector, { timeout });
+					let elementExists = false;
+
+					if (detectionMethod === 'smart') {
+						// Use smart detection approach
+						elementExists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger);
+					} else {
+						// Use traditional approach with fixed timeout
+						try {
+							await page.waitForSelector(selector, { timeout });
+							elementExists = true;
+						} catch {
+							elementExists = false;
+						}
+					}
+
+					// Only proceed if element exists
+					if (!elementExists) {
+						throw new Error(`Element with selector "${selector}" not found`);
+					}
 				}
 
 				// Get the attribute value
@@ -560,12 +754,26 @@ async function processDetection(
 
 			try {
 				if (waitForSelectors) {
-					try {
-						// Wait for at least one element to appear
-						await page.waitForSelector(selector, { timeout });
-					} catch (error) {
-						// If timeout occurs, count is 0
-						actualCount = 0;
+					if (detectionMethod === 'smart') {
+						// Use smart detection approach - just need to know if at least one element exists
+						const anyElementExists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger);
+
+						// If no elements exist in smart mode, we know the count is 0
+						if (!anyElementExists) {
+							actualCount = 0;
+							countMatches = compareCount(0, expectedCount, countComparison);
+							break; // Exit early with count = 0
+						}
+					} else {
+						// Traditional approach - try to wait for at least one element
+						try {
+							await page.waitForSelector(selector, { timeout });
+						} catch {
+							// If timeout occurs, count is 0
+							actualCount = 0;
+							countMatches = compareCount(0, expectedCount, countComparison);
+							break; // Exit early with count = 0
+						}
 					}
 				}
 
@@ -631,6 +839,20 @@ export async function execute(
 	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
 	const timeout = this.getNodeParameter('timeout', index, 5000) as number;
 	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
+
+	// Get new parameters for smart detection
+	const detectionMethod = waitForSelectors
+		? this.getNodeParameter('detectionMethod', index, 'smart') as string
+		: 'fixed';
+	const earlyExitDelay = detectionMethod === 'smart'
+		? this.getNodeParameter('earlyExitDelay', index, 500) as number
+		: 0;
+
+	// Log the detection approach being used
+	this.logger.info(`Detection approach: ${waitForSelectors ? `${detectionMethod} with ${timeout}ms timeout` : 'immediate check'}`);
+	if (detectionMethod === 'smart') {
+		this.logger.info(`Smart detection configured with ${earlyExitDelay}ms early exit delay`);
+	}
 
 	// Check if an explicit session ID was provided
 	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
@@ -717,13 +939,15 @@ export async function execute(
 				const failureValue = (detection.failureValue as string) || 'failure';
 				const invertResult = detection.invertResult === true;
 
-				// Process the detection
+				// Process the detection with the chosen method
 				const { success, actualValue, details: detectionDetails } = await processDetection(
 					page,
 					detection,
 					currentUrl,
 					waitForSelectors,
 					timeout,
+					detectionMethod,
+					earlyExitDelay,
 					this.logger
 				);
 
