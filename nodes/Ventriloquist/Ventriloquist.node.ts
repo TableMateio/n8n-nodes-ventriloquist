@@ -85,7 +85,7 @@ export class Ventriloquist implements INodeType {
 				logger.info(`Detected Bright Data session ID from WebSocket URL: ${brightDataSessionId}`);
 			} else {
 				// Fallback for other URL formats
-				const fallbackMatches = websocketEndpoint.match(/\/([a-f0-9-]{36}|[a-f0-9]{7,8}\/[a-f0-9-]{36})/i);
+				const fallbackMatches = websocketEndpoint.match(/\/([a-f0-9-]{36}|[a-f0-9-]{7,8}\/[a-f0-9-]{36})/i);
 				if (fallbackMatches && fallbackMatches[1]) {
 					brightDataSessionId = fallbackMatches[1];
 					logger.info(`Extracted Bright Data session ID (fallback): ${brightDataSessionId}`);
@@ -708,6 +708,23 @@ export class Ventriloquist implements INodeType {
 
 					this.logger.info(`Current page URL: ${pageUrl}, title: ${pageTitle}`);
 
+					// Ensure the page is active before clicking
+					try {
+						// Bring page to front
+						await page.bringToFront();
+
+						// Force page activation by performing a trivial interaction
+						await page.evaluate(() => {
+							// Small scroll to trigger activity
+							window.scrollBy(0, 1);
+							return document.title; // Just to ensure execution
+						});
+
+						this.logger.info('Activated page before clicking');
+					} catch (activationErr) {
+						this.logger.warn(`Failed to activate page: ${activationErr}`);
+					}
+
 					// If waitBeforeClickSelector is provided, wait for it first
 					if (waitBeforeClickSelector) {
 						this.logger.info(`Waiting for selector "${waitBeforeClickSelector}" before clicking`);
@@ -735,7 +752,40 @@ export class Ventriloquist implements INodeType {
 						return element !== null;
 					}, selector);
 
+					// Get more detailed information about the element for debugging
+					const elementDetails = await page.evaluate((sel) => {
+						const element = document.querySelector(sel);
+						if (!element) return null;
+
+						return {
+							tagName: element.tagName?.toLowerCase(),
+							id: element.id || null,
+							className: element.className || null,
+							text: element.textContent?.trim().substring(0, 100) || null,
+							isVisible: !!(
+								(element as HTMLElement).offsetWidth ||
+								(element as HTMLElement).offsetHeight ||
+								element.getClientRects().length
+							),
+							disabled: (element as HTMLElement).hasAttribute('disabled') ||
+								(element as HTMLElement).getAttribute('aria-disabled') === 'true',
+							attributes: Array.from(element.attributes || [])
+								.map(attr => ({ name: attr.name, value: attr.value }))
+								.filter(attr => !['style', 'class'].includes(attr.name))
+								.slice(0, 10), // Limit to 10 attributes
+							boundingRect: element.getBoundingClientRect && {
+								top: element.getBoundingClientRect().top,
+								left: element.getBoundingClientRect().left,
+								width: element.getBoundingClientRect().width,
+								height: element.getBoundingClientRect().height,
+							}
+						};
+					}, selector);
+
 					this.logger.info(`Selector "${selector}" exists on page: ${selectorExists}`);
+					if (elementDetails) {
+						this.logger.info(`Element details: ${JSON.stringify(elementDetails)}`);
+					}
 					this.logger.info(`Available IDs on page: ${JSON.stringify(allElementsWithIds)}`);
 
 					// Try to click with retries
@@ -747,10 +797,50 @@ export class Ventriloquist implements INodeType {
 							);
 							await page.waitForSelector(selector, { timeout: brightDataTimeout });
 
-							// Click the element
-							this.logger.info(`Clicking on selector "${selector}"`);
-							await page.click(selector);
-							success = true;
+							// Try different click methods for better reliability
+							try {
+								// First try Puppeteer's native click
+								this.logger.info(`Clicking on selector "${selector}" using Puppeteer's click()`);
+								await page.click(selector);
+								success = true;
+							} catch (clickErr) {
+								this.logger.warn(`Native click failed: ${clickErr.message}, trying alternative method...`);
+
+								// If that fails, try JavaScript click execution
+								this.logger.info(`Clicking on selector "${selector}" using JavaScript execution`);
+								const jsClickSuccess = await page.evaluate((sel) => {
+									const element = document.querySelector(sel);
+									if (!element) return false;
+
+									// Try different approaches
+									try {
+										// 1. Use click() method
+										(element as HTMLElement).click();
+										return true;
+									} catch (e) {
+										try {
+											// 2. Create and dispatch mouse events
+											const event = new MouseEvent('click', {
+												view: window,
+												bubbles: true,
+												cancelable: true,
+												buttons: 1
+											});
+											element.dispatchEvent(event);
+											return true;
+										} catch (e2) {
+											return false;
+										}
+									}
+								}, selector);
+
+								if (jsClickSuccess) {
+									this.logger.info('JavaScript click was successful');
+									success = true;
+								} else {
+									throw new Error('All click methods failed');
+								}
+							}
 						} catch (err: any) {
 							error = err as Error;
 							this.logger.warn(`Click attempt ${attempt + 1} failed: ${err.message}`);
