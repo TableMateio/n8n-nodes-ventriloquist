@@ -349,6 +349,79 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: 'Advanced Button Options',
+		name: 'advancedButtonOptions',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to enable advanced button clicking options for problematic forms',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+				submitForm: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Scroll Button Into View',
+		name: 'scrollIntoView',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to automatically scroll to ensure the button is visible before clicking',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+				submitForm: [true],
+				advancedButtonOptions: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Button Click Method',
+		name: 'buttonClickMethod',
+		type: 'options',
+		options: [
+			{
+				name: 'Auto (Try All Methods)',
+				value: 'auto',
+			},
+			{
+				name: 'Standard Click',
+				value: 'standard',
+			},
+			{
+				name: 'JavaScript Click',
+				value: 'javascript',
+			},
+			{
+				name: 'Direct DOM Events',
+				value: 'events',
+			},
+		],
+		default: 'auto',
+		description: 'Method to use for clicking the submit button',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+				submitForm: [true],
+				advancedButtonOptions: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Click Timeout (MS)',
+		name: 'clickTimeout',
+		type: 'number',
+		default: 10000,
+		description: 'Maximum time in milliseconds to wait for button click to complete',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+				submitForm: [true],
+				advancedButtonOptions: [true],
+			},
+		},
+	},
 ];
 
 /**
@@ -356,6 +429,120 @@ export const description: INodeProperties[] = [
  */
 function getHumanDelay(): number {
 	return Math.floor(Math.random() * (800 - 300 + 1) + 300);
+}
+
+/**
+ * Ensure an element is visible in the viewport by scrolling to it if needed
+ */
+async function ensureElementInViewport(page: puppeteer.Page, selector: string): Promise<boolean> {
+	try {
+		// Check if element exists and is visible
+		const isVisible = await page.evaluate((sel) => {
+			const el = document.querySelector(sel);
+			if (!el) return false;
+
+			const style = window.getComputedStyle(el);
+			const isDisplayed = style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+
+			if (!isDisplayed) return false;
+
+			// Check if element is in viewport
+			const rect = el.getBoundingClientRect();
+			return (
+				rect.top >= 0 &&
+				rect.left >= 0 &&
+				rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+				rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+			);
+		}, selector);
+
+		// If not visible in viewport, scroll to it
+		if (!isVisible) {
+			await page.evaluate((sel) => {
+				const el = document.querySelector(sel);
+				if (el) {
+					el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+					return true;
+				}
+				return false;
+			}, selector);
+
+			// Wait a moment for the scroll to complete
+			await new Promise(resolve => setTimeout(resolve, 500));
+			return true;
+		}
+
+		return true;
+	} catch (error) {
+		return false;
+	}
+}
+
+/**
+ * Try multiple button click methods to ensure click succeeds
+ */
+async function robustButtonClick(page: puppeteer.Page, selector: string, logger: {
+	info: (message: string) => void;
+	warn: (message: string) => void;
+	error: (message: string) => void;
+}): Promise<boolean> {
+	try {
+		// Method 1: Standard click
+		logger.info('Attempting standard click method');
+		await page.click(selector);
+		logger.info('Standard click succeeded');
+		return true;
+	} catch (error1) {
+		logger.warn(`Standard click failed: ${(error1 as Error).message}, trying alternate methods`);
+
+		try {
+			// Method 2: JavaScript click via evaluate
+			logger.info('Attempting JavaScript click method');
+			const clickResult = await page.evaluate((sel) => {
+				const button = document.querySelector(sel);
+				if (button) {
+					// Cast to HTMLElement to access click method
+					(button as HTMLElement).click();
+					return { success: true, elementExists: true };
+				}
+				return { success: false, elementExists: false };
+			}, selector);
+
+			if (clickResult.success) {
+				logger.info('JavaScript click succeeded');
+				return true;
+			}
+
+			if (!clickResult.elementExists) {
+				logger.error('Button no longer exists in DOM');
+				return false;
+			}
+
+			// Method 3: Try mousedown + mouseup events
+			logger.info('Attempting mousedown/mouseup events method');
+			await page.evaluate((sel) => {
+				const button = document.querySelector(sel);
+				if (button) {
+					const events = ['mousedown', 'mouseup', 'click'];
+					for (const eventType of events) {
+						const event = new MouseEvent(eventType, {
+							view: window,
+							bubbles: true,
+							cancelable: true,
+							buttons: 1
+						});
+						button.dispatchEvent(event);
+					}
+				}
+			}, selector);
+
+			logger.info('Direct event dispatch attempted');
+			return true;
+		} catch (error2) {
+			logger.error(`All click methods failed: ${(error2 as Error).message}`);
+			return false;
+		}
+	}
 }
 
 /**
@@ -445,6 +632,7 @@ export async function execute(
 	const retrySubmission = this.getNodeParameter('retrySubmission', index, false) as boolean;
 	const maxRetries = this.getNodeParameter('maxRetries', index, 2) as number;
 	const retryDelay = this.getNodeParameter('retryDelay', index, 1000) as number;
+	const advancedButtonOptions = this.getNodeParameter('advancedButtonOptions', index, false) as boolean;
 
 	// Check if an explicit session ID was provided
 	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
@@ -754,16 +942,138 @@ export async function execute(
 					disabled: el.hasAttribute('disabled'),
 					type: el.getAttribute('type') || '',
 					text: el.textContent?.trim() || '',
+					visible: (el as HTMLElement).offsetParent !== null,
+					position: {
+						top: el.getBoundingClientRect().top,
+						left: el.getBoundingClientRect().left,
+					}
 				}));
 				this.logger.info(`Found submit button: ${JSON.stringify(buttonDetails)}`);
+
+				// Check if button is disabled
+				if (buttonDetails.disabled) {
+					this.logger.warn('Button is currently disabled. Waiting 1000ms to see if it becomes enabled...');
+					await new Promise(resolve => setTimeout(resolve, 1000));
+
+					// Check again
+					const updatedDisabled = await page.$eval(submitSelector, el => el.hasAttribute('disabled'));
+					if (updatedDisabled) {
+						this.logger.warn('Button remains disabled. Attempting to click anyway, but it may fail.');
+					} else {
+						this.logger.info('Button is now enabled, proceeding with click');
+					}
+				}
+
+				// Check if button is not visible
+				if (!buttonDetails.visible) {
+					this.logger.warn('Button may not be visible. Will attempt to scroll it into view.');
+				}
 			} catch (buttonError) {
 				this.logger.warn(`Error getting submit button details: ${buttonError}`);
 			}
 
-			// Now click the submit button
-			this.logger.info(`Clicking submit button with selector: ${submitSelector}`);
-			await page.click(submitSelector);
-			this.logger.info('Submit button clicked');
+			// Get advanced button options if enabled
+			let scrollIntoView = false;
+			let buttonClickMethod = 'auto';
+			let clickTimeout = 10000;
+
+			if (advancedButtonOptions) {
+				scrollIntoView = this.getNodeParameter('scrollIntoView', index, true) as boolean;
+				buttonClickMethod = this.getNodeParameter('buttonClickMethod', index, 'auto') as string;
+				clickTimeout = this.getNodeParameter('clickTimeout', index, 10000) as number;
+			}
+
+			// Scroll the button into view if requested
+			if (scrollIntoView) {
+				this.logger.info('Scrolling button into view...');
+				const scrollResult = await ensureElementInViewport(page, submitSelector);
+				this.logger.info(`Scroll into view ${scrollResult ? 'successful' : 'not needed or failed'}`);
+			}
+
+			// Now click the submit button using the appropriate method
+			this.logger.info(`Clicking submit button with selector: ${submitSelector} (method: ${buttonClickMethod})`);
+
+			let clickSuccess = false;
+
+			// Create a timeout promise to prevent hanging
+			const clickTimeoutPromise = new Promise<boolean>((resolve) => {
+				setTimeout(() => resolve(false), clickTimeout);
+			});
+
+			// Use different click methods based on settings
+			if (buttonClickMethod === 'auto') {
+				// Use the robust click method that tries multiple approaches
+				const clickPromise = robustButtonClick(page, submitSelector, this.logger);
+				clickSuccess = await Promise.race([clickPromise, clickTimeoutPromise]);
+
+				if (!clickSuccess) {
+					this.logger.warn(`Button click timed out after ${clickTimeout}ms`);
+				}
+			} else if (buttonClickMethod === 'standard') {
+				// Standard puppeteer click
+				try {
+					await Promise.race([
+						page.click(submitSelector),
+						clickTimeoutPromise
+					]);
+					clickSuccess = true;
+					this.logger.info('Standard click completed');
+				} catch (clickError) {
+					this.logger.error(`Standard click failed: ${clickError}`);
+					clickSuccess = false;
+				}
+			} else if (buttonClickMethod === 'javascript') {
+				// JavaScript click
+				try {
+					const jsClickPromise = page.evaluate((sel) => {
+						const button = document.querySelector(sel);
+						if (button) {
+							(button as HTMLElement).click();
+							return true;
+						}
+						return false;
+					}, submitSelector);
+
+					clickSuccess = await Promise.race([jsClickPromise, clickTimeoutPromise]);
+					this.logger.info(`JavaScript click ${clickSuccess ? 'completed' : 'timed out'}`);
+				} catch (clickError) {
+					this.logger.error(`JavaScript click failed: ${clickError}`);
+					clickSuccess = false;
+				}
+			} else if (buttonClickMethod === 'events') {
+				// Direct DOM events
+				try {
+					const eventsClickPromise = page.evaluate((sel) => {
+						const button = document.querySelector(sel);
+						if (button) {
+							const events = ['mousedown', 'mouseup', 'click'];
+							for (const eventType of events) {
+								const event = new MouseEvent(eventType, {
+									view: window,
+									bubbles: true,
+									cancelable: true,
+									buttons: 1
+								});
+								button.dispatchEvent(event);
+							}
+							return true;
+						}
+						return false;
+					}, submitSelector);
+
+					clickSuccess = await Promise.race([eventsClickPromise, clickTimeoutPromise]);
+					this.logger.info(`DOM events click ${clickSuccess ? 'completed' : 'timed out'}`);
+				} catch (clickError) {
+					this.logger.error(`DOM events click failed: ${clickError}`);
+					clickSuccess = false;
+				}
+			}
+
+			if (clickSuccess) {
+				this.logger.info('Submit button click successful');
+			} else {
+				this.logger.warn('Submit button click may have failed - will continue anyway');
+			}
 
 			// Handle waiting after submission
 			if (waitAfterSubmit === 'navigationComplete') {
