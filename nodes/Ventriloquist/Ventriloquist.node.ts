@@ -24,17 +24,19 @@ export class Ventriloquist implements INodeType {
 	// Static map to store browser sessions
 	private static browserSessions: Map<
 		string,
-		{ browser: puppeteer.Browser; lastUsed: Date; pages: Map<string, puppeteer.Page> }
+		{ browser: puppeteer.Browser; lastUsed: Date; pages: Map<string, puppeteer.Page>; timeout?: number }
 	> = new Map();
 
 	// Clean up old sessions (called periodically)
 	private static cleanupSessions() {
 		const now = new Date();
-		const maxAge = 30 * 60 * 1000; // 30 minutes inactivity timeout
 
 		for (const [sessionId, session] of this.browserSessions.entries()) {
+			// Get the custom timeout or use default (3 minutes)
+			const maxAge = session.timeout || 3 * 60 * 1000; // Default to 3 minutes if not specified
+
 			if (now.getTime() - session.lastUsed.getTime() > maxAge) {
-				// Close browser for sessions inactive for more than 10 minutes
+				// Close browser for sessions inactive for the specified timeout
 				try {
 					session.browser.close().catch(() => {
 						// Ignore errors during cleanup
@@ -53,6 +55,7 @@ export class Ventriloquist implements INodeType {
 		workflowId: string,
 		websocketEndpoint: string,
 		logger: any,
+		sessionTimeout?: number,
 	): Promise<{ browser: puppeteer.Browser; sessionId: string; brightDataSessionId: string }> {
 		// Clean up old sessions
 		this.cleanupSessions();
@@ -105,16 +108,31 @@ export class Ventriloquist implements INodeType {
 				browserWSEndpoint: websocketEndpoint,
 			});
 
+			// Convert minutes to milliseconds for timeout if provided
+			const timeoutMs = sessionTimeout ? sessionTimeout * 60 * 1000 : 3 * 60 * 1000; // Default to 3 minutes
+
 			session = {
 				browser,
 				lastUsed: new Date(),
 				pages: new Map(),
+				timeout: timeoutMs, // Store timeout in milliseconds
 			};
 
 			this.browserSessions.set(workflowId, session);
+			logger.info(`New browser session created with ${timeoutMs}ms timeout (${sessionTimeout || 3} minutes)`);
 		} else {
 			// Update last used timestamp
 			session.lastUsed = new Date();
+
+			// Update timeout if provided and different from current
+			if (sessionTimeout !== undefined) {
+				const timeoutMs = sessionTimeout * 60 * 1000;
+				if (session.timeout !== timeoutMs) {
+					session.timeout = timeoutMs;
+					logger.info(`Updated session timeout to ${timeoutMs}ms (${sessionTimeout} minutes)`);
+				}
+			}
+
 			logger.info('Reusing existing browser session');
 		}
 
@@ -447,6 +465,19 @@ export class Ventriloquist implements INodeType {
 					},
 				},
 			},
+			{
+				displayName: 'Session Timeout (Minutes)',
+				name: 'sessionTimeout',
+				type: 'number',
+				default: 3,
+				description: 'Close the browser session automatically after this many minutes of inactivity. Lower values help prevent orphaned sessions in Bright Data.',
+				hint: 'The session will close automatically after this period of inactivity to prevent orphaned sessions',
+				displayOptions: {
+					show: {
+						operation: ['open'],
+					},
+				},
+			},
 
 			// Properties for 'click' operation
 			{
@@ -621,6 +652,7 @@ export class Ventriloquist implements INodeType {
 					const timeout = this.getNodeParameter('timeout', i, 30000) as number;
 					const enableDebug = this.getNodeParameter('enableDebug', i, false) as boolean;
 					const captureScreenshot = this.getNodeParameter('captureScreenshot', i, true) as boolean;
+					const sessionTimeout = this.getNodeParameter('sessionTimeout', i, 3) as number;
 
 					// Double the timeout for Bright Data as recommended in their docs
 					const brightDataTimeout = timeout * 2;
@@ -630,6 +662,7 @@ export class Ventriloquist implements INodeType {
 						workflowId,
 						websocketEndpoint,
 						this.logger,
+						sessionTimeout,
 					);
 
 					// Create a new page
@@ -754,6 +787,7 @@ export class Ventriloquist implements INodeType {
 						workflowId,
 						websocketEndpoint,
 						this.logger,
+						undefined, // Use the existing timeout set during open
 					);
 
 					// Try to get existing page from session

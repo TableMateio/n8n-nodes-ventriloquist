@@ -381,7 +381,8 @@ export async function execute(
 		const { browser, sessionId: newSessionId } = await Ventriloquist.getOrCreateSession(
 			workflowId,
 			websocketEndpoint,
-			this.logger
+			this.logger,
+			undefined,
 		);
 
 		// Try to get any existing page from the browser

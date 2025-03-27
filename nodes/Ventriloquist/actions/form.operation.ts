@@ -401,7 +401,8 @@ export async function execute(
 		const { browser, sessionId: newSessionId } = await Ventriloquist.getOrCreateSession(
 			workflowId,
 			websocketEndpoint,
-			this.logger
+			this.logger,
+			undefined,
 		);
 
 		// If an explicit sessionId was provided, try to get that page first
