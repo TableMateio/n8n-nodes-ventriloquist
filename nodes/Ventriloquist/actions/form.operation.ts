@@ -732,7 +732,27 @@ export async function execute(
 		// Wait for form elements if enabled
 		if (waitForSelectors) {
 			this.logger.info('Waiting for form elements to appear');
-			await page.waitForSelector('*', { timeout: selectorTimeout });
+			// Remove the problematic selector '*' wait and replace with a better approach
+			// Check if the page is ready first
+			const pageReady = await page.evaluate(() => {
+				return {
+					readyState: document.readyState,
+					bodyExists: !!document.body,
+					contentLoaded: document.readyState === 'interactive' || document.readyState === 'complete',
+				};
+			});
+
+			this.logger.info(`Page readiness state: ${JSON.stringify(pageReady)}`);
+
+			if (!pageReady.bodyExists) {
+				this.logger.warn('Page body not yet available - waiting for page to initialize');
+				try {
+					// Wait for the body element specifically
+					await page.waitForSelector('body', { timeout: selectorTimeout });
+				} catch (bodyError) {
+					throw new Error(`Page did not initialize properly: ${(bodyError as Error).message}`);
+				}
+			}
 		}
 
 		// Fill each form field
@@ -745,7 +765,66 @@ export async function execute(
 			// Wait for the element to be available
 			if (waitForSelectors) {
 				this.logger.info(`Waiting for selector: ${selector} (timeout: ${selectorTimeout}ms)`);
-				await page.waitForSelector(selector, { timeout: selectorTimeout });
+				try {
+					await page.waitForSelector(selector, { timeout: selectorTimeout });
+				} catch (selectorError) {
+					// Get information about the current page for better diagnostics
+					const currentUrl = page.url();
+					const pageTitle = await page.title();
+
+					// Try to take a screenshot if possible for debugging
+					let errorScreenshot = '';
+					try {
+						const screenshotBuffer = await page.screenshot({
+							encoding: 'base64',
+							type: 'jpeg',
+							quality: 50, // Lower quality for smaller size
+						});
+						errorScreenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
+					} catch {
+						// Ignore screenshot errors
+					}
+
+					// Log detailed diagnostic information
+					this.logger.error(`Failed to find form field selector: ${selector}`);
+					this.logger.error(`Current page: ${currentUrl} | Title: ${pageTitle}`);
+
+					// Include screenshot information in the logs if available
+					if (errorScreenshot) {
+						this.logger.debug('Error screenshot captured for debugging');
+					}
+
+					// Prepare detailed error information
+					const errorDetails = {
+						message: `Form field selector "${selector}" not found on page after ${selectorTimeout}ms.`,
+						url: currentUrl,
+						title: pageTitle,
+						selector,
+						fieldType,
+						screenshot: errorScreenshot,
+					};
+
+					// Store the error details for potential use in error handling
+					if (continueOnFail) {
+						// If we're continuing on failure, add this to results as a failed field
+						results.push({
+							fieldType,
+							selector,
+							success: false,
+							error: errorDetails.message,
+							errorDetails,
+						});
+
+						// Skip to the next field without throwing
+						continue;
+					}
+
+					// Throw a more informative error (only reaches here if continueOnFail is false)
+					throw new Error(
+						`Form field selector "${selector}" not found on page after ${selectorTimeout}ms. ` +
+						`Page URL: ${currentUrl} | Title: ${pageTitle}`
+					);
+				}
 			} else {
 				// Check if the element exists first
 				const elementExists = await page.$(selector) !== null;
