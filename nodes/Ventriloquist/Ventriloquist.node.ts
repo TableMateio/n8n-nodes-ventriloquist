@@ -676,6 +676,9 @@ export class Ventriloquist implements INodeType {
 			const operation = this.getNodeParameter('operation', i) as string;
 			const workflowId = this.getWorkflow()?.id?.toString() || `default_${Date.now()}`;
 
+			// Record start time for operation execution
+			const startTime = Date.now();
+
 			try {
 				if (operation === 'open') {
 					const url = this.getNodeParameter('url', i) as string;
@@ -767,6 +770,10 @@ export class Ventriloquist implements INodeType {
 							responseData.brightDataDebugInfo = brightDataDebugInfo;
 						}
 
+						// Calculate execution duration
+						const executionDuration = Date.now() - startTime;
+						responseData.executionDuration = executionDuration;
+
 						returnData.push({
 							json: responseData,
 						});
@@ -777,6 +784,9 @@ export class Ventriloquist implements INodeType {
 							throw new Error(`Open browser operation failed: ${(error as Error).message}`);
 						}
 
+						// Calculate execution duration even for failed operations
+						const executionDuration = Date.now() - startTime;
+
 						// Otherwise, return an error response and continue
 						returnData.push({
 							json: {
@@ -785,6 +795,7 @@ export class Ventriloquist implements INodeType {
 								error: (error as Error).message,
 								url,
 								timestamp: new Date().toISOString(),
+								executionDuration,
 							},
 						});
 					}
@@ -959,11 +970,15 @@ export class Ventriloquist implements INodeType {
 						}
 
 						if (this.continueOnFail()) {
+							// Calculate execution duration
+							const executionDuration = Date.now() - startTime;
+
 							returnData.push({
 								json: {
 									success: false,
 									error: error.message || 'An unknown error occurred',
 									stack: error.stack || '',
+									executionDuration,
 								},
 							});
 							continue;
@@ -992,6 +1007,10 @@ export class Ventriloquist implements INodeType {
 
 					if (success) {
 						// Click operation successful
+
+						// Calculate execution duration
+						const executionDuration = Date.now() - startTime;
+
 						returnData.push({
 							json: {
 								success: true,
@@ -1002,12 +1021,16 @@ export class Ventriloquist implements INodeType {
 								url: updatedPageUrl,
 								title: updatedPageTitle,
 								timestamp: new Date().toISOString(),
+								executionDuration,
 								...(screenshot ? { screenshot } : {}),
 							},
 						});
 					} else {
 						// Click operation failed
 						const errorMessage = error?.message || 'Click operation failed for an unknown reason';
+
+						// Calculate execution duration
+						const executionDuration = Date.now() - startTime;
 
 						if (!continueOnFail) {
 							// If continueOnFail is false, throw the error to fail the node
@@ -1026,6 +1049,7 @@ export class Ventriloquist implements INodeType {
 								url: updatedPageUrl,
 								title: updatedPageTitle,
 								timestamp: new Date().toISOString(),
+								executionDuration,
 								...(screenshot ? { screenshot } : {}),
 							},
 						});
@@ -1038,6 +1062,12 @@ export class Ventriloquist implements INodeType {
 						websocketEndpoint,
 						workflowId,
 					);
+
+					// Add execution duration to the result
+					if (result.json) {
+						result.json.executionDuration = Date.now() - startTime;
+					}
+
 					returnData.push(result);
 				} else if (operation === 'detect') {
 					// Execute detect operation
@@ -1047,6 +1077,12 @@ export class Ventriloquist implements INodeType {
 						websocketEndpoint,
 						workflowId,
 					);
+
+					// Add execution duration to the result
+					if (result.json) {
+						result.json.executionDuration = Date.now() - startTime;
+					}
+
 					returnData.push(result);
 				} else if (operation === 'extract') {
 					// Execute extract operation
@@ -1056,6 +1092,12 @@ export class Ventriloquist implements INodeType {
 						websocketEndpoint,
 						workflowId,
 					);
+
+					// Add execution duration to the result
+					if (result.json) {
+						result.json.executionDuration = Date.now() - startTime;
+					}
+
 					returnData.push(result);
 				} else if (operation === 'close') {
 					// Close browser sessions based on the selected mode
@@ -1103,6 +1145,7 @@ export class Ventriloquist implements INodeType {
 										sessionId,
 										message: `Browser session ${sessionId} closed successfully`,
 										timestamp: new Date().toISOString(),
+										executionDuration: Date.now() - startTime,
 									},
 								});
 							} else {
@@ -1125,6 +1168,7 @@ export class Ventriloquist implements INodeType {
 									note: "This operation only closes sessions tracked by this N8N instance. To close orphaned sessions, please visit the Bright Data console.",
 									brightDataConsoleUrl: "https://brightdata.com/cp/zones",
 									timestamp: new Date().toISOString(),
+									executionDuration: Date.now() - startTime,
 								},
 							});
 						} else if (closeMode === 'multiple') {
@@ -1162,6 +1206,7 @@ export class Ventriloquist implements INodeType {
 									failedSessions,
 									message: `Closed ${closedSessions.length} of ${sessionIds.length} sessions successfully`,
 									timestamp: new Date().toISOString(),
+									executionDuration: Date.now() - startTime,
 								},
 							});
 						}
@@ -1180,6 +1225,7 @@ export class Ventriloquist implements INodeType {
 								closeMode,
 								error: (error as Error).message,
 								timestamp: new Date().toISOString(),
+								executionDuration: Date.now() - startTime,
 							},
 						});
 					}
@@ -1193,11 +1239,15 @@ export class Ventriloquist implements INodeType {
 				}
 
 				if (this.continueOnFail()) {
+					// Calculate execution duration
+					const executionDuration = Date.now() - startTime;
+
 					returnData.push({
 						json: {
 							success: false,
 							error: error.message || 'An unknown error occurred',
 							stack: error.stack || '',
+							executionDuration,
 						},
 					});
 					continue;
