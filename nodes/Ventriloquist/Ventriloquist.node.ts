@@ -637,6 +637,18 @@ export class Ventriloquist implements INodeType {
 					},
 				},
 			},
+			{
+				displayName: 'Continue On Fail',
+				name: 'continueOnFail',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to continue execution even when close operations fail',
+				displayOptions: {
+					show: {
+						operation: ['close'],
+					},
+				},
+			},
 		],
 	};
 
@@ -1048,113 +1060,125 @@ export class Ventriloquist implements INodeType {
 				} else if (operation === 'close') {
 					// Close browser sessions based on the selected mode
 					const closeMode = this.getNodeParameter('closeMode', i, 'session') as string;
+					const continueOnFail = this.getNodeParameter('continueOnFail', i, true) as boolean;
 
-					if (closeMode === 'session') {
-						// Close a specific session
-						let sessionId = '';
+					try {
+						if (closeMode === 'session') {
+							// Close a specific session
+							let sessionId = '';
 
-						// First, check if an explicit session ID was provided
-						const explicitSessionId = this.getNodeParameter('explicitSessionId', i, '') as string;
-						if (explicitSessionId) {
-							sessionId = explicitSessionId;
-							this.logger.info(`Using explicitly provided session ID: ${sessionId}`);
-						}
-						// If not, try to get sessionId from the current item
-						else if (items[i].json?.sessionId) {
-							sessionId = items[i].json.sessionId as string;
-						}
-						// For backward compatibility, also check for pageId
-						else if (items[i].json?.pageId) {
-							sessionId = items[i].json.pageId as string;
-							this.logger.info('Using legacy pageId as sessionId for compatibility');
-						}
-
-						// If we found a sessionId, close it
-						if (sessionId) {
-							// Get existing page from session
-							const page = Ventriloquist.getPage(workflowId, sessionId);
-							if (page) {
-								await page.close();
-								this.logger.info(`Closed page with session ID: ${sessionId}`);
-							} else {
-								this.logger.warn(`No page found with session ID: ${sessionId}`);
+							// First, check if an explicit session ID was provided
+							const explicitSessionId = this.getNodeParameter('explicitSessionId', i, '') as string;
+							if (explicitSessionId) {
+								sessionId = explicitSessionId;
+								this.logger.info(`Using explicitly provided session ID: ${sessionId}`);
+							}
+							// If not, try to get sessionId from the current item
+							else if (items[i].json?.sessionId) {
+								sessionId = items[i].json.sessionId as string;
+							}
+							// For backward compatibility, also check for pageId
+							else if (items[i].json?.pageId) {
+								sessionId = items[i].json.pageId as string;
+								this.logger.info('Using legacy pageId as sessionId for compatibility');
 							}
 
-							// Return success
+							// If we found a sessionId, close it
+							if (sessionId) {
+								// Get existing page from session
+								const page = Ventriloquist.getPage(workflowId, sessionId);
+								if (page) {
+									await page.close();
+									this.logger.info(`Closed page with session ID: ${sessionId}`);
+								} else {
+									this.logger.warn(`No page found with session ID: ${sessionId}`);
+								}
+
+								// Return success
+								returnData.push({
+									json: {
+										success: true,
+										operation,
+										closeMode,
+										sessionId,
+										message: `Browser session ${sessionId} closed successfully`,
+										timestamp: new Date().toISOString(),
+									},
+								});
+							} else {
+								// No session ID found
+								throw new Error('No session ID provided or found in input');
+							}
+						} else if (closeMode === 'all') {
+							// Close all browser sessions
+							const closeResult = await Ventriloquist.closeAllSessions(this.logger);
+
+							// Return success with details
 							returnData.push({
 								json: {
 									success: true,
 									operation,
 									closeMode,
-									sessionId,
-									message: `Browser session ${sessionId} closed successfully`,
+									totalSessions: closeResult.totalSessions,
+									closedSessions: closeResult.closedSessions,
+									message: `Closed ${closeResult.closedSessions} of ${closeResult.totalSessions} locally tracked browser sessions`,
+									note: "This operation only closes sessions tracked by this N8N instance. To close orphaned sessions, please visit the Bright Data console.",
+									brightDataConsoleUrl: "https://brightdata.com/cp/zones",
 									timestamp: new Date().toISOString(),
 								},
 							});
-						} else {
-							// No session ID found
+						} else if (closeMode === 'multiple') {
+							// Close a list of specific sessions
+							const sessionIds = this.getNodeParameter('sessionIds', i, []) as string[];
+							const closedSessions: string[] = [];
+							const failedSessions: string[] = [];
+
+							// Process each session ID
+							for (const sessionId of sessionIds) {
+								try {
+									// Get existing page from session
+									const page = Ventriloquist.getPage(workflowId, sessionId);
+									if (page) {
+										await page.close();
+										closedSessions.push(sessionId);
+										this.logger.info(`Closed page with session ID: ${sessionId}`);
+									} else {
+										failedSessions.push(sessionId);
+										this.logger.warn(`No page found with session ID: ${sessionId}`);
+									}
+								} catch (error) {
+									failedSessions.push(sessionId);
+									this.logger.error(`Error closing session ${sessionId}: ${error}`);
+								}
+							}
+
+							// Return result
 							returnData.push({
 								json: {
-									success: false,
+									success: true,
 									operation,
 									closeMode,
-									error: 'No session ID provided or found in input',
+									closedSessions,
+									failedSessions,
+									message: `Closed ${closedSessions.length} of ${sessionIds.length} sessions successfully`,
 									timestamp: new Date().toISOString(),
 								},
 							});
 						}
-					} else if (closeMode === 'all') {
-						// Close all browser sessions
-						const closeResult = await Ventriloquist.closeAllSessions(this.logger);
-
-						// Return success with details
-						returnData.push({
-							json: {
-								success: true,
-								operation,
-								closeMode,
-								totalSessions: closeResult.totalSessions,
-								closedSessions: closeResult.closedSessions,
-								message: `Closed ${closeResult.closedSessions} of ${closeResult.totalSessions} locally tracked browser sessions`,
-								note: "This operation only closes sessions tracked by this N8N instance. To close orphaned sessions, please visit the Bright Data console.",
-								brightDataConsoleUrl: "https://brightdata.com/cp/zones",
-								timestamp: new Date().toISOString(),
-							},
-						});
-					} else if (closeMode === 'multiple') {
-						// Close a list of specific sessions
-						const sessionIds = this.getNodeParameter('sessionIds', i, []) as string[];
-						const closedSessions: string[] = [];
-						const failedSessions: string[] = [];
-
-						// Process each session ID
-						for (const sessionId of sessionIds) {
-							try {
-								// Get existing page from session
-								const page = Ventriloquist.getPage(workflowId, sessionId);
-								if (page) {
-									await page.close();
-									closedSessions.push(sessionId);
-									this.logger.info(`Closed page with session ID: ${sessionId}`);
-								} else {
-									failedSessions.push(sessionId);
-									this.logger.warn(`No page found with session ID: ${sessionId}`);
-								}
-							} catch (error) {
-								failedSessions.push(sessionId);
-								this.logger.error(`Error closing session ${sessionId}: ${error}`);
-							}
+					} catch (error) {
+						// Handle errors based on continueOnFail setting
+						if (!continueOnFail) {
+							// If continueOnFail is false, throw the error to fail the node
+							throw new Error(`Close operation failed: ${(error as Error).message}`);
 						}
 
-						// Return result
+						// Otherwise, return an error response and continue
 						returnData.push({
 							json: {
-								success: true,
+								success: false,
 								operation,
 								closeMode,
-								closedSessions,
-								failedSessions,
-								message: `Closed ${closedSessions.length} of ${sessionIds.length} sessions successfully`,
+								error: (error as Error).message,
 								timestamp: new Date().toISOString(),
 							},
 						});
