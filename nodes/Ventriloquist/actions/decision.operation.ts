@@ -319,41 +319,7 @@ export const description: INodeProperties[] = [
 								displayName: 'Fields',
 								values: [
 									{
-										displayName: 'Field Type',
-										name: 'fieldType',
-										type: 'options',
-										options: [
-											{
-												name: 'Checkbox',
-												value: 'checkbox',
-												description: 'Checkbox input element',
-											},
-											{
-												name: 'File Upload',
-												value: 'file',
-												description: 'File input element',
-											},
-											{
-												name: 'Radio Button',
-												value: 'radio',
-												description: 'Radio button input element',
-											},
-											{
-												name: 'Select / Dropdown',
-												value: 'select',
-												description: 'Dropdown select element',
-											},
-											{
-												name: 'Text / Textarea',
-												value: 'text',
-												description: 'Standard text input or textarea',
-											},
-										],
-										default: 'text',
-										description: 'The type of form field',
-									},
-									{
-										displayName: 'Selector',
+										displayName: 'Field Selector',
 										name: 'selector',
 										type: 'string',
 										default: '',
@@ -362,81 +328,65 @@ export const description: INodeProperties[] = [
 										required: true,
 									},
 									{
-										displayName: 'Value',
+										displayName: 'Field Value',
 										name: 'value',
 										type: 'string',
 										default: '',
 										description: 'Value to set for the form field',
-										displayOptions: {
-											show: {
-												fieldType: ['text', 'radio', 'select'],
-											},
-										},
 									},
 									{
-										displayName: 'Check State',
-										name: 'checkState',
+										displayName: 'Field Type',
+										name: 'fieldType',
 										type: 'options',
 										options: [
 											{
-												name: 'Check / Select',
-												value: 'check',
-												description: 'Check/select the element',
+												name: 'Text Field / Textarea',
+												value: 'text',
+												description: 'Standard text input or textarea',
 											},
 											{
-												name: 'Uncheck / Deselect',
-												value: 'uncheck',
-												description: 'Uncheck/deselect the element',
+												name: 'Select / Dropdown',
+												value: 'select',
+												description: 'Dropdown select element',
 											},
 											{
-												name: 'Toggle',
-												value: 'toggle',
-												description: 'Toggle the current state',
+												name: 'Checkbox / Radio',
+												value: 'checkbox',
+												description: 'Checkbox or radio button input element',
 											},
 										],
-										default: 'check',
-										description: 'Whether to check or uncheck the checkbox/radio button',
-										displayOptions: {
-											show: {
-												fieldType: ['checkbox', 'radio'],
-											},
-										},
+										default: 'text',
+										description: 'The type of form field',
 									},
 									{
-										displayName: 'File Path',
-										name: 'filePath',
-										type: 'string',
-										default: '',
-										description: 'Path to the file to upload',
-										displayOptions: {
-											show: {
-												fieldType: ['file'],
+										displayName: 'Options',
+										name: 'options',
+										type: 'collection',
+										placeholder: 'Add Option',
+										default: {},
+										options: [
+											{
+												displayName: 'Clear Field First',
+												name: 'clearField',
+												type: 'boolean',
+												default: true,
+												description: 'Whether to clear the field before entering text',
 											},
-										},
-									},
-									{
-										displayName: 'Clear Field First',
-										name: 'clearField',
-										type: 'boolean',
-										default: true,
-										description: 'Whether to clear the field before entering text',
-										displayOptions: {
-											show: {
-												fieldType: ['text'],
+											{
+												displayName: 'Press Enter After Input',
+												name: 'pressEnter',
+												type: 'boolean',
+												default: false,
+												description: 'Whether to press Enter after entering text',
 											},
-										},
-									},
-									{
-										displayName: 'Press Enter After Input',
-										name: 'pressEnter',
-										type: 'boolean',
-										default: false,
-										description: 'Whether to press Enter after entering text',
-										displayOptions: {
-											show: {
-												fieldType: ['text'],
+											{
+												displayName: 'Human-Like Typing',
+												name: 'humanLike',
+												type: 'boolean',
+												default: true,
+												description: 'Whether to use human-like typing with random delays between keystrokes',
 											},
-										},
+										],
 									},
 								],
 							},
@@ -514,122 +464,6 @@ export const description: INodeProperties[] = [
 								actionType: ['fill'],
 								submitForm: [true],
 								waitAfterSubmit: ['fixedTime'],
-							},
-						},
-					},
-					{
-						displayName: 'Text Value',
-						name: 'textValue',
-						type: 'string',
-						default: '',
-						description: 'Text to enter into the form field',
-						displayOptions: {
-							hide: {
-								actionType: ['click', 'extract', 'navigate', 'none'],
-							},
-						},
-					},
-					{
-						displayName: 'Input Type',
-						name: 'inputType',
-						type: 'options',
-						options: [
-							{
-								name: 'Checkbox',
-								value: 'checkbox',
-								description: 'Checkbox input element',
-							},
-							{
-								name: 'File Upload',
-								value: 'file',
-								description: 'File input element',
-							},
-							{
-								name: 'Radio Button',
-								value: 'radio',
-								description: 'Radio button input element',
-							},
-							{
-								name: 'Select / Dropdown',
-								value: 'select',
-								description: 'Dropdown select element',
-							},
-							{
-								name: 'Text / Textarea',
-								value: 'text',
-								description: 'Standard text input or textarea',
-							},
-						],
-						default: 'text',
-						description: 'Type of form input to interact with',
-						displayOptions: {
-							hide: {
-								actionType: ['click', 'extract', 'navigate', 'none'],
-							},
-						},
-					},
-					{
-						displayName: 'Clear Field First',
-						name: 'clearField',
-						type: 'boolean',
-						default: false,
-						description: 'Whether to clear the field before entering text (useful for pre-filled inputs)',
-						displayOptions: {
-							hide: {
-								actionType: ['click', 'extract', 'navigate', 'none'],
-							},
-						},
-					},
-					{
-						displayName: 'Press Enter After Input',
-						name: 'pressEnter',
-						type: 'boolean',
-						default: false,
-						description: 'Whether to press Enter after entering text (useful for forms that submit on Enter)',
-						displayOptions: {
-							hide: {
-								actionType: ['click', 'extract', 'navigate', 'none'],
-							},
-						},
-					},
-					{
-						displayName: 'Check State',
-						name: 'checkState',
-						type: 'options',
-						options: [
-							{
-								name: 'Check / Select',
-								value: 'check',
-								description: 'Check/select the element',
-							},
-							{
-								name: 'Uncheck / Deselect',
-								value: 'uncheck',
-								description: 'Uncheck/deselect the element',
-							},
-							{
-								name: 'Toggle',
-								value: 'toggle',
-								description: 'Toggle the current state',
-							},
-						],
-						default: 'check',
-						description: 'Whether to check or uncheck the checkbox/radio button',
-						displayOptions: {
-							hide: {
-								actionType: ['click', 'extract', 'navigate', 'none'],
-							},
-						},
-					},
-					{
-						displayName: 'File Path',
-						name: 'filePath',
-						type: 'string',
-						default: '',
-						description: 'Path to the file to upload (must be accessible to the Ventriloquist server)',
-						displayOptions: {
-							hide: {
-								actionType: ['click', 'extract', 'navigate', 'none'],
 							},
 						},
 					},
@@ -1555,33 +1389,17 @@ export async function execute(
 								const waitAfterSubmit = group.waitAfterSubmit as string || 'domContentLoaded';
 								const waitSubmitTime = group.waitSubmitTime as number || 2000;
 
-								// For backward compatibility with old parameters
-								const actionSelector = group.actionSelector as string;
-								const textValue = group.textValue as string;
-								const inputType = group.inputType as string || 'text';
-								const clearField = group.clearField as boolean || false;
-								const pressEnter = group.pressEnter as boolean || false;
-								const checkState = group.checkState as string || 'check';
-								const filePath = group.filePath as string || '';
-
-								// If we have old-style parameters (single field) and no form fields,
-								// convert them to form fields format
-								if (actionSelector && formFields.length === 0) {
-									formFields.push({
-										fieldType: inputType,
-										selector: actionSelector,
-										value: textValue,
-										clearField,
-										pressEnter,
-										checkState,
-										filePath,
-									});
-								}
-
 								// Process each form field
 								for (const field of formFields) {
-									const fieldType = field.fieldType as string;
 									const selector = field.selector as string;
+									const value = field.value as string || '';
+									const fieldType = field.fieldType as string || 'text';
+									const options = field.options as IDataObject || {};
+
+									// Extract options
+									const clearField = (options.clearField as boolean) ?? true;
+									const pressEnter = options.pressEnter as boolean || false;
+									const humanLike = (options.humanLike as boolean) ?? true;
 
 									// Wait for the element if needed
 									if (waitForSelectors) {
@@ -1610,10 +1428,6 @@ export async function execute(
 									// Handle different field types
 									switch (fieldType) {
 										case 'text': {
-											const value = field.value as string || '';
-											const clearField = field.clearField as boolean || false;
-											const pressEnter = field.pressEnter as boolean || false;
-
 											// Clear field if requested
 											if (clearField) {
 												// Click three times to select all text
@@ -1624,7 +1438,15 @@ export async function execute(
 
 											// Type the text
 											this.logger.debug(`Filling form field: ${selector} with value: ${value}`);
-											await puppeteerPage.type(selector, value);
+
+											// Use human-like typing with random delays between keystrokes
+											if (humanLike) {
+												for (const char of value) {
+													await puppeteerPage.type(selector, char, { delay: Math.floor(Math.random() * 150) + 25 });
+												}
+											} else {
+												await puppeteerPage.type(selector, value);
+											}
 
 											// Press Enter if requested
 											if (pressEnter) {
@@ -1634,50 +1456,16 @@ export async function execute(
 										}
 
 										case 'select': {
-											const value = field.value as string || '';
 											// Handle select/dropdown elements
 											this.logger.debug(`Setting select element: ${selector} to value: ${value}`);
 											await puppeteerPage.select(selector, value);
 											break;
 										}
 
-										case 'checkbox':
-										case 'radio': {
-											const checkState = field.checkState as string || 'check';
+										case 'checkbox': {
 											// Handle checkbox and radio button inputs
-											this.logger.debug(`Setting ${fieldType}: ${selector} to state: ${checkState}`);
-
-											// Get the current checked state
-											const currentChecked = await puppeteerPage.$eval(selector, el => (el as HTMLInputElement).checked);
-
-											// Determine if we need to click based on requested state
-											let shouldClick = false;
-											if (checkState === 'check' && !currentChecked) shouldClick = true;
-											if (checkState === 'uncheck' && currentChecked) shouldClick = true;
-											if (checkState === 'toggle') shouldClick = true;
-
-											if (shouldClick) {
-												await puppeteerPage.click(selector);
-											}
-											break;
-										}
-
-										case 'file': {
-											const filePath = field.filePath as string || '';
-											// Handle file upload inputs
-											this.logger.debug(`Setting file input: ${selector} with file: ${filePath}`);
-											// Use correct typing for ElementHandle to avoid linter errors
-											const input = await puppeteerPage.$(selector);
-											if (input) {
-												await puppeteerPage.evaluate((el, filePath) => {
-													// This is needed to bypass file input security restrictions
-													// by directly setting the file in the browser context
-													const dataTransfer = new DataTransfer();
-													const file = new File([''], filePath.split('/').pop() || 'file', { type: 'application/octet-stream' });
-													dataTransfer.items.add(file);
-													(el as HTMLInputElement).files = dataTransfer.files;
-												}, input, filePath);
-											}
+											this.logger.debug(`Clicking checkbox/radio: ${selector}`);
+											await puppeteerPage.click(selector);
 											break;
 										}
 									}
