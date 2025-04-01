@@ -94,128 +94,9 @@ export const description: INodeProperties[] = [
 						description: 'Define the conditions to check',
 						options: [
 							{
-								name: 'condition',
-								displayName: 'Condition',
+								name: 'elementExists',
+								displayName: 'Element Exists Condition',
 								values: [
-									{
-										displayName: 'Condition Type',
-										name: 'conditionType',
-										type: 'options',
-										options: [
-											{
-												name: 'Element Count',
-												value: 'elementCount',
-												description: 'Count the elements that match a selector',
-											},
-											{
-												name: 'Element Exists',
-												value: 'elementExists',
-												description: 'Check if element exists on the page',
-											},
-											{
-												name: 'Execution Count',
-												value: 'executionCount',
-												description: 'Check how many times this node has been executed',
-											},
-											{
-												name: 'Expression',
-												value: 'expression',
-												description: 'Evaluate a JavaScript expression',
-											},
-											{
-												name: 'Input Source',
-												value: 'inputSource',
-												description: 'Check which node the data came from',
-											},
-											{
-												name: 'Text Contains',
-												value: 'textContains',
-												description: 'Check if element contains specific text',
-											},
-											{
-												name: 'URL Contains',
-												value: 'urlContains',
-												description: 'Check if current URL contains string',
-											},
-										],
-										default: 'elementExists',
-										description: 'Type of condition to check',
-									},
-									{
-										displayName: 'JavaScript Expression',
-										name: 'jsExpression',
-										type: 'string',
-										typeOptions: {
-											rows: 4,
-										},
-										default: '$input.item.json.someProperty === true',
-										description: 'JavaScript expression that should evaluate to true or false. You can use $input to access the input data.',
-										placeholder: '$input.item.json.status === "success" || $input.item.json.count > 5',
-										displayOptions: {
-											show: {
-												conditionType: ['expression'],
-											},
-										},
-									},
-									{
-										displayName: 'Source Node Name',
-										name: 'sourceNodeName',
-										type: 'string',
-										default: '',
-										placeholder: 'e.g., HTTP Request, Function, Switch',
-										description: 'Enter the exact name of the node that should trigger this condition. This is the name shown in the node\'s title bar.',
-										displayOptions: {
-											show: {
-												conditionType: ['inputSource'],
-											},
-										},
-									},
-									{
-										displayName: 'Count Comparison',
-										name: 'executionCountComparison',
-										type: 'options',
-										options: [
-											{
-												name: 'Equal To',
-												value: 'equal',
-											},
-											{
-												name: 'Greater Than',
-												value: 'greater',
-											},
-											{
-												name: 'Greater Than or Equal To',
-												value: 'greaterEqual',
-											},
-											{
-												name: 'Less Than',
-												value: 'less',
-											},
-											{
-												name: 'Less Than or Equal To',
-												value: 'lessEqual',
-											},
-										],
-										default: 'equal',
-										description: 'How to compare the execution count',
-										displayOptions: {
-											show: {
-												conditionType: ['executionCount'],
-											},
-										},
-									},
-									{
-										displayName: 'Execution Count',
-										name: 'executionCountValue',
-										type: 'number',
-										default: 1,
-										description: 'The value to compare the execution count against',
-										displayOptions: {
-											show: {
-												conditionType: ['executionCount'],
-											},
-										},
-									},
 									{
 										displayName: 'Selector',
 										name: 'selector',
@@ -223,35 +104,29 @@ export const description: INodeProperties[] = [
 										default: '',
 										placeholder: '#element, .class, div[data-test="value"]',
 										description: 'CSS selector to target the element(s)',
-										displayOptions: {
-											show: {
-												conditionType: ['elementExists', 'textContains', 'elementCount'],
-											},
-										},
+										required: true,
 									},
 									{
-										displayName: 'Text to Check',
-										name: 'textToCheck',
-										type: 'string',
-										default: '',
-										description: 'Text content to check for in the selected element',
-										displayOptions: {
-											show: {
-												conditionType: ['textContains'],
-											},
-										},
+										displayName: 'Invert Condition',
+										name: 'invertCondition',
+										type: 'boolean',
+										default: false,
+										description: 'Whether to invert the condition result (true becomes false, false becomes true)',
 									},
+								],
+							},
+							{
+								name: 'elementCount',
+								displayName: 'Element Count Condition',
+								values: [
 									{
-										displayName: 'URL Substring',
-										name: 'urlSubstring',
+										displayName: 'Selector',
+										name: 'selector',
 										type: 'string',
 										default: '',
-										description: 'Text to look for in the current URL',
-										displayOptions: {
-											show: {
-												conditionType: ['urlContains'],
-											},
-										},
+										placeholder: '#element, .class, div[data-test="value"]',
+										description: 'CSS selector to target the element(s)',
+										required: true,
 									},
 									{
 										displayName: 'Count Comparison',
@@ -281,11 +156,6 @@ export const description: INodeProperties[] = [
 										],
 										default: 'equal',
 										description: 'How to compare the actual element count with the expected count',
-										displayOptions: {
-											show: {
-												conditionType: ['elementCount'],
-											},
-										},
 									},
 									{
 										displayName: 'Expected Count',
@@ -293,11 +163,36 @@ export const description: INodeProperties[] = [
 										type: 'number',
 										default: 1,
 										description: 'The value to compare the element count against',
-										displayOptions: {
-											show: {
-												conditionType: ['elementCount'],
-											},
-										},
+									},
+									{
+										displayName: 'Invert Condition',
+										name: 'invertCondition',
+										type: 'boolean',
+										default: false,
+										description: 'Whether to invert the condition result (true becomes false, false becomes true)',
+									},
+								],
+							},
+							{
+								name: 'textContains',
+								displayName: 'Text Contains Condition',
+								values: [
+									{
+										displayName: 'Selector',
+										name: 'selector',
+										type: 'string',
+										default: '',
+										placeholder: '#element, .class, div[data-test="value"]',
+										description: 'CSS selector to target the element(s)',
+										required: true,
+									},
+									{
+										displayName: 'Text to Check',
+										name: 'textToCheck',
+										type: 'string',
+										default: '',
+										description: 'Text content to check for in the selected element',
+										required: true,
 									},
 									{
 										displayName: 'Match Type',
@@ -331,12 +226,7 @@ export const description: INodeProperties[] = [
 											},
 										],
 										default: 'contains',
-										description: 'How to match the text or URL value',
-										displayOptions: {
-											show: {
-												conditionType: ['textContains', 'urlContains'],
-											},
-										},
+										description: 'How to match the text value',
 									},
 									{
 										displayName: 'Case Sensitive',
@@ -344,11 +234,166 @@ export const description: INodeProperties[] = [
 										type: 'boolean',
 										default: false,
 										description: 'Whether the matching should be case-sensitive',
-										displayOptions: {
-											show: {
-												conditionType: ['textContains', 'urlContains'],
+									},
+									{
+										displayName: 'Invert Condition',
+										name: 'invertCondition',
+										type: 'boolean',
+										default: false,
+										description: 'Whether to invert the condition result (true becomes false, false becomes true)',
+									},
+								],
+							},
+							{
+								name: 'urlContains',
+								displayName: 'URL Contains Condition',
+								values: [
+									{
+										displayName: 'URL Substring',
+										name: 'urlSubstring',
+										type: 'string',
+										default: '',
+										description: 'Text to look for in the current URL',
+										required: true,
+									},
+									{
+										displayName: 'Match Type',
+										name: 'matchType',
+										type: 'options',
+										options: [
+											{
+												name: 'Contains',
+												value: 'contains',
+												description: 'Value must contain the specified string',
 											},
+											{
+												name: 'Ends With',
+												value: 'endsWith',
+												description: 'Value must end with the specified string',
+											},
+											{
+												name: 'Exact Match',
+												value: 'exact',
+												description: 'Value must match exactly',
+											},
+											{
+												name: 'RegEx',
+												value: 'regex',
+												description: 'Match using a regular expression',
+											},
+											{
+												name: 'Starts With',
+												value: 'startsWith',
+												description: 'Value must start with the specified string',
+											},
+										],
+										default: 'contains',
+										description: 'How to match the URL value',
+									},
+									{
+										displayName: 'Case Sensitive',
+										name: 'caseSensitive',
+										type: 'boolean',
+										default: false,
+										description: 'Whether the matching should be case-sensitive',
+									},
+									{
+										displayName: 'Invert Condition',
+										name: 'invertCondition',
+										type: 'boolean',
+										default: false,
+										description: 'Whether to invert the condition result (true becomes false, false becomes true)',
+									},
+								],
+							},
+							{
+								name: 'expression',
+								displayName: 'Expression Condition',
+								values: [
+									{
+										displayName: 'JavaScript Expression',
+										name: 'jsExpression',
+										type: 'string',
+										typeOptions: {
+											rows: 4,
 										},
+										default: '$input.item.json.someProperty === true',
+										description: 'JavaScript expression that should evaluate to true or false. You can use $input to access the input data.',
+										placeholder: '$input.item.json.status === "success" || $input.item.json.count > 5',
+										required: true,
+									},
+									{
+										displayName: 'Invert Condition',
+										name: 'invertCondition',
+										type: 'boolean',
+										default: false,
+										description: 'Whether to invert the condition result (true becomes false, false becomes true)',
+									},
+								],
+							},
+							{
+								name: 'inputSource',
+								displayName: 'Input Source Condition',
+								values: [
+									{
+										displayName: 'Source Node Name',
+										name: 'sourceNodeName',
+										type: 'string',
+										default: '',
+										placeholder: 'e.g., HTTP Request, Function, Switch',
+										description: 'Enter the exact name of the node that should trigger this condition. This is the name shown in the node\'s title bar.',
+										required: true,
+									},
+									{
+										displayName: 'Invert Condition',
+										name: 'invertCondition',
+										type: 'boolean',
+										default: false,
+										description: 'Whether to invert the condition result (true becomes false, false becomes true)',
+									},
+								],
+							},
+							{
+								name: 'executionCount',
+								displayName: 'Execution Count Condition',
+								values: [
+									{
+										displayName: 'Count Comparison',
+										name: 'executionCountComparison',
+										type: 'options',
+										options: [
+											{
+												name: 'Equal To',
+												value: 'equal',
+											},
+											{
+												name: 'Greater Than',
+												value: 'greater',
+											},
+											{
+												name: 'Greater Than or Equal To',
+												value: 'greaterEqual',
+											},
+											{
+												name: 'Less Than',
+												value: 'less',
+											},
+											{
+												name: 'Less Than or Equal To',
+												value: 'lessEqual',
+											},
+										],
+										default: 'equal',
+										description: 'How to compare the execution count',
+										required: true,
+									},
+									{
+										displayName: 'Execution Count',
+										name: 'executionCountValue',
+										type: 'number',
+										default: 1,
+										description: 'The value to compare the execution count against',
+										required: true,
 									},
 									{
 										displayName: 'Invert Condition',
@@ -1462,19 +1507,8 @@ export async function execute(
 			const groupName = group.name as string;
 			const invertCondition = group.invertCondition as boolean || false;
 
-			// Get conditions and ensure type safety
-			let conditions: IDataObject[] = [];
-			if (group.conditions &&
-				typeof group.conditions === 'object' &&
-				'condition' in group.conditions &&
-				Array.isArray(group.conditions.condition)) {
-				conditions = group.conditions.condition as IDataObject[];
-			}
-
-			// Get logical operator (default to AND if not set or just a single condition)
-			const logicalOperator = (conditions.length > 1)
-				? (group.logicalOperator as string || 'and')
-				: 'and'; // Single condition doesn't need an operator
+			// Get logical operator (default to AND)
+			const logicalOperator = group.logicalOperator as string || 'and';
 
 			// Get route if routing is enabled
 			if (enableRouting) {
@@ -1485,7 +1519,7 @@ export async function execute(
 				}
 			}
 
-			this.logger.debug(`Checking condition group: ${groupName} with ${conditions.length} conditions`);
+			this.logger.debug(`Checking condition group: ${groupName}`);
 
 			// Default value for logical operators
 			// If AND, start with true and any false will make it false
@@ -1493,84 +1527,158 @@ export async function execute(
 			let groupConditionMet = logicalOperator === 'and';
 
 			try {
-				// Handle the case of no conditions - default to false
-				if (conditions.length === 0) {
-					this.logger.debug(`No conditions in group ${groupName}, skipping`);
-					groupConditionMet = false;
-				} else {
-					// Process multiple conditions with the logical operator
-					for (const condition of conditions) {
-						const conditionType = condition.conditionType as string;
-						const invertSingleCondition = condition.invertCondition as boolean || false;
+				// Flag to track if we have any conditions
+				let hasAnyConditions = false;
 
-						// Evaluate a single condition
-						let conditionMet = false;
+				// Process elementExists conditions
+				if (group.conditions && typeof group.conditions === 'object') {
 
-						// Use the same switch structure but with condition object instead of group
-						switch (conditionType) {
-							case 'elementExists': {
-								const selector = condition.selector as string;
+					// Check for elementExists conditions
+					if ('elementExists' in group.conditions && Array.isArray(group.conditions.elementExists)) {
+						hasAnyConditions = true;
+						const elementExistsConditions = group.conditions.elementExists as IDataObject[];
 
-								if (waitForSelectors) {
-									if (detectionMethod === 'smart') {
-										// Use smart DOM-aware detection
-										conditionMet = await smartWaitForSelector(
-											puppeteerPage,
-											selector,
-											selectorTimeout,
-											earlyExitDelay,
-											this.logger,
-										);
-									} else {
-										// Use traditional fixed timeout waiting
-										try {
-											await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
-											conditionMet = true;
-										} catch (error) {
-											conditionMet = false;
-										}
-									}
+						for (const condition of elementExistsConditions) {
+							const selector = condition.selector as string;
+							const invertSingleCondition = condition.invertCondition as boolean || false;
+
+							let conditionMet = false;
+
+							if (waitForSelectors) {
+								if (detectionMethod === 'smart') {
+									// Use smart DOM-aware detection
+									conditionMet = await smartWaitForSelector(
+										puppeteerPage,
+										selector,
+										selectorTimeout,
+										earlyExitDelay,
+										this.logger,
+									);
 								} else {
-									// Just check without waiting
-									const elementExists = await puppeteerPage.$(selector) !== null;
-									conditionMet = elementExists;
+									// Use traditional fixed timeout waiting
+									try {
+										await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
+										conditionMet = true;
+									} catch (error) {
+										conditionMet = false;
+									}
 								}
-								break;
+							} else {
+								// Just check without waiting
+								const elementExists = await puppeteerPage.$(selector) !== null;
+								conditionMet = elementExists;
 							}
 
-							case 'textContains': {
-								const selector = condition.selector as string;
-								const textToCheck = condition.textToCheck as string;
-								const matchType = condition.matchType as string;
-								const caseSensitive = condition.caseSensitive as boolean;
+							// Apply inversion if specified for this specific condition
+							if (invertSingleCondition) {
+								conditionMet = !conditionMet;
+							}
 
-								if (waitForSelectors) {
-									let elementExists = false;
-									if (detectionMethod === 'smart') {
-										// Use smart DOM-aware detection
-										elementExists = await smartWaitForSelector(
-											puppeteerPage,
-											selector,
-											selectorTimeout,
-											earlyExitDelay,
-											this.logger,
-										);
-									} else {
-										// Use traditional fixed timeout waiting
-										try {
-											await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
-											elementExists = true;
-										} catch (error) {
-											elementExists = false;
-										}
-									}
+							// Apply the logical operator
+							if (logicalOperator === 'and') {
+								// AND operator - if any condition is false, the result is false
+								groupConditionMet = groupConditionMet && conditionMet;
 
-									if (!elementExists) {
-										conditionMet = false;
-										break;
+								// Short-circuit evaluation - if we've already got a false with AND, we can stop
+								if (!groupConditionMet) break;
+							} else {
+								// OR operator - if any condition is true, the result is true
+								groupConditionMet = groupConditionMet || conditionMet;
+
+								// Short-circuit evaluation - if we've already got a true with OR, we can stop
+								if (groupConditionMet) break;
+							}
+						}
+					}
+
+					// Check for elementCount conditions
+					if ('elementCount' in group.conditions && Array.isArray(group.conditions.elementCount)) {
+						hasAnyConditions = true;
+						const elementCountConditions = group.conditions.elementCount as IDataObject[];
+
+						for (const condition of elementCountConditions) {
+							const selector = condition.selector as string;
+							const expectedCount = condition.expectedCount as number;
+							const countComparison = condition.countComparison as string;
+							const invertSingleCondition = condition.invertCondition as boolean || false;
+
+							let conditionMet = false;
+
+							// For element count, we just check without waiting as we expect some elements might not exist
+							const elements = await puppeteerPage.$$(selector);
+							const actualCount = elements.length;
+
+							conditionMet = compareCount(actualCount, expectedCount, countComparison);
+
+							// Apply inversion if specified for this specific condition
+							if (invertSingleCondition) {
+								conditionMet = !conditionMet;
+							}
+
+							// Apply the logical operator
+							if (logicalOperator === 'and') {
+								// AND operator - if any condition is false, the result is false
+								groupConditionMet = groupConditionMet && conditionMet;
+
+								// Short-circuit evaluation - if we've already got a false with AND, we can stop
+								if (!groupConditionMet) break;
+							} else {
+								// OR operator - if any condition is true, the result is true
+								groupConditionMet = groupConditionMet || conditionMet;
+
+								// Short-circuit evaluation - if we've already got a true with OR, we can stop
+								if (groupConditionMet) break;
+							}
+						}
+					}
+
+					// Check for textContains conditions
+					if ('textContains' in group.conditions && Array.isArray(group.conditions.textContains)) {
+						hasAnyConditions = true;
+						const textContainsConditions = group.conditions.textContains as IDataObject[];
+
+						for (const condition of textContainsConditions) {
+							const selector = condition.selector as string;
+							const textToCheck = condition.textToCheck as string;
+							const matchType = condition.matchType as string;
+							const caseSensitive = condition.caseSensitive as boolean;
+							const invertSingleCondition = condition.invertCondition as boolean || false;
+
+							let conditionMet = false;
+
+							if (waitForSelectors) {
+								let elementExists = false;
+								if (detectionMethod === 'smart') {
+									// Use smart DOM-aware detection
+									elementExists = await smartWaitForSelector(
+										puppeteerPage,
+										selector,
+										selectorTimeout,
+										earlyExitDelay,
+										this.logger,
+									);
+								} else {
+									// Use traditional fixed timeout waiting
+									try {
+										await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
+										elementExists = true;
+									} catch (error) {
+										elementExists = false;
 									}
 								}
 
+								if (!elementExists) {
+									conditionMet = false;
+								} else {
+									try {
+										const elementText = await puppeteerPage.$eval(selector, (el) => el.textContent || '');
+										conditionMet = matchStrings(elementText, textToCheck, matchType, caseSensitive);
+									} catch (error) {
+										// Element might not exist
+										conditionMet = false;
+									}
+								}
+							} else {
 								try {
 									const elementText = await puppeteerPage.$eval(selector, (el) => el.textContent || '');
 									conditionMet = matchStrings(elementText, textToCheck, matchType, caseSensitive);
@@ -1578,149 +1686,255 @@ export async function execute(
 									// Element might not exist
 									conditionMet = false;
 								}
-								break;
 							}
 
-							case 'elementCount': {
-								const selector = condition.selector as string;
-								const expectedCount = condition.expectedCount as number;
-								const countComparison = condition.countComparison as string;
-
-								// For element count, we just check without waiting as we expect some elements might not exist
-								const elements = await puppeteerPage.$$(selector);
-								const actualCount = elements.length;
-
-								conditionMet = compareCount(actualCount, expectedCount, countComparison);
-								break;
+							// Apply inversion if specified for this specific condition
+							if (invertSingleCondition) {
+								conditionMet = !conditionMet;
 							}
 
-							case 'urlContains': {
-								const urlSubstring = condition.urlSubstring as string;
-								const matchType = condition.matchType as string;
-								const caseSensitive = condition.caseSensitive as boolean;
+							// Apply the logical operator
+							if (logicalOperator === 'and') {
+								// AND operator - if any condition is false, the result is false
+								groupConditionMet = groupConditionMet && conditionMet;
 
-								conditionMet = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
-								break;
+								// Short-circuit evaluation - if we've already got a false with AND, we can stop
+								if (!groupConditionMet) break;
+							} else {
+								// OR operator - if any condition is true, the result is true
+								groupConditionMet = groupConditionMet || conditionMet;
+
+								// Short-circuit evaluation - if we've already got a true with OR, we can stop
+								if (groupConditionMet) break;
+							}
+						}
+					}
+
+					// Check for urlContains conditions
+					if ('urlContains' in group.conditions && Array.isArray(group.conditions.urlContains)) {
+						hasAnyConditions = true;
+						const urlContainsConditions = group.conditions.urlContains as IDataObject[];
+
+						for (const condition of urlContainsConditions) {
+							const urlSubstring = condition.urlSubstring as string;
+							const matchType = condition.matchType as string;
+							const caseSensitive = condition.caseSensitive as boolean;
+							const invertSingleCondition = condition.invertCondition as boolean || false;
+
+							let conditionMet = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
+
+							// Apply inversion if specified for this specific condition
+							if (invertSingleCondition) {
+								conditionMet = !conditionMet;
 							}
 
-							case 'expression': {
-								const jsExpression = condition.jsExpression as string;
+							// Apply the logical operator
+							if (logicalOperator === 'and') {
+								// AND operator - if any condition is false, the result is false
+								groupConditionMet = groupConditionMet && conditionMet;
 
-								try {
-									// Create a safe context for expression evaluation
-									const sandbox = {
-										$input: this.getInputData()[index],
-										$node: this.getNode(),
-									};
+								// Short-circuit evaluation - if we've already got a false with AND, we can stop
+								if (!groupConditionMet) break;
+							} else {
+								// OR operator - if any condition is true, the result is true
+								groupConditionMet = groupConditionMet || conditionMet;
 
-									// Evaluate the expression in a safe manner
-									// We're using Function constructor to create an isolated scope
-									const evalFunction = new Function(
-										'$input',
-										'$node',
-										`"use strict"; return (${jsExpression});`,
-									);
+								// Short-circuit evaluation - if we've already got a true with OR, we can stop
+								if (groupConditionMet) break;
+							}
+						}
+					}
 
-									// Execute the function with our safe context
-									conditionMet = Boolean(evalFunction(sandbox.$input, sandbox.$node));
-									this.logger.debug(`Expression evaluation result: ${conditionMet} for: ${jsExpression}`);
-								} catch (error) {
-									this.logger.error(`Error evaluating expression: ${error.message}`);
-									conditionMet = false;
-								}
-								break;
+					// Check for expression conditions
+					if ('expression' in group.conditions && Array.isArray(group.conditions.expression)) {
+						hasAnyConditions = true;
+						const expressionConditions = group.conditions.expression as IDataObject[];
+
+						for (const condition of expressionConditions) {
+							const jsExpression = condition.jsExpression as string;
+							const invertSingleCondition = condition.invertCondition as boolean || false;
+
+							let conditionMet = false;
+
+							try {
+								// Create a safe context for expression evaluation
+								const sandbox = {
+									$input: this.getInputData()[index],
+									$node: this.getNode(),
+								};
+
+								// Evaluate the expression in a safe manner
+								// We're using Function constructor to create an isolated scope
+								const evalFunction = new Function(
+									'$input',
+									'$node',
+									`"use strict"; return (${jsExpression});`,
+								);
+
+								// Execute the function with our safe context
+								conditionMet = Boolean(evalFunction(sandbox.$input, sandbox.$node));
+								this.logger.debug(`Expression evaluation result: ${conditionMet} for: ${jsExpression}`);
+							} catch (error) {
+								this.logger.error(`Error evaluating expression: ${(error as Error).message}`);
+								conditionMet = false;
 							}
 
-							case 'inputSource': {
-								const sourceNodeName = condition.sourceNodeName as string;
+							// Apply inversion if specified for this specific condition
+							if (invertSingleCondition) {
+								conditionMet = !conditionMet;
+							}
 
-								try {
-									// Get the node that sent the data
-									const inputData = this.getInputData()[index];
+							// Apply the logical operator
+							if (logicalOperator === 'and') {
+								// AND operator - if any condition is false, the result is false
+								groupConditionMet = groupConditionMet && conditionMet;
 
-									// Only access source property if it's a data object with the right structure
-									let inputNodeName: string | undefined;
+								// Short-circuit evaluation - if we've already got a false with AND, we can stop
+								if (!groupConditionMet) break;
+							} else {
+								// OR operator - if any condition is true, the result is true
+								groupConditionMet = groupConditionMet || conditionMet;
 
-									if (typeof inputData === 'object' &&
-										inputData !== null &&
-										'source' in inputData &&
-										inputData.source !== null &&
-										typeof inputData.source === 'object') {
+								// Short-circuit evaluation - if we've already got a true with OR, we can stop
+								if (groupConditionMet) break;
+							}
+						}
+					}
 
-										const source = inputData.source as IDataObject;
-										if ('node' in source &&
-											source.node !== null &&
-											typeof source.node === 'object') {
+					// Check for inputSource conditions
+					if ('inputSource' in group.conditions && Array.isArray(group.conditions.inputSource)) {
+						hasAnyConditions = true;
+						const inputSourceConditions = group.conditions.inputSource as IDataObject[];
 
-											const node = source.node as IDataObject;
-											if ('name' in node && typeof node.name === 'string') {
-												inputNodeName = node.name;
-											}
+						for (const condition of inputSourceConditions) {
+							const sourceNodeName = condition.sourceNodeName as string;
+							const invertSingleCondition = condition.invertCondition as boolean || false;
+
+							let conditionMet = false;
+
+							try {
+								// Get the node that sent the data
+								const inputData = this.getInputData()[index];
+
+								// Only access source property if it's a data object with the right structure
+								let inputNodeName: string | undefined;
+
+								if (typeof inputData === 'object' &&
+									inputData !== null &&
+									'source' in inputData &&
+									inputData.source !== null &&
+									typeof inputData.source === 'object') {
+
+									const source = inputData.source as IDataObject;
+									if ('node' in source &&
+										source.node !== null &&
+										typeof source.node === 'object') {
+
+										const node = source.node as IDataObject;
+										if ('name' in node && typeof node.name === 'string') {
+											inputNodeName = node.name;
 										}
 									}
-
-									// Compare with the expected source node name
-									conditionMet = inputNodeName === sourceNodeName;
-									this.logger.debug(`Input source check: ${inputNodeName} === ${sourceNodeName}: ${conditionMet}`);
-								} catch (error) {
-									this.logger.error(`Error checking input source: ${error.message}`);
-									conditionMet = false;
 								}
-								break;
+
+								// Compare with the expected source node name
+								conditionMet = inputNodeName === sourceNodeName;
+								this.logger.debug(`Input source check: ${inputNodeName} === ${sourceNodeName}: ${conditionMet}`);
+							} catch (error) {
+								this.logger.error(`Error checking input source: ${(error as Error).message}`);
+								conditionMet = false;
 							}
 
-							case 'executionCount': {
-								const comparison = condition.executionCountComparison as string;
-								const value = condition.executionCountValue as number;
+							// Apply inversion if specified for this specific condition
+							if (invertSingleCondition) {
+								conditionMet = !conditionMet;
+							}
 
-								try {
-									// Get static data for this node to track execution count
-									const nodeContext = this.getWorkflowStaticData('node');
+							// Apply the logical operator
+							if (logicalOperator === 'and') {
+								// AND operator - if any condition is false, the result is false
+								groupConditionMet = groupConditionMet && conditionMet;
 
-									// Initialize or increment the execution counter
-									if (typeof nodeContext.executionCount !== 'number') {
-										nodeContext.executionCount = 0;
-									}
+								// Short-circuit evaluation - if we've already got a false with AND, we can stop
+								if (!groupConditionMet) break;
+							} else {
+								// OR operator - if any condition is true, the result is true
+								groupConditionMet = groupConditionMet || conditionMet;
 
-									nodeContext.executionCount = (nodeContext.executionCount as number) + 1;
-									const currentCount = nodeContext.executionCount as number;
-
-									// Compare using the same helper function we use for element count
-									conditionMet = compareCount(currentCount, value, comparison);
-									this.logger.debug(`Execution count check: ${currentCount} ${comparison} ${value}: ${conditionMet}`);
-								} catch (error) {
-									this.logger.error(`Error checking execution count: ${error.message}`);
-									conditionMet = false;
-								}
-								break;
+								// Short-circuit evaluation - if we've already got a true with OR, we can stop
+								if (groupConditionMet) break;
 							}
 						}
+					}
 
-						// Apply inversion if specified for this specific condition
-						if (invertSingleCondition) {
-							conditionMet = !conditionMet;
-						}
+					// Check for executionCount conditions
+					if ('executionCount' in group.conditions && Array.isArray(group.conditions.executionCount)) {
+						hasAnyConditions = true;
+						const executionCountConditions = group.conditions.executionCount as IDataObject[];
 
-						// Apply the logical operator
-						if (logicalOperator === 'and') {
-							// AND operator - if any condition is false, the result is false
-							groupConditionMet = groupConditionMet && conditionMet;
+						for (const condition of executionCountConditions) {
+							const comparison = condition.executionCountComparison as string;
+							const value = condition.executionCountValue as number;
+							const invertSingleCondition = condition.invertCondition as boolean || false;
 
-							// Short-circuit evaluation - if we've already got a false with AND, we can stop
-							if (!groupConditionMet) break;
-						} else {
-							// OR operator - if any condition is true, the result is true
-							groupConditionMet = groupConditionMet || conditionMet;
+							let conditionMet = false;
 
-							// Short-circuit evaluation - if we've already got a true with OR, we can stop
-							if (groupConditionMet) break;
+							try {
+								// Get static data for this node to track execution count
+								const nodeContext = this.getWorkflowStaticData('node');
+
+								// Initialize or increment the execution counter
+								if (typeof nodeContext.executionCount !== 'number') {
+									nodeContext.executionCount = 0;
+								}
+
+								nodeContext.executionCount = (nodeContext.executionCount as number) + 1;
+								const currentCount = nodeContext.executionCount as number;
+
+								// Compare using the same helper function we use for element count
+								conditionMet = compareCount(currentCount, value, comparison);
+								this.logger.debug(`Execution count check: ${currentCount} ${comparison} ${value}: ${conditionMet}`);
+							} catch (error) {
+								this.logger.error(`Error checking execution count: ${(error as Error).message}`);
+								conditionMet = false;
+							}
+
+							// Apply inversion if specified for this specific condition
+							if (invertSingleCondition) {
+								conditionMet = !conditionMet;
+							}
+
+							// Apply the logical operator
+							if (logicalOperator === 'and') {
+								// AND operator - if any condition is false, the result is false
+								groupConditionMet = groupConditionMet && conditionMet;
+
+								// Short-circuit evaluation - if we've already got a false with AND, we can stop
+								if (!groupConditionMet) break;
+							} else {
+								// OR operator - if any condition is true, the result is true
+								groupConditionMet = groupConditionMet || conditionMet;
+
+								// Short-circuit evaluation - if we've already got a true with OR, we can stop
+								if (groupConditionMet) break;
+							}
 						}
 					}
 				}
 
+				// If no conditions were found, set groupConditionMet to false
+				if (!hasAnyConditions) {
+					groupConditionMet = false;
+				}
+
+				// Apply the group-level inversion if needed
+				if (invertCondition) {
+					groupConditionMet = !groupConditionMet;
+				}
+
 				this.logger.debug(`Condition group ${groupName} result: ${groupConditionMet}`);
 
-				// If condition is met
+				// If condition is met, take the corresponding action
 				if (groupConditionMet) {
 					routeTaken = groupName;
 					const actionType = group.actionType as string;
@@ -1730,7 +1944,7 @@ export async function execute(
 						const groupRoute = group.route as number;
 						if (groupRoute) {
 							// Route numbers are 1-based, but indexes are 0-based
-							routeIndex = groupRoute - 1;
+								routeIndex = groupRoute - 1;
 						}
 					}
 
@@ -2202,7 +2416,7 @@ export async function execute(
 											// Type the text
 											this.logger.debug(`Filling form field: ${selector} with value: ${value}`);
 
-											// Use human-like typing if enabled
+											// Use human-like typing with random delays between keystrokes
 											if (humanLike) {
 												for (const char of value) {
 													await puppeteerPage.type(selector, char, { delay: Math.floor(Math.random() * 150) + 25 });
@@ -2289,15 +2503,15 @@ export async function execute(
 
 										case 'file': {
 											const filePath = field.filePath as string || '';
-
-											// Handle file upload inputs
-											this.logger.debug(`Setting file input: ${selector} with file: ${filePath}`);
-
-											const fileInput = await puppeteerPage.$(selector) as puppeteer.ElementHandle<HTMLInputElement>;
-											if (fileInput) {
-												await fileInput.uploadFile(filePath);
-											} else {
-												this.logger.warn(`File input element not found: ${selector}`);
+											if (filePath) {
+												this.logger.debug(`Setting file input: ${selector} with file: ${filePath}`);
+												// Use the correct file upload method
+												const fileInput = await puppeteerPage.$(selector) as puppeteer.ElementHandle<HTMLInputElement>;
+												if (fileInput) {
+													await fileInput.uploadFile(filePath);
+												} else {
+													this.logger.warn(`File input element not found: ${selector}`);
+												}
 											}
 											break;
 										}
