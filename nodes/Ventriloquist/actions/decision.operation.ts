@@ -87,19 +87,34 @@ export const description: INodeProperties[] = [
 						type: 'options',
 						options: [
 							{
+								name: 'Element Count',
+								value: 'elementCount',
+								description: 'Count the elements that match a selector',
+							},
+							{
 								name: 'Element Exists',
 								value: 'elementExists',
 								description: 'Check if element exists on the page',
 							},
 							{
+								name: 'Execution Count',
+								value: 'executionCount',
+								description: 'Check how many times this node has been executed',
+							},
+							{
+								name: 'Expression',
+								value: 'expression',
+								description: 'Evaluate a JavaScript expression',
+							},
+							{
+								name: 'Input Source',
+								value: 'inputSource',
+								description: 'Check which node the data came from',
+							},
+							{
 								name: 'Text Contains',
 								value: 'textContains',
 								description: 'Check if element contains specific text',
-							},
-							{
-								name: 'Element Count',
-								value: 'elementCount',
-								description: 'Count the elements that match a selector',
 							},
 							{
 								name: 'URL Contains',
@@ -645,6 +660,81 @@ export const description: INodeProperties[] = [
 							show: {
 								waitAfterAction: ['fixedTime'],
 								actionType: ['click', 'navigate'],
+							},
+						},
+					},
+					{
+						displayName: 'JavaScript Expression',
+						name: 'jsExpression',
+						type: 'string',
+						typeOptions: {
+							rows: 4,
+						},
+						default: '$input.item.json.someProperty === true',
+						description: 'JavaScript expression that should evaluate to true or false. You can use $input to access the input data.',
+						placeholder: '$input.item.json.status === "success" || $input.item.json.count > 5',
+						displayOptions: {
+							show: {
+								conditionType: ['expression'],
+							},
+						},
+					},
+					{
+						displayName: 'Source Node Name',
+						name: 'sourceNodeName',
+						type: 'string',
+						default: '',
+						description: 'Name of the node that should have sent data to this node',
+						placeholder: 'Previous Node Name',
+						displayOptions: {
+							show: {
+								conditionType: ['inputSource'],
+							},
+						},
+					},
+					{
+						displayName: 'Count Comparison',
+						name: 'executionCountComparison',
+						type: 'options',
+						options: [
+							{
+								name: 'Equal To',
+								value: 'equal',
+							},
+							{
+								name: 'Greater Than',
+								value: 'greater',
+							},
+							{
+								name: 'Greater Than or Equal To',
+								value: 'greaterEqual',
+							},
+							{
+								name: 'Less Than',
+								value: 'less',
+							},
+							{
+								name: 'Less Than or Equal To',
+								value: 'lessEqual',
+							},
+						],
+						default: 'equal',
+						description: 'How to compare the execution count',
+						displayOptions: {
+							show: {
+								conditionType: ['executionCount'],
+							},
+						},
+					},
+					{
+						displayName: 'Value',
+						name: 'executionCountValue',
+						type: 'number',
+						default: 1,
+						description: 'The value to compare the execution count against',
+						displayOptions: {
+							show: {
+								conditionType: ['executionCount'],
 							},
 						},
 					},
@@ -1436,6 +1526,98 @@ export async function execute(
 						const caseSensitive = group.caseSensitive as boolean;
 
 						conditionMet = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
+						break;
+					}
+
+					case 'expression': {
+						const jsExpression = group.jsExpression as string;
+
+						try {
+							// Create a safe context for expression evaluation
+							const sandbox = {
+								$input: this.getInputData()[index],
+								$node: this.getNode(),
+							};
+
+							// Evaluate the expression in a safe manner
+							// We're using Function constructor to create an isolated scope
+							const evalFunction = new Function(
+								'$input',
+								'$node',
+								`"use strict"; return (${jsExpression});`,
+							);
+
+							// Execute the function with our safe context
+							conditionMet = Boolean(evalFunction(sandbox.$input, sandbox.$node));
+							this.logger.debug(`Expression evaluation result: ${conditionMet} for: ${jsExpression}`);
+						} catch (error) {
+							this.logger.error(`Error evaluating expression: ${error.message}`);
+							conditionMet = false;
+						}
+						break;
+					}
+
+					case 'inputSource': {
+						const sourceNodeName = group.sourceNodeName as string;
+
+						try {
+							// Get the node that sent the data
+							const inputData = this.getInputData()[index];
+
+							// Only access source property if it's a data object with the right structure
+							let inputNodeName: string | undefined;
+
+							if (typeof inputData === 'object' &&
+								inputData !== null &&
+								'source' in inputData &&
+								inputData.source !== null &&
+								typeof inputData.source === 'object') {
+
+								const source = inputData.source as IDataObject;
+								if ('node' in source &&
+									source.node !== null &&
+									typeof source.node === 'object') {
+
+									const node = source.node as IDataObject;
+									if ('name' in node && typeof node.name === 'string') {
+										inputNodeName = node.name;
+									}
+								}
+							}
+
+							// Compare with the expected source node name
+							conditionMet = inputNodeName === sourceNodeName;
+							this.logger.debug(`Input source check: ${inputNodeName} === ${sourceNodeName}: ${conditionMet}`);
+						} catch (error) {
+							this.logger.error(`Error checking input source: ${error.message}`);
+							conditionMet = false;
+						}
+						break;
+					}
+
+					case 'executionCount': {
+						const comparison = group.executionCountComparison as string;
+						const value = group.executionCountValue as number;
+
+						try {
+							// Get static data for this node to track execution count
+							const nodeContext = this.getWorkflowStaticData('node');
+
+							// Initialize or increment the execution counter
+							if (typeof nodeContext.executionCount !== 'number') {
+								nodeContext.executionCount = 0;
+							}
+
+							nodeContext.executionCount = (nodeContext.executionCount as number) + 1;
+							const currentCount = nodeContext.executionCount as number;
+
+							// Compare using the same helper function we use for element count
+							conditionMet = compareCount(currentCount, value, comparison);
+							this.logger.debug(`Execution count check: ${currentCount} ${comparison} ${value}: ${conditionMet}`);
+						} catch (error) {
+							this.logger.error(`Error checking execution count: ${error.message}`);
+							conditionMet = false;
+						}
 						break;
 					}
 				}
