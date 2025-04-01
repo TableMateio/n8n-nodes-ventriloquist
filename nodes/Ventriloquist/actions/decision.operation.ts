@@ -452,9 +452,6 @@ export const description: INodeProperties[] = [
 							show: {
 								actionType: ['fill'],
 							},
-							hide: {
-								'': [],
-							},
 						},
 					},
 					{
@@ -468,9 +465,6 @@ export const description: INodeProperties[] = [
 							show: {
 								actionType: ['fill'],
 								submitForm: [true],
-							},
-							hide: {
-								'': [],
 							},
 						},
 					},
@@ -507,9 +501,6 @@ export const description: INodeProperties[] = [
 								actionType: ['fill'],
 								submitForm: [true],
 							},
-							hide: {
-								'': [],
-							},
 						},
 					},
 					{
@@ -524,9 +515,6 @@ export const description: INodeProperties[] = [
 								submitForm: [true],
 								waitAfterSubmit: ['fixedTime'],
 							},
-							hide: {
-								'': [],
-							},
 						},
 					},
 					{
@@ -536,11 +524,8 @@ export const description: INodeProperties[] = [
 						default: '',
 						description: 'Text to enter into the form field',
 						displayOptions: {
-							show: {
-								actionType: ['fill'],
-							},
 							hide: {
-								'': [],
+								actionType: ['click', 'extract', 'navigate', 'none'],
 							},
 						},
 					},
@@ -578,11 +563,8 @@ export const description: INodeProperties[] = [
 						default: 'text',
 						description: 'Type of form input to interact with',
 						displayOptions: {
-							show: {
-								actionType: ['fill'],
-							},
 							hide: {
-								'': [],
+								actionType: ['click', 'extract', 'navigate', 'none'],
 							},
 						},
 					},
@@ -593,11 +575,8 @@ export const description: INodeProperties[] = [
 						default: false,
 						description: 'Whether to clear the field before entering text (useful for pre-filled inputs)',
 						displayOptions: {
-							show: {
-								actionType: ['fill'],
-							},
 							hide: {
-								'': [],
+								actionType: ['click', 'extract', 'navigate', 'none'],
 							},
 						},
 					},
@@ -608,11 +587,8 @@ export const description: INodeProperties[] = [
 						default: false,
 						description: 'Whether to press Enter after entering text (useful for forms that submit on Enter)',
 						displayOptions: {
-							show: {
-								actionType: ['fill'],
-							},
 							hide: {
-								'': [],
+								actionType: ['click', 'extract', 'navigate', 'none'],
 							},
 						},
 					},
@@ -640,11 +616,8 @@ export const description: INodeProperties[] = [
 						default: 'check',
 						description: 'Whether to check or uncheck the checkbox/radio button',
 						displayOptions: {
-							show: {
-								actionType: ['fill'],
-							},
 							hide: {
-								'': [],
+								actionType: ['click', 'extract', 'navigate', 'none'],
 							},
 						},
 					},
@@ -655,11 +628,8 @@ export const description: INodeProperties[] = [
 						default: '',
 						description: 'Path to the file to upload (must be accessible to the Ventriloquist server)',
 						displayOptions: {
-							show: {
-								actionType: ['fill'],
-							},
 							hide: {
-								'': [],
+								actionType: ['click', 'extract', 'navigate', 'none'],
 							},
 						},
 					},
