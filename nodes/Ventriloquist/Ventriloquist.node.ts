@@ -663,8 +663,12 @@ export class Ventriloquist implements INodeType {
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
+		// Get input items
 		const items = this.getInputData();
-		const returnData: INodeExecutionData[] = [];
+		const returnData: INodeExecutionData[][] = [];
+
+		// Always initialize with at least one output
+		returnData.push([]);
 
 		// Get credentials
 		const credentials = (await this.getCredentials(
@@ -784,7 +788,7 @@ export class Ventriloquist implements INodeType {
 						const executionDuration = Date.now() - startTime;
 						responseData.executionDuration = executionDuration;
 
-						returnData.push({
+						returnData[0].push({
 							json: responseData,
 						});
 					} catch (error) {
@@ -798,7 +802,7 @@ export class Ventriloquist implements INodeType {
 						const executionDuration = Date.now() - startTime;
 
 						// Otherwise, return an error response and continue
-						returnData.push({
+						returnData[0].push({
 							json: {
 								success: false,
 								operation,
@@ -983,7 +987,7 @@ export class Ventriloquist implements INodeType {
 							// Calculate execution duration
 							const executionDuration = Date.now() - startTime;
 
-							returnData.push({
+							returnData[0].push({
 								json: {
 									success: false,
 									error: error.message || 'An unknown error occurred',
@@ -1021,7 +1025,7 @@ export class Ventriloquist implements INodeType {
 						// Calculate execution duration
 						const executionDuration = Date.now() - startTime;
 
-						returnData.push({
+						returnData[0].push({
 							json: {
 								success: true,
 								operation: 'click',
@@ -1048,7 +1052,7 @@ export class Ventriloquist implements INodeType {
 						}
 
 						// Otherwise, return an error response but continue execution
-						returnData.push({
+						returnData[0].push({
 							json: {
 								success: false,
 								operation: 'click',
@@ -1078,7 +1082,7 @@ export class Ventriloquist implements INodeType {
 						result.json.executionDuration = Date.now() - startTime;
 					}
 
-					returnData.push(result);
+					returnData[0].push(result);
 				} else if (operation === 'detect') {
 					// Execute detect operation
 					const result = await detectOperation.execute.call(
@@ -1093,7 +1097,7 @@ export class Ventriloquist implements INodeType {
 						result.json.executionDuration = Date.now() - startTime;
 					}
 
-					returnData.push(result);
+					returnData[0].push(result);
 				} else if (operation === 'decision') {
 					// Find the session we need to use
 					const existingSessionId = this.getNodeParameter('sessionId', i, '') as string;
@@ -1126,13 +1130,34 @@ export class Ventriloquist implements INodeType {
 					}
 
 					// Execute decision operation
-					const result = await decisionOperation.execute.call(
+					const decisionResult = await decisionOperation.execute.call(
 						this,
 						i,
 						page
 					);
 
-					returnData.push(...result);
+					const routingOptions = this.getNodeParameter('routingOptions', i, {}) as IDataObject;
+					const enableMultipleOutputs = !!routingOptions.enableMultipleOutputs;
+
+					if (enableMultipleOutputs) {
+						// For the decision node with routing, we'll store the data in memory for now
+						// In a future update, we'll implement proper dynamic outputs
+
+						// Get the route from the decision result
+						let outputRoute = 'main';
+						if (Array.isArray(decisionResult) && decisionResult.length > 0 && decisionResult[0].json) {
+							outputRoute = decisionResult[0].json.outputRoute as string || 'main';
+						}
+
+						// Return the data with the route information
+						returnData[0] = decisionResult;
+
+						// Add a notice about current routing implementation
+						this.logger.info(`Decision operation routed to "${outputRoute}". For proper routing, update to a future version with multi-output support.`);
+					} else {
+						// Single output mode
+						returnData[0] = decisionResult;
+					}
 				} else if (operation === 'extract') {
 					// Execute extract operation
 					const result = await extractOperation.execute.call(
@@ -1147,7 +1172,7 @@ export class Ventriloquist implements INodeType {
 						result.json.executionDuration = Date.now() - startTime;
 					}
 
-					returnData.push(result);
+					returnData[0].push(result);
 				} else if (operation === 'close') {
 					// Close browser sessions based on the selected mode
 					const closeMode = this.getNodeParameter('closeMode', i, 'session') as string;
@@ -1186,7 +1211,7 @@ export class Ventriloquist implements INodeType {
 								}
 
 								// Return success
-								returnData.push({
+								returnData[0].push({
 									json: {
 										success: true,
 										operation,
@@ -1206,7 +1231,7 @@ export class Ventriloquist implements INodeType {
 							const closeResult = await Ventriloquist.closeAllSessions(this.logger);
 
 							// Return success with details
-							returnData.push({
+							returnData[0].push({
 								json: {
 									success: true,
 									operation,
@@ -1246,7 +1271,7 @@ export class Ventriloquist implements INodeType {
 							}
 
 							// Return result
-							returnData.push({
+							returnData[0].push({
 								json: {
 									success: true,
 									operation,
@@ -1267,7 +1292,7 @@ export class Ventriloquist implements INodeType {
 						}
 
 						// Otherwise, return an error response and continue
-						returnData.push({
+						returnData[0].push({
 							json: {
 								success: false,
 								operation,
@@ -1291,7 +1316,7 @@ export class Ventriloquist implements INodeType {
 					// Calculate execution duration
 					const executionDuration = Date.now() - startTime;
 
-					returnData.push({
+					returnData[0].push({
 						json: {
 							success: false,
 							error: error.message || 'An unknown error occurred',
@@ -1305,6 +1330,6 @@ export class Ventriloquist implements INodeType {
 			}
 		}
 
-		return [returnData];
+		return returnData;
 	}
 }

@@ -41,6 +41,14 @@ export const description: INodeProperties[] = [
 						required: true,
 					},
 					{
+						displayName: 'Route to Output',
+						name: 'routeOutput',
+						type: 'string',
+						default: '',
+						description: 'Name of the output to route items to when this condition matches (leave empty to use index-based routing)',
+						placeholder: 'e.g., success, error, retry',
+					},
+					{
 						displayName: 'Condition Type',
 						name: 'conditionType',
 						type: 'options',
@@ -553,6 +561,51 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: 'Routing Options',
+		name: 'routingOptions',
+		type: 'collection',
+		placeholder: 'Add Routing Option',
+		default: {},
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+			},
+		},
+		options: [
+			{
+				displayName: 'Enable Multiple Outputs',
+				name: 'enableMultipleOutputs',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to send data to different outputs based on matching conditions',
+			},
+			{
+				displayName: 'Fallback Output',
+				name: 'fallbackOutput',
+				type: 'string',
+				default: '',
+				description: 'Name of the output to route items to when no conditions match (leave empty to use main output)',
+				displayOptions: {
+					show: {
+						enableMultipleOutputs: [true],
+					},
+				},
+			},
+			{
+				displayName: 'Send to All Matching Outputs',
+				name: 'sendToAllMatching',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to send data to all outputs with matching conditions (not just the first one)',
+				displayOptions: {
+					show: {
+						enableMultipleOutputs: [true],
+					},
+				},
+			},
+		],
+	},
 ];
 
 /**
@@ -737,16 +790,42 @@ export async function execute(
 		const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
 		const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 
+		// Get routing options
+		const routingOptions = this.getNodeParameter('routingOptions', index, {}) as IDataObject;
+		const enableMultipleOutputs = routingOptions.enableMultipleOutputs as boolean || false;
+		const fallbackOutput = routingOptions.fallbackOutput as string || '';
+		const sendToAllMatching = routingOptions.sendToAllMatching as boolean || false;
+
 		let routeTaken = 'none';
 		let actionPerformed = 'none';
+		let outputRouteName = '';
 		const currentUrl = await puppeteerPage.url();
 		let screenshot: string | undefined;
+
+		// Track matching conditions for routing
+		const matchingRoutes: string[] = [];
+		const defaultResult = {
+			success: true,
+			routeTaken,
+			actionPerformed,
+			currentUrl: await puppeteerPage.url(),
+			pageTitle: await puppeteerPage.title(),
+			screenshot,
+			executionDuration: 0,
+			outputRoute: '',
+		};
+
+		// Prepare routing results
+		const routingResults: Record<string, INodeExecutionData[]> = {
+			main: [{ json: { ...defaultResult } }],
+		};
 
 		// Check each condition group
 		for (const group of conditionGroups) {
 			const conditionType = group.conditionType as string;
 			const groupName = group.name as string;
 			const invertCondition = group.invertCondition as boolean || false;
+			const routeOutput = (group.routeOutput as string || '').trim();
 
 			this.logger.debug(`Checking condition group: ${groupName}`);
 
@@ -858,10 +937,16 @@ export async function execute(
 
 				this.logger.debug(`Condition result for ${groupName}: ${conditionMet}`);
 
-				// If condition is met, perform the corresponding action
+				// If condition is met
 				if (conditionMet) {
 					routeTaken = groupName;
 					const actionType = group.actionType as string;
+
+					// For routing capability, store route information
+					if (enableMultipleOutputs && routeOutput) {
+						matchingRoutes.push(routeOutput);
+						outputRouteName = routeOutput;
+					}
 
 					if (actionType !== 'none') {
 						actionPerformed = actionType;
@@ -947,8 +1032,10 @@ export async function execute(
 						}
 					}
 
-					// Exit the loop after finding first matching condition
-					break;
+					// If not sending to all matching outputs, exit the loop after first match
+					if (!enableMultipleOutputs || !sendToAllMatching) {
+						break;
+					}
 				}
 			} catch (error) {
 				this.logger.error(`Error in condition group ${groupName}: ${(error as Error).message}`);
@@ -963,6 +1050,12 @@ export async function execute(
 		if (routeTaken === 'none' && fallbackAction !== 'none') {
 			routeTaken = 'fallback';
 			actionPerformed = fallbackAction;
+
+			// Set fallback output route if specified
+			if (enableMultipleOutputs && fallbackOutput) {
+				outputRouteName = fallbackOutput;
+				matchingRoutes.push(fallbackOutput);
+			}
 
 			try {
 				// Add human-like delay if enabled
@@ -1060,18 +1153,38 @@ export async function execute(
 
 		const executionDuration = Date.now() - startTime;
 
-		// Return results
+		// Prepare the result data
+		const resultData = {
+			success: true,
+			routeTaken,
+			actionPerformed,
+			currentUrl: await puppeteerPage.url(),
+			pageTitle: await puppeteerPage.title(),
+			screenshot,
+			executionDuration,
+			outputRoute: outputRouteName,
+		};
+
+		// Handle routing logic
+		if (enableMultipleOutputs && matchingRoutes.length > 0) {
+			// Create outputs for each matching route
+			for (const route of matchingRoutes) {
+				if (!routingResults[route]) {
+					routingResults[route] = [];
+				}
+				routingResults[route].push({
+					json: resultData,
+				});
+			}
+
+			// Return the routing results object for the node to handle
+			return Object.values(routingResults).flat();
+		}
+
+		// If not using multiple outputs, return simple array
 		return [
 			{
-				json: {
-					success: true,
-					routeTaken,
-					actionPerformed,
-					currentUrl: await puppeteerPage.url(),
-					pageTitle: await puppeteerPage.title(),
-					screenshot,
-					executionDuration,
-				},
+				json: resultData,
 			},
 		];
 	} catch (error) {
