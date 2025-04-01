@@ -45,7 +45,7 @@ export const description: INodeProperties[] = [
 			show: {
 				'/operation': ['decision'],
 				'/enableRouting': [true],
-				'/fallbackAction': ['continueExecution', 'stopExecution'],
+				'/fallbackAction': ['click', 'extract', 'fill', 'navigate'],
 			},
 		},
 		typeOptions: {
