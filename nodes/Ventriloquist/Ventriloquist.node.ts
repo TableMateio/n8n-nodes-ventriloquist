@@ -1443,43 +1443,43 @@ export class Ventriloquist implements INodeType {
 				try {
 					// Create an array of basic node options
 					const nodeOptions: INodePropertyOptions[] = [
-						{ name: '- Select a Node -', value: '' },
+						{ name: '- Select a Specific Node Name -', value: '' },
 					];
 
-					// Add options for common scenarios with descriptive names
+					// Add a note about where to find the node name
+					const NOTE_PREFIX = "📝 ";
+
+					// Add help options
 					nodeOptions.push(
-						{ name: 'Previous Node (First Input)', value: 'prevNode' },
-						{ name: 'Previous Node (Second Input)', value: 'prevNode2' },
-						{ name: 'Start Node (Workflow Trigger)', value: 'startNode' },
-						{ name: 'Input 1', value: 'input1' },
-						{ name: 'Input 2', value: 'input2' },
-						{ name: 'Input 3', value: 'input3' },
-						{ name: 'Input A', value: 'inputA' },
-						{ name: 'Input B', value: 'inputB' },
-						{ name: 'Input C', value: 'inputC' }
+						{
+							name: `${NOTE_PREFIX}Node names can be found in the node title or settings`,
+							value: ''
+						},
+						{
+							name: `${NOTE_PREFIX}Enter the exact name of the node that should trigger this condition`,
+							value: ''
+						}
 					);
 
-					// Include some generic input names
-					for (let i = 1; i <= 5; i++) {
-						const nodeName = `Node ${i}`;
-						if (!nodeOptions.find(option => option.value === nodeName)) {
-							nodeOptions.push({
-								name: nodeName,
-								value: nodeName,
-							});
-						}
-					}
+					// Add common naming pattern examples
+					nodeOptions.push(
+						{ name: 'HTTP Request', value: 'HTTP Request' },
+						{ name: 'Set', value: 'Set' },
+						{ name: 'Function', value: 'Function' },
+						{ name: 'Switch', value: 'Switch' },
+						{ name: 'IF', value: 'IF' },
+						{ name: 'Code', value: 'Code' },
+						{ name: 'Webhook', value: 'Webhook' }
+					);
 
 					return nodeOptions;
 				} catch (error) {
 					// If any error occurs, return basic options
 					return [
-						{ name: '- Select a Node -', value: '' },
-						{ name: 'Previous Node (First Input)', value: 'prevNode' },
-						{ name: 'Previous Node (Second Input)', value: 'prevNode2' },
-						{ name: 'Start Node (Workflow Trigger)', value: 'startNode' },
-						{ name: 'Input 1', value: 'input1' },
-						{ name: 'Input 2', value: 'input2' }
+						{ name: '- Select a Specific Node Name -', value: '' },
+						{ name: 'HTTP Request', value: 'HTTP Request' },
+						{ name: 'Set', value: 'Set' },
+						{ name: 'Function', value: 'Function' }
 					];
 				}
 			},

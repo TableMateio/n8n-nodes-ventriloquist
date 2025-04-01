@@ -158,6 +158,19 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
+						displayName: 'Custom Node Name',
+						name: 'customSourceNodeName',
+						type: 'string',
+						default: '',
+						placeholder: 'e.g., HTTP Request 1, My Function Node',
+						description: 'If your node doesn\'t appear in the dropdown above, enter its exact name here. This will override the selection.',
+						displayOptions: {
+							show: {
+								conditionType: ['inputSource'],
+							},
+						},
+					},
+					{
 						displayName: 'Count Comparison',
 						name: 'executionCountComparison',
 						type: 'options',
@@ -1528,6 +1541,11 @@ export async function execute(
 
 					case 'inputSource': {
 						const sourceNodeName = group.sourceNodeName as string;
+						const customSourceNodeName = group.customSourceNodeName as string;
+
+						// Use the custom node name if provided, otherwise use the dropdown selection
+						const targetNodeName = (customSourceNodeName?.trim()) ?
+							customSourceNodeName.trim() : sourceNodeName;
 
 						try {
 							// Get the node that sent the data
@@ -1555,8 +1573,8 @@ export async function execute(
 							}
 
 							// Compare with the expected source node name
-							conditionMet = inputNodeName === sourceNodeName;
-							this.logger.debug(`Input source check: ${inputNodeName} === ${sourceNodeName}: ${conditionMet}`);
+							conditionMet = inputNodeName === targetNodeName;
+							this.logger.debug(`Input source check: ${inputNodeName} === ${targetNodeName}: ${conditionMet}`);
 						} catch (error) {
 							this.logger.error(`Error checking input source: ${error.message}`);
 							conditionMet = false;
