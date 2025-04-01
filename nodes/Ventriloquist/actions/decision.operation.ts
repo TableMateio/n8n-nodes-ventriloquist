@@ -23,45 +23,23 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: 'Routes',
-		name: 'routes',
-		type: 'fixedCollection',
-		typeOptions: {
-			multipleValues: true,
-			sortable: true,
-		},
-		default: { values: [{ name: 'Route 1' }, { name: 'Route 2' }] },
-		placeholder: 'Add Route',
-		description: 'Define the routes that can be selected in conditions',
+		displayName: 'Number of Routes',
+		name: 'routeCount',
+		type: 'number',
+		default: 2,
+		description: 'Maximum number of routes to create',
 		displayOptions: {
 			show: {
 				operation: ['decision'],
 				enableRouting: [true],
 			},
 		},
-		options: [
-			{
-				name: 'values',
-				displayName: 'Route',
-				values: [
-					{
-						displayName: 'Name',
-						name: 'name',
-						type: 'string',
-						default: '',
-						placeholder: 'e.g., Success Route',
-						description: 'Name of this route for identification',
-						required: true,
-					},
-				],
-			},
-		],
 	},
 	{
 		displayName: 'Fallback Route',
 		name: 'fallbackRoute',
 		type: 'options',
-		default: 'Route 1',
+		default: 1,
 		description: 'Which output route to use when no conditions match',
 		displayOptions: {
 			show: {
@@ -108,7 +86,7 @@ export const description: INodeProperties[] = [
 						displayName: 'Route',
 						name: 'route',
 						type: 'options',
-						default: 'Route 1',
+						default: 1,
 						description: 'Which output route to use when this condition matches',
 						displayOptions: {
 							show: {
@@ -835,16 +813,10 @@ export async function execute(
 
 			// Get route if routing is enabled
 			if (enableRouting) {
-				const groupRoute = group.route as string;
+				const groupRoute = group.route as number;
 				if (groupRoute) {
-					// Use the route string directly for output index
-					// "Route 1" -> 0, "Route 2" -> 1, etc.
-					if (groupRoute.startsWith('Route ')) {
-						const routeNum = Number.parseInt(groupRoute.substring(6), 10);
-						if (!Number.isNaN(routeNum) && routeNum > 0) {
-							routeIndex = routeNum - 1;
-						}
-					}
+					// Route numbers are 1-based, but indexes are 0-based
+					routeIndex = groupRoute - 1;
 				}
 			}
 
@@ -965,16 +937,10 @@ export async function execute(
 
 					// For routing capability, store route information
 					if (enableRouting) {
-						const groupRoute = group.route as string;
+						const groupRoute = group.route as number;
 						if (groupRoute) {
-							// Use the route string directly for output index
-							// "Route 1" -> 0, "Route 2" -> 1, etc.
-							if (groupRoute.startsWith('Route ')) {
-								const routeNum = Number.parseInt(groupRoute.substring(6), 10);
-								if (!Number.isNaN(routeNum) && routeNum > 0) {
-									routeIndex = routeNum - 1;
-								}
-							}
+							// Route numbers are 1-based, but indexes are 0-based
+							routeIndex = groupRoute - 1;
 						}
 					}
 
@@ -1081,17 +1047,8 @@ export async function execute(
 
 			// Set fallback route if routing is enabled
 			if (enableRouting) {
-				const fallbackRoute = this.getNodeParameter('fallbackRoute', index, 'Route 1') as string;
-				if (fallbackRoute) {
-					// Use the route string directly for output index
-					// "Route 1" -> 0, "Route 2" -> 1, etc.
-					if (fallbackRoute.startsWith('Route ')) {
-						const routeNum = Number.parseInt(fallbackRoute.substring(6), 10);
-						if (!Number.isNaN(routeNum) && routeNum > 0) {
-							routeIndex = routeNum - 1;
-						}
-					}
-				}
+				const fallbackRoute = this.getNodeParameter('fallbackRoute', index, 1) as number;
+				routeIndex = fallbackRoute - 1;
 			}
 
 			try {
@@ -1212,7 +1169,7 @@ export async function execute(
 
 		// If using routing
 		if (enableRouting) {
-			// Set the route name for output
+			// Set the route name for output (1-based for display)
 			const routeName = `Route ${routeIndex + 1}`;
 
 			return [{

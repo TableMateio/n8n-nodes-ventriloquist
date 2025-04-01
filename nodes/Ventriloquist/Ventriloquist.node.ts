@@ -1408,27 +1408,32 @@ export class Ventriloquist implements INodeType {
 			// Get route options for the Decision operation
 			async getRoutes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				try {
-					// Try to get the routes the user has defined
-					const routes = this.getNodeParameter('routes.values') as IDataObject[] | undefined;
+					// Get the maximum number of routes
+					const routeCount = parseInt(this.getNodeParameter('routeCount', 2) as string, 10);
 
-					if (routes && Array.isArray(routes) && routes.length > 0) {
-						// User has defined routes, return them as options
-						return routes.map((route) => ({
-							name: route.name as string,
-							value: route.name as string,
-						}));
+					// Create numeric route options
+					const routeOptions: INodePropertyOptions[] = [];
+					for (let i = 1; i <= routeCount; i++) {
+						routeOptions.push({
+							name: `${i}`,
+							value: i
+						});
 					}
 
-					// If no routes defined, return default Route 1 and 2
-					return [
-						{ name: 'Route 1', value: 'Route 1' },
-						{ name: 'Route 2', value: 'Route 2' },
-					];
+					// Always ensure we have at least routes 1 and 2
+					if (routeOptions.length === 0) {
+						routeOptions.push(
+							{ name: '1', value: 1 },
+							{ name: '2', value: 2 }
+						);
+					}
+
+					return routeOptions;
 				} catch (error) {
-					// If any error occurs (like when first setting up), use defaults
+					// If any error occurs, use defaults
 					return [
-						{ name: 'Route 1', value: 'Route 1' },
-						{ name: 'Route 2', value: 'Route 2' },
+						{ name: '1', value: 1 },
+						{ name: '2', value: 2 },
 					];
 				}
 			},
