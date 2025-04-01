@@ -403,6 +403,114 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
+						displayName: 'Input Type',
+						name: 'inputType',
+						type: 'options',
+						options: [
+							{
+								name: 'Checkbox',
+								value: 'checkbox',
+								description: 'Checkbox input element',
+							},
+							{
+								name: 'File Upload',
+								value: 'file',
+								description: 'File input element',
+							},
+							{
+								name: 'Radio Button',
+								value: 'radio',
+								description: 'Radio button input element',
+							},
+							{
+								name: 'Select / Dropdown',
+								value: 'select',
+								description: 'Dropdown select element',
+							},
+							{
+								name: 'Text / Textarea',
+								value: 'text',
+								description: 'Standard text input or textarea',
+							},
+						],
+						default: 'text',
+						description: 'Type of form input to interact with',
+						displayOptions: {
+							show: {
+								actionType: ['fill'],
+							},
+						},
+					},
+					{
+						displayName: 'Clear Field First',
+						name: 'clearField',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to clear the field before entering text (useful for pre-filled inputs)',
+						displayOptions: {
+							show: {
+								actionType: ['fill'],
+								inputType: ['text'],
+							},
+						},
+					},
+					{
+						displayName: 'Press Enter After Input',
+						name: 'pressEnter',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to press Enter after entering text (useful for forms that submit on Enter)',
+						displayOptions: {
+							show: {
+								actionType: ['fill'],
+								inputType: ['text'],
+							},
+						},
+					},
+					{
+						displayName: 'Check State',
+						name: 'checkState',
+						type: 'options',
+						options: [
+							{
+								name: 'Check / Select',
+								value: 'check',
+								description: 'Check/select the element',
+							},
+							{
+								name: 'Uncheck / Deselect',
+								value: 'uncheck',
+								description: 'Uncheck/deselect the element',
+							},
+							{
+								name: 'Toggle',
+								value: 'toggle',
+								description: 'Toggle the current state',
+							},
+						],
+						default: 'check',
+						description: 'Whether to check or uncheck the checkbox/radio button',
+						displayOptions: {
+							show: {
+								actionType: ['fill'],
+								inputType: ['checkbox', 'radio'],
+							},
+						},
+					},
+					{
+						displayName: 'File Path',
+						name: 'filePath',
+						type: 'string',
+						default: '',
+						description: 'Path to the file to upload (must be accessible to the Ventriloquist server)',
+						displayOptions: {
+							show: {
+								actionType: ['fill'],
+								inputType: ['file'],
+							},
+						},
+					},
+					{
 						displayName: 'URL',
 						name: 'url',
 						type: 'string',
@@ -625,6 +733,119 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ['decision'],
 				fallbackAction: ['fill'],
+			},
+		},
+	},
+	{
+		displayName: 'Fallback Input Type',
+		name: 'fallbackInputType',
+		type: 'options',
+		options: [
+			{
+				name: 'Checkbox',
+				value: 'checkbox',
+				description: 'Checkbox input element',
+			},
+			{
+				name: 'File Upload',
+				value: 'file',
+				description: 'File input element',
+			},
+			{
+				name: 'Radio Button',
+				value: 'radio',
+				description: 'Radio button input element',
+			},
+			{
+				name: 'Select / Dropdown',
+				value: 'select',
+				description: 'Dropdown select element',
+			},
+			{
+				name: 'Text / Textarea',
+				value: 'text',
+				description: 'Standard text input or textarea',
+			},
+		],
+		default: 'text',
+		description: 'Type of form input to interact with in the fallback action',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['fill'],
+			},
+		},
+	},
+	{
+		displayName: 'Fallback Clear Field First',
+		name: 'fallbackClearField',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to clear the field before entering text (useful for pre-filled inputs)',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['fill'],
+				fallbackInputType: ['text'],
+			},
+		},
+	},
+	{
+		displayName: 'Fallback Press Enter After Input',
+		name: 'fallbackPressEnter',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to press Enter after entering text (useful for forms that submit on Enter)',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['fill'],
+				fallbackInputType: ['text'],
+			},
+		},
+	},
+	{
+		displayName: 'Fallback Check State',
+		name: 'fallbackCheckState',
+		type: 'options',
+		options: [
+			{
+				name: 'Check / Select',
+				value: 'check',
+				description: 'Check/select the element',
+			},
+			{
+				name: 'Uncheck / Deselect',
+				value: 'uncheck',
+				description: 'Uncheck/deselect the element',
+			},
+			{
+				name: 'Toggle',
+				value: 'toggle',
+				description: 'Toggle the current state',
+			},
+		],
+		default: 'check',
+		description: 'Whether to check or uncheck the checkbox/radio button',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['fill'],
+				fallbackInputType: ['checkbox', 'radio'],
+			},
+		},
+	},
+	{
+		displayName: 'Fallback File Path',
+		name: 'fallbackFilePath',
+		type: 'string',
+		default: '',
+		description: 'Path to the file to upload (must be accessible to the Ventriloquist server)',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['fill'],
+				fallbackInputType: ['file'],
 			},
 		},
 	},
@@ -1206,6 +1427,11 @@ export async function execute(
 							case 'fill': {
 								const actionSelector = group.actionSelector as string;
 								const textValue = group.textValue as string;
+								const inputType = group.inputType as string || 'text';
+								const clearField = group.clearField as boolean || false;
+								const pressEnter = group.pressEnter as boolean || false;
+								const checkState = group.checkState as string || 'check';
+								const filePath = group.filePath as string || '';
 
 								if (waitForSelectors) {
 									// For actions, we always need to ensure the element exists
@@ -1226,8 +1452,73 @@ export async function execute(
 									}
 								}
 
-								this.logger.debug(`Filling form field: ${actionSelector} with value: ${textValue}`);
-								await puppeteerPage.type(actionSelector, textValue);
+								// Handle different input types
+								switch (inputType) {
+									case 'text': {
+										// Handle text inputs and textareas
+										if (clearField) {
+											// Click three times to select all text
+											await puppeteerPage.click(actionSelector, { clickCount: 3 });
+											// Delete selected text
+											await puppeteerPage.keyboard.press('Backspace');
+										}
+
+										// Type the text
+										this.logger.debug(`Filling form field: ${actionSelector} with value: ${textValue}`);
+										await puppeteerPage.type(actionSelector, textValue);
+
+										// Press Enter if requested
+										if (pressEnter) {
+											await puppeteerPage.keyboard.press('Enter');
+										}
+										break;
+									}
+
+									case 'select': {
+										// Handle select/dropdown elements
+										this.logger.debug(`Setting select element: ${actionSelector} to value: ${textValue}`);
+										await puppeteerPage.select(actionSelector, textValue);
+										break;
+									}
+
+									case 'checkbox':
+									case 'radio': {
+										// Handle checkbox and radio button inputs
+										this.logger.debug(`Setting ${inputType}: ${actionSelector} to state: ${checkState}`);
+
+										// Get the current checked state
+										const currentChecked = await puppeteerPage.$eval(actionSelector, el => (el as HTMLInputElement).checked);
+
+										// Determine if we need to click based on requested state
+										let shouldClick = false;
+										if (checkState === 'check' && !currentChecked) shouldClick = true;
+										if (checkState === 'uncheck' && currentChecked) shouldClick = true;
+										if (checkState === 'toggle') shouldClick = true;
+
+										if (shouldClick) {
+											await puppeteerPage.click(actionSelector);
+										}
+										break;
+									}
+
+									case 'file': {
+										// Handle file upload inputs
+										this.logger.debug(`Setting file input: ${actionSelector} with file: ${filePath}`);
+										// Use correct typing for ElementHandle to avoid linter errors
+										const input = await puppeteerPage.$(actionSelector);
+										if (input) {
+											await puppeteerPage.evaluate((el, filePath) => {
+												// This is needed to bypass file input security restrictions
+												// by directly setting the file in the browser context
+												const dataTransfer = new DataTransfer();
+												const file = new File([''], filePath.split('/').pop() || 'file', { type: 'application/octet-stream' });
+												dataTransfer.items.add(file);
+												(el as HTMLInputElement).files = dataTransfer.files;
+											}, input, filePath);
+										}
+										break;
+									}
+								}
 								break;
 							}
 
@@ -1523,6 +1814,11 @@ export async function execute(
 					case 'fill': {
 						const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
 						const fallbackText = this.getNodeParameter('fallbackText', index) as string;
+						const fallbackInputType = this.getNodeParameter('fallbackInputType', index, 'text') as string;
+						const fallbackClearField = this.getNodeParameter('fallbackClearField', index, false) as boolean;
+						const fallbackPressEnter = this.getNodeParameter('fallbackPressEnter', index, false) as boolean;
+						const fallbackCheckState = this.getNodeParameter('fallbackCheckState', index, 'check') as string;
+						const fallbackFilePath = this.getNodeParameter('fallbackFilePath', index, '') as string;
 
 						if (waitForSelectors) {
 							// For actions, we always need to ensure the element exists
@@ -1543,8 +1839,73 @@ export async function execute(
 							}
 						}
 
-						this.logger.debug(`Fallback action: Filling form field: ${fallbackSelector} with value: ${fallbackText}`);
-						await puppeteerPage.type(fallbackSelector, fallbackText);
+						// Handle different input types
+						switch (fallbackInputType) {
+							case 'text': {
+								// Handle text inputs and textareas
+								if (fallbackClearField) {
+									// Click three times to select all text
+									await puppeteerPage.click(fallbackSelector, { clickCount: 3 });
+									// Delete selected text
+									await puppeteerPage.keyboard.press('Backspace');
+								}
+
+								// Type the text
+								this.logger.debug(`Fallback action: Filling form field: ${fallbackSelector} with value: ${fallbackText}`);
+								await puppeteerPage.type(fallbackSelector, fallbackText);
+
+								// Press Enter if requested
+								if (fallbackPressEnter) {
+									await puppeteerPage.keyboard.press('Enter');
+								}
+								break;
+							}
+
+							case 'select': {
+								// Handle select/dropdown elements
+								this.logger.debug(`Fallback action: Setting select element: ${fallbackSelector} to value: ${fallbackText}`);
+								await puppeteerPage.select(fallbackSelector, fallbackText);
+								break;
+							}
+
+							case 'checkbox':
+							case 'radio': {
+								// Handle checkbox and radio button inputs
+								this.logger.debug(`Fallback action: Setting ${fallbackInputType}: ${fallbackSelector} to state: ${fallbackCheckState}`);
+
+								// Get the current checked state
+								const currentChecked = await puppeteerPage.$eval(fallbackSelector, el => (el as HTMLInputElement).checked);
+
+								// Determine if we need to click based on requested state
+								let shouldClick = false;
+								if (fallbackCheckState === 'check' && !currentChecked) shouldClick = true;
+								if (fallbackCheckState === 'uncheck' && currentChecked) shouldClick = true;
+								if (fallbackCheckState === 'toggle') shouldClick = true;
+
+								if (shouldClick) {
+									await puppeteerPage.click(fallbackSelector);
+								}
+								break;
+							}
+
+							case 'file': {
+								// Handle file upload inputs
+								this.logger.debug(`Fallback action: Setting file input: ${fallbackSelector} with file: ${fallbackFilePath}`);
+								// Use correct typing for ElementHandle to avoid linter errors
+								const input = await puppeteerPage.$(fallbackSelector);
+								if (input) {
+									await puppeteerPage.evaluate((el, filePath) => {
+										// This is needed to bypass file input security restrictions
+										// by directly setting the file in the browser context
+										const dataTransfer = new DataTransfer();
+										const file = new File([''], filePath.split('/').pop() || 'file', { type: 'application/octet-stream' });
+										dataTransfer.items.add(file);
+										(el as HTMLInputElement).files = dataTransfer.files;
+									}, input, fallbackFilePath);
+								}
+								break;
+							}
+						}
 						break;
 					}
 
