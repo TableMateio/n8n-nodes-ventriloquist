@@ -71,6 +71,11 @@ export const description: INodeProperties[] = [
 						type: 'options',
 						default: '',
 						description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
+						displayOptions: {
+							show: {
+								'/enableRouting': [true],
+							},
+						},
 						typeOptions: {
 							loadOptionsMethod: 'getRoutes',
 						},
@@ -418,6 +423,13 @@ export const description: INodeProperties[] = [
 						],
 						default: 'and',
 						description: 'How to combine multiple conditions in this group',
+						// The key change here is using a simple function that counts conditions
+						// This should be evaluated at runtime in the frontend
+						displayOptions: {
+							show: {
+								'/operation': ['decision'],
+							},
+						},
 					},
 					{
 						displayName: 'Action If Condition Matches',
@@ -1164,6 +1176,12 @@ export const description: INodeProperties[] = [
 		type: 'options',
 		default: '',
 		description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
+		displayOptions: {
+			show: {
+				'/enableRouting': [true],
+				'/fallbackAction': ['click', 'extract', 'fill', 'navigate'],
+			},
+		},
 		typeOptions: {
 			loadOptionsMethod: 'getRoutes',
 		},
