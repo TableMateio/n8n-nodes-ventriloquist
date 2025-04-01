@@ -1,0 +1,889 @@
+import type {
+	IExecuteFunctions,
+	IDataObject,
+	INodeExecutionData,
+	INodeProperties,
+} from 'n8n-workflow';
+import type * as puppeteer from 'puppeteer-core';
+
+/**
+ * Decision operation description
+ */
+export const description: INodeProperties[] = [
+	{
+		displayName: 'Condition Groups',
+		name: 'conditionGroups',
+		placeholder: 'Add Condition Group',
+		type: 'fixedCollection',
+		typeOptions: {
+			multipleValues: true,
+			sortable: true,
+		},
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+			},
+		},
+		description: 'Define conditions to check and actions to take if they match',
+		default: {},
+		options: [
+			{
+				name: 'groups',
+				displayName: 'Condition Group',
+				values: [
+					{
+						displayName: 'Group Name',
+						name: 'name',
+						type: 'string',
+						default: '',
+						description: 'Name for this condition group, used in output',
+						placeholder: 'e.g., loginForm',
+						required: true,
+					},
+					{
+						displayName: 'Condition Type',
+						name: 'conditionType',
+						type: 'options',
+						options: [
+							{
+								name: 'Element Exists',
+								value: 'elementExists',
+								description: 'Check if element exists on the page',
+							},
+							{
+								name: 'Text Contains',
+								value: 'textContains',
+								description: 'Check if element contains specific text',
+							},
+							{
+								name: 'Element Count',
+								value: 'elementCount',
+								description: 'Count the elements that match a selector',
+							},
+							{
+								name: 'URL Contains',
+								value: 'urlContains',
+								description: 'Check if current URL contains string',
+							},
+						],
+						default: 'elementExists',
+						description: 'Type of condition to check',
+					},
+					{
+						displayName: 'Selector',
+						name: 'selector',
+						type: 'string',
+						default: '',
+						placeholder: '#element, .class, div[data-test="value"]',
+						description: 'CSS selector to target the element(s)',
+						displayOptions: {
+							show: {
+								conditionType: ['elementExists', 'textContains', 'elementCount'],
+							},
+						},
+					},
+					{
+						displayName: 'Text to Check',
+						name: 'textToCheck',
+						type: 'string',
+						default: '',
+						description: 'Text content to check for in the selected element',
+						displayOptions: {
+							show: {
+								conditionType: ['textContains'],
+							},
+						},
+					},
+					{
+						displayName: 'URL Substring',
+						name: 'urlSubstring',
+						type: 'string',
+						default: '',
+						description: 'String to check for in the current URL',
+						displayOptions: {
+							show: {
+								conditionType: ['urlContains'],
+							},
+						},
+					},
+					{
+						displayName: 'Expected Count',
+						name: 'expectedCount',
+						type: 'number',
+						default: 1,
+						description: 'Expected number of elements to find',
+						displayOptions: {
+							show: {
+								conditionType: ['elementCount'],
+							},
+						},
+					},
+					{
+						displayName: 'Count Comparison',
+						name: 'countComparison',
+						type: 'options',
+						options: [
+							{
+								name: 'Equal To',
+								value: 'equal',
+							},
+							{
+								name: 'Greater Than',
+								value: 'greater',
+							},
+							{
+								name: 'Greater Than or Equal To',
+								value: 'greaterEqual',
+							},
+							{
+								name: 'Less Than',
+								value: 'less',
+							},
+							{
+								name: 'Less Than or Equal To',
+								value: 'lessEqual',
+							},
+						],
+						default: 'equal',
+						description: 'How to compare the actual count with the expected count',
+						displayOptions: {
+							show: {
+								conditionType: ['elementCount'],
+							},
+						},
+					},
+					{
+						displayName: 'Match Type',
+						name: 'matchType',
+						type: 'options',
+						options: [
+							{
+								name: 'Contains',
+								value: 'contains',
+								description: 'Value must contain the specified string',
+							},
+							{
+								name: 'Ends With',
+								value: 'endsWith',
+								description: 'Value must end with the specified string',
+							},
+							{
+								name: 'Exact Match',
+								value: 'exact',
+								description: 'Value must match exactly',
+							},
+							{
+								name: 'RegEx',
+								value: 'regex',
+								description: 'Match using a regular expression',
+							},
+							{
+								name: 'Starts With',
+								value: 'startsWith',
+								description: 'Value must start with the specified string',
+							},
+						],
+						default: 'contains',
+						description: 'How to match the text or URL value',
+						displayOptions: {
+							show: {
+								conditionType: ['textContains', 'urlContains'],
+							},
+						},
+					},
+					{
+						displayName: 'Case Sensitive',
+						name: 'caseSensitive',
+						type: 'boolean',
+						default: false,
+						description: 'Whether the matching should be case-sensitive',
+						displayOptions: {
+							show: {
+								conditionType: ['textContains', 'urlContains'],
+							},
+						},
+					},
+					{
+						displayName: 'Invert Condition',
+						name: 'invertCondition',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to invert the condition result (true becomes false, false becomes true)',
+					},
+					{
+						displayName: 'Action If Condition Matches',
+						name: 'actionType',
+						type: 'options',
+						options: [
+							{
+								name: 'Click Element',
+								value: 'click',
+								description: 'Click on an element',
+							},
+							{
+								name: 'Fill Form Field',
+								value: 'fill',
+								description: 'Enter text into a form field',
+							},
+							{
+								name: 'Navigate to URL',
+								value: 'navigate',
+								description: 'Navigate to a specific URL',
+							},
+							{
+								name: 'No Action (Just Detect)',
+								value: 'none',
+								description: 'Only detect the condition, do not take any action',
+							},
+						],
+						default: 'click',
+						description: 'Action to take if the condition is met',
+					},
+					{
+						displayName: 'Action Selector',
+						name: 'actionSelector',
+						type: 'string',
+						default: '',
+						placeholder: 'button.submit, input[type="text"]',
+						description: 'CSS selector for the element to interact with',
+						displayOptions: {
+							show: {
+								actionType: ['click', 'fill'],
+							},
+						},
+					},
+					{
+						displayName: 'Text Value',
+						name: 'textValue',
+						type: 'string',
+						default: '',
+						description: 'Text to enter into the form field',
+						displayOptions: {
+							show: {
+								actionType: ['fill'],
+							},
+						},
+					},
+					{
+						displayName: 'URL',
+						name: 'url',
+						type: 'string',
+						default: '',
+						placeholder: 'https://example.com/page',
+						description: 'URL to navigate to',
+						displayOptions: {
+							show: {
+								actionType: ['navigate'],
+							},
+						},
+					},
+					{
+						displayName: 'Wait After Action',
+						name: 'waitAfterAction',
+						type: 'options',
+						options: [
+							{
+								name: 'DOM Content Loaded',
+								value: 'domContentLoaded',
+								description: 'Wait until the DOM content is loaded (faster)',
+							},
+							{
+								name: 'Fixed Time',
+								value: 'fixedTime',
+								description: 'Wait for a specific amount of time',
+							},
+							{
+								name: 'Navigation Complete',
+								value: 'navigationComplete',
+								description: 'Wait until navigation is complete (slower but more thorough)',
+							},
+							{
+								name: 'No Wait',
+								value: 'noWait',
+								description: 'Do not wait after the action',
+							},
+						],
+						default: 'domContentLoaded',
+						description: 'What to wait for after performing the action',
+						displayOptions: {
+							show: {
+								actionType: ['click', 'navigate'],
+							},
+						},
+					},
+					{
+						displayName: 'Wait Time (MS)',
+						name: 'waitTime',
+						type: 'number',
+						default: 2000,
+						description: 'Time to wait in milliseconds (for fixed time wait)',
+						displayOptions: {
+							show: {
+								waitAfterAction: ['fixedTime'],
+								actionType: ['click', 'navigate'],
+							},
+						},
+					},
+				],
+			},
+		],
+		required: true,
+	},
+	{
+		displayName: 'Fallback Action',
+		name: 'fallbackAction',
+		type: 'options',
+		options: [
+			{
+				name: 'None',
+				value: 'none',
+				description: 'Do not perform any fallback action',
+			},
+			{
+				name: 'Click Element',
+				value: 'click',
+				description: 'Click on an element',
+			},
+			{
+				name: 'Fill Form Field',
+				value: 'fill',
+				description: 'Enter text into a form field',
+			},
+			{
+				name: 'Navigate to URL',
+				value: 'navigate',
+				description: 'Navigate to a specific URL',
+			},
+		],
+		default: 'none',
+		description: 'Action to take if none of the conditions match',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+			},
+		},
+	},
+	{
+		displayName: 'Fallback Selector',
+		name: 'fallbackSelector',
+		type: 'string',
+		default: '',
+		placeholder: 'button.cancel, input[type="text"]',
+		description: 'CSS selector for the element to interact with in the fallback action',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['click', 'fill'],
+			},
+		},
+	},
+	{
+		displayName: 'Fallback Text',
+		name: 'fallbackText',
+		type: 'string',
+		default: '',
+		description: 'Text to enter into the form field in the fallback action',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['fill'],
+			},
+		},
+	},
+	{
+		displayName: 'Fallback URL',
+		name: 'fallbackUrl',
+		type: 'string',
+		default: '',
+		placeholder: 'https://example.com/fallback',
+		description: 'URL to navigate to in the fallback action',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['navigate'],
+			},
+		},
+	},
+	{
+		displayName: 'Wait After Fallback',
+		name: 'waitAfterFallback',
+		type: 'options',
+		options: [
+			{
+				name: 'DOM Content Loaded',
+				value: 'domContentLoaded',
+				description: 'Wait until the DOM content is loaded (faster)',
+			},
+			{
+				name: 'Fixed Time',
+				value: 'fixedTime',
+				description: 'Wait for a specific amount of time',
+			},
+			{
+				name: 'Navigation Complete',
+				value: 'navigationComplete',
+				description: 'Wait until navigation is complete (slower but more thorough)',
+			},
+			{
+				name: 'No Wait',
+				value: 'noWait',
+				description: 'Do not wait after the action',
+			},
+		],
+		default: 'domContentLoaded',
+		description: 'What to wait for after performing the fallback action',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['click', 'navigate'],
+			},
+		},
+	},
+	{
+		displayName: 'Fallback Wait Time (MS)',
+		name: 'fallbackWaitTime',
+		type: 'number',
+		default: 2000,
+		description: 'Time to wait in milliseconds for fallback action (for fixed time wait)',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['click', 'navigate'],
+				waitAfterFallback: ['fixedTime'],
+			},
+		},
+	},
+	{
+		displayName: 'Wait for Selectors',
+		name: 'waitForSelectors',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to wait for selectors to appear before checking conditions',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+			},
+		},
+	},
+	{
+		displayName: 'Timeout',
+		name: 'selectorTimeout',
+		type: 'number',
+		default: 5000,
+		description: 'Maximum time in milliseconds to wait for selectors to appear',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				waitForSelectors: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Use Human-Like Delays',
+		name: 'useHumanDelays',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to use random delays between actions to simulate human behavior (100-300ms)',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+			},
+		},
+	},
+	{
+		displayName: 'Take Screenshot',
+		name: 'takeScreenshot',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to take a screenshot after the decision operation completes',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+			},
+		},
+	},
+	{
+		displayName: 'Continue On Fail',
+		name: 'continueOnFail',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to continue execution even when the operation fails',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+			},
+		},
+	},
+];
+
+/**
+ * Get a random human-like delay between 100-300ms
+ */
+function getHumanDelay(): number {
+	return Math.floor(Math.random() * (300 - 100 + 1) + 100);
+}
+
+/**
+ * Safely matches strings according to the specified match type
+ */
+function matchStrings(value: string, targetValue: string, matchType: string, caseSensitive: boolean): boolean {
+	// Apply case sensitivity
+	let compareValue = value;
+	let compareTarget = targetValue;
+
+	if (!caseSensitive) {
+		compareValue = value.toLowerCase();
+		compareTarget = targetValue.toLowerCase();
+	}
+
+	// Apply match type
+	switch (matchType) {
+		case 'exact':
+			return compareValue === compareTarget;
+		case 'contains':
+			return compareValue.includes(compareTarget);
+		case 'startsWith':
+			return compareValue.startsWith(compareTarget);
+		case 'endsWith':
+			return compareValue.endsWith(compareTarget);
+		case 'regex':
+			try {
+				const regex = new RegExp(targetValue, caseSensitive ? '' : 'i');
+				return regex.test(value);
+			} catch (error) {
+				return false;
+			}
+		default:
+			return compareValue.includes(compareTarget);
+	}
+}
+
+/**
+ * Compare element counts based on the comparison operator
+ */
+function compareCount(actualCount: number, expectedCount: number, operator: string): boolean {
+	switch (operator) {
+		case 'equal':
+			return actualCount === expectedCount;
+		case 'greater':
+			return actualCount > expectedCount;
+		case 'less':
+			return actualCount < expectedCount;
+		case 'greaterEqual':
+			return actualCount >= expectedCount;
+		case 'lessEqual':
+			return actualCount <= expectedCount;
+		default:
+			return actualCount === expectedCount;
+	}
+}
+
+/**
+ * Wait for navigation based on waitUntil parameter
+ */
+async function waitForNavigation(page: puppeteer.Page, waitUntil: string, timeout: number): Promise<void> {
+	if (waitUntil === 'noWait') return;
+
+	let waitUntilOption: puppeteer.PuppeteerLifeCycleEvent | puppeteer.PuppeteerLifeCycleEvent[] = 'domcontentloaded';
+
+	switch (waitUntil) {
+		case 'domContentLoaded':
+			waitUntilOption = 'domcontentloaded';
+			break;
+		case 'navigationComplete':
+			waitUntilOption = 'networkidle0';
+			break;
+		case 'fixedTime':
+			await new Promise((resolve) => setTimeout(resolve, timeout));
+			return;
+		default:
+			waitUntilOption = 'domcontentloaded';
+	}
+
+	if (waitUntil !== 'noWait' && waitUntil !== 'fixedTime') {
+		await page.waitForNavigation({ waitUntil: waitUntilOption, timeout });
+	}
+}
+
+/**
+ * Execute the decision operation
+ */
+export async function execute(
+	this: IExecuteFunctions,
+	index: number,
+	puppeteerPage: puppeteer.Page,
+): Promise<INodeExecutionData[]> {
+	const startTime = Date.now();
+
+	// Store this parameter at the top level so it's available in the catch block
+	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
+
+	try {
+		// Get operation parameters
+		const conditionGroups = this.getNodeParameter('conditionGroups.groups', index, []) as IDataObject[];
+		const fallbackAction = this.getNodeParameter('fallbackAction', index) as string;
+		const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
+		const selectorTimeout = this.getNodeParameter('selectorTimeout', index, 5000) as number;
+		const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
+		const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
+
+		let routeTaken = 'none';
+		let actionPerformed = 'none';
+		const currentUrl = await puppeteerPage.url();
+		let screenshot: string | undefined;
+
+		// Check each condition group
+		for (const group of conditionGroups) {
+			const conditionType = group.conditionType as string;
+			const groupName = group.name as string;
+			const invertCondition = group.invertCondition as boolean || false;
+
+			this.logger.debug(`Checking condition group: ${groupName}`);
+
+			// Evaluate the condition
+			let conditionMet = false;
+
+			try {
+				switch (conditionType) {
+					case 'elementExists': {
+						const selector = group.selector as string;
+
+						if (waitForSelectors) {
+							try {
+								await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
+								conditionMet = true;
+							} catch (error) {
+								conditionMet = false;
+							}
+						} else {
+							const elementExists = await puppeteerPage.$(selector) !== null;
+							conditionMet = elementExists;
+						}
+						break;
+					}
+
+					case 'textContains': {
+						const selector = group.selector as string;
+						const textToCheck = group.textToCheck as string;
+						const matchType = group.matchType as string;
+						const caseSensitive = group.caseSensitive as boolean;
+
+						if (waitForSelectors) {
+							try {
+								await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
+							} catch (error) {
+								conditionMet = false;
+								break;
+							}
+						}
+
+						const elementText = await puppeteerPage.$eval(selector, (el) => el.textContent || '');
+						conditionMet = matchStrings(elementText, textToCheck, matchType, caseSensitive);
+						break;
+					}
+
+					case 'elementCount': {
+						const selector = group.selector as string;
+						const expectedCount = group.expectedCount as number;
+						const countComparison = group.countComparison as string;
+
+						const elements = await puppeteerPage.$$(selector);
+						const actualCount = elements.length;
+
+						conditionMet = compareCount(actualCount, expectedCount, countComparison);
+						break;
+					}
+
+					case 'urlContains': {
+						const urlSubstring = group.urlSubstring as string;
+						const matchType = group.matchType as string;
+						const caseSensitive = group.caseSensitive as boolean;
+
+						conditionMet = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
+						break;
+					}
+				}
+
+				// Apply inversion if specified
+				if (invertCondition) {
+					conditionMet = !conditionMet;
+				}
+
+				this.logger.debug(`Condition result for ${groupName}: ${conditionMet}`);
+
+				// If condition is met, perform the corresponding action
+				if (conditionMet) {
+					routeTaken = groupName;
+					const actionType = group.actionType as string;
+
+					if (actionType !== 'none') {
+						actionPerformed = actionType;
+
+						// Add human-like delay if enabled
+						if (useHumanDelays) {
+							await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
+						}
+
+						switch (actionType) {
+							case 'click': {
+								const actionSelector = group.actionSelector as string;
+								const waitAfterAction = group.waitAfterAction as string;
+								const waitTime = group.waitTime as number;
+
+								if (waitForSelectors) {
+									await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+								}
+
+								this.logger.debug(`Clicking element: ${actionSelector}`);
+								await puppeteerPage.click(actionSelector);
+
+								// Wait according to specified wait type
+								await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
+								break;
+							}
+
+							case 'fill': {
+								const actionSelector = group.actionSelector as string;
+								const textValue = group.textValue as string;
+
+								if (waitForSelectors) {
+									await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+								}
+
+								this.logger.debug(`Filling form field: ${actionSelector} with value: ${textValue}`);
+								await puppeteerPage.type(actionSelector, textValue);
+								break;
+							}
+
+							case 'navigate': {
+								const url = group.url as string;
+								const waitAfterAction = group.waitAfterAction as string;
+								const waitTime = group.waitTime as number;
+
+								this.logger.debug(`Navigating to URL: ${url}`);
+								await puppeteerPage.goto(url);
+
+								// Wait according to specified wait type
+								await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
+								break;
+							}
+						}
+					}
+
+					// Exit the loop after finding first matching condition
+					break;
+				}
+			} catch (error) {
+				this.logger.error(`Error in condition group ${groupName}: ${(error as Error).message}`);
+
+				if (!continueOnFail) {
+					throw error;
+				}
+			}
+		}
+
+		// If no condition was met, perform fallback action
+		if (routeTaken === 'none' && fallbackAction !== 'none') {
+			routeTaken = 'fallback';
+			actionPerformed = fallbackAction;
+
+			try {
+				// Add human-like delay if enabled
+				if (useHumanDelays) {
+					await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
+				}
+
+				switch (fallbackAction) {
+					case 'click': {
+						const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
+						const waitAfterFallback = this.getNodeParameter('waitAfterFallback', index) as string;
+						const fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index) as number;
+
+						if (waitForSelectors) {
+							await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
+						}
+
+						this.logger.debug(`Fallback action: Clicking element: ${fallbackSelector}`);
+						await puppeteerPage.click(fallbackSelector);
+
+						// Wait according to specified wait type
+						await waitForNavigation(puppeteerPage, waitAfterFallback, fallbackWaitTime);
+						break;
+					}
+
+					case 'fill': {
+						const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
+						const fallbackText = this.getNodeParameter('fallbackText', index) as string;
+
+						if (waitForSelectors) {
+							await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
+						}
+
+						this.logger.debug(`Fallback action: Filling form field: ${fallbackSelector} with value: ${fallbackText}`);
+						await puppeteerPage.type(fallbackSelector, fallbackText);
+						break;
+					}
+
+					case 'navigate': {
+						const fallbackUrl = this.getNodeParameter('fallbackUrl', index) as string;
+						const waitAfterFallback = this.getNodeParameter('waitAfterFallback', index) as string;
+						const fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index) as number;
+
+						this.logger.debug(`Fallback action: Navigating to URL: ${fallbackUrl}`);
+						await puppeteerPage.goto(fallbackUrl);
+
+						// Wait according to specified wait type
+						await waitForNavigation(puppeteerPage, waitAfterFallback, fallbackWaitTime);
+						break;
+					}
+				}
+			} catch (error) {
+				this.logger.error(`Error in fallback action: ${(error as Error).message}`);
+
+				if (!continueOnFail) {
+					throw error;
+				}
+			}
+		}
+
+		// Take screenshot if requested
+		if (takeScreenshot) {
+			screenshot = await puppeteerPage.screenshot({ encoding: 'base64' }) as string;
+		}
+
+		const executionDuration = Date.now() - startTime;
+
+		// Return results
+		return [
+			{
+				json: {
+					success: true,
+					routeTaken,
+					actionPerformed,
+					currentUrl: await puppeteerPage.url(),
+					pageTitle: await puppeteerPage.title(),
+					screenshot,
+					executionDuration,
+				},
+			},
+		];
+	} catch (error) {
+		const executionDuration = Date.now() - startTime;
+
+		if (continueOnFail) {
+			return [
+				{
+					json: {
+						success: false,
+						error: (error as Error).message,
+						currentUrl: await puppeteerPage.url(),
+						pageTitle: await puppeteerPage.title(),
+						executionDuration,
+					},
+				},
+			];
+		}
+
+		throw error;
+	}
+}

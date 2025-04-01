@@ -15,6 +15,7 @@ import * as puppeteer from 'puppeteer-core';
 import * as formOperation from './actions/form.operation';
 import * as extractOperation from './actions/extract.operation';
 import * as detectOperation from './actions/detect.operation';
+import * as decisionOperation from './actions/decision.operation';
 
 /**
  * Ventriloquist is a custom node for N8N that connects to Bright Data's Browser Scraping Browser
@@ -337,14 +338,26 @@ export class Ventriloquist implements INodeType {
 					{
 						name: 'Click',
 						value: 'click',
-						description: 'Click on an element',
-						action: 'Click on an element',
+						description: 'Click on a specific element on the page',
+						action: 'Click an element on the page',
+					},
+					{
+						name: 'Close',
+						value: 'close',
+						description: 'Close a browser session',
+						action: 'Close a browser session',
+					},
+					{
+						name: 'Decision',
+						value: 'decision',
+						description: 'Make conditional decisions based on page state and take action',
+						action: 'Make a decision and take action',
 					},
 					{
 						name: 'Detect',
 						value: 'detect',
-						description: 'Detect if elements exist or match conditions',
-						action: 'Detect if elements exist or match conditions',
+						description: 'Detect elements, text, URL paths, or page state',
+						action: 'Detect page state',
 					},
 					{
 						name: 'Extract',
@@ -357,12 +370,6 @@ export class Ventriloquist implements INodeType {
 						value: 'form',
 						description: 'Fill out a form',
 						action: 'Fill out a form',
-					},
-					{
-						name: 'Close Browser',
-						value: 'close',
-						description: 'Close the browser session',
-						action: 'Close the browser session',
 					},
 				],
 				default: 'open',
@@ -574,6 +581,9 @@ export class Ventriloquist implements INodeType {
 
 			// Properties for 'detect' operation
 			...detectOperation.description,
+
+			// Properties for 'decision' operation
+			...decisionOperation.description,
 
 			// Properties for 'extract' operation
 			...extractOperation.description,
@@ -1084,6 +1094,45 @@ export class Ventriloquist implements INodeType {
 					}
 
 					returnData.push(result);
+				} else if (operation === 'decision') {
+					// Find the session we need to use
+					const existingSessionId = this.getNodeParameter('sessionId', i, '') as string;
+
+					// Get the page to use
+					let page: puppeteer.Page;
+
+					if (existingSessionId) {
+						// Try to get an existing page from the session
+						const existingPage = Ventriloquist.getPage(workflowId, existingSessionId);
+						if (!existingPage) {
+							throw new Error(`Session ID ${existingSessionId} not found. The session may have expired or been closed.`);
+						}
+						page = existingPage;
+					} else {
+						// Use latest page from the browser (fall back to creating a new one if needed)
+						const browser = await Ventriloquist.getOrCreateSession(
+							workflowId,
+							websocketEndpoint,
+							this.logger,
+						);
+						const pages = await browser.browser.pages();
+
+						if (pages.length > 0) {
+							page = pages[pages.length - 1]; // Use the most recently created page
+						} else {
+							// Create a new page if none exists
+							page = await browser.browser.newPage();
+						}
+					}
+
+					// Execute decision operation
+					const result = await decisionOperation.execute.call(
+						this,
+						i,
+						page
+					);
+
+					returnData.push(...result);
 				} else if (operation === 'extract') {
 					// Execute extract operation
 					const result = await extractOperation.execute.call(
