@@ -126,6 +126,84 @@ export const description: INodeProperties[] = [
 						description: 'Type of condition to check',
 					},
 					{
+						displayName: 'JavaScript Expression',
+						name: 'jsExpression',
+						type: 'string',
+						typeOptions: {
+							rows: 4,
+						},
+						default: '$input.item.json.someProperty === true',
+						description: 'JavaScript expression that should evaluate to true or false. You can use $input to access the input data.',
+						placeholder: '$input.item.json.status === "success" || $input.item.json.count > 5',
+						displayOptions: {
+							show: {
+								conditionType: ['expression'],
+							},
+						},
+					},
+					{
+						displayName: 'Source Node Name or ID',
+						name: 'sourceNodeName',
+						type: 'options',
+						typeOptions: {
+							loadOptionsDependsOn: [''],
+							loadOptionsMethod: 'getWorkflowNodes',
+						},
+						default: '',
+						description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
+						displayOptions: {
+							show: {
+								conditionType: ['inputSource'],
+							},
+						},
+					},
+					{
+						displayName: 'Count Comparison',
+						name: 'executionCountComparison',
+						type: 'options',
+						options: [
+							{
+								name: 'Equal To',
+								value: 'equal',
+							},
+							{
+								name: 'Greater Than',
+								value: 'greater',
+							},
+							{
+								name: 'Greater Than or Equal To',
+								value: 'greaterEqual',
+							},
+							{
+								name: 'Less Than',
+								value: 'less',
+							},
+							{
+								name: 'Less Than or Equal To',
+								value: 'lessEqual',
+							},
+						],
+						default: 'equal',
+						description: 'How to compare the execution count',
+						displayOptions: {
+							show: {
+								conditionType: ['executionCount'],
+							},
+						},
+					},
+					{
+						displayName: 'Execution Count',
+						name: 'executionCountValue',
+						type: 'number',
+						default: 1,
+						description: 'The value to compare the execution count against',
+						displayOptions: {
+							show: {
+								conditionType: ['executionCount'],
+							},
+						},
+					},
+					{
 						displayName: 'Selector',
 						name: 'selector',
 						type: 'string',
@@ -168,40 +246,6 @@ export const description: INodeProperties[] = [
 						type: 'number',
 						default: 1,
 						description: 'Expected number of elements to find',
-						displayOptions: {
-							show: {
-								conditionType: ['elementCount'],
-							},
-						},
-					},
-					{
-						displayName: 'Count Comparison',
-						name: 'countComparison',
-						type: 'options',
-						options: [
-							{
-								name: 'Equal To',
-								value: 'equal',
-							},
-							{
-								name: 'Greater Than',
-								value: 'greater',
-							},
-							{
-								name: 'Greater Than or Equal To',
-								value: 'greaterEqual',
-							},
-							{
-								name: 'Less Than',
-								value: 'less',
-							},
-							{
-								name: 'Less Than or Equal To',
-								value: 'lessEqual',
-							},
-						],
-						default: 'equal',
-						description: 'How to compare the actual count with the expected count',
 						displayOptions: {
 							show: {
 								conditionType: ['elementCount'],
@@ -660,81 +704,6 @@ export const description: INodeProperties[] = [
 							show: {
 								waitAfterAction: ['fixedTime'],
 								actionType: ['click', 'navigate'],
-							},
-						},
-					},
-					{
-						displayName: 'JavaScript Expression',
-						name: 'jsExpression',
-						type: 'string',
-						typeOptions: {
-							rows: 4,
-						},
-						default: '$input.item.json.someProperty === true',
-						description: 'JavaScript expression that should evaluate to true or false. You can use $input to access the input data.',
-						placeholder: '$input.item.json.status === "success" || $input.item.json.count > 5',
-						displayOptions: {
-							show: {
-								conditionType: ['expression'],
-							},
-						},
-					},
-					{
-						displayName: 'Source Node Name',
-						name: 'sourceNodeName',
-						type: 'string',
-						default: '',
-						description: 'Name of the node that should have sent data to this node',
-						placeholder: 'Previous Node Name',
-						displayOptions: {
-							show: {
-								conditionType: ['inputSource'],
-							},
-						},
-					},
-					{
-						displayName: 'Count Comparison',
-						name: 'executionCountComparison',
-						type: 'options',
-						options: [
-							{
-								name: 'Equal To',
-								value: 'equal',
-							},
-							{
-								name: 'Greater Than',
-								value: 'greater',
-							},
-							{
-								name: 'Greater Than or Equal To',
-								value: 'greaterEqual',
-							},
-							{
-								name: 'Less Than',
-								value: 'less',
-							},
-							{
-								name: 'Less Than or Equal To',
-								value: 'lessEqual',
-							},
-						],
-						default: 'equal',
-						description: 'How to compare the execution count',
-						displayOptions: {
-							show: {
-								conditionType: ['executionCount'],
-							},
-						},
-					},
-					{
-						displayName: 'Value',
-						name: 'executionCountValue',
-						type: 'number',
-						default: 1,
-						description: 'The value to compare the execution count against',
-						displayOptions: {
-							show: {
-								conditionType: ['executionCount'],
 							},
 						},
 					},

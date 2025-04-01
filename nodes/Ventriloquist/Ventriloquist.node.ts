@@ -1437,6 +1437,31 @@ export class Ventriloquist implements INodeType {
 					];
 				}
 			},
+
+			// Get workflow nodes for the Input Source condition
+			async getWorkflowNodes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				try {
+					// Get all nodes connected to this node
+					const nodeOptions: INodePropertyOptions[] = [];
+
+					// Add placeholder empty option
+					nodeOptions.push({
+						name: '- Select a Node -',
+						value: '',
+					});
+
+					// Add some default options that might be commonly used
+					nodeOptions.push(
+						{ name: 'Previous Node', value: 'prevNode' },
+						{ name: 'Start Node', value: 'startNode' },
+					);
+
+					return nodeOptions;
+				} catch (error) {
+					// If any error occurs, return empty options
+					return [];
+				}
+			},
 		},
 	};
 }
