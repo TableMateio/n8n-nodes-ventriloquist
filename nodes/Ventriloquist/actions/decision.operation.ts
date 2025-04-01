@@ -142,28 +142,12 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
-						displayName: 'Source Node Name or ID',
+						displayName: 'Source Node Name',
 						name: 'sourceNodeName',
-						type: 'options',
-						typeOptions: {
-							loadOptionsDependsOn: [''],
-							loadOptionsMethod: 'getWorkflowNodes',
-						},
-						default: '',
-						description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
-						displayOptions: {
-							show: {
-								conditionType: ['inputSource'],
-							},
-						},
-					},
-					{
-						displayName: 'Custom Node Name',
-						name: 'customSourceNodeName',
 						type: 'string',
 						default: '',
-						placeholder: 'e.g., HTTP Request 1, My Function Node',
-						description: 'If your node doesn\'t appear in the dropdown above, enter its exact name here. This will override the selection.',
+						placeholder: 'e.g., HTTP Request, Function, Switch',
+						description: 'Enter the exact name of the node that should trigger this condition. This is the name shown in the node\'s title bar.',
 						displayOptions: {
 							show: {
 								conditionType: ['inputSource'],
@@ -1541,11 +1525,6 @@ export async function execute(
 
 					case 'inputSource': {
 						const sourceNodeName = group.sourceNodeName as string;
-						const customSourceNodeName = group.customSourceNodeName as string;
-
-						// Use the custom node name if provided, otherwise use the dropdown selection
-						const targetNodeName = (customSourceNodeName?.trim()) ?
-							customSourceNodeName.trim() : sourceNodeName;
 
 						try {
 							// Get the node that sent the data
@@ -1573,8 +1552,8 @@ export async function execute(
 							}
 
 							// Compare with the expected source node name
-							conditionMet = inputNodeName === targetNodeName;
-							this.logger.debug(`Input source check: ${inputNodeName} === ${targetNodeName}: ${conditionMet}`);
+							conditionMet = inputNodeName === sourceNodeName;
+							this.logger.debug(`Input source check: ${inputNodeName} === ${sourceNodeName}: ${conditionMet}`);
 						} catch (error) {
 							this.logger.error(`Error checking input source: ${error.message}`);
 							conditionMet = false;
