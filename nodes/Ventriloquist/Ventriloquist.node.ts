@@ -344,27 +344,24 @@ export class Ventriloquist implements INodeType {
 			// Count all conditions across all groups
 			let totalConditionCount = 0;
 			for (const group of conditionGroups.groups as IDataObject[]) {
-				if (group.conditions && typeof group.conditions === 'object') {
-					const conditions = group.conditions as IDataObject;
-					if (conditions.condition && Array.isArray(conditions.condition)) {
-						// Count the actual conditions
-						const conditionArr = conditions.condition as IDataObject[];
-						console.log('*** Found condition array with length:', conditionArr.length);
+				if (group.conditions && Array.isArray(group.conditions)) {
+					// Count the actual conditions
+					const conditionArr = group.conditions as IDataObject[];
+					console.log('*** Found condition array with length:', conditionArr.length);
 
-						// Filter for meaningful conditions
-						const validConditions = conditionArr.filter(condition => {
-							const type = condition.conditionType as string;
-							return ['elementExists', 'elementCount', 'textContains', 'urlContains',
-								   'expression', 'inputSource', 'executionCount'].includes(type);
-						});
-						console.log('*** Valid conditions count:', validConditions.length);
+					// Filter for meaningful conditions
+					const validConditions = conditionArr.filter(condition => {
+						const type = condition.conditionType as string;
+						return ['elementExists', 'elementCount', 'textContains', 'urlContains',
+							   'expression', 'inputSource', 'executionCount'].includes(type);
+					});
+					console.log('*** Valid conditions count:', validConditions.length);
 
-						totalConditionCount += validConditions.length;
+					totalConditionCount += validConditions.length;
 
-						if (totalConditionCount > 1) {
-							console.log('*** Found multiple conditions, returning true');
-							return true;
-						}
+					if (totalConditionCount > 1) {
+						console.log('*** Found multiple conditions, returning true');
+						return true;
 					}
 				}
 			}
