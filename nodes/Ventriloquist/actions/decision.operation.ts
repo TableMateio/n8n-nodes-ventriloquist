@@ -294,99 +294,238 @@ export const description: INodeProperties[] = [
 						description: 'CSS selector for the element to interact with',
 						displayOptions: {
 							show: {
-								actionType: ['click', 'fill', 'extract'],
+								actionType: ['click', 'extract'],
 							},
 						},
 					},
 					{
-						displayName: 'Extraction Type',
-						name: 'extractionType',
+						displayName: 'Form Fields',
+						name: 'formFields',
+						placeholder: 'Add Form Field',
+						type: 'fixedCollection',
+						typeOptions: {
+							multipleValues: true,
+							sortable: true,
+						},
+						default: {},
+						displayOptions: {
+							show: {
+								actionType: ['fill'],
+							},
+						},
+						options: [
+							{
+								name: 'fields',
+								displayName: 'Fields',
+								values: [
+									{
+										displayName: 'Field Type',
+										name: 'fieldType',
+										type: 'options',
+										options: [
+											{
+												name: 'Checkbox',
+												value: 'checkbox',
+												description: 'Checkbox input element',
+											},
+											{
+												name: 'File Upload',
+												value: 'file',
+												description: 'File input element',
+											},
+											{
+												name: 'Radio Button',
+												value: 'radio',
+												description: 'Radio button input element',
+											},
+											{
+												name: 'Select / Dropdown',
+												value: 'select',
+												description: 'Dropdown select element',
+											},
+											{
+												name: 'Text / Textarea',
+												value: 'text',
+												description: 'Standard text input or textarea',
+											},
+										],
+										default: 'text',
+										description: 'The type of form field',
+									},
+									{
+										displayName: 'Selector',
+										name: 'selector',
+										type: 'string',
+										default: '',
+										placeholder: '#input-field, .form-control, input[name="email"]',
+										description: 'CSS selector to target the form field',
+										required: true,
+									},
+									{
+										displayName: 'Value',
+										name: 'value',
+										type: 'string',
+										default: '',
+										description: 'Value to set for the form field',
+										displayOptions: {
+											show: {
+												fieldType: ['text', 'radio', 'select'],
+											},
+										},
+									},
+									{
+										displayName: 'Check State',
+										name: 'checkState',
+										type: 'options',
+										options: [
+											{
+												name: 'Check / Select',
+												value: 'check',
+												description: 'Check/select the element',
+											},
+											{
+												name: 'Uncheck / Deselect',
+												value: 'uncheck',
+												description: 'Uncheck/deselect the element',
+											},
+											{
+												name: 'Toggle',
+												value: 'toggle',
+												description: 'Toggle the current state',
+											},
+										],
+										default: 'check',
+										description: 'Whether to check or uncheck the checkbox/radio button',
+										displayOptions: {
+											show: {
+												fieldType: ['checkbox', 'radio'],
+											},
+										},
+									},
+									{
+										displayName: 'File Path',
+										name: 'filePath',
+										type: 'string',
+										default: '',
+										description: 'Path to the file to upload',
+										displayOptions: {
+											show: {
+												fieldType: ['file'],
+											},
+										},
+									},
+									{
+										displayName: 'Clear Field First',
+										name: 'clearField',
+										type: 'boolean',
+										default: true,
+										description: 'Whether to clear the field before entering text',
+										displayOptions: {
+											show: {
+												fieldType: ['text'],
+											},
+										},
+									},
+									{
+										displayName: 'Press Enter After Input',
+										name: 'pressEnter',
+										type: 'boolean',
+										default: false,
+										description: 'Whether to press Enter after entering text',
+										displayOptions: {
+											show: {
+												fieldType: ['text'],
+											},
+										},
+									},
+								],
+							},
+						],
+					},
+					{
+						displayName: 'Submit Form After Filling',
+						name: 'submitForm',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to submit the form after filling the fields',
+						displayOptions: {
+							show: {
+								actionType: ['fill'],
+							},
+							hide: {
+								'': [],
+							},
+						},
+					},
+					{
+						displayName: 'Submit Button Selector',
+						name: 'submitSelector',
+						type: 'string',
+						default: '',
+						placeholder: 'button[type="submit"], input[type="submit"], .submit-button',
+						description: 'CSS selector of the submit button',
+						displayOptions: {
+							show: {
+								actionType: ['fill'],
+								submitForm: [true],
+							},
+							hide: {
+								'': [],
+							},
+						},
+					},
+					{
+						displayName: 'Wait After Submit',
+						name: 'waitAfterSubmit',
 						type: 'options',
 						options: [
 							{
-								name: 'Attribute',
-								value: 'attribute',
-								description: 'Extract specific attribute from an element',
+								name: 'DOM Content Loaded',
+								value: 'domContentLoaded',
+								description: 'Wait until the DOM content is loaded (faster)',
 							},
 							{
-								name: 'HTML',
-								value: 'html',
-								description: 'Extract HTML content from an element',
+								name: 'Fixed Time',
+								value: 'fixedTime',
+								description: 'Wait for a specific amount of time',
 							},
 							{
-								name: 'Input Value',
-								value: 'value',
-								description: 'Extract value from input, select or textarea',
+								name: 'Navigation Complete',
+								value: 'navigationComplete',
+								description: 'Wait until navigation is complete (slower but more thorough)',
 							},
 							{
-								name: 'Text Content',
-								value: 'text',
-								description: 'Extract text content from an element',
+								name: 'No Wait',
+								value: 'noWait',
+								description: 'Do not wait after clicking submit',
 							},
 						],
-						default: 'text',
-						description: 'What type of data to extract from the element',
+						default: 'domContentLoaded',
+						description: 'What to wait for after clicking the submit button',
 						displayOptions: {
 							show: {
-								actionType: ['extract'],
+								actionType: ['fill'],
+								submitForm: [true],
+							},
+							hide: {
+								'': [],
 							},
 						},
 					},
 					{
-						displayName: 'HTML Options',
-						name: 'htmlOptions',
-						type: 'collection',
-						placeholder: 'Add Option',
-						default: {},
-						typeOptions: {
-							multipleValues: false,
-						},
+						displayName: 'Wait Time (MS)',
+						name: 'waitSubmitTime',
+						type: 'number',
+						default: 2000,
+						description: 'Time to wait in milliseconds (for fixed time wait)',
 						displayOptions: {
 							show: {
-								actionType: ['extract'],
-								extractionType: ['html'],
+								actionType: ['fill'],
+								submitForm: [true],
+								waitAfterSubmit: ['fixedTime'],
 							},
-						},
-						options: [
-							{
-								displayName: 'Output Format',
-								name: 'outputFormat',
-								type: 'options',
-								options: [
-									{
-										name: 'HTML (String)',
-										value: 'html',
-										description: 'Return the HTML as a raw string',
-									},
-									{
-										name: 'JSON',
-										value: 'json',
-										description: 'Return the HTML wrapped in a JSON object',
-									},
-								],
-								default: 'html',
-								description: 'Format of the output data',
-							},
-							{
-								displayName: 'Include Metadata',
-								name: 'includeMetadata',
-								type: 'boolean',
-								default: false,
-								description: 'Whether to include metadata about the HTML (length, structure info)',
-							},
-						],
-					},
-					{
-						displayName: 'Attribute Name',
-						name: 'extractAttributeName',
-						type: 'string',
-						default: '',
-						placeholder: 'href, src, data-ID',
-						description: 'Name of the attribute to extract from the element',
-						displayOptions: {
-							show: {
-								actionType: ['extract'],
-								extractionType: ['attribute'],
+							hide: {
+								'': [],
 							},
 						},
 					},
@@ -399,6 +538,9 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								actionType: ['fill'],
+							},
+							hide: {
+								'': [],
 							},
 						},
 					},
@@ -439,6 +581,9 @@ export const description: INodeProperties[] = [
 							show: {
 								actionType: ['fill'],
 							},
+							hide: {
+								'': [],
+							},
 						},
 					},
 					{
@@ -450,7 +595,9 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								actionType: ['fill'],
-								inputType: ['text'],
+							},
+							hide: {
+								'': [],
 							},
 						},
 					},
@@ -463,7 +610,9 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								actionType: ['fill'],
-								inputType: ['text'],
+							},
+							hide: {
+								'': [],
 							},
 						},
 					},
@@ -493,7 +642,9 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								actionType: ['fill'],
-								inputType: ['checkbox', 'radio'],
+							},
+							hide: {
+								'': [],
 							},
 						},
 					},
@@ -506,7 +657,9 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								actionType: ['fill'],
-								inputType: ['file'],
+							},
+							hide: {
+								'': [],
 							},
 						},
 					},
@@ -1425,6 +1578,14 @@ export async function execute(
 							}
 
 							case 'fill': {
+								// Get form parameters
+								const formFields = group.formFields && (group.formFields as IDataObject).fields as IDataObject[] || [];
+								const submitForm = group.submitForm as boolean || false;
+								const submitSelector = group.submitSelector as string || '';
+								const waitAfterSubmit = group.waitAfterSubmit as string || 'domContentLoaded';
+								const waitSubmitTime = group.waitSubmitTime as number || 2000;
+
+								// For backward compatibility with old parameters
 								const actionSelector = group.actionSelector as string;
 								const textValue = group.textValue as string;
 								const inputType = group.inputType as string || 'text';
@@ -1433,92 +1594,141 @@ export async function execute(
 								const checkState = group.checkState as string || 'check';
 								const filePath = group.filePath as string || '';
 
-								if (waitForSelectors) {
-									// For actions, we always need to ensure the element exists
-									if (detectionMethod === 'smart') {
-										const elementExists = await smartWaitForSelector(
-											puppeteerPage,
-											actionSelector,
-											selectorTimeout,
-											earlyExitDelay,
-											this.logger,
-										);
+								// If we have old-style parameters (single field) and no form fields,
+								// convert them to form fields format
+								if (actionSelector && formFields.length === 0) {
+									formFields.push({
+										fieldType: inputType,
+										selector: actionSelector,
+										value: textValue,
+										clearField,
+										pressEnter,
+										checkState,
+										filePath,
+									});
+								}
 
-										if (!elementExists) {
-											throw new Error(`Action element with selector "${actionSelector}" not found`);
+								// Process each form field
+								for (const field of formFields) {
+									const fieldType = field.fieldType as string;
+									const selector = field.selector as string;
+
+									// Wait for the element if needed
+									if (waitForSelectors) {
+										if (detectionMethod === 'smart') {
+											const elementExists = await smartWaitForSelector(
+												puppeteerPage,
+												selector,
+												selectorTimeout,
+												earlyExitDelay,
+												this.logger,
+											);
+
+											if (!elementExists) {
+												throw new Error(`Form field element with selector "${selector}" not found`);
+											}
+										} else {
+											await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
 										}
-									} else {
-										await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+									}
+
+									// Add a human-like delay if enabled
+									if (useHumanDelays) {
+										await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
+									}
+
+									// Handle different field types
+									switch (fieldType) {
+										case 'text': {
+											const value = field.value as string || '';
+											const clearField = field.clearField as boolean || false;
+											const pressEnter = field.pressEnter as boolean || false;
+
+											// Clear field if requested
+											if (clearField) {
+												// Click three times to select all text
+												await puppeteerPage.click(selector, { clickCount: 3 });
+												// Delete selected text
+												await puppeteerPage.keyboard.press('Backspace');
+											}
+
+											// Type the text
+											this.logger.debug(`Filling form field: ${selector} with value: ${value}`);
+											await puppeteerPage.type(selector, value);
+
+											// Press Enter if requested
+											if (pressEnter) {
+												await puppeteerPage.keyboard.press('Enter');
+											}
+											break;
+										}
+
+										case 'select': {
+											const value = field.value as string || '';
+											// Handle select/dropdown elements
+											this.logger.debug(`Setting select element: ${selector} to value: ${value}`);
+											await puppeteerPage.select(selector, value);
+											break;
+										}
+
+										case 'checkbox':
+										case 'radio': {
+											const checkState = field.checkState as string || 'check';
+											// Handle checkbox and radio button inputs
+											this.logger.debug(`Setting ${fieldType}: ${selector} to state: ${checkState}`);
+
+											// Get the current checked state
+											const currentChecked = await puppeteerPage.$eval(selector, el => (el as HTMLInputElement).checked);
+
+											// Determine if we need to click based on requested state
+											let shouldClick = false;
+											if (checkState === 'check' && !currentChecked) shouldClick = true;
+											if (checkState === 'uncheck' && currentChecked) shouldClick = true;
+											if (checkState === 'toggle') shouldClick = true;
+
+											if (shouldClick) {
+												await puppeteerPage.click(selector);
+											}
+											break;
+										}
+
+										case 'file': {
+											const filePath = field.filePath as string || '';
+											// Handle file upload inputs
+											this.logger.debug(`Setting file input: ${selector} with file: ${filePath}`);
+											// Use correct typing for ElementHandle to avoid linter errors
+											const input = await puppeteerPage.$(selector);
+											if (input) {
+												await puppeteerPage.evaluate((el, filePath) => {
+													// This is needed to bypass file input security restrictions
+													// by directly setting the file in the browser context
+													const dataTransfer = new DataTransfer();
+													const file = new File([''], filePath.split('/').pop() || 'file', { type: 'application/octet-stream' });
+													dataTransfer.items.add(file);
+													(el as HTMLInputElement).files = dataTransfer.files;
+												}, input, filePath);
+											}
+											break;
+										}
 									}
 								}
 
-								// Handle different input types
-								switch (inputType) {
-									case 'text': {
-										// Handle text inputs and textareas
-										if (clearField) {
-											// Click three times to select all text
-											await puppeteerPage.click(actionSelector, { clickCount: 3 });
-											// Delete selected text
-											await puppeteerPage.keyboard.press('Backspace');
-										}
+								// Submit the form if requested
+								if (submitForm && submitSelector) {
+									this.logger.debug(`Submitting form using selector: ${submitSelector}`);
 
-										// Type the text
-										this.logger.debug(`Filling form field: ${actionSelector} with value: ${textValue}`);
-										await puppeteerPage.type(actionSelector, textValue);
-
-										// Press Enter if requested
-										if (pressEnter) {
-											await puppeteerPage.keyboard.press('Enter');
-										}
-										break;
+									// Wait a short time before submitting (feels more human)
+									if (useHumanDelays) {
+										await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
 									}
 
-									case 'select': {
-										// Handle select/dropdown elements
-										this.logger.debug(`Setting select element: ${actionSelector} to value: ${textValue}`);
-										await puppeteerPage.select(actionSelector, textValue);
-										break;
-									}
+									// Click the submit button
+									await puppeteerPage.click(submitSelector);
 
-									case 'checkbox':
-									case 'radio': {
-										// Handle checkbox and radio button inputs
-										this.logger.debug(`Setting ${inputType}: ${actionSelector} to state: ${checkState}`);
-
-										// Get the current checked state
-										const currentChecked = await puppeteerPage.$eval(actionSelector, el => (el as HTMLInputElement).checked);
-
-										// Determine if we need to click based on requested state
-										let shouldClick = false;
-										if (checkState === 'check' && !currentChecked) shouldClick = true;
-										if (checkState === 'uncheck' && currentChecked) shouldClick = true;
-										if (checkState === 'toggle') shouldClick = true;
-
-										if (shouldClick) {
-											await puppeteerPage.click(actionSelector);
-										}
-										break;
-									}
-
-									case 'file': {
-										// Handle file upload inputs
-										this.logger.debug(`Setting file input: ${actionSelector} with file: ${filePath}`);
-										// Use correct typing for ElementHandle to avoid linter errors
-										const input = await puppeteerPage.$(actionSelector);
-										if (input) {
-											await puppeteerPage.evaluate((el, filePath) => {
-												// This is needed to bypass file input security restrictions
-												// by directly setting the file in the browser context
-												const dataTransfer = new DataTransfer();
-												const file = new File([''], filePath.split('/').pop() || 'file', { type: 'application/octet-stream' });
-												dataTransfer.items.add(file);
-												(el as HTMLInputElement).files = dataTransfer.files;
-											}, input, filePath);
-										}
-										break;
-									}
+									// Wait according to specified wait type
+									await waitForNavigation(puppeteerPage, waitAfterSubmit, waitSubmitTime);
 								}
+
 								break;
 							}
 
