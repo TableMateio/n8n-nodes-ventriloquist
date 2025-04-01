@@ -332,9 +332,12 @@ export class Ventriloquist implements INodeType {
 	// Check if there are multiple conditions defined
 	public static hasMultipleConditions(nodeParameters: IDataObject): boolean {
 		try {
+			console.log('*** hasMultipleConditions called with:', JSON.stringify(nodeParameters));
+
 			// Get the decision groups from node parameters
 			const conditionGroups = nodeParameters.conditionGroups as IDataObject;
 			if (!conditionGroups || !conditionGroups.groups || !Array.isArray(conditionGroups.groups)) {
+				console.log('*** No condition groups found or not in expected format');
 				return false;
 			}
 
@@ -346,6 +349,7 @@ export class Ventriloquist implements INodeType {
 					if (conditions.condition && Array.isArray(conditions.condition)) {
 						// Count the actual conditions
 						const conditionArr = conditions.condition as IDataObject[];
+						console.log('*** Found condition array with length:', conditionArr.length);
 
 						// Filter for meaningful conditions
 						const validConditions = conditionArr.filter(condition => {
@@ -353,19 +357,23 @@ export class Ventriloquist implements INodeType {
 							return ['elementExists', 'elementCount', 'textContains', 'urlContains',
 								   'expression', 'inputSource', 'executionCount'].includes(type);
 						});
+						console.log('*** Valid conditions count:', validConditions.length);
 
 						totalConditionCount += validConditions.length;
 
 						if (totalConditionCount > 1) {
+							console.log('*** Found multiple conditions, returning true');
 							return true;
 						}
 					}
 				}
 			}
 
+			console.log('*** Total condition count:', totalConditionCount);
 			return totalConditionCount > 1;
 		} catch (error) {
 			// In case of error, return false to show the logical operator by default
+			console.error('*** Error in hasMultipleConditions:', error);
 			return false;
 		}
 	}

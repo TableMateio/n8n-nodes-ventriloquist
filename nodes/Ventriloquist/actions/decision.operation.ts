@@ -68,7 +68,7 @@ export const description: INodeProperties[] = [
 		options: [
 			{
 				name: 'groups',
-				displayName: 'Decision Group',
+				displayName: 'Decision',
 				values: [
 					{
 						displayName: 'Group Name',
@@ -398,7 +398,7 @@ export const description: INodeProperties[] = [
 								'/operation': ['decision'],
 							},
 							hide: {
-								'@node.hasMultipleConditions': [false],
+								'__conditionCount': [1, 0],
 							},
 						},
 					},
