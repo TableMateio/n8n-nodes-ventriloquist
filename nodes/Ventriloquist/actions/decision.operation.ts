@@ -97,278 +97,286 @@ export const description: INodeProperties[] = [
 						displayName: 'Conditions',
 						name: 'conditions',
 						placeholder: 'Add Condition',
-						type: 'collection',
+						type: 'fixedCollection',
 						typeOptions: {
 							multipleValues: true,
 							sortable: true,
 						},
-						default: [
-							{
-								conditionType: 'elementExists',
-								selector: ''
-							}
-						],
+						default: {
+							condition: [
+								{
+									conditionType: 'elementExists',
+									selector: ''
+								}
+							]
+						},
 						description: 'Define the conditions to check',
 						options: [
 							{
-								displayName: 'Condition Type',
-								name: 'conditionType',
-								type: 'options',
-								options: [
+								name: 'condition',
+								displayName: 'Condition',
+								values: [
 									{
-										name: 'Element Count',
-										value: 'elementCount',
-										description: 'Count the elements that match a selector',
+										displayName: 'Condition Type',
+										name: 'conditionType',
+										type: 'options',
+										options: [
+											{
+												name: 'Element Count',
+												value: 'elementCount',
+												description: 'Count the elements that match a selector',
+											},
+											{
+												name: 'Element Exists',
+												value: 'elementExists',
+												description: 'Check if element exists on the page',
+											},
+											{
+												name: 'Execution Count',
+												value: 'executionCount',
+												description: 'Check how many times this node has been executed',
+											},
+											{
+												name: 'Expression',
+												value: 'expression',
+												description: 'Evaluate a JavaScript expression',
+											},
+											{
+												name: 'Input Source',
+												value: 'inputSource',
+												description: 'Check which node the data came from',
+											},
+											{
+												name: 'Text Contains',
+												value: 'textContains',
+												description: 'Check if element contains specific text',
+											},
+											{
+												name: 'URL Contains',
+												value: 'urlContains',
+												description: 'Check if current URL contains string',
+											},
+										],
+										default: 'elementExists',
+										description: 'Type of condition to check',
 									},
 									{
-										name: 'Element Exists',
-										value: 'elementExists',
-										description: 'Check if element exists on the page',
+										displayName: 'JavaScript Expression',
+										name: 'jsExpression',
+										type: 'string',
+										typeOptions: {
+											rows: 4,
+										},
+										default: '$input.item.json.someProperty === true',
+										description: 'JavaScript expression that should evaluate to true or false. You can use $input to access the input data.',
+										placeholder: '$input.item.json.status === "success" || $input.item.json.count > 5',
+										displayOptions: {
+											show: {
+												conditionType: ['expression'],
+											},
+										},
 									},
 									{
-										name: 'Execution Count',
-										value: 'executionCount',
-										description: 'Check how many times this node has been executed',
+										displayName: 'Source Node Name',
+										name: 'sourceNodeName',
+										type: 'string',
+										default: '',
+										placeholder: 'e.g., HTTP Request, Function, Switch',
+										description: 'Enter the exact name of the node that should trigger this condition. This is the name shown in the node\'s title bar.',
+										displayOptions: {
+											show: {
+												conditionType: ['inputSource'],
+											},
+										},
 									},
 									{
-										name: 'Expression',
-										value: 'expression',
-										description: 'Evaluate a JavaScript expression',
+										displayName: 'Count Comparison',
+										name: 'executionCountComparison',
+										type: 'options',
+										options: [
+											{
+												name: 'Equal To',
+												value: 'equal',
+											},
+											{
+												name: 'Greater Than',
+												value: 'greater',
+											},
+											{
+												name: 'Greater Than or Equal To',
+												value: 'greaterEqual',
+											},
+											{
+												name: 'Less Than',
+												value: 'less',
+											},
+											{
+												name: 'Less Than or Equal To',
+												value: 'lessEqual',
+											},
+										],
+										default: 'equal',
+										description: 'How to compare the execution count',
+										displayOptions: {
+											show: {
+												conditionType: ['executionCount'],
+											},
+										},
 									},
 									{
-										name: 'Input Source',
-										value: 'inputSource',
-										description: 'Check which node the data came from',
+										displayName: 'Execution Count',
+										name: 'executionCountValue',
+										type: 'number',
+										default: 1,
+										description: 'The value to compare the execution count against',
+										displayOptions: {
+											show: {
+												conditionType: ['executionCount'],
+											},
+										},
 									},
 									{
-										name: 'Text Contains',
-										value: 'textContains',
-										description: 'Check if element contains specific text',
+										displayName: 'Selector',
+										name: 'selector',
+										type: 'string',
+										default: '',
+										placeholder: '#element, .class, div[data-test="value"]',
+										description: 'CSS selector to target the element(s)',
+										displayOptions: {
+											show: {
+												conditionType: ['elementExists', 'textContains', 'elementCount'],
+											},
+										},
 									},
 									{
-										name: 'URL Contains',
-										value: 'urlContains',
-										description: 'Check if current URL contains string',
+										displayName: 'Text to Check',
+										name: 'textToCheck',
+										type: 'string',
+										default: '',
+										description: 'Text content to check for in the selected element',
+										displayOptions: {
+											show: {
+												conditionType: ['textContains'],
+											},
+										},
+									},
+									{
+										displayName: 'URL Substring',
+										name: 'urlSubstring',
+										type: 'string',
+										default: '',
+										description: 'Text to look for in the current URL',
+										displayOptions: {
+											show: {
+												conditionType: ['urlContains'],
+											},
+										},
+									},
+									{
+										displayName: 'Count Comparison',
+										name: 'countComparison',
+										type: 'options',
+										options: [
+											{
+												name: 'Equal To',
+												value: 'equal',
+											},
+											{
+												name: 'Greater Than',
+												value: 'greater',
+											},
+											{
+												name: 'Greater Than or Equal To',
+												value: 'greaterEqual',
+											},
+											{
+												name: 'Less Than',
+												value: 'less',
+											},
+											{
+												name: 'Less Than or Equal To',
+												value: 'lessEqual',
+											},
+										],
+										default: 'equal',
+										description: 'How to compare the actual element count with the expected count',
+										displayOptions: {
+											show: {
+												conditionType: ['elementCount'],
+											},
+										},
+									},
+									{
+										displayName: 'Expected Count',
+										name: 'expectedCount',
+										type: 'number',
+										default: 1,
+										description: 'The value to compare the element count against',
+										displayOptions: {
+											show: {
+												conditionType: ['elementCount'],
+											},
+										},
+									},
+									{
+										displayName: 'Match Type',
+										name: 'matchType',
+										type: 'options',
+										options: [
+											{
+												name: 'Contains',
+												value: 'contains',
+												description: 'Value must contain the specified string',
+											},
+											{
+												name: 'Ends With',
+												value: 'endsWith',
+												description: 'Value must end with the specified string',
+											},
+											{
+												name: 'Exact Match',
+												value: 'exact',
+												description: 'Value must match exactly',
+											},
+											{
+												name: 'RegEx',
+												value: 'regex',
+												description: 'Match using a regular expression',
+											},
+											{
+												name: 'Starts With',
+												value: 'startsWith',
+												description: 'Value must start with the specified string',
+											},
+										],
+										default: 'contains',
+										description: 'How to match the text or URL value',
+										displayOptions: {
+											show: {
+												conditionType: ['textContains', 'urlContains'],
+											},
+										},
+									},
+									{
+										displayName: 'Case Sensitive',
+										name: 'caseSensitive',
+										type: 'boolean',
+										default: false,
+										description: 'Whether the matching should be case-sensitive',
+										displayOptions: {
+											show: {
+												conditionType: ['textContains', 'urlContains'],
+											},
+										},
+									},
+									{
+										displayName: 'Invert Condition',
+										name: 'invertCondition',
+										type: 'boolean',
+										default: false,
+										description: 'Whether to invert the condition result (true becomes false, false becomes true)',
 									},
 								],
-								default: 'elementExists',
-								description: 'Type of condition to check',
-							},
-							{
-								displayName: 'JavaScript Expression',
-								name: 'jsExpression',
-								type: 'string',
-								typeOptions: {
-									rows: 4,
-								},
-								default: '$input.item.json.someProperty === true',
-								description: 'JavaScript expression that should evaluate to true or false. You can use $input to access the input data.',
-								placeholder: '$input.item.json.status === "success" || $input.item.json.count > 5',
-								displayOptions: {
-									show: {
-										conditionType: ['expression'],
-									},
-								},
-							},
-							{
-								displayName: 'Source Node Name',
-								name: 'sourceNodeName',
-								type: 'string',
-								default: '',
-								placeholder: 'e.g., HTTP Request, Function, Switch',
-								description: 'Enter the exact name of the node that should trigger this condition. This is the name shown in the node\'s title bar.',
-								displayOptions: {
-									show: {
-										conditionType: ['inputSource'],
-									},
-								},
-							},
-							{
-								displayName: 'Count Comparison',
-								name: 'executionCountComparison',
-								type: 'options',
-								options: [
-									{
-										name: 'Equal To',
-										value: 'equal',
-									},
-									{
-										name: 'Greater Than',
-										value: 'greater',
-									},
-									{
-										name: 'Greater Than or Equal To',
-										value: 'greaterEqual',
-									},
-									{
-										name: 'Less Than',
-										value: 'less',
-									},
-									{
-										name: 'Less Than or Equal To',
-										value: 'lessEqual',
-									},
-								],
-								default: 'equal',
-								description: 'How to compare the execution count',
-								displayOptions: {
-									show: {
-										conditionType: ['executionCount'],
-									},
-								},
-							},
-							{
-								displayName: 'Execution Count',
-								name: 'executionCountValue',
-								type: 'number',
-								default: 1,
-								description: 'The value to compare the execution count against',
-								displayOptions: {
-									show: {
-										conditionType: ['executionCount'],
-									},
-								},
-							},
-							{
-								displayName: 'Selector',
-								name: 'selector',
-								type: 'string',
-								default: '',
-								placeholder: '#element, .class, div[data-test="value"]',
-								description: 'CSS selector to target the element(s)',
-								displayOptions: {
-									show: {
-										conditionType: ['elementExists', 'textContains', 'elementCount'],
-									},
-								},
-							},
-							{
-								displayName: 'Text to Check',
-								name: 'textToCheck',
-								type: 'string',
-								default: '',
-								description: 'Text content to check for in the selected element',
-								displayOptions: {
-									show: {
-										conditionType: ['textContains'],
-									},
-								},
-							},
-							{
-								displayName: 'URL Substring',
-								name: 'urlSubstring',
-								type: 'string',
-								default: '',
-								description: 'Text to look for in the current URL',
-								displayOptions: {
-									show: {
-										conditionType: ['urlContains'],
-									},
-								},
-							},
-							{
-								displayName: 'Count Comparison',
-								name: 'countComparison',
-								type: 'options',
-								options: [
-									{
-										name: 'Equal To',
-										value: 'equal',
-									},
-									{
-										name: 'Greater Than',
-										value: 'greater',
-									},
-									{
-										name: 'Greater Than or Equal To',
-										value: 'greaterEqual',
-									},
-									{
-										name: 'Less Than',
-										value: 'less',
-									},
-									{
-										name: 'Less Than or Equal To',
-										value: 'lessEqual',
-									},
-								],
-								default: 'equal',
-								description: 'How to compare the actual element count with the expected count',
-								displayOptions: {
-									show: {
-										conditionType: ['elementCount'],
-									},
-								},
-							},
-							{
-								displayName: 'Expected Count',
-								name: 'expectedCount',
-								type: 'number',
-								default: 1,
-								description: 'The value to compare the element count against',
-								displayOptions: {
-									show: {
-										conditionType: ['elementCount'],
-									},
-								},
-							},
-							{
-								displayName: 'Match Type',
-								name: 'matchType',
-								type: 'options',
-								options: [
-									{
-										name: 'Contains',
-										value: 'contains',
-										description: 'Value must contain the specified string',
-									},
-									{
-										name: 'Ends With',
-										value: 'endsWith',
-										description: 'Value must end with the specified string',
-									},
-									{
-										name: 'Exact Match',
-										value: 'exact',
-										description: 'Value must match exactly',
-									},
-									{
-										name: 'RegEx',
-										value: 'regex',
-										description: 'Match using a regular expression',
-									},
-									{
-										name: 'Starts With',
-										value: 'startsWith',
-										description: 'Value must start with the specified string',
-									},
-								],
-								default: 'contains',
-								description: 'How to match the text or URL value',
-								displayOptions: {
-									show: {
-										conditionType: ['textContains', 'urlContains'],
-									},
-								},
-							},
-							{
-								displayName: 'Case Sensitive',
-								name: 'caseSensitive',
-								type: 'boolean',
-								default: false,
-								description: 'Whether the matching should be case-sensitive',
-								displayOptions: {
-									show: {
-										conditionType: ['textContains', 'urlContains'],
-									},
-								},
-							},
-							{
-								displayName: 'Invert Condition',
-								name: 'invertCondition',
-								type: 'boolean',
-								default: false,
-								description: 'Whether to invert the condition result (true becomes false, false becomes true)',
 							},
 						],
 					},
