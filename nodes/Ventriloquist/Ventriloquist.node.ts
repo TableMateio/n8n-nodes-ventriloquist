@@ -102,22 +102,22 @@ export class Ventriloquist implements INodeType {
 			let matches = websocketEndpoint.match(/io:\d+\/([^\/]+\/[^\/\s]+)/);
 
 			// If that doesn't work, try alternative format
-			if (!matches || !matches[1]) {
+			if (!matches?.length) {
 				matches = websocketEndpoint.match(/io\/([^\/]+\/[^\/\s]+)/);
 			}
 
 			// If that doesn't work, try the older format
-			if (!matches || !matches[1]) {
+			if (!matches?.length) {
 				matches = websocketEndpoint.match(/browser\/[^\/]+\/([^\/]+)/);
 			}
 
-			if (matches && matches[1]) {
+			if (matches?.[1]) {
 				brightDataSessionId = matches[1];
 				logger.info(`Detected Bright Data session ID from WebSocket URL: ${brightDataSessionId}`);
 			} else {
 				// Fallback for other URL formats
 				const fallbackMatches = websocketEndpoint.match(/\/([a-f0-9-]{36}|[a-f0-9-]{7,8}\/[a-f0-9-]{36})/i);
-				if (fallbackMatches && fallbackMatches[1]) {
+				if (fallbackMatches?.[1]) {
 					brightDataSessionId = fallbackMatches[1];
 					logger.info(`Extracted Bright Data session ID (fallback): ${brightDataSessionId}`);
 				} else {
@@ -299,11 +299,11 @@ export class Ventriloquist implements INodeType {
 				let matches = inspectUrl.match(/io:\d+\/([^\/]+\/[^\/&?]+)/);
 
 				// If that doesn't work, try alternative format
-				if (!matches || !matches[1]) {
+				if (!matches?.length) {
 					matches = inspectUrl.match(/io\/([^\/]+\/[^\/&?]+)/);
 				}
 
-				if (matches && matches[1]) {
+				if (matches?.[1]) {
 					brightDataDebugInfo = matches[1];
 					logger.info(`Bright Data dashboard session ID detected: ${brightDataDebugInfo}`);
 				} else {
@@ -312,7 +312,7 @@ export class Ventriloquist implements INodeType {
 
 					// Extract any part that might be a session ID
 					const fallbackMatches = inspectUrl.match(/\/([a-f0-9-]{36}|[a-f0-9-]{7,8}\/[a-f0-9-]{36})/i);
-					if (fallbackMatches && fallbackMatches[1]) {
+					if (fallbackMatches?.[1]) {
 						brightDataDebugInfo = fallbackMatches[1];
 						logger.info(`Extracted potential Bright Data session ID (fallback): ${brightDataDebugInfo}`);
 					}
@@ -853,11 +853,11 @@ export class Ventriloquist implements INodeType {
 						this.logger.info(`Using explicitly provided session ID: ${sessionId}`);
 					}
 					// If not explicit ID provided, try to get sessionId from the current item
-					else if (items[i].json && items[i].json.sessionId) {
+					else if (items[i].json?.sessionId) {
 						sessionId = items[i].json.sessionId as string;
 					}
 					// For backward compatibility, also check for pageId
-					else if (items[i].json && items[i].json.pageId) {
+					else if (items[i].json?.pageId) {
 						sessionId = items[i].json.pageId as string;
 						this.logger.info('Using legacy pageId as sessionId for compatibility');
 					}
@@ -865,12 +865,12 @@ export class Ventriloquist implements INodeType {
 					// If no sessionId in current item, look at the input items for a sessionId
 					if (!sessionId) {
 						for (const item of items) {
-							if (item.json && item.json.sessionId) {
+							if (item.json?.sessionId) {
 								sessionId = item.json.sessionId as string;
 								break;
 							}
 							// For backward compatibility
-							else if (item.json && item.json.pageId) {
+							else if (item.json?.pageId) {
 								sessionId = item.json.pageId as string;
 								this.logger.info('Using legacy pageId as sessionId for compatibility');
 								break;
@@ -1441,25 +1441,46 @@ export class Ventriloquist implements INodeType {
 			// Get workflow nodes for the Input Source condition
 			async getWorkflowNodes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				try {
-					// Get all nodes connected to this node
-					const nodeOptions: INodePropertyOptions[] = [];
+					// Create an array of basic node options
+					const nodeOptions: INodePropertyOptions[] = [
+						{ name: '- Select a Node -', value: '' },
+					];
 
-					// Add placeholder empty option
-					nodeOptions.push({
-						name: '- Select a Node -',
-						value: '',
-					});
-
-					// Add some default options that might be commonly used
+					// Add options for common scenarios with descriptive names
 					nodeOptions.push(
-						{ name: 'Previous Node', value: 'prevNode' },
-						{ name: 'Start Node', value: 'startNode' },
+						{ name: 'Previous Node (First Input)', value: 'prevNode' },
+						{ name: 'Previous Node (Second Input)', value: 'prevNode2' },
+						{ name: 'Start Node (Workflow Trigger)', value: 'startNode' },
+						{ name: 'Input 1', value: 'input1' },
+						{ name: 'Input 2', value: 'input2' },
+						{ name: 'Input 3', value: 'input3' },
+						{ name: 'Input A', value: 'inputA' },
+						{ name: 'Input B', value: 'inputB' },
+						{ name: 'Input C', value: 'inputC' }
 					);
+
+					// Include some generic input names
+					for (let i = 1; i <= 5; i++) {
+						const nodeName = `Node ${i}`;
+						if (!nodeOptions.find(option => option.value === nodeName)) {
+							nodeOptions.push({
+								name: nodeName,
+								value: nodeName,
+							});
+						}
+					}
 
 					return nodeOptions;
 				} catch (error) {
-					// If any error occurs, return empty options
-					return [];
+					// If any error occurs, return basic options
+					return [
+						{ name: '- Select a Node -', value: '' },
+						{ name: 'Previous Node (First Input)', value: 'prevNode' },
+						{ name: 'Previous Node (Second Input)', value: 'prevNode2' },
+						{ name: 'Start Node (Workflow Trigger)', value: 'startNode' },
+						{ name: 'Input 1', value: 'input1' },
+						{ name: 'Input 2', value: 'input2' }
+					];
 				}
 			},
 		},
