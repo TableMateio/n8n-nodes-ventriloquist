@@ -1501,7 +1501,7 @@ export async function execute(
 				}
 			}
 
-			this.logger.debug(`Checking condition group: ${groupName} with ${conditions.length} conditions`);
+			this.logger.debug(`Checking decision group: ${groupName} with ${conditions.length} conditions`);
 
 			// Default value for logical operators
 			// If AND, start with true and any false will make it false
@@ -1734,7 +1734,7 @@ export async function execute(
 					}
 				}
 
-				this.logger.debug(`Condition group ${groupName} result: ${groupConditionMet}`);
+				this.logger.debug(`Decision group ${groupName} result: ${groupConditionMet}`);
 
 				// If condition is met
 				if (groupConditionMet) {
@@ -2105,7 +2105,7 @@ export async function execute(
 					}
 				}
 
-				this.logger.debug(`Condition group ${groupName} result: ${groupConditionMet}`);
+				this.logger.debug(`Decision group ${groupName} result: ${groupConditionMet}`);
 
 				// If condition is met
 				if (groupConditionMet) {
@@ -2474,7 +2474,7 @@ export async function execute(
 					break;
 				}
 			} catch (error) {
-				this.logger.error(`Error in condition group ${groupName}: ${(error as Error).message}`);
+				this.logger.error(`Error in decision group ${groupName}: ${(error as Error).message}`);
 
 				if (!continueOnFail) {
 					throw error;

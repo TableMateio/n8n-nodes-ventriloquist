@@ -329,6 +329,47 @@ export class Ventriloquist implements INodeType {
 		}
 	}
 
+	// Check if there are multiple conditions defined
+	public static hasMultipleConditions(nodeParameters: IDataObject): boolean {
+		try {
+			// Get the decision groups from node parameters
+			const conditionGroups = nodeParameters.conditionGroups as IDataObject;
+			if (!conditionGroups || !conditionGroups.groups || !Array.isArray(conditionGroups.groups)) {
+				return false;
+			}
+
+			// Count all conditions across all groups
+			let totalConditionCount = 0;
+			for (const group of conditionGroups.groups as IDataObject[]) {
+				if (group.conditions && typeof group.conditions === 'object') {
+					const conditions = group.conditions as IDataObject;
+					if (conditions.condition && Array.isArray(conditions.condition)) {
+						// Count the actual conditions
+						const conditionArr = conditions.condition as IDataObject[];
+
+						// Filter for meaningful conditions
+						const validConditions = conditionArr.filter(condition => {
+							const type = condition.conditionType as string;
+							return ['elementExists', 'elementCount', 'textContains', 'urlContains',
+								   'expression', 'inputSource', 'executionCount'].includes(type);
+						});
+
+						totalConditionCount += validConditions.length;
+
+						if (totalConditionCount > 1) {
+							return true;
+						}
+					}
+				}
+			}
+
+			return totalConditionCount > 1;
+		} catch (error) {
+			// In case of error, return false to show the logical operator by default
+			return false;
+		}
+	}
+
 	// Methods to handle loading options for dynamic fields like routes
 	description: INodeTypeDescription = {
 		displayName: 'Ventriloquist',
