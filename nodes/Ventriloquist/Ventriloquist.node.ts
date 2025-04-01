@@ -44,13 +44,29 @@ const configureDecisionOutputs = (parameters: INodeParameters) => {
 		];
 	}
 
-	const routeCount = parameters.routeCount as number || 2;
+	// Get routes from parameters
+	const routesParam = parameters.routes as IDataObject | undefined;
+	const routeValues = routesParam?.values as IDataObject[] | undefined;
 
-	// Generate a route for each output number
-	return Array.from({ length: routeCount }, (_, i) => ({
-		type: NodeConnectionType.Main,
-		displayName: `Route ${i + 1}`,
-	}));
+	if (routeValues && routeValues.length > 0) {
+		// Use route names as output names
+		return routeValues.map((route) => ({
+			type: NodeConnectionType.Main,
+			displayName: route.name as string,
+		}));
+	}
+
+	// Default to two routes if none defined
+	return [
+		{
+			type: NodeConnectionType.Main,
+			displayName: 'Route 1',
+		},
+		{
+			type: NodeConnectionType.Main,
+			displayName: 'Route 2',
+		},
+	];
 };
 
 /**
