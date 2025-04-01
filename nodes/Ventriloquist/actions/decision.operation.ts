@@ -466,6 +466,31 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: 'Detection Method',
+		name: 'detectionMethod',
+		type: 'options',
+		options: [
+			{
+				name: 'Smart Detection (DOM-aware)',
+				value: 'smart',
+				description: 'Intelligently detects when the page is fully loaded before checking for elements (faster for elements that don\'t exist)',
+			},
+			{
+				name: 'Fixed Timeout',
+				value: 'fixed',
+				description: 'Simply waits for the specified timeout (may be slower but more thorough)',
+			},
+		],
+		default: 'smart',
+		description: 'Method to use when checking for elements',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				waitForSelectors: [true],
+			},
+		},
+	},
+	{
 		displayName: 'Timeout',
 		name: 'selectorTimeout',
 		type: 'number',
@@ -475,6 +500,20 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ['decision'],
 				waitForSelectors: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Early Exit Delay (MS)',
+		name: 'earlyExitDelay',
+		type: 'number',
+		default: 500,
+		description: 'Time in milliseconds to wait after DOM is loaded before checking for elements (for Smart Detection only)',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				waitForSelectors: [true],
+				detectionMethod: ['smart'],
 			},
 		},
 	},
@@ -606,6 +645,75 @@ async function waitForNavigation(page: puppeteer.Page, waitUntil: string, timeou
 }
 
 /**
+ * Smart wait for element with DOM-aware early exit strategy
+ */
+async function smartWaitForSelector(
+	page: puppeteer.Page,
+	selector: string,
+	timeout: number,
+	earlyExitDelay: number,
+	logger: IExecuteFunctions['logger'],
+): Promise<boolean> {
+	// Create a promise that resolves when the element is found
+	const elementPromise = page.waitForSelector(selector, { timeout })
+		.then(() => {
+			logger.debug(`Element found: ${selector}`);
+			return true;
+		})
+		.catch(() => {
+			logger.debug(`Element not found within timeout: ${selector}`);
+			return false;
+		});
+
+	// Check if the DOM is already loaded
+	const domState = await page.evaluate(() => {
+		return {
+			readyState: document.readyState,
+			bodyExists: !!document.body,
+		};
+	});
+
+	logger.debug(`DOM state: readyState=${domState.readyState}, bodyExists=${domState.bodyExists}`);
+
+	// If DOM is not loaded yet, wait for it
+	if (domState.readyState !== 'complete' && domState.readyState !== 'interactive') {
+		logger.debug('DOM not ready, waiting for it to load...');
+		await page.waitForFunction(
+			() => document.readyState === 'complete' || document.readyState === 'interactive',
+			{ timeout: Math.min(timeout, 10000) }, // Cap at 10 seconds max for DOM loading
+		);
+	}
+
+	// If there's no body yet (rare case), wait for it
+	if (!domState.bodyExists) {
+		logger.debug('Document body not found, waiting for it...');
+		await page.waitForFunction(() => !!document.body, {
+			timeout: Math.min(timeout, 5000), // Cap at 5 seconds max for body
+		});
+	}
+
+	// Wait a small delay to allow dynamic content to load
+	if (earlyExitDelay > 0) {
+		logger.debug(`Waiting ${earlyExitDelay}ms early exit delay...`);
+		await new Promise(resolve => setTimeout(resolve, earlyExitDelay));
+	}
+
+	// Check if element exists without waiting (quick check)
+	const elementExistsNow = await page.evaluate((sel) => {
+		return document.querySelector(sel) !== null;
+	}, selector);
+
+	if (elementExistsNow) {
+		logger.debug(`Element found immediately after DOM ready: ${selector}`);
+		return true;
+	}
+
+	logger.debug(`Element not found in initial check, waiting up to timeout: ${selector}`);
+	// If not found immediately, wait for the original promise with timeout
+	return elementPromise;
+}
+
+/**
  * Execute the decision operation
  */
 export async function execute(
@@ -624,6 +732,8 @@ export async function execute(
 		const fallbackAction = this.getNodeParameter('fallbackAction', index) as string;
 		const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
 		const selectorTimeout = this.getNodeParameter('selectorTimeout', index, 5000) as number;
+		const detectionMethod = this.getNodeParameter('detectionMethod', index, 'smart') as string;
+		const earlyExitDelay = this.getNodeParameter('earlyExitDelay', index, 500) as number;
 		const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
 		const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 
@@ -649,13 +759,26 @@ export async function execute(
 						const selector = group.selector as string;
 
 						if (waitForSelectors) {
-							try {
-								await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
-								conditionMet = true;
-							} catch (error) {
-								conditionMet = false;
+							if (detectionMethod === 'smart') {
+								// Use smart DOM-aware detection
+								conditionMet = await smartWaitForSelector(
+									puppeteerPage,
+									selector,
+									selectorTimeout,
+									earlyExitDelay,
+									this.logger,
+								);
+							} else {
+								// Use traditional fixed timeout waiting
+								try {
+									await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
+									conditionMet = true;
+								} catch (error) {
+									conditionMet = false;
+								}
 							}
 						} else {
+							// Just check without waiting
 							const elementExists = await puppeteerPage.$(selector) !== null;
 							conditionMet = elementExists;
 						}
@@ -669,16 +792,39 @@ export async function execute(
 						const caseSensitive = group.caseSensitive as boolean;
 
 						if (waitForSelectors) {
-							try {
-								await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
-							} catch (error) {
+							let elementExists = false;
+							if (detectionMethod === 'smart') {
+								// Use smart DOM-aware detection
+								elementExists = await smartWaitForSelector(
+									puppeteerPage,
+									selector,
+									selectorTimeout,
+									earlyExitDelay,
+									this.logger,
+								);
+							} else {
+								// Use traditional fixed timeout waiting
+								try {
+									await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
+									elementExists = true;
+								} catch (error) {
+									elementExists = false;
+								}
+							}
+
+							if (!elementExists) {
 								conditionMet = false;
 								break;
 							}
 						}
 
-						const elementText = await puppeteerPage.$eval(selector, (el) => el.textContent || '');
-						conditionMet = matchStrings(elementText, textToCheck, matchType, caseSensitive);
+						try {
+							const elementText = await puppeteerPage.$eval(selector, (el) => el.textContent || '');
+							conditionMet = matchStrings(elementText, textToCheck, matchType, caseSensitive);
+						} catch (error) {
+							// Element might not exist
+							conditionMet = false;
+						}
 						break;
 					}
 
@@ -687,6 +833,7 @@ export async function execute(
 						const expectedCount = group.expectedCount as number;
 						const countComparison = group.countComparison as string;
 
+						// For element count, we just check without waiting as we expect some elements might not exist
 						const elements = await puppeteerPage.$$(selector);
 						const actualCount = elements.length;
 
@@ -731,7 +878,22 @@ export async function execute(
 								const waitTime = group.waitTime as number;
 
 								if (waitForSelectors) {
-									await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+									// For actions, we always need to ensure the element exists
+									if (detectionMethod === 'smart') {
+										const elementExists = await smartWaitForSelector(
+											puppeteerPage,
+											actionSelector,
+											selectorTimeout,
+											earlyExitDelay,
+											this.logger,
+										);
+
+										if (!elementExists) {
+											throw new Error(`Action element with selector "${actionSelector}" not found`);
+										}
+									} else {
+										await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+									}
 								}
 
 								this.logger.debug(`Clicking element: ${actionSelector}`);
@@ -747,7 +909,22 @@ export async function execute(
 								const textValue = group.textValue as string;
 
 								if (waitForSelectors) {
-									await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+									// For actions, we always need to ensure the element exists
+									if (detectionMethod === 'smart') {
+										const elementExists = await smartWaitForSelector(
+											puppeteerPage,
+											actionSelector,
+											selectorTimeout,
+											earlyExitDelay,
+											this.logger,
+										);
+
+										if (!elementExists) {
+											throw new Error(`Action element with selector "${actionSelector}" not found`);
+										}
+									} else {
+										await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+									}
 								}
 
 								this.logger.debug(`Filling form field: ${actionSelector} with value: ${textValue}`);
@@ -800,7 +977,22 @@ export async function execute(
 						const fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index) as number;
 
 						if (waitForSelectors) {
-							await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
+							// For actions, we always need to ensure the element exists
+							if (detectionMethod === 'smart') {
+								const elementExists = await smartWaitForSelector(
+									puppeteerPage,
+									fallbackSelector,
+									selectorTimeout,
+									earlyExitDelay,
+									this.logger,
+								);
+
+								if (!elementExists) {
+									throw new Error(`Fallback element with selector "${fallbackSelector}" not found`);
+								}
+							} else {
+								await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
+							}
 						}
 
 						this.logger.debug(`Fallback action: Clicking element: ${fallbackSelector}`);
@@ -816,7 +1008,22 @@ export async function execute(
 						const fallbackText = this.getNodeParameter('fallbackText', index) as string;
 
 						if (waitForSelectors) {
-							await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
+							// For actions, we always need to ensure the element exists
+							if (detectionMethod === 'smart') {
+								const elementExists = await smartWaitForSelector(
+									puppeteerPage,
+									fallbackSelector,
+									selectorTimeout,
+									earlyExitDelay,
+									this.logger,
+								);
+
+								if (!elementExists) {
+									throw new Error(`Fallback element with selector "${fallbackSelector}" not found`);
+								}
+							} else {
+								await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
+							}
 						}
 
 						this.logger.debug(`Fallback action: Filling form field: ${fallbackSelector} with value: ${fallbackText}`);
