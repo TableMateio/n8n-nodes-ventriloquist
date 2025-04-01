@@ -333,6 +333,7 @@ export class Ventriloquist implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Ventriloquist',
 		name: 'ventriloquist',
+		icon: 'file:ventriloquist.svg',
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
@@ -1406,16 +1407,30 @@ export class Ventriloquist implements INodeType {
 		loadOptions: {
 			// Get route options for the Decision operation
 			async getRoutes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				// Default route options
-				const routeOptions: INodePropertyOptions[] = [
-					{ name: 'Route 1', value: 'Route 1' },
-					{ name: 'Route 2', value: 'Route 2' },
-					{ name: 'Route 3', value: 'Route 3' },
-					{ name: 'Route 4', value: 'Route 4' },
-					{ name: 'Route 5', value: 'Route 5' },
-				];
+				try {
+					// Try to get the routes the user has defined
+					const routes = this.getNodeParameter('routes.values') as IDataObject[] | undefined;
 
-				return routeOptions;
+					if (routes && Array.isArray(routes) && routes.length > 0) {
+						// User has defined routes, return them as options
+						return routes.map((route) => ({
+							name: route.name as string,
+							value: route.name as string,
+						}));
+					}
+
+					// If no routes defined, return default Route 1 and 2
+					return [
+						{ name: 'Route 1', value: 'Route 1' },
+						{ name: 'Route 2', value: 'Route 2' },
+					];
+				} catch (error) {
+					// If any error occurs (like when first setting up), use defaults
+					return [
+						{ name: 'Route 1', value: 'Route 1' },
+						{ name: 'Route 2', value: 'Route 2' },
+					];
+				}
 			},
 		},
 	};
