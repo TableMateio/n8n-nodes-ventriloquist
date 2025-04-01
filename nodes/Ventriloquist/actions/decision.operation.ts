@@ -68,10 +68,6 @@ export const description: INodeProperties[] = [
 				enableRouting: [true],
 			},
 		},
-		// This will be dynamically populated based on the routes defined
-		typeOptions: {
-			loadOptionsMethod: 'getRoutes',
-		},
 		default: '',
 	},
 	{
@@ -112,9 +108,6 @@ export const description: INodeProperties[] = [
 							show: {
 								'/enableRouting': [true],
 							},
-						},
-						typeOptions: {
-							loadOptionsMethod: 'getRoutes',
 						},
 						default: '',
 						description: 'Route to take if this condition matches',
@@ -1248,27 +1241,5 @@ export async function execute(
 		}
 
 		throw error;
-	}
-}
-
-/**
- * Returns route options for dropdown
- */
-export function getRoutes(this: IExecuteFunctions): Array<{ name: string; value: string }> {
-	try {
-		// Get all the routes the user has defined
-		const routes = this.getNodeParameter('routes.values', 0, []) as IDataObject[];
-
-		// Convert to options format
-		return routes.map((route) => ({
-			name: route.name as string,
-			value: route.name as string,
-		}));
-	} catch (error) {
-		// If routes parameter not found (like when initially setting up)
-		return [
-			{ name: 'Route 1', value: 'Route 1' },
-			{ name: 'Route 2', value: 'Route 2' },
-		];
 	}
 }
