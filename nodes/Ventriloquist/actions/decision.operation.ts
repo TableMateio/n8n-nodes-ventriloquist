@@ -82,25 +82,6 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
-						displayName: 'Logical Operator',
-						name: 'logicalOperator',
-						type: 'options',
-						options: [
-							{
-								name: 'AND - All Conditions Must Match',
-								value: 'and',
-								description: 'All conditions must be true for the group to match (logical AND)',
-							},
-							{
-								name: 'OR - Any Condition Can Match',
-								value: 'or',
-								description: 'At least one condition must be true for the group to match (logical OR)',
-							},
-						],
-						default: 'and',
-						description: 'How to combine multiple conditions in this group',
-					},
-					{
 						displayName: 'Conditions',
 						name: 'conditions',
 						placeholder: 'Add Condition',
@@ -110,7 +91,7 @@ export const description: INodeProperties[] = [
 							sortable: true,
 						},
 						default: {},
-						description: 'Define multiple conditions to check within this group',
+						description: 'Define the conditions to check',
 						options: [
 							{
 								name: 'condition',
@@ -381,48 +362,29 @@ export const description: INodeProperties[] = [
 						],
 					},
 					{
-						displayName: 'Condition Type',
-						name: 'conditionType',
+						displayName: 'Logical Operator',
+						name: 'logicalOperator',
 						type: 'options',
 						options: [
 							{
-								name: 'Element Count',
-								value: 'elementCount',
-								description: 'Count the elements that match a selector',
+								name: 'AND - All Conditions Must Match',
+								value: 'and',
+								description: 'All conditions must be true for the group to match (logical AND)',
 							},
 							{
-								name: 'Element Exists',
-								value: 'elementExists',
-								description: 'Check if element exists on the page',
-							},
-							{
-								name: 'Execution Count',
-								value: 'executionCount',
-								description: 'Check how many times this node has been executed',
-							},
-							{
-								name: 'Expression',
-								value: 'expression',
-								description: 'Evaluate a JavaScript expression',
-							},
-							{
-								name: 'Input Source',
-								value: 'inputSource',
-								description: 'Check which node the data came from',
-							},
-							{
-								name: 'Text Contains',
-								value: 'textContains',
-								description: 'Check if element contains specific text',
-							},
-							{
-								name: 'URL Contains',
-								value: 'urlContains',
-								description: 'Check if current URL contains string',
+								name: 'OR - Any Condition Can Match',
+								value: 'or',
+								description: 'At least one condition must be true for the group to match (logical OR)',
 							},
 						],
-						default: 'elementExists',
-						description: 'Type of condition to check',
+						default: 'and',
+						description: 'How to combine multiple conditions in this group',
+						displayOptions: {
+							show: {
+								'/operation': ['decision'],
+								'__hasMultipleConditions': [true],
+							},
+						},
 					},
 					{
 						displayName: 'Action If Condition Matches',
@@ -1498,10 +1460,9 @@ export async function execute(
 		// Check each condition group
 		for (const group of conditionGroups) {
 			const groupName = group.name as string;
-			const logicalOperator = group.logicalOperator as string || 'and';
 			const invertCondition = group.invertCondition as boolean || false;
 
-			// Type-safe access to conditions
+			// Get conditions and ensure type safety
 			let conditions: IDataObject[] = [];
 			if (group.conditions &&
 				typeof group.conditions === 'object' &&
@@ -1510,8 +1471,10 @@ export async function execute(
 				conditions = group.conditions.condition as IDataObject[];
 			}
 
-			// Handle backward compatibility - if no nested conditions, treat the group itself as a condition
-			const legacyMode = conditions.length === 0;
+			// Get logical operator (default to AND if not set or just a single condition)
+			const logicalOperator = (conditions.length > 1)
+				? (group.logicalOperator as string || 'and')
+				: 'and'; // Single condition doesn't need an operator
 
 			// Get route if routing is enabled
 			if (enableRouting) {
@@ -1522,7 +1485,7 @@ export async function execute(
 				}
 			}
 
-			this.logger.debug(`Checking condition group: ${groupName} with operator: ${logicalOperator}`);
+			this.logger.debug(`Checking condition group: ${groupName} with ${conditions.length} conditions`);
 
 			// Default value for logical operators
 			// If AND, start with true and any false will make it false
@@ -1530,52 +1493,10 @@ export async function execute(
 			let groupConditionMet = logicalOperator === 'and';
 
 			try {
-				// If no conditions are defined, treat the entire group as the condition (backward compatibility)
-				if (legacyMode) {
-					const conditionType = group.conditionType as string;
-					// Evaluate the single condition as before
-					let conditionMet = false;
-
-					switch (conditionType) {
-						case 'elementExists': {
-							const selector = group.selector as string;
-
-							if (waitForSelectors) {
-								if (detectionMethod === 'smart') {
-									// Use smart DOM-aware detection
-									conditionMet = await smartWaitForSelector(
-										puppeteerPage,
-										selector,
-										selectorTimeout,
-										earlyExitDelay,
-										this.logger,
-									);
-								} else {
-									// Use traditional fixed timeout waiting
-									try {
-										await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
-										conditionMet = true;
-									} catch (error) {
-										conditionMet = false;
-									}
-								}
-							} else {
-								// Just check without waiting
-								const elementExists = await puppeteerPage.$(selector) !== null;
-								conditionMet = elementExists;
-							}
-							break;
-						}
-						// ... handle other condition types for legacy mode ...
-						// (Keep all the existing condition type cases from the original function)
-					}
-
-					// Apply inversion if specified
-					if (invertCondition) {
-						conditionMet = !conditionMet;
-					}
-
-					groupConditionMet = conditionMet;
+				// Handle the case of no conditions - default to false
+				if (conditions.length === 0) {
+					this.logger.debug(`No conditions in group ${groupName}, skipping`);
+					groupConditionMet = false;
 				} else {
 					// Process multiple conditions with the logical operator
 					for (const condition of conditions) {
