@@ -1,7 +1,7 @@
-import type {
+import {
 	IExecuteFunctions,
-	IDataObject,
 	INodeExecutionData,
+	type IDataObject,
 	INodeProperties,
 } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
@@ -61,14 +61,18 @@ export const description: INodeProperties[] = [
 		displayName: 'Fallback Route',
 		name: 'fallbackRoute',
 		type: 'options',
-		description: 'Route to use when no conditions match',
+		default: 'Route 1',
+		description: 'Which output route to use when no conditions match',
 		displayOptions: {
 			show: {
-				operation: ['decision'],
-				enableRouting: [true],
+				'/operation': ['decision'],
+				'/enableRouting': [true],
+				'/fallbackAction': ['continueExecution', 'stopExecution'],
 			},
 		},
-		default: 'Route 1',
+		typeOptions: {
+			loadOptionsMethod: 'getRoutes',
+		},
 	},
 	{
 		displayName: 'Condition Groups',
@@ -104,13 +108,17 @@ export const description: INodeProperties[] = [
 						displayName: 'Route',
 						name: 'route',
 						type: 'options',
+						default: 'Route 1',
+						description: 'Which output route to use when this condition matches',
 						displayOptions: {
 							show: {
+								'/operation': ['decision'],
 								'/enableRouting': [true],
 							},
 						},
-						default: 'Route 1',
-						description: 'Route to take if this condition matches',
+						typeOptions: {
+							loadOptionsMethod: 'getRoutes',
+						},
 					},
 					{
 						displayName: 'Condition Type',
@@ -829,12 +837,13 @@ export async function execute(
 			if (enableRouting) {
 				const groupRoute = group.route as string;
 				if (groupRoute) {
-					// Get route index from list of routes
-					const routes = this.getNodeParameter('routes.values', index, []) as IDataObject[];
-					routeIndex = routes.findIndex((r) => r.name === groupRoute);
-					if (routeIndex === -1) {
-						this.logger.warn(`Route "${groupRoute}" not found. Using first route instead.`);
-						routeIndex = 0;
+					// Use the route string directly for output index
+					// "Route 1" -> 0, "Route 2" -> 1, etc.
+					if (groupRoute.startsWith('Route ')) {
+						const routeNum = Number.parseInt(groupRoute.substring(6), 10);
+						if (!Number.isNaN(routeNum) && routeNum > 0) {
+							routeIndex = routeNum - 1;
+						}
 					}
 				}
 			}
@@ -958,12 +967,13 @@ export async function execute(
 					if (enableRouting) {
 						const groupRoute = group.route as string;
 						if (groupRoute) {
-							// Get route index from list of routes
-							const routes = this.getNodeParameter('routes.values', index, []) as IDataObject[];
-							routeIndex = routes.findIndex((r) => r.name === groupRoute);
-							if (routeIndex === -1) {
-								this.logger.warn(`Route "${groupRoute}" not found. Using first route instead.`);
-								routeIndex = 0;
+							// Use the route string directly for output index
+							// "Route 1" -> 0, "Route 2" -> 1, etc.
+							if (groupRoute.startsWith('Route ')) {
+								const routeNum = Number.parseInt(groupRoute.substring(6), 10);
+								if (!Number.isNaN(routeNum) && routeNum > 0) {
+									routeIndex = routeNum - 1;
+								}
 							}
 						}
 					}
@@ -1071,14 +1081,15 @@ export async function execute(
 
 			// Set fallback route if routing is enabled
 			if (enableRouting) {
-				const fallbackRoute = this.getNodeParameter('fallbackRoute', index, '') as string;
+				const fallbackRoute = this.getNodeParameter('fallbackRoute', index, 'Route 1') as string;
 				if (fallbackRoute) {
-					// Get route index from list of routes
-					const routes = this.getNodeParameter('routes.values', index, []) as IDataObject[];
-					routeIndex = routes.findIndex((r) => r.name === fallbackRoute);
-					if (routeIndex === -1) {
-						this.logger.warn(`Fallback route "${fallbackRoute}" not found. Using first route instead.`);
-						routeIndex = 0;
+					// Use the route string directly for output index
+					// "Route 1" -> 0, "Route 2" -> 1, etc.
+					if (fallbackRoute.startsWith('Route ')) {
+						const routeNum = Number.parseInt(fallbackRoute.substring(6), 10);
+						if (!Number.isNaN(routeNum) && routeNum > 0) {
+							routeIndex = routeNum - 1;
+						}
 					}
 				}
 			}
@@ -1201,14 +1212,14 @@ export async function execute(
 
 		// If using routing
 		if (enableRouting) {
-			// Get the route name for inclusion in the output
-			const routes = this.getNodeParameter('routes.values', index, []) as IDataObject[];
-			if (routes[routeIndex]) {
-				resultData.routeName = routes[routeIndex].name as string;
-			}
+			// Set the route name for output
+			const routeName = `Route ${routeIndex + 1}`;
 
 			return [{
-				json: resultData,
+				json: {
+					...resultData,
+					routeName,
+				},
 				pairedItem: { item: index },
 				// This special property lets n8n know which output to route the data to
 				__metadata: {

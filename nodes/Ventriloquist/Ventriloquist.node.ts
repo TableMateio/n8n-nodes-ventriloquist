@@ -8,6 +8,7 @@ import {
 	type ICredentialDataDecryptedObject,
 	type INodeParameters,
 	type INodePropertyOptions,
+	type ILoadOptionsFunctions,
 } from 'n8n-workflow';
 
 // Import puppeteer-core for browser automation
@@ -23,51 +24,24 @@ import * as decisionOperation from './actions/decision.operation';
  * Configure outputs for decision operation based on routing parameters
  */
 const configureDecisionOutputs = (parameters: INodeParameters) => {
-	const operation = parameters.operation as string;
-
-	if (operation !== 'decision') {
-		return [
-			{
-				type: NodeConnectionType.Main,
-				displayName: 'Output',
-			},
-		];
+	// Default to single output if not using routing
+	if (parameters.enableRouting !== true) {
+		return [NodeConnectionType.Main];
 	}
 
-	const enableRouting = parameters.enableRouting as boolean;
-
-	if (!enableRouting) {
-		return [
-			{
-				type: NodeConnectionType.Main,
-				displayName: 'Output',
-			},
-		];
+	// Get route count, default to 2 if not specified
+	const routeCount = (parameters.routeCount ?? 2) as number;
+	if (routeCount < 1) {
+		return [NodeConnectionType.Main];
 	}
 
-	// Get routes from parameters
-	const routesParam = parameters.routes as IDataObject | undefined;
-	const routeValues = routesParam?.values as IDataObject[] | undefined;
-
-	if (routeValues && routeValues.length > 0) {
-		// Use route names as output names
-		return routeValues.map((route) => ({
-			type: NodeConnectionType.Main,
-			displayName: route.name as string,
-		}));
+	// Create specific number of outputs
+	const outputs = [];
+	for (let i = 0; i < routeCount; i++) {
+		outputs.push(NodeConnectionType.Main);
 	}
 
-	// Default to two routes if none defined
-	return [
-		{
-			type: NodeConnectionType.Main,
-			displayName: 'Route 1',
-		},
-		{
-			type: NodeConnectionType.Main,
-			displayName: 'Route 2',
-		},
-	];
+	return outputs;
 };
 
 /**
@@ -356,68 +330,9 @@ export class Ventriloquist implements INodeType {
 	}
 
 	// Methods to handle loading options for dynamic fields like routes
-	async loadOptions(this: IExecuteFunctions): Promise<INodePropertyOptions[]> {
-		try {
-			const operation = this.getNodeParameter('operation', 0, '') as string;
-			const context = this.getContext('node');
-			const currentParameter = context.parameter as string;
-
-			// Check if this is within the decision operation
-			if (operation === 'decision') {
-				// For the routes dropdown fields
-				if (currentParameter === 'fallbackRoute' || currentParameter.endsWith('route')) {
-					try {
-						// First check if routes are defined
-						let routes = [] as IDataObject[];
-
-						try {
-							// Get all the routes the user has defined
-							routes = this.getNodeParameter('routes.values', 0, []) as IDataObject[];
-						} catch (error) {
-							// If error on accessing routes (like when first setting up), use defaults
-							this.logger.debug('Could not access routes parameter, using defaults');
-						}
-
-						// If routes exist, return them as options
-						if (routes && routes.length > 0) {
-							return routes.map((route) => ({
-								name: route.name as string,
-								value: route.name as string,
-							}));
-						}
-
-						// Default routes if none defined yet
-						return [
-							{ name: 'Route 1', value: 'Route 1' },
-							{ name: 'Route 2', value: 'Route 2' },
-						];
-					} catch (error) {
-						this.logger.debug(`Error loading route options: ${error}`);
-						// Return default routes if any error occurs
-						return [
-							{ name: 'Route 1', value: 'Route 1' },
-							{ name: 'Route 2', value: 'Route 2' },
-						];
-					}
-				}
-			}
-
-			// Default empty options for other fields
-			return [];
-		} catch (error) {
-			// Global error handler with defaults
-			this.logger.debug(`Global error in loadOptions: ${error}`);
-			return [
-				{ name: 'Route 1', value: 'Route 1' },
-				{ name: 'Route 2', value: 'Route 2' },
-			];
-		}
-	}
-
 	description: INodeTypeDescription = {
 		displayName: 'Ventriloquist',
 		name: 'ventriloquist',
-		icon: 'file:ventriloquist.svg',
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
@@ -1485,4 +1400,23 @@ export class Ventriloquist implements INodeType {
 
 		return returnData;
 	}
+
+	// Method to load options for dropdowns
+	methods = {
+		loadOptions: {
+			// Get route options for the Decision operation
+			async getRoutes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				// Default route options
+				const routeOptions: INodePropertyOptions[] = [
+					{ name: 'Route 1', value: 'Route 1' },
+					{ name: 'Route 2', value: 'Route 2' },
+					{ name: 'Route 3', value: 'Route 3' },
+					{ name: 'Route 4', value: 'Route 4' },
+					{ name: 'Route 5', value: 'Route 5' },
+				];
+
+				return routeOptions;
+			},
+		},
+	};
 }
