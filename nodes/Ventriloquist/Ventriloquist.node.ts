@@ -1438,5 +1438,49 @@ export class Ventriloquist implements INodeType {
 				}
 			},
 		},
+
+		// Add a method to check for multiple conditions in any category
+		hasMultipleConditions(
+			nodeParameters: IDataObject,
+		): boolean {
+			try {
+				const conditionGroups = nodeParameters.conditionGroups as IDataObject | undefined;
+
+				if (!conditionGroups || !conditionGroups.groups) {
+					return false;
+				}
+
+				const groups = (conditionGroups.groups as IDataObject[]);
+
+				for (const group of groups) {
+					if (!group.conditions) {
+						continue;
+					}
+
+					const conditions = group.conditions as IDataObject;
+					let totalConditionCount = 0;
+
+					// Count conditions across all categories
+					const conditionTypes = [
+						'elementExists', 'elementCount', 'textContains',
+						'urlContains', 'expression', 'inputSource', 'executionCount'
+					];
+
+					for (const type of conditionTypes) {
+						if (conditions[type] && Array.isArray(conditions[type])) {
+							totalConditionCount += (conditions[type] as IDataObject[]).length;
+							if (totalConditionCount > 1) {
+								return true;
+							}
+						}
+					}
+				}
+
+				return false;
+			} catch (error) {
+				// On error, assume no multiple conditions
+				return false;
+			}
+		},
 	};
 }

@@ -88,6 +88,7 @@ export const description: INodeProperties[] = [
 						typeOptions: {
 							multipleValues: true,
 							sortable: true,
+							multipleValueButtonText: 'Add More Conditions',
 						},
 						default: {},
 						description: 'Define the conditions to check',
@@ -318,7 +319,7 @@ export const description: INodeProperties[] = [
 										},
 										default: '$input.item.json.someProperty === true',
 										description: 'JavaScript expression that should evaluate to true or false. You can use $input to access the input data.',
-										placeholder: '$input.item.json.status === "success" || $input.item.json.count > 5',
+											placeholder: '$input.item.json.status === "success" || $input.item.json.count > 5',
 										required: true,
 									},
 									{
@@ -426,9 +427,7 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								'/operation': ['decision'],
-							},
-							hide: {
-								'@node.hasMultipleConditions': [false],
+								'__conditionCount': [2, 3, 4, 5, 6, 7, 8, 9, 10],
 							},
 						},
 					},
@@ -776,60 +775,516 @@ export const description: INodeProperties[] = [
 						default: '',
 						placeholder: 'https://example.com/page',
 						description: 'URL to navigate to',
-						displayOptions: {
-							show: {
-								actionType: ['navigate'],
+											required: true,
+										},
+										{
+											displayName: 'Invert Condition',
+											name: 'invertCondition',
+											type: 'boolean',
+											default: false,
+											description: 'Whether to invert the condition result (true becomes false, false becomes true)',
+										},
+									],
+								},
+								{
+									name: 'inputSource',
+									displayName: 'Input Source Condition',
+									values: [
+										{
+											displayName: 'Source Node Name',
+											name: 'sourceNodeName',
+											type: 'string',
+											default: '',
+											placeholder: 'e.g., HTTP Request, Function, Switch',
+											description: 'Enter the exact name of the node that should trigger this condition. This is the name shown in the node\'s title bar.',
+											required: true,
+										},
+										{
+											displayName: 'Invert Condition',
+											name: 'invertCondition',
+											type: 'boolean',
+											default: false,
+											description: 'Whether to invert the condition result (true becomes false, false becomes true)',
+										},
+									],
+								},
+								{
+									name: 'executionCount',
+									displayName: 'Execution Count Condition',
+									values: [
+										{
+											displayName: 'Count Comparison',
+											name: 'executionCountComparison',
+											type: 'options',
+											options: [
+												{
+													name: 'Equal To',
+													value: 'equal',
+												},
+												{
+													name: 'Greater Than',
+													value: 'greater',
+												},
+												{
+													name: 'Greater Than or Equal To',
+													value: 'greaterEqual',
+												},
+												{
+													name: 'Less Than',
+													value: 'less',
+												},
+												{
+													name: 'Less Than or Equal To',
+													value: 'lessEqual',
+												},
+											],
+											default: 'equal',
+											description: 'How to compare the execution count',
+											required: true,
+										},
+										{
+											displayName: 'Execution Count',
+											name: 'executionCountValue',
+											type: 'number',
+											default: 1,
+											description: 'The value to compare the execution count against',
+											required: true,
+										},
+										{
+											displayName: 'Invert Condition',
+											name: 'invertCondition',
+											type: 'boolean',
+											default: false,
+											description: 'Whether to invert the condition result (true becomes false, false becomes true)',
+										},
+									],
+								},
+							],
+						},
+						{
+							displayName: 'Logical Operator',
+							name: 'logicalOperator',
+							type: 'options',
+							options: [
+								{
+									name: 'AND - All Conditions Must Match',
+									value: 'and',
+									description: 'All conditions must be true for the group to match (logical AND)',
+								},
+								{
+									name: 'OR - Any Condition Can Match',
+									value: 'or',
+									description: 'At least one condition must be true for the group to match (logical OR)',
+								},
+							],
+							default: 'and',
+							description: 'How to combine multiple conditions in this group',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									'__conditionCount': [2, 3, 4, 5, 6, 7, 8, 9, 10],
+								},
 							},
 						},
-					},
-					{
-						displayName: 'Wait After Action',
-						name: 'waitAfterAction',
-						type: 'options',
-						options: [
-							{
-								name: 'DOM Content Loaded',
-								value: 'domContentLoaded',
-								description: 'Wait until the DOM content is loaded (faster)',
-							},
-							{
-								name: 'Fixed Time',
-								value: 'fixedTime',
-								description: 'Wait for a specific amount of time',
-							},
-							{
-								name: 'Navigation Complete',
-								value: 'navigationComplete',
-								description: 'Wait until navigation is complete (slower but more thorough)',
-							},
-							{
-								name: 'No Wait',
-								value: 'noWait',
-								description: 'Do not wait after the action',
-							},
-						],
-						default: 'domContentLoaded',
-						description: 'What to wait for after performing the action',
-						displayOptions: {
-							show: {
-								actionType: ['click', 'navigate'],
+						{
+							displayName: 'Action If Condition Matches',
+							name: 'actionType',
+							type: 'options',
+							options: [
+								{
+									name: 'Click Element',
+									value: 'click',
+									description: 'Click on an element',
+								},
+								{
+									name: 'Extract Data',
+									value: 'extract',
+									description: 'Extract data from an element on the page',
+								},
+								{
+									name: 'Fill Form Field',
+									value: 'fill',
+									description: 'Enter text into a form field',
+								},
+								{
+									name: 'Navigate to URL',
+									value: 'navigate',
+									description: 'Navigate to a specific URL',
+								},
+								{
+									name: 'No Action (Just Detect)',
+									value: 'none',
+									description: 'Only detect the condition, do not take any action',
+								},
+							],
+							default: 'click',
+							description: 'Action to take if the condition is met',
+						},
+						{
+							displayName: 'Action Selector',
+							name: 'actionSelector',
+							type: 'string',
+							default: '',
+							placeholder: 'button.submit, input[type="text"]',
+							description: 'CSS selector for the element to interact with',
+							displayOptions: {
+								show: {
+									actionType: ['click', 'extract'],
+								},
 							},
 						},
-					},
-					{
-						displayName: 'Wait Time (MS)',
-						name: 'waitTime',
-						type: 'number',
-						default: 2000,
-						description: 'Time to wait in milliseconds (for fixed time wait)',
-						displayOptions: {
-							show: {
-								waitAfterAction: ['fixedTime'],
-								actionType: ['click', 'navigate'],
+						{
+							displayName: 'Form Fields',
+							name: 'formFields',
+							placeholder: 'Add Form Field',
+							type: 'fixedCollection',
+							typeOptions: {
+								multipleValues: true,
+								sortable: true,
+							},
+							default: {},
+							displayOptions: {
+								show: {
+									actionType: ['fill'],
+								},
+							},
+							options: [
+								{
+									name: 'fields',
+									displayName: 'Fields',
+									values: [
+										{
+											displayName: 'Field Type',
+											name: 'fieldType',
+											type: 'options',
+											options: [
+												{
+													name: 'Checkbox',
+													value: 'checkbox',
+													description: 'Checkbox input element',
+												},
+												{
+													name: 'File',
+													value: 'file',
+													description: 'File upload input element',
+												},
+												{
+													name: 'Multi-Select',
+													value: 'multiSelect',
+													description: 'Multiple select dropdown element',
+												},
+												{
+													name: 'Radio',
+													value: 'radio',
+													description: 'Radio button input element',
+												},
+												{
+													name: 'Select (Dropdown)',
+													value: 'select',
+													description: 'Dropdown select element',
+												},
+												{
+													name: 'Text',
+													value: 'text',
+													description: 'Standard text input or textarea',
+												},
+											],
+											default: 'text',
+											description: 'The type of form field',
+										},
+										{
+											displayName: 'Selector',
+											name: 'selector',
+											type: 'string',
+											default: '',
+											placeholder: '#input-field, .form-control, input[name="email"]',
+											description: 'CSS selector to target the form field. Use "#ID" for IDs, ".class" for classes, "tag" for HTML elements, or "tag[attr=value]" for attributes.',
+											required: true,
+										},
+										{
+											displayName: 'Value',
+											name: 'value',
+											type: 'string',
+											default: '',
+											description: 'Value to set for the form field',
+											displayOptions: {
+												show: {
+													fieldType: ['text', 'radio'],
+												},
+											},
+										},
+										{
+											displayName: 'Dropdown Value',
+											name: 'value',
+											type: 'string',
+											default: '',
+											description: 'Value or text to select from the dropdown',
+											displayOptions: {
+												show: {
+													fieldType: ['select'],
+												},
+											},
+										},
+										{
+											displayName: 'Match Type',
+											name: 'matchType',
+											type: 'options',
+											options: [
+												{
+													name: 'Exact (Value)',
+													value: 'exact',
+													description: 'Match exactly by option value',
+												},
+												{
+													name: 'Text Contains',
+													value: 'textContains',
+													description: 'Match if option text contains this string',
+												},
+												{
+													name: 'Fuzzy Match',
+													value: 'fuzzy',
+													description: 'Use fuzzy matching to find the closest option text',
+												},
+											],
+											default: 'exact',
+											description: 'How to match the dropdown option',
+											displayOptions: {
+												show: {
+													fieldType: ['select'],
+												},
+											},
+										},
+										{
+											displayName: 'Fuzzy Match Threshold',
+											name: 'fuzzyThreshold',
+											type: 'number',
+											typeOptions: {
+												minValue: 0,
+												maxValue: 1,
+											},
+											default: 0.5,
+											description: 'Minimum similarity score (0-1) to consider a match',
+											displayOptions: {
+												show: {
+													fieldType: ['select'],
+													matchType: ['fuzzy'],
+												},
+											},
+										},
+										{
+											displayName: 'Clear Field First',
+											name: 'clearField',
+											type: 'boolean',
+											default: true,
+											description: 'Whether to clear the field before entering text',
+											displayOptions: {
+												show: {
+													fieldType: ['text'],
+												},
+											},
+										},
+										{
+											displayName: 'Press Enter After Input',
+											name: 'pressEnter',
+											type: 'boolean',
+											default: false,
+											description: 'Whether to press Enter after entering text',
+											displayOptions: {
+												show: {
+													fieldType: ['text'],
+												},
+											},
+										},
+										{
+											displayName: 'Check',
+											name: 'checked',
+											type: 'boolean',
+											default: true,
+											description: 'Whether to check or uncheck the checkbox/radio button',
+											displayOptions: {
+												show: {
+													fieldType: ['checkbox', 'radio'],
+												},
+											},
+										},
+										{
+											displayName: 'File Path',
+											name: 'filePath',
+											type: 'string',
+											default: '',
+											description: 'Full path to the file to upload',
+											displayOptions: {
+												show: {
+													fieldType: ['file'],
+												},
+											},
+										},
+										{
+											displayName: 'Multi-Select Values',
+											name: 'multiSelectValues',
+											type: 'string',
+											default: '',
+											placeholder: 'value1,value2,value3',
+											description: 'Comma-separated list of values to select (for multi-select dropdowns)',
+											displayOptions: {
+												show: {
+													fieldType: ['multiSelect'],
+												},
+											},
+										},
+										{
+											displayName: 'Human-Like Typing',
+											name: 'humanLike',
+											type: 'boolean',
+											default: true,
+											description: 'Whether to use human-like typing with random delays between keystrokes',
+											displayOptions: {
+												show: {
+													fieldType: ['text'],
+												},
+											},
+										},
+									],
+								},
+							],
+						},
+						{
+							displayName: 'Submit Form After Filling',
+							name: 'submitForm',
+							type: 'boolean',
+							default: false,
+							description: 'Whether to submit the form after filling the fields',
+							displayOptions: {
+								show: {
+									actionType: ['fill'],
+								},
 							},
 						},
-					},
-				],
+						{
+							displayName: 'Submit Button Selector',
+							name: 'submitSelector',
+							type: 'string',
+							default: '',
+							placeholder: 'button[type="submit"], input[type="submit"], .submit-button',
+							description: 'CSS selector of the submit button',
+							displayOptions: {
+								show: {
+									actionType: ['fill'],
+									submitForm: [true],
+								},
+							},
+						},
+						{
+							displayName: 'Wait After Submit',
+							name: 'waitAfterSubmit',
+							type: 'options',
+							options: [
+								{
+									name: 'DOM Content Loaded',
+									value: 'domContentLoaded',
+									description: 'Wait until the DOM content is loaded (faster)',
+								},
+								{
+									name: 'Fixed Time',
+									value: 'fixedTime',
+									description: 'Wait for a specific amount of time',
+								},
+								{
+									name: 'Navigation Complete',
+									value: 'navigationComplete',
+									description: 'Wait until navigation is complete (slower but more thorough)',
+								},
+								{
+									name: 'No Wait',
+									value: 'noWait',
+									description: 'Do not wait after clicking submit',
+								},
+							],
+							default: 'domContentLoaded',
+							description: 'What to wait for after clicking the submit button',
+							displayOptions: {
+								show: {
+									actionType: ['fill'],
+									submitForm: [true],
+								},
+							},
+						},
+						{
+							displayName: 'Wait Time (MS)',
+							name: 'waitSubmitTime',
+							type: 'number',
+							default: 2000,
+							description: 'Time to wait in milliseconds (for fixed time wait)',
+							displayOptions: {
+								show: {
+									actionType: ['fill'],
+									submitForm: [true],
+									waitAfterSubmit: ['fixedTime'],
+								},
+							},
+						},
+						{
+							displayName: 'URL',
+							name: 'url',
+							type: 'string',
+							default: '',
+							placeholder: 'https://example.com/page',
+							description: 'URL to navigate to',
+							displayOptions: {
+								show: {
+									actionType: ['navigate'],
+								},
+							},
+						},
+						{
+							displayName: 'Wait After Action',
+							name: 'waitAfterAction',
+							type: 'options',
+							options: [
+								{
+									name: 'DOM Content Loaded',
+									value: 'domContentLoaded',
+									description: 'Wait until the DOM content is loaded (faster)',
+								},
+								{
+									name: 'Fixed Time',
+									value: 'fixedTime',
+									description: 'Wait for a specific amount of time',
+								},
+								{
+									name: 'Navigation Complete',
+									value: 'navigationComplete',
+									description: 'Wait until navigation is complete (slower but more thorough)',
+								},
+								{
+									name: 'No Wait',
+									value: 'noWait',
+									description: 'Do not wait after the action',
+								},
+							],
+							default: 'domContentLoaded',
+							description: 'What to wait for after performing the action',
+							displayOptions: {
+								show: {
+									actionType: ['click', 'navigate'],
+								},
+							},
+						},
+						{
+							displayName: 'Wait Time (MS)',
+							name: 'waitTime',
+							type: 'number',
+							default: 2000,
+							description: 'Time to wait in milliseconds (for fixed time wait)',
+							displayOptions: {
+								show: {
+									waitAfterAction: ['fixedTime'],
+									actionType: ['click', 'navigate'],
+								},
+							},
+						},
+					],
+				},
 			},
 		],
 		required: true,
