@@ -6,6 +6,7 @@ import {
 	type INodeTypeDescription,
 	type IDataObject,
 	type ICredentialDataDecryptedObject,
+	type INodeParameters,
 } from 'n8n-workflow';
 
 // Import puppeteer-core for browser automation
@@ -16,6 +17,41 @@ import * as formOperation from './actions/form.operation';
 import * as extractOperation from './actions/extract.operation';
 import * as detectOperation from './actions/detect.operation';
 import * as decisionOperation from './actions/decision.operation';
+
+/**
+ * Configure outputs for decision operation based on routing parameters
+ */
+const configureDecisionOutputs = (parameters: INodeParameters) => {
+	const operation = parameters.operation as string;
+
+	if (operation !== 'decision') {
+		return [
+			{
+				type: NodeConnectionType.Main,
+				displayName: 'Output',
+			},
+		];
+	}
+
+	const enableRouting = parameters.enableRouting as boolean;
+
+	if (!enableRouting) {
+		return [
+			{
+				type: NodeConnectionType.Main,
+				displayName: 'Output',
+			},
+		];
+	}
+
+	const routeCount = parameters.routeCount as number || 2;
+
+	// Generate a route for each output number
+	return Array.from({ length: routeCount }, (_, i) => ({
+		type: NodeConnectionType.Main,
+		displayName: `Route ${i + 1}`,
+	}));
+};
 
 /**
  * Ventriloquist is a custom node for N8N that connects to Bright Data's Browser Scraping Browser
@@ -315,7 +351,7 @@ export class Ventriloquist implements INodeType {
 			color: '#2244BB',
 		},
 		inputs: [NodeConnectionType.Main],
-		outputs: [NodeConnectionType.Main],
+		outputs: `={{(${configureDecisionOutputs})($parameter)}}`,
 		credentials: [
 			{
 				name: 'brightDataApi',
@@ -1100,63 +1136,104 @@ export class Ventriloquist implements INodeType {
 					returnData[0].push(result);
 				} else if (operation === 'decision') {
 					// Find the session we need to use
-					const existingSessionId = this.getNodeParameter('sessionId', i, '') as string;
+					let page: puppeteer.Page | undefined;
 
-					// Get the page to use
-					let page: puppeteer.Page;
+					// Get session ID if provided
+					try {
+						// Get existing session ID if provided
+						const existingSessionId = this.getNodeParameter('sessionId', i, '') as string;
 
-					if (existingSessionId) {
-						// Try to get an existing page from the session
-						const existingPage = Ventriloquist.getPage(workflowId, existingSessionId);
-						if (!existingPage) {
-							throw new Error(`Session ID ${existingSessionId} not found. The session may have expired or been closed.`);
-						}
-						page = existingPage;
-					} else {
-						// Use latest page from the browser (fall back to creating a new one if needed)
-						const browser = await Ventriloquist.getOrCreateSession(
-							workflowId,
-							websocketEndpoint,
-							this.logger,
-						);
-						const pages = await browser.browser.pages();
-
-						if (pages.length > 0) {
-							page = pages[pages.length - 1]; // Use the most recently created page
+						// Get the page to use
+						if (existingSessionId) {
+							// Try to get an existing page from the session
+							const existingPage = Ventriloquist.getPage(workflowId, existingSessionId);
+							if (!existingPage) {
+								throw new Error(`Session ID ${existingSessionId} not found. The session may have expired or been closed.`);
+							}
+							page = existingPage;
 						} else {
-							// Create a new page if none exists
-							page = await browser.browser.newPage();
-						}
-					}
+							// Use latest page from the browser (fall back to creating a new one if needed)
+							const browser = await Ventriloquist.getOrCreateSession(
+								workflowId,
+								websocketEndpoint,
+								this.logger,
+							);
+							const pages = await browser.browser.pages();
 
-					// Execute decision operation
-					const decisionResult = await decisionOperation.execute.call(
-						this,
-						i,
-						page
-					);
-
-					const routingOptions = this.getNodeParameter('routingOptions', i, {}) as IDataObject;
-					const enableMultipleOutputs = !!routingOptions.enableMultipleOutputs;
-
-					if (enableMultipleOutputs) {
-						// For the decision node with routing, we'll store the data in memory for now
-						// In a future update, we'll implement proper dynamic outputs
-
-						// Get the route from the decision result
-						let outputRoute = 'main';
-						if (Array.isArray(decisionResult) && decisionResult.length > 0 && decisionResult[0].json) {
-							outputRoute = decisionResult[0].json.outputRoute as string || 'main';
+							if (pages.length > 0) {
+								page = pages[pages.length - 1]; // Use the most recently created page
+							} else {
+								// Create a new page if none exists
+								page = await browser.browser.newPage();
+							}
 						}
 
-						// Return the data with the route information
-						returnData[0] = decisionResult;
+						if (!page) {
+							throw new Error('No browser page found or could be created');
+						}
 
-						// Add a notice about current routing implementation
-						this.logger.info(`Decision operation routed to "${outputRoute}". For proper routing, update to a future version with multi-output support.`);
-					} else {
-						// Single output mode
-						returnData[0] = decisionResult;
+						// Execute the decision operation
+						const result = await decisionOperation.execute.call(
+							this,
+							i,
+							page
+						);
+
+						// Check if we need to route to different outputs
+						const enableRouting = this.getNodeParameter('enableRouting', i, false) as boolean;
+
+						if (enableRouting) {
+							// Decision routing - data will be routed based on metadata
+							if (result.length > 0 && result[0].__metadata && typeof result[0].__metadata === 'object') {
+								// Create arrays for each output if they don't exist
+								const routeCount = this.getNodeParameter('routeCount', i, 2) as number;
+
+								// Initialize arrays for each output if they don't exist
+								while (returnData.length < routeCount) {
+									returnData.push([]);
+								}
+
+								// Get the output index from metadata
+								let outputIndex = 0; // Default to first output
+
+								// Check if __metadata has the outputIndex property
+								if ('outputIndex' in result[0].__metadata) {
+									outputIndex = result[0].__metadata.outputIndex as number;
+								}
+
+								const safeIndex = Math.min(Math.max(0, outputIndex), routeCount - 1);
+
+								// Add the result to the appropriate output
+								returnData[safeIndex].push(...result);
+							} else {
+								// Fallback to adding to first output
+								if (returnData.length === 0) {
+									returnData.push([]);
+								}
+								returnData[0].push(...result);
+							}
+						} else {
+							// If routing not enabled, simply add to first output
+							if (returnData.length === 0) {
+								returnData.push([]);
+							}
+							returnData[0].push(...result);
+						}
+					} catch (error) {
+						// ... existing error handling ...
+						// Handle error and add to first output
+						if (returnData.length === 0) {
+							returnData.push([]);
+						}
+
+						returnData[0].push({
+							json: {
+								success: false,
+								error: (error as Error).message,
+								executionDuration: Date.now() - startTime,
+							},
+							pairedItem: { item: i },
+						});
 					}
 				} else if (operation === 'extract') {
 					// Execute extract operation

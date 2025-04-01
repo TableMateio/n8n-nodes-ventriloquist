@@ -41,6 +41,18 @@ export const description: INodeProperties[] = [
 						required: true,
 					},
 					{
+						displayName: 'Route Number',
+						name: 'routeNumber',
+						type: 'number',
+						default: 1,
+						description: 'Route number to send data to if this condition matches (1, 2, 3, etc.)',
+						displayOptions: {
+							show: {
+								'/enableRouting': [true],
+							},
+						},
+					},
+					{
 						displayName: 'Route to Output',
 						name: 'routeOutput',
 						type: 'string',
@@ -338,6 +350,57 @@ export const description: INodeProperties[] = [
 		required: true,
 	},
 	{
+		displayName: 'Enable Routing',
+		name: 'enableRouting',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to route data to different outputs based on conditions',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+			},
+		},
+	},
+	{
+		displayName: 'Number of Routes',
+		name: 'routeCount',
+		type: 'number',
+		default: 2,
+		description: 'Number of different route outputs to create',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				enableRouting: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Route All Matches',
+		name: 'routeAllMatches',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to send data to all matching routes (if multiple conditions match with different route numbers)',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				enableRouting: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Fallback Route',
+		name: 'fallbackRoute',
+		type: 'number',
+		default: 1,
+		description: 'Route to use when no conditions match',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				enableRouting: [true],
+			},
+		},
+	},
+	{
 		displayName: 'Fallback Action',
 		name: 'fallbackAction',
 		type: 'options',
@@ -479,7 +542,7 @@ export const description: INodeProperties[] = [
 		type: 'options',
 		options: [
 			{
-				name: 'Smart Detection (DOM-aware)',
+				name: 'Smart Detection (DOM-Aware)',
 				value: 'smart',
 				description: 'Intelligently detects when the page is fully loaded before checking for elements (faster for elements that don\'t exist)',
 			},
@@ -570,6 +633,7 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ['decision'],
+				enableRouting: [false],
 			},
 		},
 		options: [
@@ -790,42 +854,35 @@ export async function execute(
 		const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
 		const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 
-		// Get routing options
-		const routingOptions = this.getNodeParameter('routingOptions', index, {}) as IDataObject;
-		const enableMultipleOutputs = routingOptions.enableMultipleOutputs as boolean || false;
-		const fallbackOutput = routingOptions.fallbackOutput as string || '';
-		const sendToAllMatching = routingOptions.sendToAllMatching as boolean || false;
+		// Get routing parameters
+		const enableRouting = this.getNodeParameter('enableRouting', index, false) as boolean;
 
+		// Initialize routing variables
 		let routeTaken = 'none';
 		let actionPerformed = 'none';
-		let outputRouteName = '';
+		let routeNumber = 0;
 		const currentUrl = await puppeteerPage.url();
 		let screenshot: string | undefined;
 
 		// Track matching conditions for routing
-		const matchingRoutes: string[] = [];
-		const defaultResult = {
-			success: true,
-			routeTaken,
-			actionPerformed,
-			currentUrl: await puppeteerPage.url(),
-			pageTitle: await puppeteerPage.title(),
-			screenshot,
-			executionDuration: 0,
-			outputRoute: '',
-		};
-
-		// Prepare routing results
-		const routingResults: Record<string, INodeExecutionData[]> = {
-			main: [{ json: { ...defaultResult } }],
-		};
+		const matchingRoutes: number[] = [];
 
 		// Check each condition group
 		for (const group of conditionGroups) {
 			const conditionType = group.conditionType as string;
 			const groupName = group.name as string;
 			const invertCondition = group.invertCondition as boolean || false;
-			const routeOutput = (group.routeOutput as string || '').trim();
+
+			// Get route number if routing is enabled
+			if (enableRouting) {
+				const groupRouteNumber = group.routeNumber as number || 1;
+
+				// Ensure route number is valid
+				if (groupRouteNumber < 1) {
+					this.logger.warn(`Invalid route number ${groupRouteNumber} for condition group "${groupName}". Using route 1 instead.`);
+					group.routeNumber = 1;
+				}
+			}
 
 			this.logger.debug(`Checking condition group: ${groupName}`);
 
@@ -943,9 +1000,10 @@ export async function execute(
 					const actionType = group.actionType as string;
 
 					// For routing capability, store route information
-					if (enableMultipleOutputs && routeOutput) {
-						matchingRoutes.push(routeOutput);
-						outputRouteName = routeOutput;
+					if (enableRouting) {
+						const groupRouteNumber = group.routeNumber as number || 1;
+						matchingRoutes.push(groupRouteNumber);
+						routeNumber = groupRouteNumber;
 					}
 
 					if (actionType !== 'none') {
@@ -1032,8 +1090,9 @@ export async function execute(
 						}
 					}
 
-					// If not sending to all matching outputs, exit the loop after first match
-					if (!enableMultipleOutputs || !sendToAllMatching) {
+					// If not routing all matches, exit after the first match
+					const routeAllMatches = this.getNodeParameter('routeAllMatches', index, false) as boolean;
+					if (!enableRouting || !routeAllMatches) {
 						break;
 					}
 				}
@@ -1046,15 +1105,16 @@ export async function execute(
 			}
 		}
 
-		// If no condition was met, perform fallback action
+		// If no condition was met, perform fallback action and use fallback route
 		if (routeTaken === 'none' && fallbackAction !== 'none') {
 			routeTaken = 'fallback';
 			actionPerformed = fallbackAction;
 
-			// Set fallback output route if specified
-			if (enableMultipleOutputs && fallbackOutput) {
-				outputRouteName = fallbackOutput;
-				matchingRoutes.push(fallbackOutput);
+			// Set fallback route if routing is enabled
+			if (enableRouting) {
+				const fallbackRoute = this.getNodeParameter('fallbackRoute', index, 1) as number;
+				routeNumber = fallbackRoute;
+				matchingRoutes.push(fallbackRoute);
 			}
 
 			try {
@@ -1154,7 +1214,17 @@ export async function execute(
 		const executionDuration = Date.now() - startTime;
 
 		// Prepare the result data
-		const resultData = {
+		const resultData: {
+			success: boolean;
+			routeTaken: string;
+			actionPerformed: string;
+			currentUrl: string;
+			pageTitle: string;
+			screenshot: string | undefined;
+			executionDuration: number;
+			routeNumber: number;
+			outputRoute?: string;
+		} = {
 			success: true,
 			routeTaken,
 			actionPerformed,
@@ -1162,31 +1232,51 @@ export async function execute(
 			pageTitle: await puppeteerPage.title(),
 			screenshot,
 			executionDuration,
-			outputRoute: outputRouteName,
+			routeNumber,
 		};
 
-		// Handle routing logic
-		if (enableMultipleOutputs && matchingRoutes.length > 0) {
-			// Create outputs for each matching route
-			for (const route of matchingRoutes) {
-				if (!routingResults[route]) {
-					routingResults[route] = [];
-				}
-				routingResults[route].push({
-					json: resultData,
-				});
+		// If using new routing approach
+		if (enableRouting) {
+			// If no routes matched, use fallback route
+			if (matchingRoutes.length === 0) {
+				const fallbackRoute = this.getNodeParameter('fallbackRoute', index, 1) as number;
+				matchingRoutes.push(fallbackRoute);
+				resultData.routeNumber = fallbackRoute;
 			}
 
-			// Return the routing results object for the node to handle
-			return Object.values(routingResults).flat();
+			return [{
+				json: resultData,
+				pairedItem: { item: index },
+				// This special property lets n8n know which output to route the data to (1-based index)
+				__metadata: {
+					// Convert from 1-based route number to 0-based index
+					outputIndex: resultData.routeNumber - 1,
+				},
+			}];
 		}
 
-		// If not using multiple outputs, return simple array
-		return [
-			{
+		// For backward compatibility - using the old routing approach
+		const routingOptions = this.getNodeParameter('routingOptions', index, {}) as IDataObject;
+		const enableMultipleOutputs = routingOptions.enableMultipleOutputs as boolean || false;
+
+		if (enableMultipleOutputs) {
+			const fallbackOutput = routingOptions.fallbackOutput as string || '';
+			const outputRouteName = fallbackOutput || 'main';
+
+			// Add outputRoute property for backward compatibility
+			resultData.outputRoute = outputRouteName;
+
+			return [{
 				json: resultData,
-			},
-		];
+				pairedItem: { item: index },
+			}];
+		}
+
+		// Default case - single output
+		return [{
+			json: resultData,
+			pairedItem: { item: index },
+		}];
 	} catch (error) {
 		const executionDuration = Date.now() - startTime;
 
@@ -1200,6 +1290,7 @@ export async function execute(
 						pageTitle: await puppeteerPage.title(),
 						executionDuration,
 					},
+					pairedItem: { item: index },
 				},
 			];
 		}
