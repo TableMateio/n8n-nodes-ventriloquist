@@ -319,74 +319,195 @@ export const description: INodeProperties[] = [
 								displayName: 'Fields',
 								values: [
 									{
-										displayName: 'Field Selector',
-										name: 'selector',
-										type: 'string',
-										default: '',
-										placeholder: '#input-field, .form-control, input[name="email"]',
-										description: 'CSS selector to target the form field',
-										required: true,
-									},
-									{
-										displayName: 'Field Value',
-										name: 'value',
-										type: 'string',
-										default: '',
-										description: 'Value to set for the form field',
-									},
-									{
 										displayName: 'Field Type',
 										name: 'fieldType',
 										type: 'options',
 										options: [
 											{
-												name: 'Text Field / Textarea',
-												value: 'text',
-												description: 'Standard text input or textarea',
+												name: 'Checkbox',
+												value: 'checkbox',
+												description: 'Checkbox input element',
 											},
 											{
-												name: 'Select / Dropdown',
+												name: 'File',
+												value: 'file',
+												description: 'File upload input element',
+											},
+											{
+												name: 'Multi-Select',
+												value: 'multiSelect',
+												description: 'Multiple select dropdown element',
+											},
+											{
+												name: 'Radio',
+												value: 'radio',
+												description: 'Radio button input element',
+											},
+											{
+												name: 'Select (Dropdown)',
 												value: 'select',
 												description: 'Dropdown select element',
 											},
 											{
-												name: 'Checkbox / Radio',
-												value: 'checkbox',
-												description: 'Checkbox or radio button input element',
+												name: 'Text',
+												value: 'text',
+												description: 'Standard text input or textarea',
 											},
 										],
 										default: 'text',
 										description: 'The type of form field',
 									},
 									{
-										displayName: 'Options',
-										name: 'options',
-										type: 'collection',
-										placeholder: 'Add Option',
-										default: {},
+										displayName: 'Selector',
+										name: 'selector',
+										type: 'string',
+										default: '',
+										placeholder: '#input-field, .form-control, input[name="email"]',
+										description: 'CSS selector to target the form field. Use "#ID" for IDs, ".class" for classes, "tag" for HTML elements, or "tag[attr=value]" for attributes.',
+										required: true,
+									},
+									{
+										displayName: 'Value',
+										name: 'value',
+										type: 'string',
+										default: '',
+										description: 'Value to set for the form field',
+										displayOptions: {
+											show: {
+												fieldType: ['text', 'radio'],
+											},
+										},
+									},
+									{
+										displayName: 'Dropdown Value',
+										name: 'value',
+										type: 'string',
+										default: '',
+										description: 'Value or text to select from the dropdown',
+										displayOptions: {
+											show: {
+												fieldType: ['select'],
+											},
+										},
+									},
+									{
+										displayName: 'Match Type',
+										name: 'matchType',
+										type: 'options',
 										options: [
 											{
-												displayName: 'Clear Field First',
-												name: 'clearField',
-												type: 'boolean',
-												default: true,
-												description: 'Whether to clear the field before entering text',
+												name: 'Exact (Value)',
+												value: 'exact',
+												description: 'Match exactly by option value',
 											},
 											{
-												displayName: 'Press Enter After Input',
-												name: 'pressEnter',
-												type: 'boolean',
-												default: false,
-												description: 'Whether to press Enter after entering text',
+												name: 'Text Contains',
+												value: 'textContains',
+												description: 'Match if option text contains this string',
 											},
 											{
-												displayName: 'Human-Like Typing',
-												name: 'humanLike',
-												type: 'boolean',
-												default: true,
-												description: 'Whether to use human-like typing with random delays between keystrokes',
+												name: 'Fuzzy Match',
+												value: 'fuzzy',
+												description: 'Use fuzzy matching to find the closest option text',
 											},
 										],
+										default: 'exact',
+										description: 'How to match the dropdown option',
+										displayOptions: {
+											show: {
+												fieldType: ['select'],
+											},
+										},
+									},
+									{
+										displayName: 'Fuzzy Match Threshold',
+										name: 'fuzzyThreshold',
+										type: 'number',
+										typeOptions: {
+											minValue: 0,
+											maxValue: 1,
+										},
+										default: 0.5,
+										description: 'Minimum similarity score (0-1) to consider a match',
+										displayOptions: {
+											show: {
+												fieldType: ['select'],
+												matchType: ['fuzzy'],
+											},
+										},
+									},
+									{
+										displayName: 'Clear Field First',
+										name: 'clearField',
+										type: 'boolean',
+										default: true,
+										description: 'Whether to clear the field before entering text',
+										displayOptions: {
+											show: {
+												fieldType: ['text'],
+											},
+										},
+									},
+									{
+										displayName: 'Press Enter After Input',
+										name: 'pressEnter',
+										type: 'boolean',
+										default: false,
+										description: 'Whether to press Enter after entering text',
+										displayOptions: {
+											show: {
+												fieldType: ['text'],
+											},
+										},
+									},
+									{
+										displayName: 'Check',
+										name: 'checked',
+										type: 'boolean',
+										default: true,
+										description: 'Whether to check or uncheck the checkbox/radio button',
+										displayOptions: {
+											show: {
+												fieldType: ['checkbox', 'radio'],
+											},
+										},
+									},
+									{
+										displayName: 'File Path',
+										name: 'filePath',
+										type: 'string',
+										default: '',
+										description: 'Full path to the file to upload',
+										displayOptions: {
+											show: {
+												fieldType: ['file'],
+											},
+										},
+									},
+									{
+										displayName: 'Multi-Select Values',
+										name: 'multiSelectValues',
+										type: 'string',
+										default: '',
+										placeholder: 'value1,value2,value3',
+										description: 'Comma-separated list of values to select (for multi-select dropdowns)',
+										displayOptions: {
+											show: {
+												fieldType: ['multiSelect'],
+											},
+										},
+									},
+									{
+										displayName: 'Human-Like Typing',
+										name: 'humanLike',
+										type: 'boolean',
+										default: true,
+										description: 'Whether to use human-like typing with random delays between keystrokes',
+										displayOptions: {
+											show: {
+												fieldType: ['text'],
+											},
+										},
 									},
 								],
 							},
@@ -1392,14 +1513,7 @@ export async function execute(
 								// Process each form field
 								for (const field of formFields) {
 									const selector = field.selector as string;
-									const value = field.value as string || '';
 									const fieldType = field.fieldType as string || 'text';
-									const options = field.options as IDataObject || {};
-
-									// Extract options
-									const clearField = (options.clearField as boolean) ?? true;
-									const pressEnter = options.pressEnter as boolean || false;
-									const humanLike = (options.humanLike as boolean) ?? true;
 
 									// Wait for the element if needed
 									if (waitForSelectors) {
@@ -1428,6 +1542,11 @@ export async function execute(
 									// Handle different field types
 									switch (fieldType) {
 										case 'text': {
+											const value = field.value as string || '';
+											const clearField = field.clearField as boolean ?? true;
+											const pressEnter = field.pressEnter as boolean || false;
+											const humanLike = field.humanLike as boolean ?? true;
+
 											// Clear field if requested
 											if (clearField) {
 												// Click three times to select all text
@@ -1456,16 +1575,96 @@ export async function execute(
 										}
 
 										case 'select': {
-											// Handle select/dropdown elements
-											this.logger.debug(`Setting select element: ${selector} to value: ${value}`);
-											await puppeteerPage.select(selector, value);
+											const value = field.value as string || '';
+											const matchType = field.matchType as string || 'exact';
+
+											if (matchType === 'exact') {
+												// Handle select/dropdown elements using standard select
+												this.logger.debug(`Setting select element: ${selector} to value: ${value}`);
+												await puppeteerPage.select(selector, value);
+											} else {
+												// For fuzzy or text contains matching, we need to find the option first
+												const options = await puppeteerPage.$$eval(`${selector} option`, (opts) => {
+													return opts.map(o => ({
+														value: o.value,
+														text: o.text,
+													}));
+												});
+
+												let targetOption: { value: string; text: string } | undefined;
+												const fuzzyThreshold = (field.fuzzyThreshold as number) || 0.5;
+
+												if (matchType === 'fuzzy') {
+													// Simple fuzzy matching - can be enhanced with a proper algorithm
+													targetOption = options.reduce<{ option: { value: string; text: string } | null; score: number }>((best, current) => {
+														// Count matching characters
+														let score = 0;
+														const minLength = Math.min(current.text.length, value.length);
+														for (let i = 0; i < minLength; i++) {
+															if (current.text[i].toLowerCase() === value[i].toLowerCase()) score++;
+														}
+														score = score / Math.max(current.text.length, value.length);
+
+														if (score > fuzzyThreshold && score > best.score) {
+															return { option: current, score };
+														}
+														return best;
+													}, { option: null, score: 0 }).option || undefined;
+												} else if (matchType === 'textContains') {
+													// Find option containing the text
+													targetOption = options.find(o =>
+														o.text.toLowerCase().includes(value.toLowerCase())
+													);
+												}
+
+												if (targetOption) {
+													await puppeteerPage.select(selector, targetOption.value);
+												} else {
+													this.logger.warn(`No matching option found for value: ${value} in selector: ${selector}`);
+												}
+											}
 											break;
 										}
 
-										case 'checkbox': {
-											// Handle checkbox and radio button inputs
-											this.logger.debug(`Clicking checkbox/radio: ${selector}`);
-											await puppeteerPage.click(selector);
+										case 'checkbox':
+										case 'radio': {
+											const checked = field.checked as boolean ?? true;
+
+											// Get current state
+											const isChecked = await puppeteerPage.$eval(selector, (el) =>
+												(el as HTMLInputElement).checked
+											);
+
+											// Click only if we need to change state
+											if ((checked && !isChecked) || (!checked && isChecked)) {
+												this.logger.debug(`Clicking ${fieldType}: ${selector} to ${checked ? 'check' : 'uncheck'}`);
+												await puppeteerPage.click(selector);
+											}
+											break;
+										}
+
+										case 'file': {
+											const filePath = field.filePath as string || '';
+											if (filePath) {
+												this.logger.debug(`Setting file input: ${selector} with file: ${filePath}`);
+												// Use the correct file upload method
+												const fileInput = await puppeteerPage.$(selector) as puppeteer.ElementHandle<HTMLInputElement>;
+												if (fileInput) {
+													await fileInput.uploadFile(filePath);
+												} else {
+													this.logger.warn(`File input element not found: ${selector}`);
+												}
+											}
+											break;
+										}
+
+										case 'multiSelect': {
+											const multiSelectValues = (field.multiSelectValues as string || '').split(',').map(v => v.trim());
+
+											if (multiSelectValues.length) {
+												this.logger.debug(`Setting multi-select: ${selector} with values: ${multiSelectValues.join(', ')}`);
+												await puppeteerPage.select(selector, ...multiSelectValues);
+											}
 											break;
 										}
 									}
@@ -1783,10 +1982,6 @@ export async function execute(
 						const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
 						const fallbackText = this.getNodeParameter('fallbackText', index) as string;
 						const fallbackInputType = this.getNodeParameter('fallbackInputType', index, 'text') as string;
-						const fallbackClearField = this.getNodeParameter('fallbackClearField', index, false) as boolean;
-						const fallbackPressEnter = this.getNodeParameter('fallbackPressEnter', index, false) as boolean;
-						const fallbackCheckState = this.getNodeParameter('fallbackCheckState', index, 'check') as string;
-						const fallbackFilePath = this.getNodeParameter('fallbackFilePath', index, '') as string;
 
 						if (waitForSelectors) {
 							// For actions, we always need to ensure the element exists
@@ -1810,6 +2005,9 @@ export async function execute(
 						// Handle different input types
 						switch (fallbackInputType) {
 							case 'text': {
+								const fallbackClearField = this.getNodeParameter('fallbackClearField', index, false) as boolean;
+								const fallbackPressEnter = this.getNodeParameter('fallbackPressEnter', index, false) as boolean;
+
 								// Handle text inputs and textareas
 								if (fallbackClearField) {
 									// Click three times to select all text
@@ -1820,7 +2018,15 @@ export async function execute(
 
 								// Type the text
 								this.logger.debug(`Fallback action: Filling form field: ${fallbackSelector} with value: ${fallbackText}`);
-								await puppeteerPage.type(fallbackSelector, fallbackText);
+
+								// Use human-like typing if enabled
+								if (useHumanDelays) {
+									for (const char of fallbackText) {
+										await puppeteerPage.type(fallbackSelector, char, { delay: Math.floor(Math.random() * 150) + 25 });
+									}
+								} else {
+									await puppeteerPage.type(fallbackSelector, fallbackText);
+								}
 
 								// Press Enter if requested
 								if (fallbackPressEnter) {
@@ -1838,6 +2044,8 @@ export async function execute(
 
 							case 'checkbox':
 							case 'radio': {
+								const fallbackCheckState = this.getNodeParameter('fallbackCheckState', index, 'check') as string;
+
 								// Handle checkbox and radio button inputs
 								this.logger.debug(`Fallback action: Setting ${fallbackInputType}: ${fallbackSelector} to state: ${fallbackCheckState}`);
 
@@ -1857,19 +2065,16 @@ export async function execute(
 							}
 
 							case 'file': {
+								const fallbackFilePath = this.getNodeParameter('fallbackFilePath', index, '') as string;
+
 								// Handle file upload inputs
 								this.logger.debug(`Fallback action: Setting file input: ${fallbackSelector} with file: ${fallbackFilePath}`);
-								// Use correct typing for ElementHandle to avoid linter errors
-								const input = await puppeteerPage.$(fallbackSelector);
-								if (input) {
-									await puppeteerPage.evaluate((el, filePath) => {
-										// This is needed to bypass file input security restrictions
-										// by directly setting the file in the browser context
-										const dataTransfer = new DataTransfer();
-										const file = new File([''], filePath.split('/').pop() || 'file', { type: 'application/octet-stream' });
-										dataTransfer.items.add(file);
-										(el as HTMLInputElement).files = dataTransfer.files;
-									}, input, fallbackFilePath);
+
+								const fileInput = await puppeteerPage.$(fallbackSelector) as puppeteer.ElementHandle<HTMLInputElement>;
+								if (fileInput) {
+									await fileInput.uploadFile(fallbackFilePath);
+								} else {
+									this.logger.warn(`File input element not found: ${fallbackSelector}`);
 								}
 								break;
 							}
