@@ -357,43 +357,61 @@ export class Ventriloquist implements INodeType {
 
 	// Methods to handle loading options for dynamic fields like routes
 	async loadOptions(this: IExecuteFunctions): Promise<INodePropertyOptions[]> {
-		const operation = this.getNodeParameter('operation', 0, '') as string;
-		const context = this.getContext('node');
-		const currentParameter = context.parameter as string;
+		try {
+			const operation = this.getNodeParameter('operation', 0, '') as string;
+			const context = this.getContext('node');
+			const currentParameter = context.parameter as string;
 
-		// Check if this is within the decision operation
-		if (operation === 'decision') {
-			// For the routes dropdown fields
-			if (currentParameter === 'fallbackRoute' || currentParameter.endsWith('route')) {
-				try {
-					// Get all the routes the user has defined
-					const routes = this.getNodeParameter('routes.values', 0, []) as IDataObject[];
+			// Check if this is within the decision operation
+			if (operation === 'decision') {
+				// For the routes dropdown fields
+				if (currentParameter === 'fallbackRoute' || currentParameter.endsWith('route')) {
+					try {
+						// First check if routes are defined
+						let routes = [] as IDataObject[];
 
-					// If routes exist, return them as options
-					if (routes && routes.length > 0) {
-						return routes.map((route) => ({
-							name: route.name as string,
-							value: route.name as string,
-						}));
+						try {
+							// Get all the routes the user has defined
+							routes = this.getNodeParameter('routes.values', 0, []) as IDataObject[];
+						} catch (error) {
+							// If error on accessing routes (like when first setting up), use defaults
+							this.logger.debug('Could not access routes parameter, using defaults');
+						}
+
+						// If routes exist, return them as options
+						if (routes && routes.length > 0) {
+							return routes.map((route) => ({
+								name: route.name as string,
+								value: route.name as string,
+							}));
+						}
+
+						// Default routes if none defined yet
+						return [
+							{ name: 'Route 1', value: 'Route 1' },
+							{ name: 'Route 2', value: 'Route 2' },
+						];
+					} catch (error) {
+						this.logger.debug(`Error loading route options: ${error}`);
+						// Return default routes if any error occurs
+						return [
+							{ name: 'Route 1', value: 'Route 1' },
+							{ name: 'Route 2', value: 'Route 2' },
+						];
 					}
-
-					// Default routes if none defined yet
-					return [
-						{ name: 'Route 1', value: 'Route 1' },
-						{ name: 'Route 2', value: 'Route 2' },
-					];
-				} catch (error) {
-					// Return default routes if any error occurs
-					return [
-						{ name: 'Route 1', value: 'Route 1' },
-						{ name: 'Route 2', value: 'Route 2' },
-					];
 				}
 			}
-		}
 
-		// Default empty options for other fields
-		return [];
+			// Default empty options for other fields
+			return [];
+		} catch (error) {
+			// Global error handler with defaults
+			this.logger.debug(`Global error in loadOptions: ${error}`);
+			return [
+				{ name: 'Route 1', value: 'Route 1' },
+				{ name: 'Route 2', value: 'Route 2' },
+			];
+		}
 	}
 
 	description: INodeTypeDescription = {

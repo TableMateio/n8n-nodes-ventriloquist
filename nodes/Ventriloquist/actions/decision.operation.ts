@@ -68,7 +68,7 @@ export const description: INodeProperties[] = [
 				enableRouting: [true],
 			},
 		},
-		default: '',
+		default: 'Route 1',
 	},
 	{
 		displayName: 'Condition Groups',
@@ -109,7 +109,7 @@ export const description: INodeProperties[] = [
 								'/enableRouting': [true],
 							},
 						},
-						default: '',
+						default: 'Route 1',
 						description: 'Route to take if this condition matches',
 					},
 					{
