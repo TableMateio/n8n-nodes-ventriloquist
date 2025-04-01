@@ -104,7 +104,14 @@ export const description: INodeProperties[] = [
 							multipleValues: true,
 							sortable: true,
 						},
-						default: {},
+						default: {
+							condition: [
+								{
+									conditionType: 'elementExists',
+									selector: ''
+								}
+							]
+						},
 						description: 'Define the conditions to check',
 						options: [
 							{
@@ -396,9 +403,6 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								'/operation': ['decision'],
-							},
-							hide: {
-								'__conditionCount': [1, 0],
 							},
 						},
 					},
