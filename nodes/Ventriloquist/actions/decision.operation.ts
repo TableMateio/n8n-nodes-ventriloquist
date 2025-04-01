@@ -36,9 +36,9 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: 'Decision Groups',
+		displayName: 'Decisions',
 		name: 'conditionGroups',
-		placeholder: 'Add Decision Group',
+		placeholder: 'Add Decision',
 		type: 'fixedCollection',
 		typeOptions: {
 			multipleValues: true,
