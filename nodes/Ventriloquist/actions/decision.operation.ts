@@ -350,6 +350,50 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
+						displayName: 'HTML Options',
+						name: 'htmlOptions',
+						type: 'collection',
+						placeholder: 'Add Option',
+						default: {},
+						typeOptions: {
+							multipleValues: false,
+						},
+						displayOptions: {
+							show: {
+								actionType: ['extract'],
+								extractionType: ['html'],
+							},
+						},
+						options: [
+							{
+								displayName: 'Output Format',
+								name: 'outputFormat',
+								type: 'options',
+								options: [
+									{
+										name: 'HTML (String)',
+										value: 'html',
+										description: 'Return the HTML as a raw string',
+									},
+									{
+										name: 'JSON',
+										value: 'json',
+										description: 'Return the HTML wrapped in a JSON object',
+									},
+								],
+								default: 'html',
+								description: 'Format of the output data',
+							},
+							{
+								displayName: 'Include Metadata',
+								name: 'includeMetadata',
+								type: 'boolean',
+								default: false,
+								description: 'Whether to include metadata about the HTML (length, structure info)',
+							},
+						],
+					},
+					{
 						displayName: 'Attribute Name',
 						name: 'extractAttributeName',
 						type: 'string',
@@ -527,6 +571,51 @@ export const description: INodeProperties[] = [
 				fallbackAction: ['extract'],
 			},
 		},
+	},
+	{
+		displayName: 'Fallback HTML Options',
+		name: 'fallbackHtmlOptions',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		typeOptions: {
+			multipleValues: false,
+		},
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['extract'],
+				fallbackExtractionType: ['html'],
+			},
+		},
+		options: [
+			{
+				displayName: 'Output Format',
+				name: 'outputFormat',
+				type: 'options',
+				options: [
+					{
+						name: 'HTML (String)',
+						value: 'html',
+						description: 'Return the HTML as a raw string',
+					},
+					{
+						name: 'JSON',
+						value: 'json',
+						description: 'Return the HTML wrapped in a JSON object',
+					},
+				],
+				default: 'html',
+				description: 'Format of the output data',
+			},
+			{
+				displayName: 'Include Metadata',
+				name: 'includeMetadata',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to include metadata about the HTML (length, structure info)',
+			},
+		],
 	},
 	{
 		displayName: 'Fallback Attribute Name',
@@ -1166,14 +1255,57 @@ export async function execute(
 								}
 
 								// Extract data based on extraction type
-								let extractedData: string | null = null;
+								let extractedData: string | null | IDataObject = null;
 								switch (extractionType) {
 									case 'text':
 										extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.textContent?.trim() || '');
 										break;
-									case 'html':
-										extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.innerHTML);
+									case 'html': {
+										// Get HTML options
+										const htmlOptions = group.htmlOptions as IDataObject || {};
+										const outputFormat = (htmlOptions.outputFormat as string) || 'html';
+										const includeMetadata = htmlOptions.includeMetadata as boolean || false;
+
+										// Extract HTML content
+										const htmlContent = await puppeteerPage.$eval(actionSelector, (el) => el.innerHTML);
+
+										if (outputFormat === 'html') {
+											// Return as raw HTML string
+											extractedData = htmlContent;
+										} else {
+											// Return as JSON object
+											extractedData = { html: htmlContent };
+										}
+
+										// Add metadata if requested
+										if (includeMetadata) {
+											// Calculate basic metadata about the HTML
+											const elementCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('*').length);
+											const imageCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('img').length);
+											const linkCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('a').length);
+
+											if (typeof extractedData === 'object') {
+												extractedData.metadata = {
+													htmlLength: htmlContent.length,
+													elementCount,
+													imageCount,
+													linkCount,
+												};
+											} else {
+												// For string output, add metadata as a separate property
+												extractedData = {
+													html: htmlContent,
+													metadata: {
+														htmlLength: htmlContent.length,
+														elementCount,
+														imageCount,
+														linkCount,
+													}
+												};
+											}
+										}
 										break;
+									}
 									case 'value':
 										extractedData = await puppeteerPage.$eval(actionSelector, (el) => {
 											if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
@@ -1306,14 +1438,57 @@ export async function execute(
 						}
 
 						// Extract data based on extraction type
-						let extractedData: string | null = null;
+						let extractedData: string | null | IDataObject = null;
 						switch (fallbackExtractionType) {
 							case 'text':
 								extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => el.textContent?.trim() || '');
 								break;
-							case 'html':
-								extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => el.innerHTML);
+							case 'html': {
+								// Get HTML options
+								const fallbackHtmlOptions = this.getNodeParameter('fallbackHtmlOptions', index, {}) as IDataObject;
+								const outputFormat = (fallbackHtmlOptions.outputFormat as string) || 'html';
+								const includeMetadata = fallbackHtmlOptions.includeMetadata as boolean || false;
+
+								// Extract HTML content
+								const htmlContent = await puppeteerPage.$eval(fallbackSelector, (el) => el.innerHTML);
+
+								if (outputFormat === 'html') {
+									// Return as raw HTML string
+									extractedData = htmlContent;
+								} else {
+									// Return as JSON object
+									extractedData = { html: htmlContent };
+								}
+
+								// Add metadata if requested
+								if (includeMetadata) {
+									// Calculate basic metadata about the HTML
+									const elementCount = await puppeteerPage.$eval(fallbackSelector, (el) => el.querySelectorAll('*').length);
+									const imageCount = await puppeteerPage.$eval(fallbackSelector, (el) => el.querySelectorAll('img').length);
+									const linkCount = await puppeteerPage.$eval(fallbackSelector, (el) => el.querySelectorAll('a').length);
+
+									if (typeof extractedData === 'object') {
+										extractedData.metadata = {
+											htmlLength: htmlContent.length,
+											elementCount,
+											imageCount,
+											linkCount,
+										};
+									} else {
+										// For string output, add metadata as a separate property
+										extractedData = {
+											html: htmlContent,
+											metadata: {
+												htmlLength: htmlContent.length,
+												elementCount,
+												imageCount,
+												linkCount,
+											}
+										};
+									}
+								}
 								break;
+							}
 							case 'value':
 								extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => {
 									if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
