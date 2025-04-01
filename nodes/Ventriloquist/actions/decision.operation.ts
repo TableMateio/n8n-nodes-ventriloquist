@@ -446,14 +446,14 @@ export const description: INodeProperties[] = [
 		type: 'options',
 		options: [
 			{
-				name: 'None',
-				value: 'none',
-				description: 'Do not perform any fallback action',
-			},
-			{
 				name: 'Click Element',
 				value: 'click',
 				description: 'Click on an element',
+			},
+			{
+				name: 'Extract Data',
+				value: 'extract',
+				description: 'Extract data from an element on the page',
 			},
 			{
 				name: 'Fill Form Field',
@@ -464,6 +464,11 @@ export const description: INodeProperties[] = [
 				name: 'Navigate to URL',
 				value: 'navigate',
 				description: 'Navigate to a specific URL',
+			},
+			{
+				name: 'None',
+				value: 'none',
+				description: 'Do not perform any fallback action',
 			},
 		],
 		default: 'none',
@@ -484,7 +489,57 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ['decision'],
-				fallbackAction: ['click', 'fill'],
+				fallbackAction: ['click', 'fill', 'extract'],
+			},
+		},
+	},
+	{
+		displayName: 'Fallback Extraction Type',
+		name: 'fallbackExtractionType',
+		type: 'options',
+		options: [
+			{
+				name: 'Attribute',
+				value: 'attribute',
+				description: 'Extract specific attribute from an element',
+			},
+			{
+				name: 'HTML',
+				value: 'html',
+				description: 'Extract HTML content from an element',
+			},
+			{
+				name: 'Input Value',
+				value: 'value',
+				description: 'Extract value from input, select or textarea',
+			},
+			{
+				name: 'Text Content',
+				value: 'text',
+				description: 'Extract text content from an element',
+			},
+		],
+		default: 'text',
+		description: 'What type of data to extract from the element',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['extract'],
+			},
+		},
+	},
+	{
+		displayName: 'Fallback Attribute Name',
+		name: 'fallbackAttributeName',
+		type: 'string',
+		default: '',
+		placeholder: 'href, src, data-ID',
+		description: 'Name of the attribute to extract from the element',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+				fallbackAction: ['extract'],
+				fallbackExtractionType: ['attribute'],
 			},
 		},
 	},
@@ -1227,6 +1282,69 @@ export async function execute(
 						break;
 					}
 
+					case 'extract': {
+						const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
+						const fallbackExtractionType = this.getNodeParameter('fallbackExtractionType', index) as string;
+
+						if (waitForSelectors) {
+							// For actions, we always need to ensure the element exists
+							if (detectionMethod === 'smart') {
+								const elementExists = await smartWaitForSelector(
+									puppeteerPage,
+									fallbackSelector,
+									selectorTimeout,
+									earlyExitDelay,
+									this.logger,
+								);
+
+								if (!elementExists) {
+									throw new Error(`Element with selector "${fallbackSelector}" not found for fallback extraction`);
+								}
+							} else {
+								await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
+							}
+						}
+
+						// Extract data based on extraction type
+						let extractedData: string | null = null;
+						switch (fallbackExtractionType) {
+							case 'text':
+								extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => el.textContent?.trim() || '');
+								break;
+							case 'html':
+								extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => el.innerHTML);
+								break;
+							case 'value':
+								extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => {
+									if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+										return el.value;
+									}
+									return '';
+								});
+								break;
+							case 'attribute': {
+								const attributeName = this.getNodeParameter('fallbackAttributeName', index) as string;
+								extractedData = await puppeteerPage.$eval(
+									fallbackSelector,
+									(el, attr) => el.getAttribute(attr) || '',
+									attributeName
+								);
+								break;
+							}
+							default:
+								extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => el.textContent?.trim() || '');
+						}
+
+						// Store the extracted data in the result
+						if (!resultData.extractedData) {
+							resultData.extractedData = {};
+						}
+						resultData.extractedData.fallback = extractedData;
+
+						this.logger.debug(`Fallback: Extracted data (${fallbackExtractionType}) from: ${fallbackSelector}`);
+						break;
+					}
+
 					case 'fill': {
 						const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
 						const fallbackText = this.getNodeParameter('fallbackText', index) as string;
@@ -1334,3 +1452,4 @@ export async function execute(
 		throw error;
 	}
 }
+
