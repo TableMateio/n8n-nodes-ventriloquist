@@ -1,7 +1,7 @@
-import {
+import type {
 	IExecuteFunctions,
 	INodeExecutionData,
-	type IDataObject,
+	IDataObject,
 	INodeProperties,
 } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
@@ -36,11 +36,11 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: 'Fallback Route',
+		displayName: 'Fallback Route Name or ID',
 		name: 'fallbackRoute',
 		type: 'options',
-		default: 1,
-		description: 'Which output route to use when no conditions match',
+		default: '',
+		description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 		displayOptions: {
 			show: {
 				'/operation': ['decision'],
@@ -83,11 +83,11 @@ export const description: INodeProperties[] = [
 						required: true,
 					},
 					{
-						displayName: 'Route',
+						displayName: 'Route Name or ID',
 						name: 'route',
 						type: 'options',
-						default: 1,
-						description: 'Which output route to use when this condition matches',
+						default: '',
+						description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 						displayOptions: {
 							show: {
 								'/operation': ['decision'],
@@ -279,6 +279,11 @@ export const description: INodeProperties[] = [
 								description: 'Click on an element',
 							},
 							{
+								name: 'Extract Data',
+								value: 'extract',
+								description: 'Extract data from an element on the page',
+							},
+							{
 								name: 'Fill Form Field',
 								value: 'fill',
 								description: 'Enter text into a form field',
@@ -306,7 +311,55 @@ export const description: INodeProperties[] = [
 						description: 'CSS selector for the element to interact with',
 						displayOptions: {
 							show: {
-								actionType: ['click', 'fill'],
+								actionType: ['click', 'fill', 'extract'],
+							},
+						},
+					},
+					{
+						displayName: 'Extraction Type',
+						name: 'extractionType',
+						type: 'options',
+						options: [
+							{
+								name: 'Attribute',
+								value: 'attribute',
+								description: 'Extract specific attribute from an element',
+							},
+							{
+								name: 'HTML',
+								value: 'html',
+								description: 'Extract HTML content from an element',
+							},
+							{
+								name: 'Input Value',
+								value: 'value',
+								description: 'Extract value from input, select or textarea',
+							},
+							{
+								name: 'Text Content',
+								value: 'text',
+								description: 'Extract text content from an element',
+							},
+						],
+						default: 'text',
+						description: 'What type of data to extract from the element',
+						displayOptions: {
+							show: {
+								actionType: ['extract'],
+							},
+						},
+					},
+					{
+						displayName: 'Attribute Name',
+						name: 'extractAttributeName',
+						type: 'string',
+						default: '',
+						placeholder: 'href, src, data-ID',
+						description: 'Name of the attribute to extract from the element',
+						displayOptions: {
+							show: {
+								actionType: ['extract'],
+								extractionType: ['attribute'],
 							},
 						},
 					},
@@ -805,6 +858,27 @@ export async function execute(
 		const currentUrl = await puppeteerPage.url();
 		let screenshot: string | undefined;
 
+		// Prepare the result data structure
+		const resultData: {
+			success: boolean;
+			routeTaken: string;
+			actionPerformed: string;
+			currentUrl: string;
+			pageTitle: string;
+			screenshot: string | undefined;
+			executionDuration: number;
+			routeName?: string;
+			extractedData?: Record<string, unknown>;
+		} = {
+			success: true,
+			routeTaken,
+			actionPerformed,
+			currentUrl,
+			pageTitle: await puppeteerPage.title(),
+			screenshot,
+			executionDuration: 0, // Will be updated at the end
+		};
+
 		// Check each condition group
 		for (const group of conditionGroups) {
 			const conditionType = group.conditionType as string;
@@ -1013,6 +1087,69 @@ export async function execute(
 								break;
 							}
 
+							case 'extract': {
+								const actionSelector = group.actionSelector as string;
+								const extractionType = group.extractionType as string;
+
+								if (waitForSelectors) {
+									// For actions, we always need to ensure the element exists
+									if (detectionMethod === 'smart') {
+										const elementExists = await smartWaitForSelector(
+											puppeteerPage,
+											actionSelector,
+											selectorTimeout,
+											earlyExitDelay,
+											this.logger,
+										);
+
+										if (!elementExists) {
+											throw new Error(`Element with selector "${actionSelector}" not found for extraction`);
+										}
+									} else {
+										await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+									}
+								}
+
+								// Extract data based on extraction type
+								let extractedData: string | null = null;
+								switch (extractionType) {
+									case 'text':
+										extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.textContent?.trim() || '');
+										break;
+									case 'html':
+										extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.innerHTML);
+										break;
+									case 'value':
+										extractedData = await puppeteerPage.$eval(actionSelector, (el) => {
+											if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+												return el.value;
+											}
+											return '';
+										});
+										break;
+									case 'attribute': {
+										const attributeName = group.extractAttributeName as string;
+										extractedData = await puppeteerPage.$eval(
+											actionSelector,
+											(el, attr) => el.getAttribute(attr) || '',
+											attributeName
+										);
+										break;
+									}
+									default:
+										extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.textContent?.trim() || '');
+								}
+
+								// Store the extracted data in the result
+								if (!resultData.extractedData) {
+									resultData.extractedData = {};
+								}
+								resultData.extractedData[groupName] = extractedData;
+
+								this.logger.debug(`Extracted data (${extractionType}) from: ${actionSelector}`);
+								break;
+							}
+
 							case 'navigate': {
 								const url = group.url as string;
 								const waitAfterAction = group.waitAfterAction as string;
@@ -1147,36 +1284,22 @@ export async function execute(
 
 		const executionDuration = Date.now() - startTime;
 
-		// Prepare the result data
-		const resultData: {
-			success: boolean;
-			routeTaken: string;
-			actionPerformed: string;
-			currentUrl: string;
-			pageTitle: string;
-			screenshot: string | undefined;
-			executionDuration: number;
-			routeName?: string;
-		} = {
-			success: true,
-			routeTaken,
-			actionPerformed,
-			currentUrl: await puppeteerPage.url(),
-			pageTitle: await puppeteerPage.title(),
-			screenshot,
-			executionDuration,
-		};
+		// Update the execution duration in the result data
+		resultData.executionDuration = executionDuration;
+		resultData.currentUrl = await puppeteerPage.url();
+		resultData.pageTitle = await puppeteerPage.title();
+		resultData.screenshot = screenshot;
+		resultData.routeTaken = routeTaken;
+		resultData.actionPerformed = actionPerformed;
 
 		// If using routing
 		if (enableRouting) {
 			// Set the route name for output (1-based for display)
 			const routeName = `Route ${routeIndex + 1}`;
+			resultData.routeName = routeName;
 
 			return [{
-				json: {
-					...resultData,
-					routeName,
-				},
+				json: resultData,
 				pairedItem: { item: index },
 				// This special property lets n8n know which output to route the data to
 				__metadata: {
