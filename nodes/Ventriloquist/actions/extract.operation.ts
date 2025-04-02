@@ -388,15 +388,22 @@ export async function execute(
 	websocketEndpoint: string,
 	workflowId: string,
 ): Promise<INodeExecutionData> {
-	// Get parameters
-	const extractionType = this.getNodeParameter('extractionType', index, 'text') as string;
+	const startTime = Date.now();
+	// Get parameters for the extract operation
 	const selector = this.getNodeParameter('selector', index) as string;
+	const extractionType = this.getNodeParameter('extractionType', index) as string;
 	const waitForSelector = this.getNodeParameter('waitForSelector', index, true) as boolean;
 	const timeout = this.getNodeParameter('timeout', index, 30000) as number;
 	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 	const useHumanDelays = this.getNodeParameter('useHumanDelays', index, false) as boolean;
 	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 	const debugPageContent = this.getNodeParameter('debugPageContent', index, false) as boolean;
+
+	// Added for better logging
+	const nodeName = this.getNode().name;
+	const nodeId = this.getNode().id;
+	this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] ========== START EXTRACT NODE EXECUTION ==========`);
+	this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Parameters: selector=${selector}, extractionType=${extractionType}, timeout=${timeout}ms`);
 
 	// Get or create browser session
 	let page: puppeteer.Page;
@@ -418,12 +425,12 @@ export async function execute(
 			// Use the first available page
 			page = pages[0];
 			sessionId = `existing_${Date.now()}`;
-			this.logger.info('Using existing page from browser session');
+			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Using existing page from browser session`);
 		} else {
 			// Create a new page if none exists
 			page = await browser.newPage();
 			sessionId = newSessionId;
-			this.logger.info(`Created new page with session ID: ${sessionId}`);
+			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Created new page with session ID: ${sessionId}`);
 
 			// Store the new page for future operations
 			Ventriloquist.storePage(workflowId, sessionId, page);
@@ -432,28 +439,36 @@ export async function execute(
 			await page.goto('about:blank');
 		}
 	} catch (error) {
+		this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to get or create a page: ${(error as Error).message}`);
+		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] ========== END EXTRACT NODE EXECUTION (SESSION ERROR) ==========`);
 		throw new Error(`Failed to get or create a page: ${(error as Error).message}`);
 	}
 
 	try {
-		this.logger.info(`Starting extraction operation with selector: ${selector}`);
+		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Starting extraction operation with selector: ${selector}`);
 
 		// Add a human-like delay if enabled
 		if (useHumanDelays) {
 			const delay = getHumanDelay();
-			this.logger.info(`Adding human-like delay: ${delay}ms`);
+			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Adding human-like delay: ${delay}ms`);
 			await new Promise(resolve => setTimeout(resolve, delay));
 		}
 
 		// Wait for the selector if needed
 		if (waitForSelector) {
-			this.logger.info(`Waiting for selector: ${selector}`);
-			await page.waitForSelector(selector, { timeout });
+			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Waiting for selector: ${selector} (timeout: ${timeout}ms)`);
+			try {
+				await page.waitForSelector(selector, { timeout });
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Selector found: ${selector}`);
+			} catch (error) {
+				this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Selector timeout: ${selector} after ${timeout}ms`);
+				throw error;
+			}
 		}
 
 		// Ensure the page is properly stored in the session registry
 		Ventriloquist.storePage(workflowId, sessionId, page);
-		this.logger.info(`Ensured page reference in session store before extraction`);
+		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Ensured page reference in session store before extraction`);
 
 		let extractedData: IDataObject | string | Array<string | IDataObject> = '';
 		let extractionDetails: IDataObject = {};
@@ -463,7 +478,7 @@ export async function execute(
 			case 'text': {
 				// Extract text content
 				extractedData = await page.$eval(selector, (el) => el.textContent?.trim() || '');
-				this.logger.info(`Extracted text: ${extractedData}`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted text: ${extractedData}`);
 				break;
 			}
 
@@ -664,7 +679,7 @@ export async function execute(
 
 		// Ensure the page is properly stored again after extraction
 		Ventriloquist.storePage(workflowId, sessionId, page);
-		this.logger.info(`Updated page reference in session store after extraction (URL: ${currentUrl})`);
+		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Updated page reference in session store after extraction (URL: ${currentUrl})`);
 
 		// Take a screenshot if requested
 		let screenshot = '';
@@ -676,31 +691,58 @@ export async function execute(
 			});
 
 			screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
+			this.logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Captured screenshot during extraction`);
 		}
 
-		// Return the results
+		// Include debug page content if requested
+		let htmlContent = '';
+		if (debugPageContent) {
+			htmlContent = await page.content();
+			this.logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Captured page HTML (${htmlContent.length} bytes)`);
+		}
+
+		const executionDuration = Date.now() - startTime;
+		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extraction completed in ${executionDuration}ms`);
+		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] ========== END EXTRACT NODE EXECUTION ==========`);
+
+		// Create the output object
+		const result: IDataObject = {
+			success: true,
+			operation: 'extract',
+			selector,
+			extractionType,
+			extractedData,
+			url: currentUrl,
+			title: pageTitle,
+			timestamp: new Date().toISOString(),
+			sessionId,
+			executionDuration,
+		};
+
+		// Only include screenshot if it was taken
+		if (screenshot) {
+			result.screenshot = screenshot;
+		}
+
+		// Include HTML content if debug was enabled
+		if (htmlContent) {
+			result.htmlContent = htmlContent;
+		}
+
+		// Include extraction details if any were collected
+		if (Object.keys(extractionDetails).length > 0) {
+			result.details = extractionDetails;
+		}
+
 		return {
-			json: {
-				success: true,
-				operation: 'extract',
-				extractionType,
-				selector,
-				sessionId,
-				url: currentUrl,
-				title: pageTitle,
-				data: extractedData,
-				...extractionDetails,
-				timestamp: new Date().toISOString(),
-				screenshot,
-				pageStatus: 'active', // Indicate that the page is still active
-			},
+			json: result,
 		};
 	} catch (error) {
 		// Handle errors
-		this.logger.error(`Extract operation error: ${(error as Error).message}`);
+		this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extract operation error: ${(error as Error).message}`);
 
 		// Take error screenshot if requested
-		let screenshot = '';
+		let errorScreenshot = '';
 		if (takeScreenshot && page) {
 			try {
 				const screenshotBuffer = await page.screenshot({
@@ -708,88 +750,54 @@ export async function execute(
 					type: 'jpeg',
 					quality: 80,
 				});
-				screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
-			} catch {
-				// Ignore screenshot errors
+
+				errorScreenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
+				this.logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Captured error screenshot`);
+			} catch (screenshotError) {
+				this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
 			}
 		}
 
-		// Add debug information if requested
-		const debugInfo: IDataObject = {};
-		if (debugPageContent && page) {
-			try {
-				// Get page content info
-				debugInfo.pageUrl = await page.url();
-				debugInfo.pageTitle = await page.title();
-
-				// Get all IDs on the page to help find the right selector
-				debugInfo.allIdsOnPage = await page.evaluate(() => {
-					const elements = document.querySelectorAll('[id]');
-					return Array.from(elements).map(el => el.id);
-				});
-
-				// Get all tables on the page
-				debugInfo.allTablesInfo = await page.evaluate(() => {
-					const tables = document.querySelectorAll('table');
-					return Array.from(tables).map((table, index) => {
-						const id = table.id || '';
-						const className = table.className || '';
-						const rowCount = table.rows.length;
-						return { index, id, className, rowCount };
-					});
-				});
-
-				// Try to get a snippet of HTML to help with debugging
-				debugInfo.pageSnippet = await page.evaluate(() =>
-					document.documentElement.innerHTML.substring(0, 5000)
-				);
-
-				// Check if selector exists in any iframes
-				const frames = page.frames();
-				const frameInfo = [];
-				for (const frame of frames) {
-					try {
-						const hasElement = await frame.evaluate((sel) => {
-							return document.querySelector(sel) !== null;
-						}, selector);
-
-						if (hasElement) {
-							frameInfo.push({
-								url: frame.url(),
-								hasElement: true
-							});
-						}
-					} catch (e) {
-						// Ignore errors checking frames
-					}
-				}
-				debugInfo.framesWithElement = frameInfo;
-
-			} catch (debugError) {
-				debugInfo.debugError = (debugError as Error).message;
+		// Get some page info if available
+		let currentUrl = 'unknown';
+		let pageTitle = 'unknown';
+		try {
+			if (page) {
+				currentUrl = page.url();
+				pageTitle = await page.title();
 			}
+		} catch (pageInfoError) {
+			this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to get page info: ${(pageInfoError as Error).message}`);
 		}
 
-		const errorResponse = {
-			json: {
+		const executionDuration = Date.now() - startTime;
+		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] ========== END EXTRACT NODE EXECUTION (WITH ERROR) ==========`);
+
+		if (continueOnFail) {
+			// Return error information in the output
+			const result: IDataObject = {
 				success: false,
 				operation: 'extract',
-				extractionType,
 				selector,
-				sessionId,
 				error: (error as Error).message,
+				url: currentUrl,
+				title: pageTitle,
 				timestamp: new Date().toISOString(),
-				screenshot,
-				...(Object.keys(debugInfo).length > 0 ? { debugInfo } : {}),
-			},
-		};
+				sessionId: sessionId || 'unknown',
+				executionDuration,
+			};
 
-		// If continueOnFail is false, throw the error to fail the node
-		if (!continueOnFail) {
-			throw new Error(`Extract operation failed: ${(error as Error).message}`);
+			// Include error screenshot if available
+			if (errorScreenshot) {
+				result.screenshot = errorScreenshot;
+			}
+
+			return {
+				json: result,
+			};
 		}
 
-		// Otherwise, return an error result
-		return errorResponse;
+		// Re-throw the error if we should not continue on failure
+		throw error;
 	}
 }
