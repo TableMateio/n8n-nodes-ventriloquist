@@ -1084,6 +1084,11 @@ export const description: INodeProperties[] = [
 													description: 'Multiple select dropdown element',
 												},
 												{
+													name: 'Password',
+													value: 'password',
+													description: 'Secure password input field',
+												},
+												{
 													name: 'Radio',
 													value: 'radio',
 													description: 'Radio button input element',
@@ -1251,6 +1256,56 @@ export const description: INodeProperties[] = [
 											displayOptions: {
 												show: {
 													fieldType: ['text'],
+												},
+											},
+										},
+										{
+											displayName: 'Password Value',
+											name: 'value',
+											type: 'string',
+											default: '',
+											description: 'Password to enter in the field (masked in logs for security)',
+											displayOptions: {
+												show: {
+													fieldType: ['password'],
+												},
+											},
+										},
+										{
+											displayName: 'Clear Field First',
+											name: 'clearField',
+											type: 'boolean',
+											default: true,
+											description: 'Whether to clear any existing value in the field before typing',
+											displayOptions: {
+												show: {
+													fieldType: ['password'],
+												},
+											},
+										},
+										{
+											displayName: 'Has Clone Field',
+											name: 'hasCloneField',
+											type: 'boolean',
+											default: false,
+											description: 'Whether this password field has a clone/duplicate field (common with show/hide password toggles)',
+											displayOptions: {
+												show: {
+													fieldType: ['password'],
+												},
+											},
+										},
+										{
+											displayName: 'Clone Field Selector',
+											name: 'cloneSelector',
+											type: 'string',
+											default: '',
+											placeholder: '#password-clone, .password-visible',
+											description: 'CSS selector for the clone field (often shown when password is toggled to visible)',
+											displayOptions: {
+												show: {
+													fieldType: ['password'],
+													hasCloneField: [true],
 												},
 											},
 										},
@@ -2909,6 +2964,62 @@ export const description: INodeProperties[] = [
 												}
 												break;
 											}
+
+											case 'password': {
+												const value = field.value as string || '';
+												const clearField = field.clearField as boolean ?? true;
+												const hasCloneField = field.hasCloneField as boolean || false;
+												const cloneSelector = field.cloneSelector as string || '';
+
+												// Clear field if requested
+												if (clearField) {
+													this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing password field: ${selector}`);
+													await puppeteerPage.evaluate((sel: string) => {
+														const element = document.querySelector(sel);
+														if (element) {
+															(element as HTMLInputElement).value = '';
+														}
+													}, selector);
+
+													// Also clear clone field if specified
+													if (hasCloneField && cloneSelector) {
+														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing password clone field: ${cloneSelector}`);
+														await puppeteerPage.evaluate((sel: string) => {
+															const element = document.querySelector(sel);
+															if (element) {
+																(element as HTMLInputElement).value = '';
+															}
+														}, cloneSelector);
+													}
+												}
+
+												this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Filling password field: ${selector} (value masked)`);
+
+												// Use direct value setting for password fields instead of typing
+												await puppeteerPage.evaluate((sel, val) => {
+													const element = document.querySelector(sel);
+													if (element) {
+														(element as HTMLInputElement).value = val;
+													}
+												}, selector, value);
+
+												// Handle clone field if specified
+												if (hasCloneField && cloneSelector) {
+													this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Setting password clone field: ${cloneSelector}`);
+													await puppeteerPage.evaluate((sel, val) => {
+														const element = document.querySelector(sel);
+														if (element) {
+															(element as HTMLInputElement).value = val;
+														}
+													}, cloneSelector, value);
+												}
+
+												// Trigger events by clicking and typing a space then backspace
+												await puppeteerPage.click(selector);
+												await puppeteerPage.keyboard.press('Space');
+												await puppeteerPage.keyboard.press('Backspace');
+												break;
+											}
 										}
 									}
 
@@ -3439,6 +3550,62 @@ export const description: INodeProperties[] = [
 													this.logger.debug(`Setting multi-select: ${selector} with values: ${multiSelectValues.join(', ')}`);
 													await puppeteerPage.select(selector, ...multiSelectValues);
 												}
+												break;
+											}
+
+											case 'password': {
+												const value = field.value as string || '';
+												const clearField = field.clearField as boolean ?? true;
+												const hasCloneField = field.hasCloneField as boolean || false;
+												const cloneSelector = field.cloneSelector as string || '';
+
+												// Clear field if requested
+												if (clearField) {
+													this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing password field: ${selector}`);
+													await puppeteerPage.evaluate((sel: string) => {
+														const element = document.querySelector(sel);
+														if (element) {
+															(element as HTMLInputElement).value = '';
+														}
+													}, selector);
+
+													// Also clear clone field if specified
+													if (hasCloneField && cloneSelector) {
+														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing password clone field: ${cloneSelector}`);
+														await puppeteerPage.evaluate((sel: string) => {
+															const element = document.querySelector(sel);
+															if (element) {
+																(element as HTMLInputElement).value = '';
+															}
+														}, cloneSelector);
+													}
+												}
+
+												this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Filling password field: ${selector} (value masked)`);
+
+												// Use direct value setting for password fields instead of typing
+												await puppeteerPage.evaluate((sel, val) => {
+													const element = document.querySelector(sel);
+													if (element) {
+														(element as HTMLInputElement).value = val;
+													}
+												}, selector, value);
+
+												// Handle clone field if specified
+												if (hasCloneField && cloneSelector) {
+													this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Setting password clone field: ${cloneSelector}`);
+													await puppeteerPage.evaluate((sel, val) => {
+														const element = document.querySelector(sel);
+														if (element) {
+															(element as HTMLInputElement).value = val;
+														}
+													}, cloneSelector, value);
+												}
+
+												// Trigger events by clicking and typing a space then backspace
+												await puppeteerPage.click(selector);
+												await puppeteerPage.keyboard.press('Space');
+												await puppeteerPage.keyboard.press('Backspace');
 												break;
 											}
 										}
