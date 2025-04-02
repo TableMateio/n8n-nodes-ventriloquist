@@ -1982,9 +1982,11 @@ export const description: INodeProperties[] = [
 		// Added for better logging
 		const nodeName = this.getNode().name;
 		const nodeId = this.getNode().id;
-		
+
 		const currentUrl = await puppeteerPage.url();
 
+		// Visual marker to clearly indicate a new node is starting
+		this.logger.info("============ STARTING NODE EXECUTION ============");
 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Starting execution on URL: ${currentUrl}`);
 
 		try {
@@ -3024,9 +3026,16 @@ export const description: INodeProperties[] = [
 					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Condition not met for group "${groupName}", continuing to next condition`);
 				}
 			} catch (error) {
-				// This is a genuine error in execution, not just a condition failing
-				this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Action execution error in group "${groupName}": ${(error as Error).message}`);
-				// Continue to the next group if there's an error in this one
+				// Check if this is a navigation timeout, which might be expected behavior
+				const errorMessage = (error as Error).message;
+				if (errorMessage.includes('Navigation timeout')) {
+					// This is likely just a timeout during navigation, which might be expected
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation timeout in group "${groupName}": ${errorMessage} - this may be expected behavior`);
+				} else {
+					// This is a genuine error in execution, not just a condition failing
+					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Action execution error in group "${groupName}": ${errorMessage}`);
+				}
+				// No need for continue statement as it's the last statement in the loop
 			}
 		}
 
@@ -3333,10 +3342,13 @@ export const description: INodeProperties[] = [
 		// Log completion with execution metrics
 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Completed execution: route="${routeTaken}", action="${actionPerformed}", duration=${resultData.executionDuration}ms`);
 
+		// Add a visual end marker
+		this.logger.info("============ NODE EXECUTION COMPLETE ============");
+
 		// Build the output item in accordance with n8n standards
 		const returnItem: INodeExecutionData = {
 			json: resultData,
-			pairedItem: { item: index },
+				pairedItem: { item: index },
 		};
 
 		// Output the results
