@@ -397,11 +397,8 @@ export const description: INodeProperties[] = [
 							},
 						],
 						default: 'and',
-						description: 'How to combine multiple conditions in this group',
+						description: 'How to combine multiple conditions in this group (only used when you have 2+ conditions)',
 						displayOptions: {
-							hide: {
-								'__hideLogicalOperator': [true],
-							},
 							show: {
 								'/operation': ['decision'],
 							},
