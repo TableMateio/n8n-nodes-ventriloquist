@@ -108,7 +108,8 @@ export const description: INodeProperties[] = [
 								condition: [
 									{
 										conditionType: 'elementExists',
-										selector: ''
+										selector: '',
+										logicalOperator: 'and'
 									}
 								]
 							},
@@ -161,6 +162,25 @@ export const description: INodeProperties[] = [
 											],
 											default: 'elementExists',
 											description: 'Type of condition to check',
+										},
+										{
+											displayName: 'Logical Operator',
+											name: 'logicalOperator',
+											type: 'options',
+											options: [
+												{
+													name: 'AND - All Conditions Must Match',
+													value: 'and',
+													description: 'Combined with previous condition using AND logic',
+												},
+												{
+													name: 'OR - Any Condition Can Match',
+													value: 'or',
+													description: 'Combined with previous condition using OR logic',
+												},
+											],
+											default: 'and',
+											description: 'How to combine this condition with the previous one (ignored for the first condition)',
 										},
 										{
 											displayName: 'JavaScript Expression',
@@ -381,30 +401,6 @@ export const description: INodeProperties[] = [
 									],
 								},
 							],
-						},
-						{
-							displayName: 'Logical Operator',
-							name: 'logicalOperator',
-							type: 'options',
-							options: [
-								{
-									name: 'AND - All Conditions Must Match',
-									value: 'and',
-									description: 'All conditions must be true for the group to match (logical AND)',
-								},
-								{
-									name: 'OR - Any Condition Can Match',
-									value: 'or',
-									description: 'At least one condition must be true for the group to match (logical OR)',
-								},
-							],
-							default: 'and',
-							description: 'How to combine multiple conditions in this group (only used when you have 2+ conditions)',
-							displayOptions: {
-								show: {
-									'/operation': ['decision'],
-								},
-							},
 						},
 						{
 							displayName: 'Action If Condition Matches',
@@ -1485,14 +1481,11 @@ export const description: INodeProperties[] = [
 				// Get conditions and ensure type safety
 				let conditions: IDataObject[] = [];
 				if (group.conditions &&
-					Array.isArray(group.conditions)) {
-					conditions = group.conditions as IDataObject[];
+					typeof group.conditions === 'object' &&
+					(group.conditions as IDataObject).condition &&
+					Array.isArray((group.conditions as IDataObject).condition)) {
+					conditions = (group.conditions as IDataObject).condition as IDataObject[];
 				}
-
-				// Get logical operator (default to AND if not set or just a single condition)
-				const logicalOperator = (conditions.length > 1)
-					? (group.logicalOperator as string || 'and')
-					: 'and'; // Single condition doesn't need an operator
 
 				// Get route if routing is enabled
 				if (enableRouting) {
@@ -1505,10 +1498,8 @@ export const description: INodeProperties[] = [
 
 				this.logger.debug(`Checking decision group: ${groupName} with ${conditions.length} conditions`);
 
-				// Default value for logical operators
-				// If AND, start with true and any false will make it false
-				// If OR, start with false and any true will make it true
-				let groupConditionMet = logicalOperator === 'and';
+				// Initialize the overall condition result
+				let groupConditionMet = false;
 
 				try {
 					// Handle the case of no conditions - default to false
@@ -1516,10 +1507,12 @@ export const description: INodeProperties[] = [
 						this.logger.debug(`No conditions in group ${groupName}, skipping`);
 						groupConditionMet = false;
 					} else {
-						// Process multiple conditions with the logical operator
-						for (const condition of conditions) {
+						// Process conditions with their individual logical operators
+						for (let i = 0; i < conditions.length; i++) {
+							const condition = conditions[i];
 							const conditionType = condition.conditionType as string;
 							const invertSingleCondition = condition.invertCondition as boolean || false;
+							const logicalOperator = condition.logicalOperator as string || 'and';
 
 							// Evaluate a single condition
 							let conditionMet = false;
@@ -1719,24 +1712,25 @@ export const description: INodeProperties[] = [
 								conditionMet = !conditionMet;
 							}
 
-							// Apply the logical operator
-							if (logicalOperator === 'and') {
-								// AND operator - if any condition is false, the result is false
-								groupConditionMet = groupConditionMet && conditionMet;
-
-								// Short-circuit evaluation - if we've already got a false with AND, we can stop
-								if (!groupConditionMet) break;
+							// For the first condition, just set the initial result
+							if (i === 0) {
+								groupConditionMet = conditionMet;
 							} else {
-								// OR operator - if any condition is true, the result is true
-								groupConditionMet = groupConditionMet || conditionMet;
-
-								// Short-circuit evaluation - if we've already got a true with OR, we can stop
-								if (groupConditionMet) break;
+								// Apply the logical operator to combine with previous result
+								if (logicalOperator === 'and') {
+									// AND operator - both must be true
+									groupConditionMet = groupConditionMet && conditionMet;
+								} else {
+									// OR operator - either can be true
+									groupConditionMet = groupConditionMet || conditionMet;
+								}
 							}
+
+							this.logger.debug(`Condition ${i+1} (${conditionType}) result: ${conditionMet}, group result so far: ${groupConditionMet}`);
 						}
 					}
 
-					this.logger.debug(`Decision group ${groupName} result: ${groupConditionMet}`);
+					this.logger.debug(`Decision group ${groupName} final result: ${groupConditionMet}`);
 
 					// If condition is met
 					if (groupConditionMet) {
@@ -2108,7 +2102,7 @@ export const description: INodeProperties[] = [
 					}
 				}
 
-				this.logger.debug(`Decision group ${groupName} result: ${groupConditionMet}`);
+				this.logger.debug(`Decision group ${groupName} final result: ${groupConditionMet}`);
 
 				// If condition is met
 				if (groupConditionMet) {
