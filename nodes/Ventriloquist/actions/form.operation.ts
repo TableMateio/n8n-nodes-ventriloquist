@@ -847,8 +847,20 @@ export async function execute(
 					const value = field.value as string;
 					const clearField = field.clearField as boolean;
 
+					// Check if this is a password field
+					const isPasswordField = await page.evaluate((sel) => {
+						const element = document.querySelector(sel);
+						return element && (
+							element.getAttribute('type') === 'password' ||
+							element.classList.contains('Password-input')
+						);
+					}, selector);
+
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Field ${selector} detected as ${isPasswordField ? 'password' : 'text'} field`);
+
 					// Clear field if requested
 					if (clearField) {
+						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clearing field contents before filling`);
 						await page.evaluate((sel: string) => {
 							const element = document.querySelector(sel);
 							if (element) {
@@ -857,14 +869,33 @@ export async function execute(
 						}, selector);
 					}
 
-					// Type text with consistent 25ms delay
-					await page.type(selector, value, { delay: 25 });
+					// Type text with different approach for password fields
+					if (isPasswordField) {
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling password field: ${selector} (value masked)`);
+
+						// For password fields, use a more direct approach
+						await page.evaluate((sel, val) => {
+							const element = document.querySelector(sel);
+							if (element) {
+								(element as HTMLInputElement).value = val;
+							}
+						}, selector, value);
+
+						// Sometimes direct value setting doesn't trigger events, so click the field and type a space
+						await page.click(selector);
+						await page.keyboard.press('Space');
+						await page.keyboard.press('Backspace');
+					} else {
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling text field: ${selector} with value: ${value}`);
+						// Type text with consistent 25ms delay
+						await page.type(selector, value, { delay: 25 });
+					}
 
 					// Record the result
 					results.push({
 						fieldType,
 						selector,
-						value,
+						value: isPasswordField ? '********' : value,
 						success: true,
 					});
 					break;
