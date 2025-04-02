@@ -2727,6 +2727,11 @@ export const description: INodeProperties[] = [
 
 										// Wait according to specified wait type
 										await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
+
+										// Add clear indication that the click action has completed successfully
+										this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Click action completed successfully, navigation finished`);
+										const newUrl = await puppeteerPage.url();
+										this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] New URL after click: ${newUrl}`);
 									} catch (error) {
 										// Improve error clarity by checking if it's a timeout error
 										const errorMessage = (error as Error).message;
@@ -4057,6 +4062,19 @@ export const description: INodeProperties[] = [
 
 			// Log completion with execution metrics
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Completed execution: route="${routeTaken}", action="${actionPerformed}", duration=${resultData.executionDuration}ms`);
+
+			// Add more specific completion information based on action performed
+			if (actionPerformed === 'click') {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] CLICK ACTION SUCCESSFUL: Node has finished processing and is ready for the next node`);
+			} else if (actionPerformed === 'fill') {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] FORM FILL SUCCESSFUL: Node has finished processing and is ready for the next node`);
+			} else if (actionPerformed === 'extract') {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] EXTRACTION SUCCESSFUL: Node has finished processing and is ready for the next node`);
+			} else if (actionPerformed === 'navigate') {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] NAVIGATION SUCCESSFUL: Node has finished processing and is ready for the next node`);
+			} else {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] NODE SUCCESSFUL: Processing complete and ready for next node`);
+			}
 
 			// Add a visual end marker
 			this.logger.info("============ NODE EXECUTION COMPLETE ============");
