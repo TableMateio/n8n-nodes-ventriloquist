@@ -96,6 +96,9 @@ export async function execute(
 	websocketEndpoint: string,
 	workflowId: string,
 ): Promise<INodeExecutionData> {
+	// Track execution time
+	const startTime = Date.now();
+
 	// Added for better logging
 	const nodeName = this.getNode().name;
 	const nodeId = this.getNode().id;
@@ -185,34 +188,72 @@ export async function execute(
 			timeout,
 		});
 
-		// Get page information
-		const pageInfo = await brightDataBrowser.getPageInfo(page, response);
+		// Separate try/catch block for post-navigation operations
+		// This ensures that if the execution context is destroyed during navigation,
+		// we can still return a useful response with the session ID
+		try {
+			// Get page information
+			const pageInfo = await brightDataBrowser.getPageInfo(page, response);
 
-		// Take a screenshot
-		const screenshot = await brightDataBrowser.takeScreenshot(page);
+			// Take a screenshot
+			const screenshot = await brightDataBrowser.takeScreenshot(page);
 
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Navigation successful: ${pageInfo.url} (${pageInfo.title})`);
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] ========== END OPEN NODE EXECUTION ==========`);
+			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Navigation successful: ${pageInfo.url} (${pageInfo.title})`);
+			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] ========== END OPEN NODE EXECUTION ==========`);
 
-		// Prepare response data
-		const responseData: IDataObject = {
-			success: true,
-			operation: 'open',
-			...pageInfo,
-			screenshot,
-			incognito,
-			domain,
-			sessionId, // Include session ID in response for other operations to use
-			brightDataSessionId, // Include Bright Data session ID for reference
-			timestamp: new Date().toISOString(),
-		};
+			// Prepare response data
+			const responseData: IDataObject = {
+				success: true,
+				operation: 'open',
+				...pageInfo,
+				screenshot,
+				incognito,
+				domain,
+				sessionId, // Include session ID in response for other operations to use
+				brightDataSessionId, // Include Bright Data session ID for reference
+				timestamp: new Date().toISOString(),
+				executionDuration: Date.now() - startTime,
+			};
 
-		// Don't close the browser - it will be used by subsequent operations
-		// The session cleanup mechanism will handle closing it after timeout
+			// Don't close the browser - it will be used by subsequent operations
+			// The session cleanup mechanism will handle closing it after timeout
 
-		return {
-			json: responseData,
-		};
+			return {
+				json: responseData,
+			};
+		} catch (postNavError) {
+			// Handle errors that occur after successful navigation (like execution context destroyed)
+			const errorMessage = (postNavError as Error).message;
+			this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Open] Post-navigation error: ${errorMessage}`);
+
+			// If the error is about execution context destruction, it's likely because the page
+			// navigated to a new URL and we're trying to access the old context
+			const isContextDestroyed = errorMessage.includes('Execution context was destroyed');
+
+			if (isContextDestroyed) {
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Context destroyed due to navigation - this is expected behavior`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Session created successfully with ID: ${sessionId}`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] ========== END OPEN NODE EXECUTION (WITH RECOVERED ERROR) ==========`);
+
+				// Even with context destroyed, we can return success with the session ID
+				// This allows following nodes to use the session
+				return {
+					json: {
+						success: true, // Mark as success since the session was created
+						operation: 'open',
+						url: url, // Use the original URL since we can't access the current one
+						sessionId, // This is the critical piece of information for subsequent nodes
+						brightDataSessionId,
+						contextDestroyed: true, // Flag to indicate context was destroyed
+						timestamp: new Date().toISOString(),
+						executionDuration: Date.now() - startTime,
+					},
+				};
+			}
+
+			// For other post-navigation errors, rethrow to be handled by the outer catch block
+			throw postNavError;
+		}
 	} catch (error) {
 		// Extract domain if possible
 		let domain = '';
@@ -253,6 +294,7 @@ export async function execute(
 				url,
 				sessionId: sessionId || 'error_session', // Include session ID even in error case
 				timestamp: new Date().toISOString(),
+				executionDuration: Date.now() - startTime,
 			},
 		};
 	}
