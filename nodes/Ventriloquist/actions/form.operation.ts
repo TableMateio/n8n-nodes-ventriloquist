@@ -1260,15 +1260,19 @@ export async function execute(
 
 			// Handle waiting after submission
 			if (waitAfterSubmit === 'urlChanged') {
-				this.logger.info('Waiting for URL to change after submission');
+				const urlChangeTimeout = 6000; // 6 seconds is more reasonable than 10
+				const nodeName = this.getNode().name;
+				const nodeId = this.getNode().id;
+
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for URL to change after form submission (timeout: ${urlChangeTimeout}ms)`);
 				try {
 					// Wait for URL to change
 					await page.waitForFunction(
 						(beforeUrl) => window.location.href !== beforeUrl,
-						{ timeout: 10000 },
+						{ timeout: urlChangeTimeout },
 						beforeUrl
 					);
-					this.logger.info('URL changed successfully');
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] URL change successful: ${beforeUrl} → ${page.url()}`);
 
 					// Store successful navigation result
 					formSubmissionResult = {
@@ -1292,17 +1296,19 @@ export async function execute(
 					// Add a short stabilization period
 					await new Promise(resolve => setTimeout(resolve, 500));
 				} catch (urlError) {
-					this.logger.warn(`URL change timeout or error: ${urlError}`);
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] URL change detection timed out - checking URL directly`);
+
 					// Don't throw an error, just log and continue
-					this.logger.info('Adding fallback delay of 2000ms since URL change detection failed');
-					await new Promise(resolve => setTimeout(resolve, 2000));
+					const fallbackDelay = 2000;
+					this.logger.debug(`Adding fallback delay of ${fallbackDelay}ms to allow page to stabilize`);
+					await new Promise(resolve => setTimeout(resolve, fallbackDelay));
 
 					// Check if the URL actually changed despite the error
 					const afterUrl = page.url();
 					const afterTitle = await page.title();
 
 					if (afterUrl !== beforeUrl) {
-						this.logger.info('URL changed despite detection timeout - considering successful');
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] URL changed despite detection timeout: ${beforeUrl} → ${afterUrl}`);
 
 						// Store successful navigation result
 						formSubmissionResult = {
@@ -1323,10 +1329,10 @@ export async function execute(
 						});
 					} else {
 						// No URL change, likely a real navigation failure
-						this.logger.warn('No URL change detected after timeout - form submission may have failed');
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No URL change detected - form submission may not have triggered navigation`);
 
 						formSubmissionResult = {
-							error: 'URL change timeout with no actual change',
+							info: 'Form submitted but no URL change detected',
 							beforeUrl,
 							afterUrl,
 							beforeTitle,
@@ -1343,13 +1349,17 @@ export async function execute(
 					}
 				}
 			} else if (waitAfterSubmit === 'navigationComplete') {
-				this.logger.info('Waiting for navigation to complete (all network idle)');
+				const navigationTimeout = 60000; // 60 seconds for complete navigation is reasonable
+				const nodeName = this.getNode().name;
+				const nodeId = this.getNode().id;
+
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for navigation to complete (timeout: ${navigationTimeout}ms)`);
 				try {
 					await page.waitForNavigation({
-						timeout: 60000,
+						timeout: navigationTimeout,
 						waitUntil: ['load', 'domcontentloaded', 'networkidle2']
 					});
-					this.logger.info('Navigation completed successfully - all resources loaded');
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Navigation completed successfully`);
 
 					// Immediately indicate success since DOM is ready
 					formSubmissionResult = {
@@ -1376,9 +1386,9 @@ export async function execute(
 							page.waitForNavigation({ waitUntil: ['networkidle2'], timeout: 5000 }),
 							new Promise(resolve => setTimeout(resolve, 5000))
 						]);
-						this.logger.info('Network stabilized after navigation');
+						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Network stabilized after navigation`);
 					} catch (netError) {
-						this.logger.info('Continuing without waiting for full network idle');
+						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Continuing without waiting for full network idle`);
 					}
 
 					// Add a short stabilization period
@@ -1386,19 +1396,21 @@ export async function execute(
 
 					// Re-store the page reference again
 					Ventriloquist.storePage(workflowId, sessionId, page);
-					this.logger.info('Updated page reference in session store');
+					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Updated page reference in session store`);
 				} catch (navError) {
-					this.logger.warn(`Navigation timeout or error: ${navError}`);
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Navigation timeout or expected interruption - checking page state`);
+
 					// Don't throw an error, just log and continue
-					this.logger.info('Adding fallback delay of 5000ms since navigation event failed');
-					await new Promise(resolve => setTimeout(resolve, 5000));
+					const fallbackDelay = 5000;
+					this.logger.debug(`Adding fallback delay of ${fallbackDelay}ms to allow page to stabilize`);
+					await new Promise(resolve => setTimeout(resolve, fallbackDelay));
 
 					// Check if the page actually changed despite the navigation error
 					const afterUrl = page.url();
 					const afterTitle = await page.title();
 
 					if (afterUrl !== beforeUrl || afterTitle !== beforeTitle) {
-						this.logger.info('Page changed despite navigation event timeout - considering successful');
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Page changed despite navigation event timeout: ${beforeUrl} → ${afterUrl}`);
 
 						// Store successful navigation result
 						formSubmissionResult = {
@@ -1419,10 +1431,10 @@ export async function execute(
 						});
 					} else {
 						// No page change, likely a real navigation failure
-						this.logger.warn('No page change detected after navigation timeout - form submission may have failed');
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No page change detected - form submission may not have triggered navigation`);
 
 						formSubmissionResult = {
-							error: 'Navigation timeout with no page change',
+							info: 'Form submitted but no page change detected',
 							beforeUrl,
 							afterUrl,
 							beforeTitle,
@@ -1439,13 +1451,17 @@ export async function execute(
 					}
 				}
 			} else if (waitAfterSubmit === 'domContentLoaded') {
-				this.logger.info('Waiting for DOM content to be loaded (faster)');
+				const domContentLoadedTimeout = 30000; // 30 seconds is reasonable
+				const nodeName = this.getNode().name;
+				const nodeId = this.getNode().id;
+
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for DOM content to be loaded (timeout: ${domContentLoadedTimeout}ms)`);
 				try {
 					await page.waitForNavigation({
-						timeout: 30000,
+						timeout: domContentLoadedTimeout,
 						waitUntil: ['domcontentloaded']
 					});
-					this.logger.info('DOM content loaded successfully');
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] DOM content loaded successfully`);
 
 					// Immediately indicate success since DOM is ready
 					formSubmissionResult = {
@@ -1469,16 +1485,19 @@ export async function execute(
 					// Add a short stabilization period
 					await new Promise(resolve => setTimeout(resolve, 500));
 				} catch (navError) {
-					this.logger.warn(`DOM content load timeout or error: ${navError}`);
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] DOM content load timeout - checking page state directly`);
+
 					// Add fallback delay and check for page change
-					await new Promise(resolve => setTimeout(resolve, 2000));
+					const fallbackDelay = 2000;
+					this.logger.debug(`Adding fallback delay of ${fallbackDelay}ms to allow page to stabilize`);
+					await new Promise(resolve => setTimeout(resolve, fallbackDelay));
 
 					// Check if the page actually changed despite the navigation error
 					const afterUrl = page.url();
 					const afterTitle = await page.title();
 
 					if (afterUrl !== beforeUrl || afterTitle !== beforeTitle) {
-						this.logger.info('Page changed despite DOM content load timeout - considering successful');
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Page changed despite DOM content load timeout: ${beforeUrl} → ${afterUrl}`);
 
 						// Store successful navigation result
 						formSubmissionResult = {
@@ -1499,10 +1518,10 @@ export async function execute(
 						});
 					} else {
 						// No page change, likely a real navigation failure
-						this.logger.warn('No page change detected after DOM content load timeout - form submission may have failed');
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No page change detected - form submission may not have triggered navigation`);
 
 						formSubmissionResult = {
-							error: 'DOM content load timeout with no page change',
+							info: 'DOM content load timeout with no page change',
 							beforeUrl,
 							afterUrl,
 							beforeTitle,
@@ -1519,13 +1538,17 @@ export async function execute(
 					}
 				}
 			} else if (waitAfterSubmit === 'pageLoad') {
-				this.logger.info('Waiting for page load event');
+				const pageLoadTimeout = 30000; // 30 seconds is reasonable
+				const nodeName = this.getNode().name;
+				const nodeId = this.getNode().id;
+
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for page load event (timeout: ${pageLoadTimeout}ms)`);
 				try {
 					await page.waitForNavigation({
-						timeout: 30000,
+						timeout: pageLoadTimeout,
 						waitUntil: ['load']
 					});
-					this.logger.info('Page load completed successfully');
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Page load completed successfully`);
 
 					// Similar success handling as domContentLoaded
 					formSubmissionResult = {
@@ -1548,16 +1571,19 @@ export async function execute(
 					// Brief stabilization
 					await new Promise(resolve => setTimeout(resolve, 500));
 				} catch (navError) {
-					this.logger.warn(`Page load timeout or error: ${navError}`);
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Page load timeout - checking page state directly`);
+
 					// Fallback handling
-					await new Promise(resolve => setTimeout(resolve, 2000));
+					const fallbackDelay = 2000;
+					this.logger.debug(`Adding fallback delay of ${fallbackDelay}ms to allow page to stabilize`);
+					await new Promise(resolve => setTimeout(resolve, fallbackDelay));
 
 					// Check if the page actually changed despite the navigation error
 					const afterUrl = page.url();
 					const afterTitle = await page.title();
 
 					if (afterUrl !== beforeUrl || afterTitle !== beforeTitle) {
-						this.logger.info('Page changed despite page load timeout - considering successful');
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Page changed despite page load timeout: ${beforeUrl} → ${afterUrl}`);
 
 						// Store successful navigation result
 						formSubmissionResult = {
@@ -1578,10 +1604,10 @@ export async function execute(
 						});
 					} else {
 						// No page change, likely a real navigation failure
-						this.logger.warn('No page change detected after page load timeout - form submission may have failed');
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No page change detected - form submission may not have triggered navigation`);
 
 						formSubmissionResult = {
-							error: 'Page load timeout with no page change',
+							info: 'Page load timeout with no page change',
 							beforeUrl,
 							afterUrl,
 							beforeTitle,
@@ -1598,14 +1624,21 @@ export async function execute(
 					}
 				}
 			} else if (waitAfterSubmit === 'fixedTime') {
-				this.logger.info(`Waiting ${waitTime}ms after submission`);
+				const nodeName = this.getNode().name;
+				const nodeId = this.getNode().id;
+
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Using fixed wait time after form submission (${waitTime}ms)`);
 				await new Promise(resolve => setTimeout(resolve, waitTime));
-				this.logger.info('Fixed wait time completed');
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Fixed wait time completed`);
 
 				// Re-store the page in case the page reference changed during fixed wait
 				Ventriloquist.storePage(workflowId, sessionId, page);
 			} else {
 				// Even with noWait, add a minimal delay to stabilize
+				const nodeName = this.getNode().name;
+				const nodeId = this.getNode().id;
+
+				this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No wait specified, adding minimal stabilization delay (500ms)`);
 				await new Promise(resolve => setTimeout(resolve, 500));
 			}
 
