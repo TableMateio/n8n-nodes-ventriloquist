@@ -71,30 +71,46 @@ export const description: INodeProperties[] = [
 							{
 								name: 'Checkbox',
 								value: 'checkbox',
+								description: 'Checkbox toggle',
 							},
 							{
-								name: 'File',
+								name: 'File Upload',
 								value: 'file',
+								description: 'File input field',
 							},
 							{
 								name: 'Multi-Select',
 								value: 'multiSelect',
+								description: 'Multi-select dropdown (allows multiple selections)',
 							},
 							{
-								name: 'Radio',
+								name: 'Password',
+								value: 'password',
+								description: 'Password field with secure input',
+							},
+							{
+								name: 'Radio Button',
 								value: 'radio',
+								description: 'Radio button selection',
 							},
 							{
-								name: 'Select (Dropdown)',
+								name: 'Select/Dropdown',
 								value: 'select',
+								description: 'Dropdown menu selection',
 							},
 							{
-								name: 'Text',
+								name: 'Text Input',
 								value: 'text',
+								description: 'Single-line text input',
+							},
+							{
+								name: 'Textarea',
+								value: 'textarea',
+								description: 'Multi-line text area',
 							},
 						],
 						default: 'text',
-						description: 'The type of form field',
+						description: 'Type of form field to fill',
 					},
 					{
 						displayName: 'Selector',
@@ -221,6 +237,56 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								fieldType: ['multiSelect'],
+							},
+						},
+					},
+					{
+						displayName: 'Password Value',
+						name: 'value',
+						type: 'string',
+						default: '',
+						description: 'Password to enter in the field (masked in logs for security)',
+						displayOptions: {
+							show: {
+								fieldType: ['password'],
+							},
+						},
+					},
+					{
+						displayName: 'Clear Field First',
+						name: 'clearField',
+						type: 'boolean',
+						default: true,
+						description: 'Whether to clear any existing value in the field before typing',
+						displayOptions: {
+							show: {
+								fieldType: ['password'],
+							},
+						},
+					},
+					{
+						displayName: 'Has Clone Field',
+						name: 'hasCloneField',
+						type: 'boolean',
+						default: false,
+						description: 'Whether this password field has a clone/duplicate field (common with show/hide password toggles)',
+						displayOptions: {
+							show: {
+								fieldType: ['password'],
+							},
+						},
+					},
+					{
+						displayName: 'Clone Field Selector',
+						name: 'cloneSelector',
+						type: 'string',
+						default: '',
+						placeholder: '#password-clone, .password-visible',
+						description: 'CSS selector for the clone field (often shown when password is toggled to visible)',
+						displayOptions: {
+							show: {
+								fieldType: ['password'],
+								hasCloneField: [true],
 							},
 						},
 					},
@@ -847,110 +913,26 @@ export async function execute(
 					const value = field.value as string;
 					const clearField = field.clearField as boolean;
 
-					// Enhanced password field detection for complex password fields
-					const passwordInfo = await page.evaluate((sel) => {
-						// Check if this is the main password input
-						const element = document.querySelector(sel);
-						const isPassword = element && (
-							element.getAttribute('type') === 'password' ||
-							element.classList.contains('Password-input')
-						);
-
-						// Check for complex password setup (with show/hide toggle)
-						let hasClone = false;
-						let cloneId = null;
-						let toggleId = null;
-
-						if (isPassword && element) {
-							// Check for toggle connection
-							const toggleSelector = element.getAttribute('data-typetoggle');
-							toggleId = toggleSelector ? toggleSelector.replace('#', '') : null;
-
-							// Look for a clone with similar ID
-							const elementId = element.id;
-							if (elementId) {
-								const possibleClone = document.querySelector(`#${elementId}-clone`);
-								if (possibleClone) {
-									hasClone = true;
-									cloneId = `${elementId}-clone`;
-								}
-							}
-						}
-
-						return {
-							isPassword,
-							hasClone,
-							cloneId,
-							toggleId,
-							mainId: element ? element.id : null
-						};
-					}, selector);
-
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Field ${selector} detected as ${passwordInfo.isPassword ? 'password' : 'text'} field${passwordInfo.hasClone ? ' with clone' : ''}`);
-
 					// Clear field if requested
 					if (clearField) {
 						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clearing field contents before filling`);
-						await page.evaluate((sel: string) => {
-							const element = document.querySelector(sel);
-							if (element) {
-								(element as HTMLInputElement).value = '';
-							}
-						}, selector);
-					}
-
-					// Type text with different approach for password fields
-					if (passwordInfo.isPassword) {
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling password field: ${selector} (value masked)`);
-
-						// For complex password fields with clones
-						if (passwordInfo.hasClone && passwordInfo.cloneId) {
-							this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Complex password field detected with clone: #${passwordInfo.cloneId}`);
-
-							// Handle both the password field and its clone
-							await page.evaluate((details, val) => {
-								// Set main password field
-								const mainField = document.querySelector(`#${details.mainId}`);
-								if (mainField) {
-									(mainField as HTMLInputElement).value = val;
-								}
-
-								// Set clone field
-								const cloneField = document.querySelector(`#${details.cloneId}`);
-								if (cloneField) {
-									(cloneField as HTMLInputElement).value = val;
-								}
-							}, passwordInfo, value);
-
-							// Focus and type a character in the visible field to ensure events trigger
-							await page.click(selector);
-							await page.keyboard.press('Space');
-							await page.keyboard.press('Backspace');
-						} else {
-							// Standard direct value setting for simple password fields
-							await page.evaluate((sel, val) => {
+							await page.evaluate((sel: string) => {
 								const element = document.querySelector(sel);
 								if (element) {
-									(element as HTMLInputElement).value = val;
+									(element as HTMLInputElement).value = '';
 								}
-							}, selector, value);
-
-							// Trigger events with focus and fake typing
-							await page.click(selector);
-							await page.keyboard.press('Space');
-							await page.keyboard.press('Backspace');
-						}
-					} else {
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling text field: ${selector} with value: ${value}`);
-						// Type text with consistent 25ms delay
-						await page.type(selector, value, { delay: 25 });
+							}, selector);
 					}
+
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling text field: ${selector} with value: ${value}`);
+					// Type text with consistent 25ms delay
+					await page.type(selector, value, { delay: 25 });
 
 					// Record the result
 					results.push({
 						fieldType,
 						selector,
-						value: passwordInfo.isPassword ? '********' : value,
+						value,
 						success: true,
 					});
 					break;
@@ -1158,6 +1140,70 @@ export async function execute(
 						fieldType,
 						selector,
 						values: multiSelectValues,
+						success: true,
+					});
+					break;
+				}
+
+				case 'password': {
+					const value = field.value as string;
+					const clearField = field.clearField as boolean;
+					const hasCloneField = field.hasCloneField as boolean;
+					const cloneSelector = field.cloneSelector as string;
+
+					// Clear field if requested
+					if (clearField) {
+						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clearing password field contents before filling`);
+						await page.evaluate((sel: string) => {
+							const element = document.querySelector(sel);
+							if (element) {
+								(element as HTMLInputElement).value = '';
+							}
+						}, selector);
+
+						// Also clear clone field if specified
+						if (hasCloneField && cloneSelector) {
+							this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clearing clone field: ${cloneSelector}`);
+							await page.evaluate((sel: string) => {
+								const element = document.querySelector(sel);
+								if (element) {
+									(element as HTMLInputElement).value = '';
+								}
+							}, cloneSelector);
+						}
+					}
+
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling password field: ${selector} (value masked)`);
+
+					// Use direct value setting for password fields instead of typing
+					await page.evaluate((sel, val) => {
+						const element = document.querySelector(sel);
+						if (element) {
+							(element as HTMLInputElement).value = val;
+						}
+					}, selector, value);
+
+					// Handle clone field if specified
+					if (hasCloneField && cloneSelector) {
+						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Setting clone field: ${cloneSelector}`);
+						await page.evaluate((sel, val) => {
+							const element = document.querySelector(sel);
+							if (element) {
+								(element as HTMLInputElement).value = val;
+							}
+						}, cloneSelector, value);
+					}
+
+					// Trigger events by clicking and typing a space then backspace
+					await page.click(selector);
+					await page.keyboard.press('Space');
+					await page.keyboard.press('Backspace');
+
+					// Record the result with masked password
+					results.push({
+						fieldType,
+						selector,
+						value: '********', // Mask password in results
 						success: true,
 					});
 					break;
