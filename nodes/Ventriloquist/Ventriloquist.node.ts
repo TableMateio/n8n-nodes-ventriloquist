@@ -84,12 +84,16 @@ export class Ventriloquist implements INodeType {
 		websocketEndpoint: string,
 		logger: any,
 		sessionTimeout?: number,
+		forceNew: boolean = false,
 	): Promise<{ browser: puppeteer.Browser; sessionId: string; brightDataSessionId: string }> {
 		// Clean up old sessions
 		this.cleanupSessions();
 
+		// Create unique workflowId if forceNew is true to force a new session
+		const sessionWorkflowId = forceNew ? `${workflowId}_${Date.now()}` : workflowId;
+
 		// Check if we have an existing session for this workflow
-		let session = this.browserSessions.get(workflowId);
+		let session = this.browserSessions.get(sessionWorkflowId);
 		let brightDataSessionId = '';
 
 		// Extract the Bright Data session ID from the WebSocket URL if possible
@@ -131,7 +135,9 @@ export class Ventriloquist implements INodeType {
 
 		if (!session) {
 			// Create a new browser session
-			logger.info('Creating new browser session');
+			logger.info(forceNew
+				? 'Forcing creation of new browser session (required for Page.navigate)'
+				: 'Creating new browser session');
 			const browser = await puppeteer.connect({
 				browserWSEndpoint: websocketEndpoint,
 			});
@@ -146,7 +152,7 @@ export class Ventriloquist implements INodeType {
 				timeout: timeoutMs, // Store timeout in milliseconds
 			};
 
-			this.browserSessions.set(workflowId, session);
+			this.browserSessions.set(sessionWorkflowId, session);
 			logger.info(`New browser session created with ${timeoutMs}ms timeout (${sessionTimeout || 3} minutes)`);
 		} else {
 			// Update last used timestamp
