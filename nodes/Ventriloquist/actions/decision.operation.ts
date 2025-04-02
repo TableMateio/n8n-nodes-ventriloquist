@@ -2269,6 +2269,86 @@ export const description: INodeProperties[] = [
 	}
 
 	/**
+	 * Helper function to format extracted data for logging
+	 * Truncates the data to make it more log-friendly
+	 */
+	function formatExtractedDataForLog(data: any, extractionType: string): string {
+		if (data === null || data === undefined) {
+			return 'null';
+		}
+
+		const truncateLength = 100; // Maximum string length to show in logs
+		const truncateMessage = '... (truncated)';
+
+		if (typeof data === 'string') {
+			// For string data, truncate if too long
+			if (data.length > truncateLength) {
+				return `"${data.substring(0, truncateLength)}${truncateMessage}" (${data.length} chars)`;
+			}
+			return `"${data}"`;
+		} else if (Array.isArray(data)) {
+			// For arrays, summarize content
+			const itemCount = data.length;
+			if (itemCount === 0) {
+				return '[] (empty array)';
+			}
+
+			// Sample a few items from the array
+			const sampleSize = Math.min(3, itemCount);
+			const sample = data.slice(0, sampleSize).map(item => {
+				if (typeof item === 'string') {
+					return item.length > 20 ? `"${item.substring(0, 20)}..."` : `"${item}"`;
+				} else if (typeof item === 'object') {
+					return '[object]';
+				}
+				return String(item);
+			});
+
+			return `[${sample.join(', ')}${itemCount > sampleSize ? `, ... (${itemCount - sampleSize} more)` : ''}]`;
+		} else if (typeof data === 'object') {
+			// For objects, show a sample of keys and values
+			if (data === null) {
+				return 'null';
+			}
+
+			if (extractionType === 'table') {
+				// Special handling for table data
+				const rowCount = Array.isArray(data) ? data.length : Object.prototype.hasOwnProperty.call(data, 'rowCount') ? data.rowCount : 'unknown';
+				return `[Table data: ${rowCount} row(s)]`;
+			}
+
+			// For other objects, sample a few properties
+			const keys = Object.keys(data);
+			if (keys.length === 0) {
+				return '{} (empty object)';
+			}
+
+			// Only show a few keys
+			const sampleSize = Math.min(3, keys.length);
+			const sample = keys.slice(0, sampleSize).map(key => {
+				const value = data[key];
+
+				// Format the value based on its type
+				let valueStr;
+				if (typeof value === 'string') {
+					valueStr = value.length > 15 ? `"${value.substring(0, 15)}..."` : `"${value}"`;
+				} else if (typeof value === 'object') {
+					valueStr = '[object]';
+				} else {
+					valueStr = String(value);
+				}
+
+				return `${key}: ${valueStr}`;
+			});
+
+			return `{${sample.join(', ')}${keys.length > sampleSize ? `, ... (${keys.length - sampleSize} more)` : ''}}`;
+		}
+
+		// For other data types, convert to string
+		return String(data);
+	}
+
+	/**
 	 * Execute the decision operation
 	 */
 	export async function execute(
@@ -3089,7 +3169,8 @@ export const description: INodeProperties[] = [
 									}
 									resultData.extractedData[groupName] = extractedData;
 
-									this.logger.debug(`Extracted data (${extractionType}) from: ${actionSelector}`);
+									const truncatedData = formatExtractedDataForLog(extractedData, extractionType);
+									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Extracted ${extractionType} data from: ${actionSelector} - Value: ${truncatedData}`);
 									break;
 								}
 
@@ -3619,7 +3700,8 @@ export const description: INodeProperties[] = [
 									}
 									resultData.extractedData[groupName] = extractedData;
 
-									this.logger.debug(`Extracted data (${extractionType}) from: ${actionSelector}`);
+									const truncatedData = formatExtractedDataForLog(extractedData, extractionType);
+									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Extracted ${extractionType} data from: ${actionSelector} - Value: ${truncatedData}`);
 									break;
 								}
 
@@ -3816,7 +3898,8 @@ export const description: INodeProperties[] = [
 							}
 							resultData.extractedData.fallback = extractedData;
 
-							this.logger.debug(`Fallback: Extracted data (${fallbackExtractionType}) from: ${fallbackSelector}`);
+							const truncatedData = formatExtractedDataForLog(extractedData, fallbackExtractionType);
+							this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Fallback: Extracted ${fallbackExtractionType} data from: ${fallbackSelector} - Value: ${truncatedData}`);
 							break;
 						}
 
