@@ -170,6 +170,18 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
+						displayName: 'Human-Like Typing',
+						name: 'humanLike',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to type with human-like random delays between keystrokes',
+						displayOptions: {
+							show: {
+								fieldType: ['text'],
+							},
+						},
+					},
+					{
 						displayName: 'Dropdown Value',
 						name: 'value',
 						type: 'string',
@@ -912,21 +924,31 @@ export async function execute(
 				case 'text': {
 					const value = field.value as string;
 					const clearField = field.clearField as boolean;
+					const humanLike = field.humanLike as boolean || false;
 
 					// Clear field if requested
 					if (clearField) {
 						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clearing field contents before filling`);
-							await page.evaluate((sel: string) => {
-								const element = document.querySelector(sel);
-								if (element) {
-									(element as HTMLInputElement).value = '';
-								}
-							}, selector);
+						await page.evaluate((sel: string) => {
+							const element = document.querySelector(sel);
+							if (element) {
+								(element as HTMLInputElement).value = '';
+							}
+						}, selector);
 					}
 
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling text field: ${selector} with value: ${value}`);
-					// Type text with consistent 25ms delay
-					await page.type(selector, value, { delay: 25 });
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling text field: ${selector} with value: ${value} (human-like: ${humanLike})`);
+
+					// Type text with either human-like typing or direct typing
+					if (humanLike) {
+						// Character-by-character typing with variable delays
+						for (const char of value) {
+							await page.type(selector, char, { delay: Math.floor(Math.random() * 150) + 25 });
+						}
+					} else {
+						// Direct input without character delays
+						await page.type(selector, value, { delay: 0 });
+					}
 
 					// Record the result
 					results.push({

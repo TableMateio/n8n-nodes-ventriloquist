@@ -2797,7 +2797,7 @@ export const description: INodeProperties[] = [
 												}
 
 												// Type the text
-												this.logger.debug(`Filling form field: ${selector} with value: ${value}`);
+												this.logger.debug(`Filling form field: ${selector} with value: ${value} (human-like: ${humanLike})`);
 
 												// Use human-like typing with random delays between keystrokes
 												if (humanLike) {
@@ -2805,7 +2805,8 @@ export const description: INodeProperties[] = [
 														await puppeteerPage.type(selector, char, { delay: Math.floor(Math.random() * 150) + 25 });
 													}
 												} else {
-													await puppeteerPage.type(selector, value);
+													// Fast direct typing without delays for non-human-like mode
+													await puppeteerPage.type(selector, value, { delay: 0 });
 												}
 
 												// Press Enter if requested
@@ -3328,15 +3329,16 @@ export const description: INodeProperties[] = [
 												}
 
 												// Type the text
-												this.logger.debug(`Filling form field: ${selector} with value: ${value}`);
+												this.logger.debug(`Filling form field: ${selector} with value: ${value} (human-like: ${humanLike})`);
 
-												// Use human-like typing if enabled
+												// Use human-like typing with random delays between keystrokes
 												if (humanLike) {
 													for (const char of value) {
 														await puppeteerPage.type(selector, char, { delay: Math.floor(Math.random() * 150) + 25 });
 													}
 												} else {
-													await puppeteerPage.type(selector, value);
+													// Fast direct typing without delays for non-human-like mode
+													await puppeteerPage.type(selector, value, { delay: 0 });
 												}
 
 												// Press Enter if requested
