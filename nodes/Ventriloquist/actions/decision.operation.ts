@@ -11,6 +11,18 @@ import type * as puppeteer from 'puppeteer-core';
  */
 export const description: INodeProperties[] = [
 	{
+		displayName: 'Session ID',
+		name: 'sessionId',
+		type: 'string',
+		default: '',
+		description: 'Session ID to use (if not provided, will try to use session from previous operations)',
+		displayOptions: {
+			show: {
+				operation: ['decision'],
+			},
+		},
+	},
+	{
 		displayName: 'Enable Routing',
 		name: 'enableRouting',
 		type: 'boolean',

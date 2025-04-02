@@ -1081,6 +1081,7 @@ export class Ventriloquist implements INodeType {
 
 						returnData[0].push({
 							json: {
+								...items[i].json, // Pass through input data
 								success: true,
 								operation: 'click',
 								selector,
@@ -1108,6 +1109,7 @@ export class Ventriloquist implements INodeType {
 						// Otherwise, return an error response but continue execution
 						returnData[0].push({
 							json: {
+								...items[i].json, // Pass through input data
 								success: false,
 								operation: 'click',
 								error: errorMessage,
@@ -1246,6 +1248,7 @@ export class Ventriloquist implements INodeType {
 
 						returnData[0].push({
 							json: {
+								...items[i].json, // Pass through input data
 								success: false,
 								error: (error as Error).message,
 								executionDuration: Date.now() - startTime,
@@ -1308,6 +1311,7 @@ export class Ventriloquist implements INodeType {
 								// Return success
 								returnData[0].push({
 									json: {
+										...items[i].json, // Pass through input data
 										success: true,
 										operation,
 										closeMode,
@@ -1328,6 +1332,7 @@ export class Ventriloquist implements INodeType {
 							// Return success with details
 							returnData[0].push({
 								json: {
+									...items[i].json, // Pass through input data
 									success: true,
 									operation,
 									closeMode,
@@ -1368,6 +1373,7 @@ export class Ventriloquist implements INodeType {
 							// Return result
 							returnData[0].push({
 								json: {
+									...items[i].json, // Pass through input data
 									success: true,
 									operation,
 									closeMode,
@@ -1389,6 +1395,7 @@ export class Ventriloquist implements INodeType {
 						// Otherwise, return an error response and continue
 						returnData[0].push({
 							json: {
+								...items[i].json, // Pass through input data
 								success: false,
 								operation,
 								closeMode,
