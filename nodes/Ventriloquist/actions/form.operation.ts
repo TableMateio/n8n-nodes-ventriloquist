@@ -258,6 +258,9 @@ export const description: INodeProperties[] = [
 						type: 'string',
 						default: '',
 						description: 'Password to enter in the field (masked in logs for security)',
+						typeOptions: {
+							password: true,
+						},
 						displayOptions: {
 							show: {
 								fieldType: ['password'],
