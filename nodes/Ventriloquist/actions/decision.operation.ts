@@ -2977,50 +2977,28 @@ export const description: INodeProperties[] = [
 												// Clear field if requested
 												if (clearField) {
 													this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing password field: ${selector}`);
-													await puppeteerPage.evaluate((sel: string) => {
-														const element = document.querySelector(sel);
-														if (element) {
-															(element as HTMLInputElement).value = '';
-														}
-													}, selector);
-
-													// Also clear clone field if specified
-													if (hasCloneField && cloneSelector) {
-														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing password clone field: ${cloneSelector}`);
-														await puppeteerPage.evaluate((sel: string) => {
-															const element = document.querySelector(sel);
-															if (element) {
-																(element as HTMLInputElement).value = '';
-															}
-														}, cloneSelector);
-													}
+													// Click three times to select all text
+													await puppeteerPage.click(selector, { clickCount: 3 });
+													// Delete selected text
+													await puppeteerPage.keyboard.press('Backspace');
 												}
 
 												this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Filling password field: ${selector} (value masked)`);
 
-												// Use direct value setting for password fields instead of typing
-												await puppeteerPage.evaluate((sel, val) => {
-													const element = document.querySelector(sel);
-													if (element) {
-														(element as HTMLInputElement).value = val;
-													}
-												}, selector, value);
+												// Use direct typing approach (like text fields) with zero delay
+												await puppeteerPage.type(selector, value, { delay: 0 });
 
-												// Handle clone field if specified
+												// Handle clone field if specified and needed
 												if (hasCloneField && cloneSelector) {
 													this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Setting password clone field: ${cloneSelector}`);
-													await puppeteerPage.evaluate((sel, val) => {
-														const element = document.querySelector(sel);
-														if (element) {
-															(element as HTMLInputElement).value = val;
-														}
-													}, cloneSelector, value);
+													// Clear and fill the clone field directly
+													await puppeteerPage.click(cloneSelector, { clickCount: 3 });
+													await puppeteerPage.keyboard.press('Backspace');
+													await puppeteerPage.type(cloneSelector, value, { delay: 0 });
 												}
 
-												// Trigger events by clicking and typing a space then backspace
-												await puppeteerPage.click(selector);
-												await puppeteerPage.keyboard.press('Space');
-												await puppeteerPage.keyboard.press('Backspace');
+												// Press Tab to move from the field and trigger events
+												await puppeteerPage.keyboard.press('Tab');
 												break;
 											}
 										}
@@ -3565,50 +3543,28 @@ export const description: INodeProperties[] = [
 												// Clear field if requested
 												if (clearField) {
 													this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing password field: ${selector}`);
-													await puppeteerPage.evaluate((sel: string) => {
-														const element = document.querySelector(sel);
-														if (element) {
-															(element as HTMLInputElement).value = '';
-														}
-													}, selector);
-
-													// Also clear clone field if specified
-													if (hasCloneField && cloneSelector) {
-														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing password clone field: ${cloneSelector}`);
-														await puppeteerPage.evaluate((sel: string) => {
-															const element = document.querySelector(sel);
-															if (element) {
-																(element as HTMLInputElement).value = '';
-															}
-														}, cloneSelector);
-													}
+													// Click three times to select all text
+													await puppeteerPage.click(selector, { clickCount: 3 });
+													// Delete selected text
+													await puppeteerPage.keyboard.press('Backspace');
 												}
 
 												this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Filling password field: ${selector} (value masked)`);
 
-												// Use direct value setting for password fields instead of typing
-												await puppeteerPage.evaluate((sel, val) => {
-													const element = document.querySelector(sel);
-													if (element) {
-														(element as HTMLInputElement).value = val;
-													}
-												}, selector, value);
+												// Use direct typing approach (like text fields) with zero delay
+												await puppeteerPage.type(selector, value, { delay: 0 });
 
-												// Handle clone field if specified
+												// Handle clone field if specified and needed
 												if (hasCloneField && cloneSelector) {
 													this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Setting password clone field: ${cloneSelector}`);
-													await puppeteerPage.evaluate((sel, val) => {
-														const element = document.querySelector(sel);
-														if (element) {
-															(element as HTMLInputElement).value = val;
-														}
-													}, cloneSelector, value);
+													// Clear and fill the clone field directly
+													await puppeteerPage.click(cloneSelector, { clickCount: 3 });
+													await puppeteerPage.keyboard.press('Backspace');
+													await puppeteerPage.type(cloneSelector, value, { delay: 0 });
 												}
 
-												// Trigger events by clicking and typing a space then backspace
-												await puppeteerPage.click(selector);
-												await puppeteerPage.keyboard.press('Space');
-												await puppeteerPage.keyboard.press('Backspace');
+												// Press Tab to move from the field and trigger events
+												await puppeteerPage.keyboard.press('Tab');
 												break;
 											}
 										}

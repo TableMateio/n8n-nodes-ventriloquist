@@ -1179,56 +1179,33 @@ export async function execute(
 					// Clear field if requested
 					if (clearField) {
 						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clearing password field contents before filling`);
-						await page.evaluate((sel: string) => {
-							const element = document.querySelector(sel);
-							if (element) {
-								(element as HTMLInputElement).value = '';
-							}
-						}, selector);
-
-						// Also clear clone field if specified
-						if (hasCloneField && cloneSelector) {
-							this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clearing clone field: ${cloneSelector}`);
-							await page.evaluate((sel: string) => {
-								const element = document.querySelector(sel);
-								if (element) {
-									(element as HTMLInputElement).value = '';
-								}
-							}, cloneSelector);
-						}
+						// Click three times to select all text
+						await page.click(selector, { clickCount: 3 });
+						// Delete selected text
+						await page.keyboard.press('Backspace');
 					}
 
 					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling password field: ${selector} (value masked)`);
 
-					// Use direct value setting for password fields instead of typing
-					await page.evaluate((sel, val) => {
-						const element = document.querySelector(sel);
-						if (element) {
-							(element as HTMLInputElement).value = val;
-						}
-					}, selector, value);
+					// Use direct typing approach (like text fields) with zero delay
+					await page.type(selector, value, { delay: 0 });
 
-					// Handle clone field if specified
+					// Handle clone field if specified and needed
 					if (hasCloneField && cloneSelector) {
 						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Setting clone field: ${cloneSelector}`);
-						await page.evaluate((sel, val) => {
-							const element = document.querySelector(sel);
-							if (element) {
-								(element as HTMLInputElement).value = val;
-							}
-						}, cloneSelector, value);
+						// Clear and fill the clone field directly
+						await page.click(cloneSelector, { clickCount: 3 });
+						await page.keyboard.press('Backspace');
+						await page.type(cloneSelector, value, { delay: 0 });
 					}
 
-					// Trigger events by clicking and typing a space then backspace
-					await page.click(selector);
-					await page.keyboard.press('Space');
-					await page.keyboard.press('Backspace');
+					// Press Tab to move from the field and trigger events
+					await page.keyboard.press('Tab');
 
-					// Record the result with masked password
+					// Record the result
 					results.push({
 						fieldType,
 						selector,
-						value: '********', // Mask password in results
 						success: true,
 					});
 					break;
