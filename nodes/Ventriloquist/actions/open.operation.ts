@@ -1,4 +1,4 @@
-import {
+import type {
 	IExecuteFunctions,
 	IDataObject,
 	INodeExecutionData,
@@ -232,7 +232,9 @@ export async function execute(
 
 			if (isContextDestroyed) {
 				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Context destroyed due to navigation - this is expected behavior`);
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Session created successfully with ID: ${sessionId}`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] This usually happens with redirects or page refreshes during navigation`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] The browser session was SUCCESSFULLY created with ID: ${sessionId}`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] The session can be used by downstream nodes even though initial navigation triggered redirects`);
 				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] ========== END OPEN NODE EXECUTION (WITH RECOVERED ERROR) ==========`);
 
 				// Even with context destroyed, we can return success with the session ID
@@ -245,6 +247,7 @@ export async function execute(
 						sessionId, // This is the critical piece of information for subsequent nodes
 						brightDataSessionId,
 						contextDestroyed: true, // Flag to indicate context was destroyed
+						contextDestroyedInfo: "This typically happens with redirects. The browser session was successfully created and can be used by following nodes.",
 						timestamp: new Date().toISOString(),
 						executionDuration: Date.now() - startTime,
 					},
