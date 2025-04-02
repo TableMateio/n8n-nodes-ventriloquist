@@ -2358,8 +2358,8 @@ export const description: INodeProperties[] = [
 												);
 
 												if (!elementExists) {
-													// Improve error message
-													throw new Error(`Element selector "${actionSelector}" exists in page but is not clickable or visible`);
+													// Improve error message to indicate this is for decision flow, not an error
+													throw new Error(`Decision action: Element "${actionSelector}" required for this path is not present or visible`);
 												}
 											} else {
 												await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
@@ -2377,7 +2377,7 @@ export const description: INodeProperties[] = [
 										// Improve error clarity by checking if it's a timeout error
 										const errorMessage = (error as Error).message;
 										if (errorMessage.includes('timeout')) {
-											throw new Error(`Timeout waiting for element "${actionSelector}" (${selectorTimeout}ms)`);
+											throw new Error(`Decision path timeout: Element "${actionSelector}" didn't appear within ${selectorTimeout}ms`);
 										}
 										throw error; // Re-throw other errors
 									}
@@ -3094,6 +3094,12 @@ export const description: INodeProperties[] = [
 				if (errorMessage.includes('Navigation timeout')) {
 					// This is likely just a timeout during navigation, which might be expected
 					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation timeout in group "${groupName}": ${errorMessage} - this may be expected behavior`);
+				} else if (errorMessage.includes('not found') || errorMessage.includes('not clickable or visible')) {
+					// Not an error - decision point didn't match selected element
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Decision point "${groupName}": Element not available - continuing to next decision`);
+
+					// Add additional details at debug level
+					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Details: ${errorMessage}`);
 				} else {
 					// This is a genuine error in execution, not just a condition failing
 					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Action execution error in group "${groupName}": ${errorMessage}`);
