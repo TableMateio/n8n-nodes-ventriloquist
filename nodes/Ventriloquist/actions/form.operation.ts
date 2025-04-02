@@ -847,16 +847,46 @@ export async function execute(
 					const value = field.value as string;
 					const clearField = field.clearField as boolean;
 
-					// Check if this is a password field
-					const isPasswordField = await page.evaluate((sel) => {
+					// Enhanced password field detection for complex password fields
+					const passwordInfo = await page.evaluate((sel) => {
+						// Check if this is the main password input
 						const element = document.querySelector(sel);
-						return element && (
+						const isPassword = element && (
 							element.getAttribute('type') === 'password' ||
 							element.classList.contains('Password-input')
 						);
+
+						// Check for complex password setup (with show/hide toggle)
+						let hasClone = false;
+						let cloneId = null;
+						let toggleId = null;
+
+						if (isPassword && element) {
+							// Check for toggle connection
+							const toggleSelector = element.getAttribute('data-typetoggle');
+							toggleId = toggleSelector ? toggleSelector.replace('#', '') : null;
+
+							// Look for a clone with similar ID
+							const elementId = element.id;
+							if (elementId) {
+								const possibleClone = document.querySelector(`#${elementId}-clone`);
+								if (possibleClone) {
+									hasClone = true;
+									cloneId = `${elementId}-clone`;
+								}
+							}
+						}
+
+						return {
+							isPassword,
+							hasClone,
+							cloneId,
+							toggleId,
+							mainId: element ? element.id : null
+						};
 					}, selector);
 
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Field ${selector} detected as ${isPasswordField ? 'password' : 'text'} field`);
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Field ${selector} detected as ${passwordInfo.isPassword ? 'password' : 'text'} field${passwordInfo.hasClone ? ' with clone' : ''}`);
 
 					// Clear field if requested
 					if (clearField) {
@@ -870,21 +900,46 @@ export async function execute(
 					}
 
 					// Type text with different approach for password fields
-					if (isPasswordField) {
+					if (passwordInfo.isPassword) {
 						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling password field: ${selector} (value masked)`);
 
-						// For password fields, use a more direct approach
-						await page.evaluate((sel, val) => {
-							const element = document.querySelector(sel);
-							if (element) {
-								(element as HTMLInputElement).value = val;
-							}
-						}, selector, value);
+						// For complex password fields with clones
+						if (passwordInfo.hasClone && passwordInfo.cloneId) {
+							this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Complex password field detected with clone: #${passwordInfo.cloneId}`);
 
-						// Sometimes direct value setting doesn't trigger events, so click the field and type a space
-						await page.click(selector);
-						await page.keyboard.press('Space');
-						await page.keyboard.press('Backspace');
+							// Handle both the password field and its clone
+							await page.evaluate((details, val) => {
+								// Set main password field
+								const mainField = document.querySelector(`#${details.mainId}`);
+								if (mainField) {
+									(mainField as HTMLInputElement).value = val;
+								}
+
+								// Set clone field
+								const cloneField = document.querySelector(`#${details.cloneId}`);
+								if (cloneField) {
+									(cloneField as HTMLInputElement).value = val;
+								}
+							}, passwordInfo, value);
+
+							// Focus and type a character in the visible field to ensure events trigger
+							await page.click(selector);
+							await page.keyboard.press('Space');
+							await page.keyboard.press('Backspace');
+						} else {
+							// Standard direct value setting for simple password fields
+							await page.evaluate((sel, val) => {
+								const element = document.querySelector(sel);
+								if (element) {
+									(element as HTMLInputElement).value = val;
+								}
+							}, selector, value);
+
+							// Trigger events with focus and fake typing
+							await page.click(selector);
+							await page.keyboard.press('Space');
+							await page.keyboard.press('Backspace');
+						}
 					} else {
 						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling text field: ${selector} with value: ${value}`);
 						// Type text with consistent 25ms delay
@@ -895,7 +950,7 @@ export async function execute(
 					results.push({
 						fieldType,
 						selector,
-						value: isPasswordField ? '********' : value,
+						value: passwordInfo.isPassword ? '********' : value,
 						success: true,
 					});
 					break;
