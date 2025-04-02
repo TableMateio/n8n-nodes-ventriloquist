@@ -2971,13 +2971,13 @@ export const description: INodeProperties[] = [
 											case 'password': {
 												const value = field.value as string || '';
 												const clearField = field.clearField as boolean ?? true;
-												const hasCloneField = field.hasCloneField as boolean || false;
-												const cloneSelector = field.cloneSelector as string || '';
+												// Remove these lines
+												// const hasCloneField = field.hasCloneField as boolean || false;
+												// const cloneSelector = field.cloneSelector as string || '';
 
 												// Clear field if requested
 												if (clearField) {
 													this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing password field: ${selector}`);
-													// Don't use keyboard events - use JavaScript directly
 													await puppeteerPage.evaluate((sel: string) => {
 														const element = document.querySelector(sel);
 														if (element) {
@@ -3014,34 +3014,10 @@ export const description: INodeProperties[] = [
 													}
 												}, selector, value);
 
-												// Handle clone field if specified
-												if (hasCloneField && cloneSelector) {
-													this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Setting password clone field: ${cloneSelector}`);
-													await puppeteerPage.evaluate((sel, val) => {
-														const element = document.querySelector(sel);
-														if (element && element instanceof HTMLInputElement) {
-															try {
-																// Save original type
-																const originalType = element.getAttribute('type');
-
-																// Temporarily change to text type
-																element.setAttribute('type', 'text');
-
-																// Set the value while it's a text field
-																element.value = val;
-
-																// Trigger events
-																element.dispatchEvent(new Event('input', { bubbles: true }));
-																element.dispatchEvent(new Event('change', { bubbles: true }));
-
-																// Change back to original type
-																element.setAttribute('type', originalType || 'password');
-															} catch (err) {
-																console.error('Error while manipulating clone field:', err);
-															}
-														}
-													}, cloneSelector, value);
-												}
+												// Remove all the clone field handling code
+												// if (hasCloneField && cloneSelector) {
+												//   ...
+												// }
 
 												// Focus the next field or blur current field to trigger validation
 												await puppeteerPage.evaluate((sel) => {
@@ -3589,13 +3565,13 @@ export const description: INodeProperties[] = [
 											case 'password': {
 												const value = field.value as string || '';
 												const clearField = field.clearField as boolean ?? true;
-												const hasCloneField = field.hasCloneField as boolean || false;
-												const cloneSelector = field.cloneSelector as string || '';
+												// Remove these lines
+												// const hasCloneField = field.hasCloneField as boolean || false;
+												// const cloneSelector = field.cloneSelector as string || '';
 
 												// Clear field if requested
 												if (clearField) {
 													this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing password field: ${selector}`);
-													// Don't use keyboard events - use JavaScript directly
 													await puppeteerPage.evaluate((sel: string) => {
 														const element = document.querySelector(sel);
 														if (element) {
@@ -3632,34 +3608,10 @@ export const description: INodeProperties[] = [
 													}
 												}, selector, value);
 
-												// Handle clone field if specified
-												if (hasCloneField && cloneSelector) {
-													this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Setting password clone field: ${cloneSelector}`);
-													await puppeteerPage.evaluate((sel, val) => {
-														const element = document.querySelector(sel);
-														if (element && element instanceof HTMLInputElement) {
-															try {
-																// Save original type
-																const originalType = element.getAttribute('type');
-
-																// Temporarily change to text type
-																element.setAttribute('type', 'text');
-
-																// Set the value while it's a text field
-																element.value = val;
-
-																// Trigger events
-																element.dispatchEvent(new Event('input', { bubbles: true }));
-																element.dispatchEvent(new Event('change', { bubbles: true }));
-
-																// Change back to original type
-																element.setAttribute('type', originalType || 'password');
-															} catch (err) {
-																console.error('Error while manipulating clone field:', err);
-															}
-														}
-													}, cloneSelector, value);
-												}
+												// Remove all the clone field handling code
+												// if (hasCloneField && cloneSelector) {
+												//   ...
+												// }
 
 												// Focus the next field or blur current field to trigger validation
 												await puppeteerPage.evaluate((sel) => {
