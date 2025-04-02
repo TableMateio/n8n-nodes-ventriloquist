@@ -54,14 +54,9 @@ export const description: INodeProperties[] = [
 			groups: [
 				{
 					name: 'Default',
-					conditions: {
-						condition: [
-							{
-								conditionType: 'elementExists',
-								selector: ''
-							}
-						]
-					}
+					conditionType: 'one',
+					singleConditionType: 'elementExists',
+					singleSelector: ''
 				}
 			]
 		},
@@ -96,10 +91,15 @@ export const description: INodeProperties[] = [
 							},
 						},
 						{
-							displayName: 'Logical Operator',
-							name: 'logicalOperator',
+							displayName: 'Condition Type',
+							name: 'conditionType',
 							type: 'options',
 							options: [
+								{
+									name: 'One Condition',
+									value: 'one',
+									description: 'Only use a single condition',
+								},
 								{
 									name: 'AND - All Conditions Must Match',
 									value: 'and',
@@ -111,17 +111,310 @@ export const description: INodeProperties[] = [
 									description: 'At least one condition must be true for the group to match (logical OR)',
 								},
 							],
-							default: 'and',
-							description: 'How to combine multiple conditions in this group (only appears when you add a second condition)',
+							default: 'one',
+							description: 'How to evaluate conditions in this group',
 							displayOptions: {
 								show: {
 									'/operation': ['decision'],
 								},
-								hide: {
-									'@node.hasMultipleConditions': [false]
-								}
 							},
 						},
+						// Single condition fields (only shown when conditionType is 'one')
+						{
+							displayName: 'Condition Type',
+							name: 'singleConditionType',
+							type: 'options',
+							options: [
+								{
+									name: 'Element Count',
+									value: 'elementCount',
+									description: 'Count the elements that match a selector',
+								},
+								{
+									name: 'Element Exists',
+									value: 'elementExists',
+									description: 'Check if element exists on the page',
+								},
+								{
+									name: 'Execution Count',
+									value: 'executionCount',
+									description: 'Check how many times this node has been executed',
+								},
+								{
+									name: 'Expression',
+									value: 'expression',
+									description: 'Evaluate a JavaScript expression',
+								},
+								{
+									name: 'Input Source',
+									value: 'inputSource',
+									description: 'Check which node the data came from',
+								},
+								{
+									name: 'Text Contains',
+									value: 'textContains',
+									description: 'Check if element contains specific text',
+								},
+								{
+									name: 'URL Contains',
+									value: 'urlContains',
+									description: 'Check if current URL contains string',
+								},
+							],
+							default: 'elementExists',
+							description: 'Type of condition to check',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+								},
+							},
+						},
+						{
+							displayName: 'JavaScript Expression',
+							name: 'singleJsExpression',
+							type: 'string',
+							typeOptions: {
+								rows: 4,
+							},
+							default: '$input.item.json.someProperty === true',
+							description: 'JavaScript expression that should evaluate to true or false. You can use $input to access the input data.',
+								placeholder: '$input.item.json.status === "success" || $input.item.json.count > 5',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+									singleConditionType: ['expression'],
+								},
+							},
+						},
+						{
+							displayName: 'Source Node Name',
+							name: 'singleSourceNodeName',
+							type: 'string',
+							default: '',
+							placeholder: 'e.g., HTTP Request, Function, Switch',
+							description: 'Enter the exact name of the node that should trigger this condition. This is the name shown in the node\'s title bar.',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+									singleConditionType: ['inputSource'],
+								},
+							},
+						},
+						{
+							displayName: 'Count Comparison',
+							name: 'singleExecutionCountComparison',
+							type: 'options',
+							options: [
+								{
+									name: 'Equal To',
+									value: 'equal',
+								},
+								{
+									name: 'Greater Than',
+									value: 'greater',
+								},
+								{
+									name: 'Greater Than or Equal To',
+									value: 'greaterEqual',
+								},
+								{
+									name: 'Less Than',
+									value: 'less',
+								},
+								{
+									name: 'Less Than or Equal To',
+									value: 'lessEqual',
+								},
+							],
+							default: 'equal',
+							description: 'How to compare the execution count',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+									singleConditionType: ['executionCount'],
+								},
+							},
+						},
+						{
+							displayName: 'Execution Count',
+							name: 'singleExecutionCountValue',
+							type: 'number',
+							default: 1,
+							description: 'The value to compare the execution count against',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+									singleConditionType: ['executionCount'],
+								},
+							},
+						},
+						{
+							displayName: 'Selector',
+							name: 'singleSelector',
+							type: 'string',
+							default: '',
+							placeholder: '#element, .class, div[data-test="value"]',
+							description: 'CSS selector to target the element(s)',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+									singleConditionType: ['elementExists', 'textContains', 'elementCount'],
+								},
+							},
+						},
+						{
+							displayName: 'Text to Check',
+							name: 'singleTextToCheck',
+							type: 'string',
+							default: '',
+							description: 'Text content to check for in the selected element',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+									singleConditionType: ['textContains'],
+								},
+							},
+						},
+						{
+							displayName: 'URL Substring',
+							name: 'singleUrlSubstring',
+							type: 'string',
+							default: '',
+							description: 'Text to look for in the current URL',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+									singleConditionType: ['urlContains'],
+								},
+							},
+						},
+						{
+							displayName: 'Count Comparison',
+							name: 'singleCountComparison',
+							type: 'options',
+							options: [
+								{
+									name: 'Equal To',
+									value: 'equal',
+								},
+								{
+									name: 'Greater Than',
+									value: 'greater',
+								},
+								{
+									name: 'Greater Than or Equal To',
+									value: 'greaterEqual',
+								},
+								{
+									name: 'Less Than',
+									value: 'less',
+								},
+								{
+									name: 'Less Than or Equal To',
+									value: 'lessEqual',
+								},
+							],
+							default: 'equal',
+							description: 'How to compare the actual element count with the expected count',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+									singleConditionType: ['elementCount'],
+								},
+							},
+						},
+						{
+							displayName: 'Expected Count',
+							name: 'singleExpectedCount',
+							type: 'number',
+							default: 1,
+							description: 'The value to compare the element count against',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+									singleConditionType: ['elementCount'],
+								},
+							},
+						},
+						{
+							displayName: 'Match Type',
+							name: 'singleMatchType',
+							type: 'options',
+							options: [
+								{
+									name: 'Contains',
+									value: 'contains',
+									description: 'Value must contain the specified string',
+								},
+								{
+									name: 'Ends With',
+									value: 'endsWith',
+									description: 'Value must end with the specified string',
+								},
+								{
+									name: 'Exact Match',
+									value: 'exact',
+									description: 'Value must match exactly',
+								},
+								{
+									name: 'RegEx',
+									value: 'regex',
+									description: 'Match using a regular expression',
+								},
+								{
+									name: 'Starts With',
+									value: 'startsWith',
+									description: 'Value must start with the specified string',
+								},
+							],
+							default: 'contains',
+							description: 'How to match the text or URL value',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+									singleConditionType: ['textContains', 'urlContains'],
+								},
+							},
+						},
+						{
+							displayName: 'Case Sensitive',
+							name: 'singleCaseSensitive',
+							type: 'boolean',
+							default: false,
+							description: 'Whether the matching should be case-sensitive',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+									singleConditionType: ['textContains', 'urlContains'],
+								},
+							},
+						},
+						{
+							displayName: 'Invert Condition',
+							name: 'singleInvertCondition',
+							type: 'boolean',
+							default: false,
+							description: 'Whether to invert the condition result (true becomes false, false becomes true)',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['one'],
+								},
+							},
+						},
+						// Multiple conditions collection (only shown when conditionType is 'and' or 'or')
 						{
 							displayName: 'Conditions',
 							name: 'conditions',
@@ -130,6 +423,7 @@ export const description: INodeProperties[] = [
 							typeOptions: {
 								multipleValues: true,
 								sortable: true,
+								multipleValueButtonText: 'Add Condition',
 							},
 							default: {
 								condition: [
@@ -140,6 +434,12 @@ export const description: INodeProperties[] = [
 								]
 							},
 							description: 'Define the conditions to check',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+									conditionType: ['and', 'or'],
+								},
+							},
 							options: [
 								{
 									name: 'condition',
@@ -188,25 +488,6 @@ export const description: INodeProperties[] = [
 											],
 											default: 'elementExists',
 											description: 'Type of condition to check',
-										},
-										{
-											displayName: 'Logical Operator',
-											name: 'logicalOperator',
-											type: 'options',
-											options: [
-												{
-													name: 'AND - All Conditions Must Match',
-													value: 'and',
-													description: 'Combined with previous condition using AND logic',
-												},
-												{
-													name: 'OR - Any Condition Can Match',
-													value: 'or',
-													description: 'Combined with previous condition using OR logic',
-												},
-											],
-											default: 'and',
-											description: 'How to combine this condition with the previous one (ignored for the first condition)',
 										},
 										{
 											displayName: 'JavaScript Expression',
@@ -1717,17 +1998,8 @@ export const description: INodeProperties[] = [
 				const groupName = group.name as string;
 				const invertCondition = group.invertCondition as boolean || false;
 
-				// Get conditions and ensure type safety
-				let conditions: IDataObject[] = [];
-				if (group.conditions &&
-					typeof group.conditions === 'object' &&
-					(group.conditions as IDataObject).condition &&
-					Array.isArray((group.conditions as IDataObject).condition)) {
-					conditions = (group.conditions as IDataObject).condition as IDataObject[];
-				}
-
-				// Get logical operator (default to AND if not set)
-				const logicalOperator = group.logicalOperator as string || 'and';
+				// Get condition type (default to one if not set)
+				const conditionType = group.conditionType as string || 'one';
 
 				// Get route if routing is enabled
 				if (enableRouting) {
@@ -1738,27 +2010,68 @@ export const description: INodeProperties[] = [
 					}
 				}
 
-				this.logger.debug(`Checking decision group: ${groupName} with ${conditions.length} conditions using ${logicalOperator} logic`);
+				this.logger.debug(`Checking decision group: ${groupName} with condition type ${conditionType}`);
 
 				// Initialize the overall condition result
 				let groupConditionMet = false;
 
 				try {
-					// Handle the case of no conditions - default to false
-					if (conditions.length === 0) {
-						this.logger.debug(`No conditions in group ${groupName}, skipping`);
-						groupConditionMet = false;
-					} else if (conditions.length === 1) {
-						// Single condition case - just evaluate it directly
-						const condition = conditions[0];
-						const conditionType = condition.conditionType as string;
-						const invertSingleCondition = condition.invertCondition as boolean || false;
+					// Handle the different condition types
+					if (conditionType === 'one') {
+						// Handle single condition case with direct parameters (not in a collection)
+						const singleConditionType = group.singleConditionType as string || 'elementExists';
+						const invertSingleCondition = group.singleInvertCondition as boolean || false;
+
+						// Create a condition object from the single condition parameters
+						const singleCondition: IDataObject = {
+							conditionType: singleConditionType,
+							invertCondition: invertSingleCondition,
+						};
+
+						// Add specific fields based on condition type
+						switch (singleConditionType) {
+							case 'elementExists':
+							case 'textContains':
+							case 'elementCount':
+								singleCondition.selector = group.singleSelector as string;
+								break;
+							case 'expression':
+								singleCondition.jsExpression = group.singleJsExpression as string;
+								break;
+							case 'inputSource':
+								singleCondition.sourceNodeName = group.singleSourceNodeName as string;
+								break;
+							case 'executionCount':
+								singleCondition.executionCountComparison = group.singleExecutionCountComparison as string;
+								singleCondition.executionCountValue = group.singleExecutionCountValue as number;
+								break;
+							case 'urlContains':
+								singleCondition.urlSubstring = group.singleUrlSubstring as string;
+								break;
+						}
+
+						// Add additional fields for specific condition types
+						if (singleConditionType === 'textContains') {
+							singleCondition.textToCheck = group.singleTextToCheck as string;
+							singleCondition.matchType = group.singleMatchType as string;
+							singleCondition.caseSensitive = group.singleCaseSensitive as boolean;
+						}
+
+						if (singleConditionType === 'urlContains') {
+							singleCondition.matchType = group.singleMatchType as string;
+							singleCondition.caseSensitive = group.singleCaseSensitive as boolean;
+						}
+
+						if (singleConditionType === 'elementCount') {
+							singleCondition.countComparison = group.singleCountComparison as string;
+							singleCondition.expectedCount = group.singleExpectedCount as number;
+						}
 
 						// Evaluate the single condition
 						groupConditionMet = await evaluateCondition(
 							puppeteerPage,
-							condition,
-							conditionType,
+							singleCondition,
+							singleConditionType,
 							waitForSelectors,
 							selectorTimeout,
 							detectionMethod,
@@ -1773,80 +2086,124 @@ export const description: INodeProperties[] = [
 							groupConditionMet = !groupConditionMet;
 						}
 
-						this.logger.debug(`Single condition (${conditionType}) result: ${groupConditionMet}`);
+						this.logger.debug(`Single condition (${singleConditionType}) result: ${groupConditionMet}`);
 					} else {
-						// Multiple conditions case - apply logical operator
-						if (logicalOperator === 'and') {
-							// AND logic - start with true, any false makes it false
-							groupConditionMet = true;
-
-							for (const condition of conditions) {
-								const conditionType = condition.conditionType as string;
-								const invertSingleCondition = condition.invertCondition as boolean || false;
-
-								// Evaluate the condition
-								let conditionMet = await evaluateCondition(
-									puppeteerPage,
-									condition,
-									conditionType,
-									waitForSelectors,
-									selectorTimeout,
-									detectionMethod,
-									earlyExitDelay,
-									currentUrl,
-									index,
-									this
-								);
-
-								// Apply inversion if needed
-								if (invertSingleCondition) {
-									conditionMet = !conditionMet;
-								}
-
-								// Short circuit if any condition is false
-								if (!conditionMet) {
-									groupConditionMet = false;
-									this.logger.debug(`Condition (${conditionType}) is false, short-circuiting AND logic`);
-									break;
-								}
-							}
-						} else {
-							// OR logic - start with false, any true makes it true
-							groupConditionMet = false;
-
-							for (const condition of conditions) {
-								const conditionType = condition.conditionType as string;
-								const invertSingleCondition = condition.invertCondition as boolean || false;
-
-								// Evaluate the condition
-								let conditionMet = await evaluateCondition(
-									puppeteerPage,
-									condition,
-									conditionType,
-									waitForSelectors,
-									selectorTimeout,
-									detectionMethod,
-									earlyExitDelay,
-									currentUrl,
-									index,
-									this
-								);
-
-								// Apply inversion if needed
-								if (invertSingleCondition) {
-									conditionMet = !conditionMet;
-								}
-
-								// Short circuit if any condition is true
-								if (conditionMet) {
-									groupConditionMet = true;
-									this.logger.debug(`Condition (${conditionType}) is true, short-circuiting OR logic`);
-									break;
-								}
-							}
+						// Handle multiple conditions with AND/OR logic
+						// Get conditions and ensure type safety
+						let conditions: IDataObject[] = [];
+						if (group.conditions &&
+							typeof group.conditions === 'object' &&
+							(group.conditions as IDataObject).condition &&
+							Array.isArray((group.conditions as IDataObject).condition)) {
+							conditions = (group.conditions as IDataObject).condition as IDataObject[];
 						}
 
-						this.logger.debug(`Multiple conditions with ${logicalOperator} logic result: ${groupConditionMet}`);
+						this.logger.debug(`Checking ${conditions.length} conditions with ${conditionType} logic`);
+
+						// Handle the case of no conditions - default to false
+						if (conditions.length === 0) {
+							this.logger.debug(`No conditions in group ${groupName}, skipping`);
+							groupConditionMet = false;
+						} else if (conditions.length === 1) {
+							// Single condition in multiple conditions case
+							const condition = conditions[0];
+							const singleConditionType = condition.conditionType as string;
+							const invertSingleCondition = condition.invertCondition as boolean || false;
+
+							// Evaluate the single condition
+							groupConditionMet = await evaluateCondition(
+								puppeteerPage,
+								condition,
+								singleConditionType,
+								waitForSelectors,
+								selectorTimeout,
+								detectionMethod,
+								earlyExitDelay,
+								currentUrl,
+								index,
+								this
+							);
+
+							// Apply inversion if needed
+							if (invertSingleCondition) {
+								groupConditionMet = !groupConditionMet;
+							}
+
+							this.logger.debug(`Single condition in collection (${singleConditionType}) result: ${groupConditionMet}`);
+						} else {
+							// Multiple conditions case - apply logical operator based on conditionType
+							if (conditionType === 'and') {
+								// AND logic - start with true, any false makes it false
+								groupConditionMet = true;
+
+								for (const condition of conditions) {
+									const singleConditionType = condition.conditionType as string;
+									const invertSingleCondition = condition.invertCondition as boolean || false;
+
+									// Evaluate the condition
+									let conditionMet = await evaluateCondition(
+										puppeteerPage,
+										condition,
+										singleConditionType,
+										waitForSelectors,
+										selectorTimeout,
+										detectionMethod,
+										earlyExitDelay,
+										currentUrl,
+										index,
+										this
+									);
+
+									// Apply inversion if needed
+									if (invertSingleCondition) {
+										conditionMet = !conditionMet;
+									}
+
+									// Short circuit if any condition is false
+									if (!conditionMet) {
+										groupConditionMet = false;
+										this.logger.debug(`Condition (${singleConditionType}) is false, short-circuiting AND logic`);
+										break;
+									}
+								}
+							} else if (conditionType === 'or') {
+								// OR logic - start with false, any true makes it true
+								groupConditionMet = false;
+
+								for (const condition of conditions) {
+									const singleConditionType = condition.conditionType as string;
+									const invertSingleCondition = condition.invertCondition as boolean || false;
+
+									// Evaluate the condition
+									let conditionMet = await evaluateCondition(
+										puppeteerPage,
+										condition,
+										singleConditionType,
+										waitForSelectors,
+										selectorTimeout,
+										detectionMethod,
+										earlyExitDelay,
+										currentUrl,
+										index,
+										this
+									);
+
+									// Apply inversion if needed
+									if (invertSingleCondition) {
+										conditionMet = !conditionMet;
+									}
+
+									// Short circuit if any condition is true
+									if (conditionMet) {
+										groupConditionMet = true;
+										this.logger.debug(`Condition (${singleConditionType}) is true, short-circuiting OR logic`);
+										break;
+									}
+								}
+							}
+
+							this.logger.debug(`Multiple conditions with ${conditionType} logic result: ${groupConditionMet}`);
+						}
 					}
 
 					this.logger.debug(`Decision group ${groupName} final result: ${groupConditionMet}`);
