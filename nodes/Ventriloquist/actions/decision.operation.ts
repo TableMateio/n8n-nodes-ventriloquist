@@ -768,6 +768,281 @@ export const description: INodeProperties[] = [
 								},
 							},
 						},
+						// Add Extraction Type for Extract action
+						{
+							displayName: 'Extraction Type',
+							name: 'extractionType',
+							type: 'options',
+							options: [
+								{
+									name: 'Attribute',
+									value: 'attribute',
+									description: 'Extract specific attribute from an element',
+								},
+								{
+									name: 'HTML',
+									value: 'html',
+									description: 'Extract HTML content from an element',
+								},
+								{
+									name: 'Input Value',
+									value: 'value',
+									description: 'Extract value from input, select or textarea',
+								},
+								{
+									name: 'Multiple Elements',
+									value: 'multiple',
+									description: 'Extract data from multiple elements matching a selector',
+								},
+								{
+									name: 'Table',
+									value: 'table',
+									description: 'Extract data from a table',
+								},
+								{
+									name: 'Text Content',
+									value: 'text',
+									description: 'Extract text content from an element',
+								},
+							],
+							default: 'text',
+							description: 'What type of data to extract from the element',
+							displayOptions: {
+								show: {
+									actionType: ['extract'],
+								},
+							},
+						},
+						{
+							displayName: 'Attribute Name',
+							name: 'extractAttributeName',
+							type: 'string',
+							default: '',
+							placeholder: 'href, src, data-id',
+							description: 'Name of the attribute to extract from the element',
+							displayOptions: {
+								show: {
+									actionType: ['extract'],
+									extractionType: ['attribute'],
+								},
+							},
+						},
+						// HTML Options for Extract Action
+						{
+							displayName: 'HTML Options',
+							name: 'htmlOptions',
+							type: 'collection',
+							placeholder: 'Add Option',
+							default: {},
+							typeOptions: {
+								multipleValues: false,
+							},
+							displayOptions: {
+								show: {
+									actionType: ['extract'],
+									extractionType: ['html'],
+								},
+							},
+							options: [
+								{
+									displayName: 'Output Format',
+									name: 'outputFormat',
+									type: 'options',
+									options: [
+										{
+											name: 'HTML (String)',
+											value: 'html',
+											description: 'Return the HTML as a raw string',
+										},
+										{
+											name: 'JSON',
+											value: 'json',
+											description: 'Return the HTML wrapped in a JSON object',
+										},
+									],
+									default: 'html',
+									description: 'Format of the output data',
+								},
+								{
+									displayName: 'Include Metadata',
+									name: 'includeMetadata',
+									type: 'boolean',
+									default: false,
+									description: 'Whether to include metadata about the HTML (length, structure info)',
+								},
+							],
+						},
+						// Table Options for Extract Action
+						{
+							displayName: 'Table Options',
+							name: 'tableOptions',
+							type: 'collection',
+							placeholder: 'Add Option',
+							default: {},
+							typeOptions: {
+								multipleValues: false,
+							},
+							displayOptions: {
+								show: {
+									actionType: ['extract'],
+									extractionType: ['table'],
+								},
+							},
+							options: [
+								{
+									displayName: 'Include Headers',
+									name: 'includeHeaders',
+									type: 'boolean',
+									default: true,
+									description: 'Whether to use the first row as headers in the output',
+								},
+								{
+									displayName: 'Row Selector',
+									name: 'rowSelector',
+									type: 'string',
+									default: 'tr',
+									description: 'CSS selector for table rows relative to table selector (default: tr)',
+								},
+								{
+									displayName: 'Cell Selector',
+									name: 'cellSelector',
+									type: 'string',
+									default: 'td, th',
+									description: 'CSS selector for table cells relative to row selector (default: td, th)',
+								},
+								{
+									displayName: 'Output Format',
+									name: 'outputFormat',
+									type: 'options',
+									options: [
+										{
+											name: 'JSON Objects',
+											value: 'json',
+											description: 'Return table as array of JSON objects using headers as keys',
+										},
+										{
+											name: 'Array of Arrays',
+											value: 'array',
+											description: 'Return table as a simple array of arrays (rows and cells)',
+										},
+										{
+											name: 'HTML',
+											value: 'html',
+											description: 'Return the original HTML of the table',
+										},
+										{
+											name: 'CSV',
+											value: 'csv',
+											description: 'Return the table formatted as CSV text',
+										},
+									],
+									default: 'json',
+									description: 'Format of the extracted table data',
+								},
+							],
+						},
+						// Multiple Elements Options for Extract Action
+						{
+							displayName: 'Multiple Elements Options',
+							name: 'multipleOptions',
+							type: 'collection',
+							placeholder: 'Add Option',
+							default: {},
+							typeOptions: {
+								multipleValues: false,
+							},
+							displayOptions: {
+								show: {
+									actionType: ['extract'],
+									extractionType: ['multiple'],
+								},
+							},
+							options: [
+								{
+									displayName: 'Extraction Property',
+									name: 'extractionProperty',
+									type: 'options',
+									options: [
+										{
+											name: 'Text Content',
+											value: 'textContent',
+										},
+										{
+											name: 'Inner HTML',
+											value: 'innerHTML',
+										},
+										{
+											name: 'Outer HTML',
+											value: 'outerHTML',
+										},
+										{
+											name: 'Attribute',
+											value: 'attribute',
+										},
+									],
+									default: 'textContent',
+									description: 'Property to extract from each matching element',
+								},
+								{
+									displayName: 'Attribute Name',
+									name: 'attributeName',
+									type: 'string',
+									default: '',
+									description: 'Name of the attribute to extract (if Extraction Property is set to Attribute)',
+									displayOptions: {
+										show: {
+											extractionProperty: ['attribute'],
+										},
+									},
+								},
+								{
+									displayName: 'Limit',
+									name: 'limit',
+									type: 'number',
+									default: 50,
+									description: 'Max number of results to return',
+									typeOptions: {
+										minValue: 1,
+									},
+								},
+								{
+									displayName: 'Output Format',
+									name: 'outputFormat',
+									type: 'options',
+									options: [
+										{
+											name: 'Array',
+											value: 'array',
+											description: 'Return results as a simple array',
+										},
+										{
+											name: 'JSON Objects',
+											value: 'json',
+											description: 'Return results as array of objects with indices as keys',
+										},
+										{
+											name: 'Concatenated String',
+											value: 'string',
+											description: 'Combine all results into one string with separator',
+										},
+									],
+									default: 'array',
+									description: 'Format of the extracted data',
+								},
+								{
+									displayName: 'Separator',
+									name: 'separator',
+									type: 'string',
+									default: ',',
+									description: 'Separator to use when concatenating results (if Output Format is String)',
+									displayOptions: {
+										show: {
+											outputFormat: ['string'],
+										},
+									},
+								},
+							],
+						},
 						{
 							displayName: 'Form Fields',
 							name: 'formFields',
@@ -833,7 +1108,7 @@ export const description: INodeProperties[] = [
 											type: 'string',
 											default: '',
 											placeholder: '#input-field, .form-control, input[name="email"]',
-											description: 'CSS selector to target the form field. Use "#ID" for IDs, ".class" for classes, "tag" for HTML elements, or "tag[attr=value]" for attributes.',
+											description: 'CSS selector to target the form field. Use "#id" for IDs, ".class" for classes, "tag" for HTML elements, or "tag[attr=value]" for attributes.',
 											required: true,
 										},
 										{
@@ -2595,923 +2870,1204 @@ export const description: INodeProperties[] = [
 									}
 
 									// Extract data based on extraction type
-								// Extract data based on extraction type
-								let extractedData: string | null | IDataObject = null;
-								switch (extractionType) {
-									case 'text':
-										extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.textContent?.trim() || '');
-										break;
-									case 'html': {
-										// Get HTML options
-										const htmlOptions = group.htmlOptions as IDataObject || {};
-										const outputFormat = (htmlOptions.outputFormat as string) || 'html';
-										const includeMetadata = htmlOptions.includeMetadata as boolean || false;
+									let extractedData: string | null | IDataObject | IDataObject[] | string[][] | string[] = null;
+									switch (extractionType) {
+										case 'text':
+											extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.textContent?.trim() || '');
+											break;
+										case 'html': {
+											// Get HTML options
+											const htmlOptions = group.htmlOptions as IDataObject || {};
+											const outputFormat = (htmlOptions.outputFormat as string) || 'html';
+											const includeMetadata = htmlOptions.includeMetadata as boolean || false;
 
-										// Extract HTML content
-										const htmlContent = await puppeteerPage.$eval(actionSelector, (el) => el.innerHTML);
+											// Extract HTML content
+											const htmlContent = await puppeteerPage.$eval(actionSelector, (el) => el.innerHTML);
 
-										if (outputFormat === 'html') {
-											// Return as raw HTML string
-											extractedData = htmlContent;
-										} else {
-											// Return as JSON object
-											extractedData = { html: htmlContent };
-										}
-
-										// Add metadata if requested
-										if (includeMetadata) {
-											// Calculate basic metadata about the HTML
-											const elementCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('*').length);
-											const imageCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('img').length);
-											const linkCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('a').length);
-
-											if (typeof extractedData === 'object') {
-												extractedData.metadata = {
-													htmlLength: htmlContent.length,
-													elementCount,
-													imageCount,
-													linkCount,
-												};
+											if (outputFormat === 'html') {
+												// Return as raw HTML string
+												extractedData = htmlContent;
 											} else {
-												// For string output, add metadata as a separate property
-												extractedData = {
-													html: htmlContent,
-													metadata: {
+												// Return as JSON object
+												extractedData = { html: htmlContent };
+											}
+
+											// Add metadata if requested
+											if (includeMetadata) {
+												// Calculate basic metadata about the HTML
+												const elementCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('*').length);
+												const imageCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('img').length);
+												const linkCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('a').length);
+
+												if (typeof extractedData === 'object') {
+													extractedData.metadata = {
 														htmlLength: htmlContent.length,
 														elementCount,
 														imageCount,
 														linkCount,
-													}
-												};
+													};
+												} else {
+													// For string output, add metadata as a separate property
+													extractedData = {
+														html: htmlContent,
+														metadata: {
+															htmlLength: htmlContent.length,
+															elementCount,
+															imageCount,
+															linkCount,
+														}
+													};
+												}
 											}
+											break;
 										}
-										break;
-									}
-									case 'value':
-										extractedData = await puppeteerPage.$eval(actionSelector, (el) => {
-											if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
-												return el.value;
+										case 'value':
+											extractedData = await puppeteerPage.$eval(actionSelector, (el) => {
+												if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+													return el.value;
+												}
+												return '';
+											});
+											break;
+										case 'attribute': {
+											const attributeName = group.extractAttributeName as string;
+											extractedData = await puppeteerPage.$eval(
+												actionSelector,
+												(el, attr) => el.getAttribute(attr) || '',
+												attributeName
+											);
+											break;
+										}
+										case 'multiple': {
+											// Get multiple elements options
+											const multipleOptions = group.multipleOptions as IDataObject || {};
+											const extractionProperty = (multipleOptions.extractionProperty as string) || 'textContent';
+											const limit = (multipleOptions.limit as number) || 50;
+											const outputFormat = (multipleOptions.outputFormat as string) || 'array';
+											const separator = (multipleOptions.separator as string) || ',';
+											const attributeName = multipleOptions.attributeName as string;
+
+											// Extract data from multiple elements
+											let results: string[] = [];
+
+											if (extractionProperty === 'attribute' && attributeName) {
+												results = await puppeteerPage.$$eval(
+													actionSelector,
+													(elements, attr, maxResults) => {
+														return elements
+															.slice(0, maxResults)
+															.map(el => el.getAttribute(attr) || '');
+													},
+													attributeName,
+													limit
+												);
+											} else {
+												results = await puppeteerPage.$$eval(
+													actionSelector,
+													(elements, property, maxResults) => {
+														return elements
+															.slice(0, maxResults)
+															.map(el => {
+																switch (property) {
+																	case 'textContent':
+																		return el.textContent?.trim() || '';
+																	case 'innerHTML':
+																		return el.innerHTML;
+																	case 'outerHTML':
+																		return el.outerHTML;
+																	default:
+																		return el.textContent?.trim() || '';
+																}
+															});
+													},
+													extractionProperty,
+													limit
+												);
 											}
-											return '';
-										});
-										break;
-									case 'attribute': {
-										const attributeName = group.extractAttributeName as string;
-										extractedData = await puppeteerPage.$eval(
-											actionSelector,
-											(el, attr) => el.getAttribute(attr) || '',
-											attributeName
-										);
-										break;
-									}
-									default:
-										extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.textContent?.trim() || '');
-								}
 
-								// Store the extracted data in the result
-								if (!resultData.extractedData) {
-									resultData.extractedData = {};
-								}
-								resultData.extractedData[groupName] = extractedData;
+											// Format the output according to the specified format
+											if (outputFormat === 'json') {
+												extractedData = results.map((value, index) => ({
+													index,
+													value
+												}));
+											} else if (outputFormat === 'string') {
+												extractedData = results.join(separator);
+											} else {
+												// Default array format
+												extractedData = results as unknown as IDataObject[];
+											}
 
-								this.logger.debug(`Extracted data (${extractionType}) from: ${actionSelector}`);
-								break;
-							}
-
-							case 'navigate': {
-								const url = group.url as string;
-								const waitAfterAction = group.waitAfterAction as string;
-								// Fix: Ensure waitTime has a default value based on the waitAfterAction type
-								let waitTime = group.waitTime as number;
-								if (waitTime === undefined) {
-									waitTime = waitAfterAction === 'fixedTime' ? 2000 :
-											  waitAfterAction === 'urlChanged' ? 6000 : 30000;
-								}
-
-								this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigating to "${url}" (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`);
-
-								try {
-									await puppeteerPage.goto(url);
-									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation successful to "${url}"`);
-
-									// Wait according to specified wait type
-									await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
-								} catch (error) {
-									const errorMessage = (error as Error).message;
-									if (errorMessage.includes('timeout')) {
-										this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation timeout to "${url}" - continuing anyway`);
-									}
-									// If it's not a timeout error, rethrow it
-									if (!errorMessage.includes('timeout')) {
-										throw error;
-									}
-								}
-								break;
-							}
-						}
-					}
-
-					// Apply inversion if specified
-					if (invertCondition) {
-						groupConditionMet = !groupConditionMet;
-					}
-				}
-
-				this.logger.debug(`Decision group ${groupName} final result: ${groupConditionMet}`);
-
-				// If condition is met
-				if (groupConditionMet) {
-					routeTaken = groupName;
-					const actionType = group.actionType as string;
-
-					// For routing capability, store route information
-					if (enableRouting) {
-						const groupRoute = group.route as number;
-						if (groupRoute) {
-							// Route numbers are 1-based, but indexes are 0-based
-							routeIndex = groupRoute - 1;
-						}
-					}
-
-					if (actionType !== 'none') {
-						actionPerformed = actionType;
-
-						// Add human-like delay if enabled
-						if (useHumanDelays) {
-							await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
-						}
-
-						switch (actionType) {
-							case 'click': {
-								const actionSelector = group.actionSelector as string;
-								const waitAfterAction = group.waitAfterAction as string;
-								const waitTime = group.waitTime as number;
-
-								if (waitForSelectors) {
-									// For actions, we always need to ensure the element exists
-									if (detectionMethod === 'smart') {
-										const elementExists = await smartWaitForSelector(
-											puppeteerPage,
-											actionSelector,
-											selectorTimeout,
-											earlyExitDelay,
-											this.logger,
-										);
-
-										if (!elementExists) {
-											throw new Error(`Action element with selector "${actionSelector}" not found`);
+											this.logger.debug(`Extracted ${results.length} elements from ${actionSelector}`);
+											break;
 										}
-									} else {
-										await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+										case 'table': {
+											// Get table options
+											const tableOptions = group.tableOptions as IDataObject || {};
+											const includeHeaders = (tableOptions.includeHeaders as boolean) !== false;
+											const rowSelector = (tableOptions.rowSelector as string) || 'tr';
+											const cellSelector = (tableOptions.cellSelector as string) || 'td, th';
+											const outputFormat = (tableOptions.outputFormat as string) || 'json';
+
+											// Extract table data
+											const tableData = await puppeteerPage.$eval(
+												actionSelector,
+												(table, rowSel, cellSel, inclHeaders) => {
+													const rows = Array.from(table.querySelectorAll(rowSel));
+
+													// Extract headers if requested
+													const headers = inclHeaders
+														? Array.from(rows[0]?.querySelectorAll(cellSel) || [])
+															.map(header => header.textContent?.trim() || '')
+														: [];
+
+													// Extract data rows
+													const dataRowStart = inclHeaders ? 1 : 0;
+													const dataRows = rows.slice(dataRowStart).map(row => {
+														return Array.from(row.querySelectorAll(cellSel))
+															.map(cell => cell.textContent?.trim() || '');
+													});
+
+													return {
+														headers,
+														data: dataRows,
+														rowCount: dataRows.length,
+														columnCount: headers.length || (dataRows[0]?.length || 0)
+													};
+												},
+												rowSelector,
+												cellSelector,
+												includeHeaders
+											);
+
+											// Format the output according to the specified format
+											if (outputFormat === 'json' && includeHeaders) {
+												// Create array of objects using headers as keys
+												const jsonData = tableData.data.map(row => {
+													const rowObj: IDataObject = {};
+													tableData.headers.forEach((header, i) => {
+														if (header) rowObj[header] = row[i] || '';
+													});
+													return rowObj;
+												});
+												extractedData = jsonData;
+											} else if (outputFormat === 'csv') {
+												// Format as CSV
+												let csvContent = '';
+
+												// Add headers row if available
+												if (includeHeaders && tableData.headers.length > 0) {
+													csvContent = `${tableData.headers.map(h => `"${h.replace(/"/g, '""')}"`).join(',')}\n`;
+												}
+
+												// Add data rows
+												for (const row of tableData.data) {
+													csvContent += `${row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')}\n`;
+												}
+
+												extractedData = csvContent.trim();
+											} else if (outputFormat === 'html') {
+												// Return original HTML
+												extractedData = await puppeteerPage.$eval(actionSelector, el => el.outerHTML);
+											} else {
+												// Default array format
+												extractedData = includeHeaders
+													? [tableData.headers, ...tableData.data]
+													: tableData.data;
+											}
+
+											this.logger.debug(`Extracted table with ${tableData.rowCount} rows and ${tableData.columnCount} columns from ${actionSelector}`);
+											break;
+										}
+										default:
+											extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.textContent?.trim() || '');
 									}
+
+									// Store the extracted data in the result
+									if (!resultData.extractedData) {
+										resultData.extractedData = {};
+									}
+									resultData.extractedData[groupName] = extractedData;
+
+									this.logger.debug(`Extracted data (${extractionType}) from: ${actionSelector}`);
+									break;
 								}
 
-								this.logger.debug(`Clicking element: ${actionSelector}`);
-								await puppeteerPage.click(actionSelector);
+								case 'navigate': {
+									const url = group.url as string;
+									const waitAfterAction = group.waitAfterAction as string;
+									// Fix: Ensure waitTime has a default value based on the waitAfterAction type
+									let waitTime = group.waitTime as number;
+									if (waitTime === undefined) {
+										waitTime = waitAfterAction === 'fixedTime' ? 2000 :
+												  waitAfterAction === 'urlChanged' ? 6000 : 30000;
+									}
 
-								// Wait according to specified wait type
-								await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
-								break;
+									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigating to "${url}" (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`);
+
+									try {
+										await puppeteerPage.goto(url);
+										this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation successful to "${url}"`);
+
+										// Wait according to specified wait type
+										await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
+									} catch (error) {
+										const errorMessage = (error as Error).message;
+										if (errorMessage.includes('timeout')) {
+											this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation timeout to "${url}" - continuing anyway`);
+										}
+										// If it's not a timeout error, rethrow it
+										if (!errorMessage.includes('timeout')) {
+											throw error;
+										}
+									}
+									break;
+								}
+							}
+						}
+
+						// Apply inversion if specified
+						if (invertCondition) {
+							groupConditionMet = !groupConditionMet;
+						}
+					}
+
+					this.logger.debug(`Decision group ${groupName} final result: ${groupConditionMet}`);
+
+					// If condition is met
+					if (groupConditionMet) {
+						routeTaken = groupName;
+						const actionType = group.actionType as string;
+
+						// For routing capability, store route information
+						if (enableRouting) {
+							const groupRoute = group.route as number;
+							if (groupRoute) {
+								// Route numbers are 1-based, but indexes are 0-based
+								routeIndex = groupRoute - 1;
+							}
+						}
+
+						if (actionType !== 'none') {
+							actionPerformed = actionType;
+
+							// Add human-like delay if enabled
+							if (useHumanDelays) {
+								await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
 							}
 
-							case 'fill': {
-								// Get form parameters
-								const formFields = group.formFields && (group.formFields as IDataObject).fields as IDataObject[] || [];
-								const submitForm = group.submitForm as boolean || false;
-								const submitSelector = group.submitSelector as string || '';
-								const waitAfterSubmit = group.waitAfterSubmit as string || 'domContentLoaded';
-								const waitSubmitTime = group.waitSubmitTime as number || 2000;
+							switch (actionType) {
+								case 'click': {
+									const actionSelector = group.actionSelector as string;
+									const waitAfterAction = group.waitAfterAction as string;
+									const waitTime = group.waitTime as number;
 
-								// Process each form field
-								for (const field of formFields) {
-									const selector = field.selector as string;
-									const fieldType = field.fieldType as string || 'text';
-
-									// Wait for the element if needed
 									if (waitForSelectors) {
+										// For actions, we always need to ensure the element exists
 										if (detectionMethod === 'smart') {
 											const elementExists = await smartWaitForSelector(
 												puppeteerPage,
-												selector,
+												actionSelector,
 												selectorTimeout,
 												earlyExitDelay,
 												this.logger,
 											);
 
 											if (!elementExists) {
-												throw new Error(`Form field element with selector "${selector}" not found`);
+												throw new Error(`Action element with selector "${actionSelector}" not found`);
 											}
 										} else {
-											await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
+											await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
 										}
 									}
 
-									// Add a human-like delay if enabled
-									if (useHumanDelays) {
-										await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
-									}
-
-									// Handle different field types
-									switch (fieldType) {
-										case 'text': {
-											const value = field.value as string || '';
-											const clearField = field.clearField as boolean ?? true;
-											const pressEnter = field.pressEnter as boolean || false;
-											const humanLike = field.humanLike as boolean ?? true;
-
-											// Clear field if requested
-											if (clearField) {
-												// Click three times to select all text
-												await puppeteerPage.click(selector, { clickCount: 3 });
-												// Delete selected text
-												await puppeteerPage.keyboard.press('Backspace');
-											}
-
-											// Type the text
-											this.logger.debug(`Filling form field: ${selector} with value: ${value}`);
-
-											// Use human-like typing if enabled
-											if (humanLike) {
-												for (const char of value) {
-													await puppeteerPage.type(selector, char, { delay: Math.floor(Math.random() * 150) + 25 });
-												}
-											} else {
-												await puppeteerPage.type(selector, value);
-											}
-
-											// Press Enter if requested
-											if (pressEnter) {
-												await puppeteerPage.keyboard.press('Enter');
-											}
-											break;
-										}
-
-										case 'select': {
-											const value = field.value as string || '';
-											const matchType = field.matchType as string || 'exact';
-
-											if (matchType === 'exact') {
-												// Handle select/dropdown elements using standard select
-												this.logger.debug(`Setting select element: ${selector} to value: ${value}`);
-												await puppeteerPage.select(selector, value);
-											} else {
-												// For fuzzy or text contains matching, we need to find the option first
-												const options = await puppeteerPage.$$eval(`${selector} option`, (opts) => {
-													return opts.map(o => ({
-														value: o.value,
-														text: o.text,
-													}));
-												});
-
-												let targetOption: { value: string; text: string } | undefined;
-												const fuzzyThreshold = (field.fuzzyThreshold as number) || 0.5;
-
-												if (matchType === 'fuzzy') {
-													// Simple fuzzy matching - can be enhanced with a proper algorithm
-													targetOption = options.reduce<{ option: { value: string; text: string } | null; score: number }>((best, current) => {
-														// Count matching characters
-														let score = 0;
-														const minLength = Math.min(current.text.length, value.length);
-														for (let i = 0; i < minLength; i++) {
-															if (current.text[i].toLowerCase() === value[i].toLowerCase()) score++;
-														}
-														score = score / Math.max(current.text.length, value.length);
-
-														if (score > fuzzyThreshold && score > best.score) {
-															return { option: current, score };
-														}
-														return best;
-													}, { option: null, score: 0 }).option || undefined;
-												} else if (matchType === 'textContains') {
-													// Find option containing the text
-													targetOption = options.find(o =>
-														o.text.toLowerCase().includes(value.toLowerCase())
-													);
-												}
-
-												if (targetOption) {
-													await puppeteerPage.select(selector, targetOption.value);
-												} else {
-													this.logger.warn(`No matching option found for value: ${value} in selector: ${selector}`);
-												}
-											}
-											break;
-										}
-
-										case 'checkbox':
-										case 'radio': {
-											const checked = field.checked as boolean ?? true;
-
-											// Get current state
-											const isChecked = await puppeteerPage.$eval(selector, (el) =>
-												(el as HTMLInputElement).checked
-											);
-
-											// Click only if we need to change state
-											if ((checked && !isChecked) || (!checked && isChecked)) {
-												this.logger.debug(`Clicking ${fieldType}: ${selector} to ${checked ? 'check' : 'uncheck'}`);
-												await puppeteerPage.click(selector);
-											}
-											break;
-										}
-
-										case 'file': {
-											const filePath = field.filePath as string || '';
-
-											// Handle file upload inputs
-											this.logger.debug(`Setting file input: ${selector} with file: ${filePath}`);
-
-											const fileInput = await puppeteerPage.$(selector) as puppeteer.ElementHandle<HTMLInputElement>;
-											if (fileInput) {
-												await fileInput.uploadFile(filePath);
-											} else {
-												this.logger.warn(`File input element not found: ${selector}`);
-											}
-											break;
-										}
-
-										case 'multiSelect': {
-											const multiSelectValues = (field.multiSelectValues as string || '').split(',').map(v => v.trim());
-
-											if (multiSelectValues.length) {
-												this.logger.debug(`Setting multi-select: ${selector} with values: ${multiSelectValues.join(', ')}`);
-												await puppeteerPage.select(selector, ...multiSelectValues);
-											}
-											break;
-										}
-									}
-								}
-
-								// Submit the form if requested
-								if (submitForm && submitSelector) {
-									this.logger.debug(`Submitting form using selector: ${submitSelector}`);
-
-									// Wait a short time before submitting (feels more human)
-									if (useHumanDelays) {
-										await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
-									}
-
-									// Click the submit button
-									await puppeteerPage.click(submitSelector);
+									this.logger.debug(`Clicking element: ${actionSelector}`);
+									await puppeteerPage.click(actionSelector);
 
 									// Wait according to specified wait type
-									await waitForNavigation(puppeteerPage, waitAfterSubmit, waitSubmitTime);
+									await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
+									break;
 								}
 
-								break;
-							}
+								case 'fill': {
+									// Get form parameters
+									const formFields = group.formFields && (group.formFields as IDataObject).fields as IDataObject[] || [];
+									const submitForm = group.submitForm as boolean || false;
+									const submitSelector = group.submitSelector as string || '';
+									const waitAfterSubmit = group.waitAfterSubmit as string || 'domContentLoaded';
+									const waitSubmitTime = group.waitSubmitTime as number || 2000;
 
-							case 'extract': {
-								const actionSelector = group.actionSelector as string;
-								const extractionType = group.extractionType as string;
+									// Process each form field
+									for (const field of formFields) {
+										const selector = field.selector as string;
+										const fieldType = field.fieldType as string || 'text';
 
-								if (waitForSelectors) {
-									// For actions, we always need to ensure the element exists
-									if (detectionMethod === 'smart') {
-										const elementExists = await smartWaitForSelector(
-											puppeteerPage,
-											actionSelector,
-											selectorTimeout,
-											earlyExitDelay,
-											this.logger,
-										);
+										// Wait for the element if needed
+										if (waitForSelectors) {
+											if (detectionMethod === 'smart') {
+												const elementExists = await smartWaitForSelector(
+													puppeteerPage,
+													selector,
+													selectorTimeout,
+													earlyExitDelay,
+													this.logger,
+												);
 
-										if (!elementExists) {
-											throw new Error(`Element with selector "${actionSelector}" not found for extraction`);
-										}
-									} else {
-										await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
-									}
-								}
-
-								// Extract data based on extraction type
-								let extractedData: string | null | IDataObject = null;
-								switch (extractionType) {
-									case 'text':
-										extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.textContent?.trim() || '');
-										break;
-									case 'html': {
-										// Get HTML options
-										const htmlOptions = group.htmlOptions as IDataObject || {};
-										const outputFormat = (htmlOptions.outputFormat as string) || 'html';
-										const includeMetadata = htmlOptions.includeMetadata as boolean || false;
-
-										// Extract HTML content
-										const htmlContent = await puppeteerPage.$eval(actionSelector, (el) => el.innerHTML);
-
-										if (outputFormat === 'html') {
-											// Return as raw HTML string
-											extractedData = htmlContent;
-										} else {
-											// Return as JSON object
-											extractedData = { html: htmlContent };
-										}
-
-										// Add metadata if requested
-										if (includeMetadata) {
-											// Calculate basic metadata about the HTML
-											const elementCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('*').length);
-											const imageCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('img').length);
-											const linkCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('a').length);
-
-											if (typeof extractedData === 'object') {
-												extractedData.metadata = {
-													htmlLength: htmlContent.length,
-													elementCount,
-													imageCount,
-													linkCount,
-												};
+												if (!elementExists) {
+													throw new Error(`Form field element with selector "${selector}" not found`);
+												}
 											} else {
-												// For string output, add metadata as a separate property
-												extractedData = {
-													html: htmlContent,
-													metadata: {
+												await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
+											}
+										}
+
+										// Add a human-like delay if enabled
+										if (useHumanDelays) {
+											await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
+										}
+
+										// Handle different field types
+										switch (fieldType) {
+											case 'text': {
+												const value = field.value as string || '';
+												const clearField = field.clearField as boolean ?? true;
+												const pressEnter = field.pressEnter as boolean || false;
+												const humanLike = field.humanLike as boolean ?? true;
+
+												// Clear field if requested
+												if (clearField) {
+													// Click three times to select all text
+													await puppeteerPage.click(selector, { clickCount: 3 });
+													// Delete selected text
+													await puppeteerPage.keyboard.press('Backspace');
+												}
+
+												// Type the text
+												this.logger.debug(`Filling form field: ${selector} with value: ${value}`);
+
+												// Use human-like typing if enabled
+												if (humanLike) {
+													for (const char of value) {
+														await puppeteerPage.type(selector, char, { delay: Math.floor(Math.random() * 150) + 25 });
+													}
+												} else {
+													await puppeteerPage.type(selector, value);
+												}
+
+												// Press Enter if requested
+												if (pressEnter) {
+													await puppeteerPage.keyboard.press('Enter');
+												}
+												break;
+											}
+
+											case 'select': {
+												const value = field.value as string || '';
+												const matchType = field.matchType as string || 'exact';
+
+												if (matchType === 'exact') {
+													// Handle select/dropdown elements using standard select
+													this.logger.debug(`Setting select element: ${selector} to value: ${value}`);
+													await puppeteerPage.select(selector, value);
+												} else {
+													// For fuzzy or text contains matching, we need to find the option first
+													const options = await puppeteerPage.$$eval(`${selector} option`, (opts) => {
+														return opts.map(o => ({
+															value: o.value,
+															text: o.text,
+														}));
+													});
+
+													let targetOption: { value: string; text: string } | undefined;
+													const fuzzyThreshold = (field.fuzzyThreshold as number) || 0.5;
+
+													if (matchType === 'fuzzy') {
+														// Simple fuzzy matching - can be enhanced with a proper algorithm
+														targetOption = options.reduce<{ option: { value: string; text: string } | null; score: number }>((best, current) => {
+															// Count matching characters
+															let score = 0;
+															const minLength = Math.min(current.text.length, value.length);
+															for (let i = 0; i < minLength; i++) {
+																if (current.text[i].toLowerCase() === value[i].toLowerCase()) score++;
+															}
+															score = score / Math.max(current.text.length, value.length);
+
+															if (score > fuzzyThreshold && score > best.score) {
+																return { option: current, score };
+															}
+															return best;
+														}, { option: null, score: 0 }).option || undefined;
+													} else if (matchType === 'textContains') {
+														// Find option containing the text
+														targetOption = options.find(o =>
+															o.text.toLowerCase().includes(value.toLowerCase())
+														);
+													}
+
+													if (targetOption) {
+														await puppeteerPage.select(selector, targetOption.value);
+													} else {
+														this.logger.warn(`No matching option found for value: ${value} in selector: ${selector}`);
+													}
+												}
+												break;
+											}
+
+											case 'checkbox':
+											case 'radio': {
+												const checked = field.checked as boolean ?? true;
+
+												// Get current state
+												const isChecked = await puppeteerPage.$eval(selector, (el) =>
+													(el as HTMLInputElement).checked
+												);
+
+												// Click only if we need to change state
+												if ((checked && !isChecked) || (!checked && isChecked)) {
+													this.logger.debug(`Clicking ${fieldType}: ${selector} to ${checked ? 'check' : 'uncheck'}`);
+													await puppeteerPage.click(selector);
+												}
+												break;
+											}
+
+											case 'file': {
+												const filePath = field.filePath as string || '';
+
+												// Handle file upload inputs
+												this.logger.debug(`Setting file input: ${selector} with file: ${filePath}`);
+
+												const fileInput = await puppeteerPage.$(selector) as puppeteer.ElementHandle<HTMLInputElement>;
+												if (fileInput) {
+													await fileInput.uploadFile(filePath);
+												} else {
+													this.logger.warn(`File input element not found: ${selector}`);
+												}
+												break;
+											}
+
+											case 'multiSelect': {
+												const multiSelectValues = (field.multiSelectValues as string || '').split(',').map(v => v.trim());
+
+												if (multiSelectValues.length) {
+													this.logger.debug(`Setting multi-select: ${selector} with values: ${multiSelectValues.join(', ')}`);
+													await puppeteerPage.select(selector, ...multiSelectValues);
+												}
+												break;
+											}
+										}
+									}
+
+									// Submit the form if requested
+									if (submitForm && submitSelector) {
+										this.logger.debug(`Submitting form using selector: ${submitSelector}`);
+
+										// Wait a short time before submitting (feels more human)
+										if (useHumanDelays) {
+											await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
+										}
+
+										// Click the submit button
+										await puppeteerPage.click(submitSelector);
+
+										// Wait according to specified wait type
+										await waitForNavigation(puppeteerPage, waitAfterSubmit, waitSubmitTime);
+									}
+
+									break;
+								}
+
+								case 'extract': {
+									const actionSelector = group.actionSelector as string;
+									const extractionType = group.extractionType as string;
+
+									if (waitForSelectors) {
+										// For actions, we always need to ensure the element exists
+										if (detectionMethod === 'smart') {
+											const elementExists = await smartWaitForSelector(
+												puppeteerPage,
+												actionSelector,
+												selectorTimeout,
+												earlyExitDelay,
+												this.logger,
+											);
+
+											if (!elementExists) {
+												throw new Error(`Element with selector "${actionSelector}" not found for extraction`);
+											}
+										} else {
+											await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+										}
+									}
+
+									// Extract data based on extraction type
+									let extractedData: string | null | IDataObject | IDataObject[] | string[][] | string[] = null;
+									switch (extractionType) {
+										case 'text':
+											extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.textContent?.trim() || '');
+											break;
+										case 'html': {
+											// Get HTML options
+											const htmlOptions = group.htmlOptions as IDataObject || {};
+											const outputFormat = (htmlOptions.outputFormat as string) || 'html';
+											const includeMetadata = htmlOptions.includeMetadata as boolean || false;
+
+											// Extract HTML content
+											const htmlContent = await puppeteerPage.$eval(actionSelector, (el) => el.innerHTML);
+
+											if (outputFormat === 'html') {
+												// Return as raw HTML string
+												extractedData = htmlContent;
+											} else {
+												// Return as JSON object
+												extractedData = { html: htmlContent };
+											}
+
+											// Add metadata if requested
+											if (includeMetadata) {
+												// Calculate basic metadata about the HTML
+												const elementCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('*').length);
+												const imageCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('img').length);
+												const linkCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('a').length);
+
+												if (typeof extractedData === 'object') {
+													extractedData.metadata = {
 														htmlLength: htmlContent.length,
 														elementCount,
 														imageCount,
 														linkCount,
-													}
-												};
+													};
+												} else {
+													// For string output, add metadata as a separate property
+													extractedData = {
+														html: htmlContent,
+														metadata: {
+															htmlLength: htmlContent.length,
+															elementCount,
+															imageCount,
+															linkCount,
+														}
+													};
+												}
 											}
+											break;
 										}
-										break;
-									}
-									case 'value':
-										extractedData = await puppeteerPage.$eval(actionSelector, (el) => {
-											if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
-												return el.value;
+										case 'value':
+											extractedData = await puppeteerPage.$eval(actionSelector, (el) => {
+												if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+													return el.value;
+												}
+												return '';
+											});
+											break;
+										case 'attribute': {
+											const attributeName = group.extractAttributeName as string;
+											extractedData = await puppeteerPage.$eval(
+												actionSelector,
+												(el, attr) => el.getAttribute(attr) || '',
+												attributeName
+											);
+											break;
+										}
+										case 'multiple': {
+											// Get multiple elements options
+											const multipleOptions = group.multipleOptions as IDataObject || {};
+											const extractionProperty = (multipleOptions.extractionProperty as string) || 'textContent';
+											const limit = (multipleOptions.limit as number) || 50;
+											const outputFormat = (multipleOptions.outputFormat as string) || 'array';
+											const separator = (multipleOptions.separator as string) || ',';
+											const attributeName = multipleOptions.attributeName as string;
+
+											// Extract data from multiple elements
+											let results: string[] = [];
+
+											if (extractionProperty === 'attribute' && attributeName) {
+												results = await puppeteerPage.$$eval(
+													actionSelector,
+													(elements, attr, maxResults) => {
+														return elements
+															.slice(0, maxResults)
+															.map(el => el.getAttribute(attr) || '');
+													},
+													attributeName,
+													limit
+												);
+											} else {
+												results = await puppeteerPage.$$eval(
+													actionSelector,
+													(elements, property, maxResults) => {
+														return elements
+															.slice(0, maxResults)
+															.map(el => {
+																switch (property) {
+																	case 'textContent':
+																		return el.textContent?.trim() || '';
+																	case 'innerHTML':
+																		return el.innerHTML;
+																	case 'outerHTML':
+																		return el.outerHTML;
+																	default:
+																		return el.textContent?.trim() || '';
+																}
+															});
+													},
+													extractionProperty,
+													limit
+												);
 											}
-											return '';
-										});
-										break;
-									case 'attribute': {
-										const attributeName = group.extractAttributeName as string;
-										extractedData = await puppeteerPage.$eval(
-											actionSelector,
-											(el, attr) => el.getAttribute(attr) || '',
-											attributeName
-										);
-										break;
+
+											// Format the output according to the specified format
+											if (outputFormat === 'json') {
+												extractedData = results.map((value, index) => ({
+													index,
+													value
+												}));
+											} else if (outputFormat === 'string') {
+												extractedData = results.join(separator);
+											} else {
+												// Default array format
+												extractedData = results as unknown as IDataObject[];
+											}
+
+											this.logger.debug(`Extracted ${results.length} elements from ${actionSelector}`);
+											break;
+										}
+										case 'table': {
+											// Get table options
+											const tableOptions = group.tableOptions as IDataObject || {};
+											const includeHeaders = (tableOptions.includeHeaders as boolean) !== false;
+											const rowSelector = (tableOptions.rowSelector as string) || 'tr';
+											const cellSelector = (tableOptions.cellSelector as string) || 'td, th';
+											const outputFormat = (tableOptions.outputFormat as string) || 'json';
+
+											// Extract table data
+											const tableData = await puppeteerPage.$eval(
+												actionSelector,
+												(table, rowSel, cellSel, inclHeaders) => {
+													const rows = Array.from(table.querySelectorAll(rowSel));
+
+													// Extract headers if requested
+													const headers = inclHeaders
+														? Array.from(rows[0]?.querySelectorAll(cellSel) || [])
+															.map(header => header.textContent?.trim() || '')
+														: [];
+
+													// Extract data rows
+													const dataRowStart = inclHeaders ? 1 : 0;
+													const dataRows = rows.slice(dataRowStart).map(row => {
+														return Array.from(row.querySelectorAll(cellSel))
+															.map(cell => cell.textContent?.trim() || '');
+													});
+
+													return {
+														headers,
+														data: dataRows,
+														rowCount: dataRows.length,
+														columnCount: headers.length || (dataRows[0]?.length || 0)
+													};
+												},
+												rowSelector,
+												cellSelector,
+												includeHeaders
+											);
+
+											// Format the output according to the specified format
+											if (outputFormat === 'json' && includeHeaders) {
+												// Create array of objects using headers as keys
+												const jsonData = tableData.data.map(row => {
+													const rowObj: IDataObject = {};
+													tableData.headers.forEach((header, i) => {
+														if (header) rowObj[header] = row[i] || '';
+													});
+													return rowObj;
+												});
+												extractedData = jsonData;
+											} else if (outputFormat === 'csv') {
+												// Format as CSV
+												let csvContent = '';
+
+												// Add headers row if available
+												if (includeHeaders && tableData.headers.length > 0) {
+													csvContent = `${tableData.headers.map(h => `"${h.replace(/"/g, '""')}"`).join(',')}\n`;
+												}
+
+												// Add data rows
+												for (const row of tableData.data) {
+													csvContent += `${row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')}\n`;
+												}
+
+												extractedData = csvContent.trim();
+											} else if (outputFormat === 'html') {
+												// Return original HTML
+												extractedData = await puppeteerPage.$eval(actionSelector, el => el.outerHTML);
+											} else {
+												// Default array format
+												extractedData = includeHeaders
+													? [tableData.headers, ...tableData.data]
+													: tableData.data;
+											}
+
+											this.logger.debug(`Extracted table with ${tableData.rowCount} rows and ${tableData.columnCount} columns from ${actionSelector}`);
+											break;
+										}
+										default:
+											extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.textContent?.trim() || '');
 									}
-									default:
-										extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.textContent?.trim() || '');
+
+									// Store the extracted data in the result
+									if (!resultData.extractedData) {
+										resultData.extractedData = {};
+									}
+									resultData.extractedData[groupName] = extractedData;
+
+									this.logger.debug(`Extracted data (${extractionType}) from: ${actionSelector}`);
+									break;
 								}
 
-								// Store the extracted data in the result
-								if (!resultData.extractedData) {
-									resultData.extractedData = {};
+								case 'navigate': {
+									const url = group.url as string;
+									const waitAfterAction = group.waitAfterAction as string;
+									const waitTime = group.waitTime as number;
+
+									this.logger.debug(`Navigating to URL: ${url}`);
+									await puppeteerPage.goto(url);
+
+									// Wait according to specified wait type
+									await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
+									break;
 								}
-								resultData.extractedData[groupName] = extractedData;
-
-								this.logger.debug(`Extracted data (${extractionType}) from: ${actionSelector}`);
-								break;
-							}
-
-							case 'navigate': {
-								const url = group.url as string;
-								const waitAfterAction = group.waitAfterAction as string;
-								const waitTime = group.waitTime as number;
-
-								this.logger.debug(`Navigating to URL: ${url}`);
-								await puppeteerPage.goto(url);
-
-								// Wait according to specified wait type
-								await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
-								break;
-							}
-						}
-					}
-
-					// Exit after the first match - we don't continue checking conditions
-					break;
-				} else {
-					// Important change: This is NOT an error, just a normal condition not being met
-					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Condition not met for group "${groupName}", continuing to next condition`);
-				}
-			} catch (error) {
-				// Check if this is a navigation timeout, which might be expected behavior
-				const errorMessage = (error as Error).message;
-				if (errorMessage.includes('Navigation timeout')) {
-					// This is likely just a timeout during navigation, which might be expected
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation timeout in group "${groupName}": ${errorMessage} - this may be expected behavior`);
-				} else if (errorMessage.includes('not found') || errorMessage.includes('not clickable or visible')) {
-					// Not an error - decision point didn't match selected element
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Decision point "${groupName}": Element not available - continuing to next decision`);
-
-					// Add additional details at debug level
-					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Details: ${errorMessage}`);
-				} else {
-					// This is a genuine error in execution, not just a condition failing
-					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Action execution error in group "${groupName}": ${errorMessage}`);
-				}
-				// No need for continue statement as it's the last statement in the loop
-			}
-		}
-
-		// If no condition was met, perform fallback action and use fallback route
-		if (routeTaken === 'none' && fallbackAction !== 'none') {
-			routeTaken = 'fallback';
-			actionPerformed = fallbackAction;
-
-			// Set fallback route if routing is enabled
-			if (enableRouting) {
-				const fallbackRoute = this.getNodeParameter('fallbackRoute', index, 1) as number;
-				routeIndex = fallbackRoute - 1;
-			}
-
-			try {
-				// Add human-like delay if enabled
-				if (useHumanDelays) {
-					await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
-				}
-
-				switch (fallbackAction) {
-					case 'click': {
-						const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
-						const waitAfterFallback = this.getNodeParameter('waitAfterFallback', index) as string;
-						const fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index) as number;
-
-						if (waitForSelectors) {
-							// For actions, we always need to ensure the element exists
-							if (detectionMethod === 'smart') {
-								const elementExists = await smartWaitForSelector(
-									puppeteerPage,
-									fallbackSelector,
-									selectorTimeout,
-									earlyExitDelay,
-									this.logger,
-								);
-
-								if (!elementExists) {
-									throw new Error(`Fallback element with selector "${fallbackSelector}" not found`);
-								}
-							} else {
-								await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
 							}
 						}
 
-						this.logger.debug(`Fallback action: Clicking element: ${fallbackSelector}`);
-						await puppeteerPage.click(fallbackSelector);
-
-						// Wait according to specified wait type
-						await waitForNavigation(puppeteerPage, waitAfterFallback, fallbackWaitTime);
+						// Exit after the first match - we don't continue checking conditions
 						break;
+					} else {
+						// Important change: This is NOT an error, just a normal condition not being met
+						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Condition not met for group "${groupName}", continuing to next condition`);
+					}
+				} catch (error) {
+					// Check if this is a navigation timeout, which might be expected behavior
+					const errorMessage = (error as Error).message;
+					if (errorMessage.includes('Navigation timeout')) {
+						// This is likely just a timeout during navigation, which might be expected
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation timeout in group "${groupName}": ${errorMessage} - this may be expected behavior`);
+					} else if (errorMessage.includes('not found') || errorMessage.includes('not clickable or visible')) {
+						// Not an error - decision point didn't match selected element
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Decision point "${groupName}": Element not available - continuing to next decision`);
+
+						// Add additional details at debug level
+						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Details: ${errorMessage}`);
+					} else {
+						// This is a genuine error in execution, not just a condition failing
+						this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Action execution error in group "${groupName}": ${errorMessage}`);
+					}
+					// No need for continue statement as it's the last statement in the loop
+				}
+			}
+
+			// If no condition was met, perform fallback action and use fallback route
+			if (routeTaken === 'none' && fallbackAction !== 'none') {
+				routeTaken = 'fallback';
+				actionPerformed = fallbackAction;
+
+				// Set fallback route if routing is enabled
+				if (enableRouting) {
+					const fallbackRoute = this.getNodeParameter('fallbackRoute', index, 1) as number;
+					routeIndex = fallbackRoute - 1;
+				}
+
+				try {
+					// Add human-like delay if enabled
+					if (useHumanDelays) {
+						await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
 					}
 
-					case 'extract': {
-						const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
-						const fallbackExtractionType = this.getNodeParameter('fallbackExtractionType', index) as string;
+					switch (fallbackAction) {
+						case 'click': {
+							const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
+							const waitAfterFallback = this.getNodeParameter('waitAfterFallback', index) as string;
+							const fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index) as number;
 
-						if (waitForSelectors) {
-							// For actions, we always need to ensure the element exists
-							if (detectionMethod === 'smart') {
-								const elementExists = await smartWaitForSelector(
-									puppeteerPage,
-									fallbackSelector,
-									selectorTimeout,
-									earlyExitDelay,
-									this.logger,
-								);
+							if (waitForSelectors) {
+								// For actions, we always need to ensure the element exists
+								if (detectionMethod === 'smart') {
+									const elementExists = await smartWaitForSelector(
+										puppeteerPage,
+										fallbackSelector,
+										selectorTimeout,
+										earlyExitDelay,
+										this.logger,
+									);
 
-								if (!elementExists) {
-									throw new Error(`Element with selector "${fallbackSelector}" not found for fallback extraction`);
+									if (!elementExists) {
+										throw new Error(`Fallback element with selector "${fallbackSelector}" not found`);
+									}
+								} else {
+									await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
 								}
-							} else {
-								await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
 							}
+
+							this.logger.debug(`Fallback action: Clicking element: ${fallbackSelector}`);
+							await puppeteerPage.click(fallbackSelector);
+
+							// Wait according to specified wait type
+							await waitForNavigation(puppeteerPage, waitAfterFallback, fallbackWaitTime);
+							break;
 						}
 
-						// Extract data based on extraction type
-						let extractedData: string | null | IDataObject = null;
-						switch (fallbackExtractionType) {
-							case 'text':
-								extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => el.textContent?.trim() || '');
-								break;
-							case 'html': {
-								// Get HTML options
-								const fallbackHtmlOptions = this.getNodeParameter('fallbackHtmlOptions', index, {}) as IDataObject;
-								const outputFormat = (fallbackHtmlOptions.outputFormat as string) || 'html';
-								const includeMetadata = fallbackHtmlOptions.includeMetadata as boolean || false;
+						case 'extract': {
+							const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
+							const fallbackExtractionType = this.getNodeParameter('fallbackExtractionType', index) as string;
 
-								// Extract HTML content
-								const htmlContent = await puppeteerPage.$eval(fallbackSelector, (el) => el.innerHTML);
+							if (waitForSelectors) {
+								// For actions, we always need to ensure the element exists
+								if (detectionMethod === 'smart') {
+									const elementExists = await smartWaitForSelector(
+										puppeteerPage,
+										fallbackSelector,
+										selectorTimeout,
+										earlyExitDelay,
+										this.logger,
+									);
 
-								if (outputFormat === 'html') {
-									// Return as raw HTML string
-									extractedData = htmlContent;
+									if (!elementExists) {
+										throw new Error(`Element with selector "${fallbackSelector}" not found for fallback extraction`);
+									}
 								} else {
-									// Return as JSON object
-									extractedData = { html: htmlContent };
+									await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
 								}
+							}
 
-								// Add metadata if requested
-								if (includeMetadata) {
-									// Calculate basic metadata about the HTML
-									const elementCount = await puppeteerPage.$eval(fallbackSelector, (el) => el.querySelectorAll('*').length);
-									const imageCount = await puppeteerPage.$eval(fallbackSelector, (el) => el.querySelectorAll('img').length);
-									const linkCount = await puppeteerPage.$eval(fallbackSelector, (el) => el.querySelectorAll('a').length);
+							// Extract data based on extraction type
+							let extractedData: string | null | IDataObject = null;
+							switch (fallbackExtractionType) {
+								case 'text':
+									extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => el.textContent?.trim() || '');
+									break;
+								case 'html': {
+									// Get HTML options
+									const fallbackHtmlOptions = this.getNodeParameter('fallbackHtmlOptions', index, {}) as IDataObject;
+									const outputFormat = (fallbackHtmlOptions.outputFormat as string) || 'html';
+									const includeMetadata = fallbackHtmlOptions.includeMetadata as boolean || false;
 
-									if (typeof extractedData === 'object') {
-										extractedData.metadata = {
-											htmlLength: htmlContent.length,
-											elementCount,
-											imageCount,
-											linkCount,
-										};
+									// Extract HTML content
+									const htmlContent = await puppeteerPage.$eval(fallbackSelector, (el) => el.innerHTML);
+
+									if (outputFormat === 'html') {
+										// Return as raw HTML string
+										extractedData = htmlContent;
 									} else {
-										// For string output, add metadata as a separate property
-										extractedData = {
-											html: htmlContent,
-											metadata: {
+										// Return as JSON object
+										extractedData = { html: htmlContent };
+									}
+
+									// Add metadata if requested
+									if (includeMetadata) {
+										// Calculate basic metadata about the HTML
+										const elementCount = await puppeteerPage.$eval(fallbackSelector, (el) => el.querySelectorAll('*').length);
+										const imageCount = await puppeteerPage.$eval(fallbackSelector, (el) => el.querySelectorAll('img').length);
+										const linkCount = await puppeteerPage.$eval(fallbackSelector, (el) => el.querySelectorAll('a').length);
+
+										if (typeof extractedData === 'object') {
+											extractedData.metadata = {
 												htmlLength: htmlContent.length,
 												elementCount,
 												imageCount,
 												linkCount,
-											}
-										};
+											};
+										} else {
+											// For string output, add metadata as a separate property
+											extractedData = {
+												html: htmlContent,
+												metadata: {
+													htmlLength: htmlContent.length,
+													elementCount,
+													imageCount,
+													linkCount,
+												}
+											};
+										}
 									}
+									break;
 								}
-								break;
+								case 'value':
+									extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => {
+										if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+											return el.value;
+										}
+										return '';
+									});
+									break;
+								case 'attribute': {
+									const attributeName = this.getNodeParameter('fallbackAttributeName', index) as string;
+									extractedData = await puppeteerPage.$eval(
+										fallbackSelector,
+										(el, attr) => el.getAttribute(attr) || '',
+										attributeName
+									);
+									break;
+								}
+								default:
+									extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => el.textContent?.trim() || '');
 							}
-							case 'value':
-								extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => {
-									if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
-										return el.value;
-									}
-									return '';
-								});
-								break;
-							case 'attribute': {
-								const attributeName = this.getNodeParameter('fallbackAttributeName', index) as string;
-								extractedData = await puppeteerPage.$eval(
-									fallbackSelector,
-									(el, attr) => el.getAttribute(attr) || '',
-									attributeName
-								);
-								break;
+
+							// Store the extracted data in the result
+							if (!resultData.extractedData) {
+								resultData.extractedData = {};
 							}
-							default:
-								extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => el.textContent?.trim() || '');
+							resultData.extractedData.fallback = extractedData;
+
+							this.logger.debug(`Fallback: Extracted data (${fallbackExtractionType}) from: ${fallbackSelector}`);
+							break;
 						}
 
-						// Store the extracted data in the result
-						if (!resultData.extractedData) {
-							resultData.extractedData = {};
-						}
-						resultData.extractedData.fallback = extractedData;
+						case 'fill': {
+							const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
+							const fallbackText = this.getNodeParameter('fallbackText', index) as string;
+							const fallbackInputType = this.getNodeParameter('fallbackInputType', index, 'text') as string;
 
-						this.logger.debug(`Fallback: Extracted data (${fallbackExtractionType}) from: ${fallbackSelector}`);
-						break;
-					}
+							if (waitForSelectors) {
+								// For actions, we always need to ensure the element exists
+								if (detectionMethod === 'smart') {
+									const elementExists = await smartWaitForSelector(
+										puppeteerPage,
+										fallbackSelector,
+										selectorTimeout,
+										earlyExitDelay,
+										this.logger,
+									);
 
-					case 'fill': {
-						const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
-						const fallbackText = this.getNodeParameter('fallbackText', index) as string;
-						const fallbackInputType = this.getNodeParameter('fallbackInputType', index, 'text') as string;
-
-						if (waitForSelectors) {
-							// For actions, we always need to ensure the element exists
-							if (detectionMethod === 'smart') {
-								const elementExists = await smartWaitForSelector(
-									puppeteerPage,
-									fallbackSelector,
-									selectorTimeout,
-									earlyExitDelay,
-									this.logger,
-								);
-
-								if (!elementExists) {
-									throw new Error(`Fallback element with selector "${fallbackSelector}" not found`);
-								}
-							} else {
-								await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
-							}
-						}
-
-						// Handle different input types
-						switch (fallbackInputType) {
-							case 'text': {
-								const fallbackClearField = this.getNodeParameter('fallbackClearField', index, false) as boolean;
-								const fallbackPressEnter = this.getNodeParameter('fallbackPressEnter', index, false) as boolean;
-
-								// Handle text inputs and textareas
-								if (fallbackClearField) {
-									// Click three times to select all text
-									await puppeteerPage.click(fallbackSelector, { clickCount: 3 });
-									// Delete selected text
-									await puppeteerPage.keyboard.press('Backspace');
-								}
-
-								// Type the text
-								this.logger.debug(`Fallback action: Filling form field: ${fallbackSelector} with value: ${fallbackText}`);
-
-								// Use human-like typing if enabled
-								if (useHumanDelays) {
-									for (const char of fallbackText) {
-										await puppeteerPage.type(fallbackSelector, char, { delay: Math.floor(Math.random() * 150) + 25 });
+									if (!elementExists) {
+										throw new Error(`Fallback element with selector "${fallbackSelector}" not found`);
 									}
 								} else {
-									await puppeteerPage.type(fallbackSelector, fallbackText);
+									await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
 								}
-
-								// Press Enter if requested
-								if (fallbackPressEnter) {
-									await puppeteerPage.keyboard.press('Enter');
-								}
-								break;
 							}
 
-							case 'select': {
-								// Handle select/dropdown elements
-								this.logger.debug(`Fallback action: Setting select element: ${fallbackSelector} to value: ${fallbackText}`);
-								await puppeteerPage.select(fallbackSelector, fallbackText);
-								break;
-							}
+							// Handle different input types
+							switch (fallbackInputType) {
+								case 'text': {
+									const fallbackClearField = this.getNodeParameter('fallbackClearField', index, false) as boolean;
+									const fallbackPressEnter = this.getNodeParameter('fallbackPressEnter', index, false) as boolean;
 
-							case 'checkbox':
-							case 'radio': {
-								const fallbackCheckState = this.getNodeParameter('fallbackCheckState', index, 'check') as string;
+									// Handle text inputs and textareas
+									if (fallbackClearField) {
+										// Click three times to select all text
+										await puppeteerPage.click(fallbackSelector, { clickCount: 3 });
+										// Delete selected text
+										await puppeteerPage.keyboard.press('Backspace');
+									}
 
-								// Handle checkbox and radio button inputs
-								this.logger.debug(`Fallback action: Setting ${fallbackInputType}: ${fallbackSelector} to state: ${fallbackCheckState}`);
+									// Type the text
+									this.logger.debug(`Fallback action: Filling form field: ${fallbackSelector} with value: ${fallbackText}`);
 
-								// Get the current checked state
-								const currentChecked = await puppeteerPage.$eval(fallbackSelector, el => (el as HTMLInputElement).checked);
+									// Use human-like typing if enabled
+									if (useHumanDelays) {
+										for (const char of fallbackText) {
+											await puppeteerPage.type(fallbackSelector, char, { delay: Math.floor(Math.random() * 150) + 25 });
+										}
+									} else {
+										await puppeteerPage.type(fallbackSelector, fallbackText);
+									}
 
-								// Determine if we need to click based on requested state
-								let shouldClick = false;
-								if (fallbackCheckState === 'check' && !currentChecked) shouldClick = true;
-								if (fallbackCheckState === 'uncheck' && currentChecked) shouldClick = true;
-								if (fallbackCheckState === 'toggle') shouldClick = true;
-
-								if (shouldClick) {
-									await puppeteerPage.click(fallbackSelector);
+									// Press Enter if requested
+									if (fallbackPressEnter) {
+										await puppeteerPage.keyboard.press('Enter');
+									}
+									break;
 								}
-								break;
-							}
 
-							case 'file': {
-								const fallbackFilePath = this.getNodeParameter('fallbackFilePath', index, '') as string;
-
-								// Handle file upload inputs
-								this.logger.debug(`Fallback action: Setting file input: ${fallbackSelector} with file: ${fallbackFilePath}`);
-
-								const fileInput = await puppeteerPage.$(fallbackSelector) as puppeteer.ElementHandle<HTMLInputElement>;
-								if (fileInput) {
-									await fileInput.uploadFile(fallbackFilePath);
-								} else {
-									this.logger.warn(`File input element not found: ${fallbackSelector}`);
+								case 'select': {
+									// Handle select/dropdown elements
+									this.logger.debug(`Fallback action: Setting select element: ${fallbackSelector} to value: ${fallbackText}`);
+									await puppeteerPage.select(fallbackSelector, fallbackText);
+									break;
 								}
-								break;
+
+								case 'checkbox':
+								case 'radio': {
+									const fallbackCheckState = this.getNodeParameter('fallbackCheckState', index, 'check') as string;
+
+									// Handle checkbox and radio button inputs
+									this.logger.debug(`Fallback action: Setting ${fallbackInputType}: ${fallbackSelector} to state: ${fallbackCheckState}`);
+
+									// Get the current checked state
+									const currentChecked = await puppeteerPage.$eval(fallbackSelector, el => (el as HTMLInputElement).checked);
+
+									// Determine if we need to click based on requested state
+									let shouldClick = false;
+									if (fallbackCheckState === 'check' && !currentChecked) shouldClick = true;
+									if (fallbackCheckState === 'uncheck' && currentChecked) shouldClick = true;
+									if (fallbackCheckState === 'toggle') shouldClick = true;
+
+									if (shouldClick) {
+										await puppeteerPage.click(fallbackSelector);
+									}
+									break;
+								}
+
+								case 'file': {
+									const fallbackFilePath = this.getNodeParameter('fallbackFilePath', index, '') as string;
+
+									// Handle file upload inputs
+									this.logger.debug(`Fallback action: Setting file input: ${fallbackSelector} with file: ${fallbackFilePath}`);
+
+									const fileInput = await puppeteerPage.$(fallbackSelector) as puppeteer.ElementHandle<HTMLInputElement>;
+									if (fileInput) {
+										await fileInput.uploadFile(fallbackFilePath);
+									} else {
+										this.logger.warn(`File input element not found: ${fallbackSelector}`);
+									}
+									break;
+								}
 							}
+							break;
 						}
-						break;
+
+						case 'navigate': {
+							const fallbackUrl = this.getNodeParameter('fallbackUrl', index) as string;
+							const waitAfterFallback = this.getNodeParameter('waitAfterFallback', index) as string;
+							const fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index) as number;
+
+							this.logger.debug(`Fallback action: Navigating to URL: ${fallbackUrl}`);
+							await puppeteerPage.goto(fallbackUrl);
+
+							// Wait according to specified wait type
+							await waitForNavigation(puppeteerPage, waitAfterFallback, fallbackWaitTime);
+							break;
+						}
 					}
+				} catch (error) {
+					this.logger.error(`Error in fallback action: ${(error as Error).message}`);
 
-					case 'navigate': {
-						const fallbackUrl = this.getNodeParameter('fallbackUrl', index) as string;
-						const waitAfterFallback = this.getNodeParameter('waitAfterFallback', index) as string;
-						const fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index) as number;
-
-						this.logger.debug(`Fallback action: Navigating to URL: ${fallbackUrl}`);
-						await puppeteerPage.goto(fallbackUrl);
-
-						// Wait according to specified wait type
-						await waitForNavigation(puppeteerPage, waitAfterFallback, fallbackWaitTime);
-						break;
+					if (!continueOnFail) {
+						throw error;
 					}
 				}
-			} catch (error) {
-				this.logger.error(`Error in fallback action: ${(error as Error).message}`);
-
-				if (!continueOnFail) {
-					throw error;
-				}
-			}
-		}
-
-		// Take screenshot if requested
-		if (takeScreenshot) {
-			screenshot = await puppeteerPage.screenshot({
-				encoding: 'base64',
-				type: 'jpeg',
-				quality: 80,
-			}) as string;
-			resultData.screenshot = screenshot;
-			this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Screenshot captured (${screenshot.length} bytes)`);
-		}
-
-		// Update result data
-		resultData.executionDuration = Date.now() - startTime;
-		resultData.currentUrl = await puppeteerPage.url();
-		resultData.pageTitle = await puppeteerPage.title();
-		resultData.routeTaken = routeTaken;
-		resultData.actionPerformed = actionPerformed;
-
-		// Log completion with execution metrics
-		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Completed execution: route="${routeTaken}", action="${actionPerformed}", duration=${resultData.executionDuration}ms`);
-
-		// Add a visual end marker
-		this.logger.info("============ NODE EXECUTION COMPLETE ============");
-
-		// Build the output item in accordance with n8n standards
-		const returnItem: INodeExecutionData = {
-			json: resultData,
-				pairedItem: { item: index },
-		};
-
-		// Output the results
-		if (enableRouting) {
-			// Create an array for each possible output route
-			const routeCount = this.getNodeParameter('routeCount', index, 2) as number;
-			const routes: INodeExecutionData[][] = Array(routeCount).fill(null).map(() => []);
-
-			// Put the item in the correct route
-			if (routeIndex >= 0 && routeIndex < routeCount) {
-				routes[routeIndex].push(returnItem);
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Sending output to route ${routeIndex + 1}`);
-			} else {
-				// Default to route 0 if routeIndex is out of bounds
-					routes[0].push(returnItem);
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Route index ${routeIndex} out of bounds, defaulting to route 1`);
 			}
 
-			return routes;
-		}
-
-		// Single output case - no else needed as the if block returns
-		return [returnItem];
-	} catch (error) {
-		const errorMessage = (error as Error).message;
-		this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error during execution: ${errorMessage}`);
-
-		// Try to get a screenshot on error for debugging
-		let errorScreenshot: string | undefined;
-		const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
-
-		if (takeScreenshot) {
-			try {
-				errorScreenshot = await puppeteerPage.screenshot({
+			// Take screenshot if requested
+			if (takeScreenshot) {
+				screenshot = await puppeteerPage.screenshot({
 					encoding: 'base64',
 					type: 'jpeg',
 					quality: 80,
 				}) as string;
-				this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error screenshot captured (${errorScreenshot.length} bytes)`);
-			} catch (screenshotError) {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
-			}
-		}
-
-		if (continueOnFail) {
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Continuing despite error (continueOnFail=true)`);
-
-			let errorCurrentUrl = 'unknown';
-			let errorPageTitle = 'unknown';
-
-			try {
-				errorCurrentUrl = await puppeteerPage.url();
-				errorPageTitle = await puppeteerPage.title();
-			} catch (pageError) {
-				// Ignore errors when trying to get page info
+				resultData.screenshot = screenshot;
+				this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Screenshot captured (${screenshot.length} bytes)`);
 			}
 
-			// Get session ID parameter if available
-			const inputSessionId = this.getNodeParameter('sessionId', index, '') as string;
+			// Update result data
+			resultData.executionDuration = Date.now() - startTime;
+			resultData.currentUrl = await puppeteerPage.url();
+			resultData.pageTitle = await puppeteerPage.title();
+			resultData.routeTaken = routeTaken;
+			resultData.actionPerformed = actionPerformed;
 
-			// Return error information in the output but preserve the session ID
-			const executionDuration = Date.now() - startTime;
+			// Log completion with execution metrics
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Completed execution: route="${routeTaken}", action="${actionPerformed}", duration=${resultData.executionDuration}ms`);
+
+			// Add a visual end marker
+			this.logger.info("============ NODE EXECUTION COMPLETE ============");
+
+			// Build the output item in accordance with n8n standards
 			const returnItem: INodeExecutionData = {
-					json: {
-						success: false,
-						error: errorMessage,
-						routeTaken: 'error',
-						actionPerformed: 'none',
-						currentUrl: errorCurrentUrl,
-							pageTitle: errorPageTitle,
-							screenshot: errorScreenshot,
-							executionDuration,
-							sessionId: inputSessionId, // Ensure session ID is preserved on error
-					},
+				json: resultData,
 					pairedItem: { item: index },
-				};
+			};
 
-			// Route to the first output or return as single output
-			const enableRouting = this.getNodeParameter('enableRouting', index, false) as boolean;
-
+			// Output the results
 			if (enableRouting) {
+				// Create an array for each possible output route
 				const routeCount = this.getNodeParameter('routeCount', index, 2) as number;
 				const routes: INodeExecutionData[][] = Array(routeCount).fill(null).map(() => []);
-				routes[0].push(returnItem);
+
+				// Put the item in the correct route
+				if (routeIndex >= 0 && routeIndex < routeCount) {
+					routes[routeIndex].push(returnItem);
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Sending output to route ${routeIndex + 1}`);
+				} else {
+					// Default to route 0 if routeIndex is out of bounds
+						routes[0].push(returnItem);
+					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Route index ${routeIndex} out of bounds, defaulting to route 1`);
+				}
+
 				return routes;
 			}
 
+			// Single output case - no else needed as the if block returns
 			return [returnItem];
-		}
+		} catch (error) {
+			const errorMessage = (error as Error).message;
+			this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error during execution: ${errorMessage}`);
 
-		// If continueOnFail is false, throw the error
-		throw error;
+			// Try to get a screenshot on error for debugging
+			let errorScreenshot: string | undefined;
+			const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
+
+			if (takeScreenshot) {
+				try {
+					errorScreenshot = await puppeteerPage.screenshot({
+						encoding: 'base64',
+						type: 'jpeg',
+						quality: 80,
+					}) as string;
+					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error screenshot captured (${errorScreenshot.length} bytes)`);
+				} catch (screenshotError) {
+					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
+				}
+			}
+
+			if (continueOnFail) {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Continuing despite error (continueOnFail=true)`);
+
+				let errorCurrentUrl = 'unknown';
+				let errorPageTitle = 'unknown';
+
+				try {
+					errorCurrentUrl = await puppeteerPage.url();
+					errorPageTitle = await puppeteerPage.title();
+				} catch (pageError) {
+					// Ignore errors when trying to get page info
+				}
+
+				// Get session ID parameter if available
+				const inputSessionId = this.getNodeParameter('sessionId', index, '') as string;
+
+				// Return error information in the output but preserve the session ID
+				const executionDuration = Date.now() - startTime;
+				const returnItem: INodeExecutionData = {
+						json: {
+							success: false,
+							error: errorMessage,
+							routeTaken: 'error',
+							actionPerformed: 'none',
+							currentUrl: errorCurrentUrl,
+								pageTitle: errorPageTitle,
+								screenshot: errorScreenshot,
+								executionDuration,
+								sessionId: inputSessionId, // Ensure session ID is preserved on error
+						},
+						pairedItem: { item: index },
+					};
+
+				// Route to the first output or return as single output
+				const enableRouting = this.getNodeParameter('enableRouting', index, false) as boolean;
+
+				if (enableRouting) {
+					const routeCount = this.getNodeParameter('routeCount', index, 2) as number;
+					const routes: INodeExecutionData[][] = Array(routeCount).fill(null).map(() => []);
+					routes[0].push(returnItem);
+					return routes;
+				}
+
+				return [returnItem];
+			}
+
+			// If continueOnFail is false, throw the error
+			throw error;
+		}
 	}
-}
 
 
 
