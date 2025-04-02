@@ -1084,6 +1084,11 @@ export const description: INodeProperties[] = [
 									value: 'noWait',
 									description: 'Do not wait after the action',
 								},
+								{
+									name: 'URL Changed',
+									value: 'urlChanged',
+									description: 'Wait only until the URL changes to confirm navigation started',
+								},
 							],
 							default: 'domContentLoaded',
 							description: 'What to wait for after performing the action',
@@ -1423,6 +1428,11 @@ export const description: INodeProperties[] = [
 					name: 'No Wait',
 					value: 'noWait',
 					description: 'Do not wait after the action',
+				},
+				{
+					name: 'URL Changed',
+					value: 'urlChanged',
+					description: 'Wait only until the URL changes to confirm navigation started',
 				},
 			],
 			default: 'domContentLoaded',
@@ -1983,6 +1993,7 @@ export const description: INodeProperties[] = [
 				executionDuration: number;
 				routeName?: string;
 				extractedData?: Record<string, unknown>;
+				sessionId: string;
 			} = {
 				success: true,
 				routeTaken,
@@ -1991,7 +2002,17 @@ export const description: INodeProperties[] = [
 				pageTitle: await puppeteerPage.title(),
 				screenshot,
 				executionDuration: 0, // Will be updated at the end
+				sessionId: '', // Will be set below
 			};
+
+			// Get the session ID from the page
+			const sessionId = await puppeteerPage.evaluate(() => {
+				interface VentriloquistWindow extends Window {
+					__VENTRILOQUIST_SESSION_ID__?: string;
+				}
+				return (window as VentriloquistWindow).__VENTRILOQUIST_SESSION_ID__ || '';
+			});
+			resultData.sessionId = sessionId;
 
 			// Check each condition group
 			for (const group of conditionGroups) {

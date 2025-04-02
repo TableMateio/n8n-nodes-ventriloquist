@@ -265,19 +265,14 @@ export const description: INodeProperties[] = [
 		type: 'options',
 		options: [
 			{
-				name: 'DOM Content Loaded',
-				value: 'domContentLoaded',
-				description: 'Fast: Wait until the new page structure is ready for interaction (3-5 seconds)',
-			},
-			{
 				name: 'Fixed Time',
 				value: 'fixedTime',
 				description: 'Simple: Just wait for a specific amount of time that you set below',
 			},
 			{
-				name: 'Navigation Complete',
-				value: 'navigationComplete',
-				description: 'Thorough but slow: Wait until all page resources have finished loading (10-30 seconds)',
+				name: 'New Page DOM Loaded',
+				value: 'domContentLoaded',
+				description: 'Medium: Wait until the new page\'s DOM is parsed and ready for interaction',
 			},
 			{
 				name: 'No Wait',
@@ -285,9 +280,14 @@ export const description: INodeProperties[] = [
 				description: 'Immediate: Do not wait at all after clicking submit (may cause issues if next steps need the new page)',
 			},
 			{
-				name: 'Page Load',
-				value: 'pageLoad',
-				description: 'Medium: Wait for basic page resources to load (5-10 seconds)',
+				name: 'Page Resources Loaded',
+				value: 'navigationComplete',
+				description: 'Slowest: Wait until all page resources (images, scripts, etc.) have finished loading',
+			},
+			{
+				name: 'URL Changed',
+				value: 'urlChanged',
+				description: 'Fastest: Wait only until the URL changes to confirm navigation started',
 			},
 		],
 		default: 'domContentLoaded',
@@ -1259,7 +1259,90 @@ export async function execute(
 			}
 
 			// Handle waiting after submission
-			if (waitAfterSubmit === 'navigationComplete') {
+			if (waitAfterSubmit === 'urlChanged') {
+				this.logger.info('Waiting for URL to change after submission');
+				try {
+					// Wait for URL to change
+					await page.waitForFunction(
+						(beforeUrl) => window.location.href !== beforeUrl,
+						{ timeout: 10000 },
+						beforeUrl
+					);
+					this.logger.info('URL changed successfully');
+
+					// Store successful navigation result
+					formSubmissionResult = {
+						urlChanged: true,
+						titleChanged: await page.title() !== beforeTitle,
+						beforeUrl,
+						afterUrl: page.url(),
+						beforeTitle,
+						afterTitle: await page.title(),
+						navigationStarted: true,
+					};
+
+					// Store the page reference and results
+					Ventriloquist.storePage(workflowId, sessionId, page);
+					results.push({
+						fieldType: 'formSubmission',
+						success: true,
+						details: formSubmissionResult
+					});
+
+					// Add a short stabilization period
+					await new Promise(resolve => setTimeout(resolve, 500));
+				} catch (urlError) {
+					this.logger.warn(`URL change timeout or error: ${urlError}`);
+					// Don't throw an error, just log and continue
+					this.logger.info('Adding fallback delay of 2000ms since URL change detection failed');
+					await new Promise(resolve => setTimeout(resolve, 2000));
+
+					// Check if the URL actually changed despite the error
+					const afterUrl = page.url();
+					const afterTitle = await page.title();
+
+					if (afterUrl !== beforeUrl) {
+						this.logger.info('URL changed despite detection timeout - considering successful');
+
+						// Store successful navigation result
+						formSubmissionResult = {
+							urlChanged: true,
+							titleChanged: afterTitle !== beforeTitle,
+							beforeUrl,
+							afterUrl,
+							beforeTitle,
+							afterTitle,
+							navigationErrorRecovered: true,
+						};
+
+						// Add result to results array
+						results.push({
+							fieldType: 'formSubmission',
+							success: true,
+							details: formSubmissionResult
+						});
+					} else {
+						// No URL change, likely a real navigation failure
+						this.logger.warn('No URL change detected after timeout - form submission may have failed');
+
+						formSubmissionResult = {
+							error: 'URL change timeout with no actual change',
+							beforeUrl,
+							afterUrl,
+							beforeTitle,
+							afterTitle,
+							urlChanged: false,
+							titleChanged: false,
+						};
+
+						results.push({
+							fieldType: 'formSubmission',
+							success: false,
+							details: formSubmissionResult
+						});
+					}
+				}
+			} else if (waitAfterSubmit === 'navigationComplete') {
 				this.logger.info('Waiting for navigation to complete (all network idle)');
 				try {
 					await page.waitForNavigation({
