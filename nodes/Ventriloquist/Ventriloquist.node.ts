@@ -1203,41 +1203,75 @@ export class Ventriloquist implements INodeType {
 						const enableRouting = this.getNodeParameter('enableRouting', i, false) as boolean;
 
 						if (enableRouting) {
-							// Decision routing - data will be routed based on metadata
-							if (result.length > 0 && result[0].__metadata && typeof result[0].__metadata === 'object') {
-								// Create arrays for each output if they don't exist
-								const routeCount = this.getNodeParameter('routeCount', i, 2) as number;
+							// Handle different return types from decision operation
+							if (Array.isArray(result)) {
+								// Check if result is already a multi-dimensional array (INodeExecutionData[][])
+								if (result.length > 0 && Array.isArray(result[0])) {
+									// Result is already in the format INodeExecutionData[][]
+									// Multi-route format: create arrays for each output
+									const routeCount = this.getNodeParameter('routeCount', i, 2) as number;
 
-								// Initialize arrays for each output if they don't exist
-								while (returnData.length < routeCount) {
-									returnData.push([]);
+									// Initialize arrays for each output if they don't exist
+									while (returnData.length < routeCount) {
+										returnData.push([]);
+									}
+
+									// Add results to each output route
+									for (let routeIndex = 0; routeIndex < result.length && routeIndex < routeCount; routeIndex++) {
+										const routeData = result[routeIndex];
+										if (Array.isArray(routeData) && routeData.length > 0) {
+											returnData[routeIndex].push(...routeData);
+										}
+									}
+								} else {
+									// Result is in the format INodeExecutionData[]
+									// Create arrays for each output if they don't exist
+									const routeCount = this.getNodeParameter('routeCount', i, 2) as number;
+
+									// Initialize arrays for each output if they don't exist
+									while (returnData.length < routeCount) {
+										returnData.push([]);
+									}
+
+									// Default to first output
+									if (returnData.length === 0) {
+										returnData.push([]);
+									}
+
+									// Add all items to first output
+									const items = result as INodeExecutionData[];
+									if (items.length > 0) {
+										returnData[0].push(...items);
+									}
 								}
-
-								// Get the output index from metadata
-								let outputIndex = 0; // Default to first output
-
-								// Check if __metadata has the outputIndex property
-								if ('outputIndex' in result[0].__metadata) {
-									outputIndex = result[0].__metadata.outputIndex as number;
-								}
-
-								const safeIndex = Math.min(Math.max(0, outputIndex), routeCount - 1);
-
-								// Add the result to the appropriate output
-								returnData[safeIndex].push(...result);
 							} else {
-								// Fallback to adding to first output
+								// Empty result or invalid format, create empty first output if needed
 								if (returnData.length === 0) {
 									returnData.push([]);
 								}
-								returnData[0].push(...result);
 							}
 						} else {
 							// If routing not enabled, simply add to first output
 							if (returnData.length === 0) {
 								returnData.push([]);
 							}
-							returnData[0].push(...result);
+
+							// Check if result is INodeExecutionData[] or INodeExecutionData[][]
+							if (Array.isArray(result)) {
+								if (result.length > 0 && Array.isArray(result[0])) {
+									// It's INodeExecutionData[][], take the first array
+									const firstRoute = result[0] as INodeExecutionData[];
+									if (firstRoute.length > 0) {
+										returnData[0].push(...firstRoute);
+									}
+								} else {
+									// It's INodeExecutionData[]
+									const items = result as INodeExecutionData[];
+									if (items.length > 0) {
+										returnData[0].push(...items);
+									}
+								}
+							}
 						}
 					} catch (error) {
 						// ... existing error handling ...

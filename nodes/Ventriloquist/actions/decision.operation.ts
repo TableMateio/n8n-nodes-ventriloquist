@@ -1972,11 +1972,17 @@ export const description: INodeProperties[] = [
 		this: IExecuteFunctions,
 		index: number,
 		puppeteerPage: puppeteer.Page,
-	): Promise<INodeExecutionData[]> {
+	): Promise<INodeExecutionData[][] | INodeExecutionData[]> {
 		const startTime = Date.now();
 
 		// Store this parameter at the top level so it's available in the catch block
 		const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
+		let screenshot: string | undefined;
+
+		// Added for better logging
+		const nodeName = this.getNode().name;
+		const currentUrl = await puppeteerPage.url();
+		this.logger.info(`[Ventriloquist][${nodeName}][Decision] Starting execution on URL: ${currentUrl}`);
 
 		try {
 			// Get operation parameters
@@ -1989,6 +1995,10 @@ export const description: INodeProperties[] = [
 			const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
 			const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 
+			// Log parameters for debugging
+			this.logger.info(`[Ventriloquist][${nodeName}][Decision] Parameters: waitForSelectors=${waitForSelectors}, selectorTimeout=${selectorTimeout}, detectionMethod=${detectionMethod}`);
+			this.logger.info(`[Ventriloquist][${nodeName}][Decision] Evaluating ${conditionGroups.length} condition groups with fallbackAction=${fallbackAction}`);
+
 			// Get routing parameters
 			const enableRouting = this.getNodeParameter('enableRouting', index, false) as boolean;
 
@@ -1996,8 +2006,7 @@ export const description: INodeProperties[] = [
 			let routeTaken = 'none';
 			let actionPerformed = 'none';
 			let routeIndex = 0;
-			const currentUrl = await puppeteerPage.url();
-			let screenshot: string | undefined;
+			const pageUrl = await puppeteerPage.url();
 
 			// Prepare the result data structure
 			const resultData: {
@@ -2015,7 +2024,7 @@ export const description: INodeProperties[] = [
 				success: true,
 				routeTaken,
 				actionPerformed,
-				currentUrl,
+				currentUrl: pageUrl,
 				pageTitle: await puppeteerPage.title(),
 				screenshot,
 				executionDuration: 0, // Will be updated at the end
@@ -2030,6 +2039,8 @@ export const description: INodeProperties[] = [
 				return (window as VentriloquistWindow).__VENTRILOQUIST_SESSION_ID__ || '';
 			});
 			resultData.sessionId = sessionId;
+
+			this.logger.info(`[Ventriloquist][${nodeName}][Decision] Connected to session ID: ${sessionId || 'Not found'}`);
 
 			// Check each condition group
 			for (const group of conditionGroups) {
@@ -2048,7 +2059,7 @@ export const description: INodeProperties[] = [
 					}
 				}
 
-				this.logger.debug(`Checking decision group: ${groupName} with condition type ${conditionType}`);
+				this.logger.info(`[Ventriloquist][${nodeName}][Decision] Checking group: "${groupName}" (type: ${conditionType}, invert: ${invertCondition})`);
 
 				// Initialize the overall condition result
 				let groupConditionMet = false;
@@ -2251,17 +2262,21 @@ export const description: INodeProperties[] = [
 						routeTaken = groupName;
 						const actionType = group.actionType as string;
 
+						this.logger.info(`[Ventriloquist][${nodeName}][Decision] Condition met for group "${groupName}", taking this route`);
+
 						// For routing capability, store route information
 						if (enableRouting) {
 							const groupRoute = group.route as number;
 							if (groupRoute) {
 								// Route numbers are 1-based, but indexes are 0-based
 								routeIndex = groupRoute - 1;
+								this.logger.info(`[Ventriloquist][${nodeName}][Decision] Using route: ${groupRoute} (index: ${routeIndex})`);
 							}
 						}
 
 						if (actionType !== 'none') {
 							actionPerformed = actionType;
+							this.logger.info(`[Ventriloquist][${nodeName}][Decision] Performing action: "${actionType}"`);
 
 							// Add human-like delay if enabled
 							if (useHumanDelays) {
@@ -2273,6 +2288,8 @@ export const description: INodeProperties[] = [
 									const actionSelector = group.actionSelector as string;
 									const waitAfterAction = group.waitAfterAction as string;
 									const waitTime = group.waitTime as number;
+
+									this.logger.info(`[Ventriloquist][${nodeName}][Decision] Click action: selector="${actionSelector}", waitAfter="${waitAfterAction}", waitTime=${waitTime}ms`);
 
 									if (waitForSelectors) {
 										// For actions, we always need to ensure the element exists
@@ -2985,11 +3002,8 @@ export const description: INodeProperties[] = [
 					break;
 				}
 			} catch (error) {
-				this.logger.error(`Error in decision group ${groupName}: ${(error as Error).message}`);
-
-				if (!continueOnFail) {
-					throw error;
-				}
+				this.logger.error(`[Ventriloquist][${nodeName}][Decision] Error in group "${groupName}": ${(error as Error).message}`);
+				// No need for continue statement as it's the last statement in the loop
 			}
 		}
 
@@ -3277,58 +3291,118 @@ export const description: INodeProperties[] = [
 
 		// Take screenshot if requested
 		if (takeScreenshot) {
-			screenshot = await puppeteerPage.screenshot({ encoding: 'base64' }) as string;
+			screenshot = await puppeteerPage.screenshot({
+				encoding: 'base64',
+				type: 'jpeg',
+				quality: 80,
+			}) as string;
+			resultData.screenshot = screenshot;
+			this.logger.debug(`[Ventriloquist][${nodeName}][Decision] Screenshot captured (${screenshot.length} bytes)`);
 		}
 
-		const executionDuration = Date.now() - startTime;
-
-		// Update the execution duration in the result data
-		resultData.executionDuration = executionDuration;
+		// Update result data
+		resultData.executionDuration = Date.now() - startTime;
 		resultData.currentUrl = await puppeteerPage.url();
 		resultData.pageTitle = await puppeteerPage.title();
-		resultData.screenshot = screenshot;
 		resultData.routeTaken = routeTaken;
 		resultData.actionPerformed = actionPerformed;
 
-		// If using routing
-		if (enableRouting) {
-			// Set the route name for output (1-based for display)
-			const routeName = `Route ${routeIndex + 1}`;
-			resultData.routeName = routeName;
+		// Log completion with execution metrics
+		this.logger.info(`[Ventriloquist][${nodeName}][Decision] Completed execution: route="${routeTaken}", action="${actionPerformed}", duration=${resultData.executionDuration}ms`);
 
-			return [{
-				json: resultData,
-				pairedItem: { item: index },
-				// This special property lets n8n know which output to route the data to
-				__metadata: {
-					outputIndex: routeIndex,
-				},
-			}];
-		}
-
-		// Default case - single output
-		return [{
+		// Build the output item in accordance with n8n standards
+		const returnItem: INodeExecutionData = {
 			json: resultData,
 			pairedItem: { item: index },
-		}];
-	} catch (error) {
-		const executionDuration = Date.now() - startTime;
+		};
 
-		if (continueOnFail) {
-			return [
-				{
-					json: {
-						success: false,
-						error: (error as Error).message,
-						currentUrl: await puppeteerPage.url(),
-						pageTitle: await puppeteerPage.title(),
-						executionDuration,
-					},
-					pairedItem: { item: index },
-				},
-			];
+		// Output the results
+		if (enableRouting) {
+			// Create an array for each possible output route
+			const routeCount = this.getNodeParameter('routeCount', index, 2) as number;
+			const routes: INodeExecutionData[][] = Array(routeCount).fill(null).map(() => []);
+
+			// Put the item in the correct route
+			if (routeIndex >= 0 && routeIndex < routeCount) {
+				routes[routeIndex].push(returnItem);
+				this.logger.info(`[Ventriloquist][${nodeName}][Decision] Sending output to route ${routeIndex + 1}`);
+			} else {
+				// Default to route 0 if routeIndex is out of bounds
+				routes[0].push(returnItem);
+				this.logger.warn(`[Ventriloquist][${nodeName}][Decision] Route index ${routeIndex} out of bounds, defaulting to route 1`);
+			}
+
+			return routes;
 		}
 
+		// Single output case - no else needed as the if block returns
+		return [returnItem];
+	} catch (error) {
+		const errorMessage = (error as Error).message;
+		this.logger.error(`[Ventriloquist][${nodeName}][Decision] Error during execution: ${errorMessage}`);
+
+		// Try to get a screenshot on error for debugging
+		let errorScreenshot: string | undefined;
+		const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
+
+		if (takeScreenshot) {
+			try {
+				errorScreenshot = await puppeteerPage.screenshot({
+					encoding: 'base64',
+					type: 'jpeg',
+					quality: 80,
+				}) as string;
+				this.logger.debug(`[Ventriloquist][${nodeName}][Decision] Error screenshot captured (${errorScreenshot.length} bytes)`);
+			} catch (screenshotError) {
+				this.logger.warn(`[Ventriloquist][${nodeName}][Decision] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
+			}
+		}
+
+		if (continueOnFail) {
+			this.logger.info(`[Ventriloquist][${nodeName}][Decision] Continuing despite error (continueOnFail=true)`);
+
+			let errorCurrentUrl = 'unknown';
+			let errorPageTitle = 'unknown';
+
+			try {
+				errorCurrentUrl = await puppeteerPage.url();
+				errorPageTitle = await puppeteerPage.title();
+			} catch (pageError) {
+				// Ignore errors when trying to get page info
+			}
+
+			// Return error information in the output
+			const executionDuration = Date.now() - startTime;
+			const returnItem: INodeExecutionData = {
+				json: {
+					success: false,
+					error: errorMessage,
+						routeTaken: 'error',
+						actionPerformed: 'none',
+						currentUrl: errorCurrentUrl,
+						pageTitle: errorPageTitle,
+						screenshot: errorScreenshot,
+						executionDuration,
+						sessionId: '',
+					},
+					pairedItem: { item: index },
+				};
+
+			// Route to the first output or return as single output
+			const enableRouting = this.getNodeParameter('enableRouting', index, false) as boolean;
+
+			if (enableRouting) {
+				const routeCount = this.getNodeParameter('routeCount', index, 2) as number;
+				const routes: INodeExecutionData[][] = Array(routeCount).fill(null).map(() => []);
+				routes[0].push(returnItem);
+				return routes;
+			}
+
+			// Single output case - no else needed
+			return [returnItem];
+		}
+
+		// If continueOnFail is false, throw the error
 		throw error;
 	}
 }

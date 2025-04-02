@@ -847,6 +847,12 @@ export async function execute(
 	websocketEndpoint: string,
 	workflowId: string,
 ): Promise<INodeExecutionData> {
+	const startTime = Date.now();
+
+	// Added for better logging
+	const nodeName = this.getNode().name;
+	this.logger.info(`[Ventriloquist][${nodeName}][Detect] Starting execution`);
+
 	// Get parameters
 	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
 	const timeout = this.getNodeParameter('timeout', index, 5000) as number;
@@ -862,9 +868,9 @@ export async function execute(
 		: 0;
 
 	// Log the detection approach being used
-	this.logger.info(`Detection approach: ${waitForSelectors ? `${detectionMethod} with ${timeout}ms timeout` : 'immediate check'}`);
+	this.logger.info(`[Ventriloquist][${nodeName}][Detect] Parameters: waitForSelectors=${waitForSelectors}, timeout=${timeout}ms, method=${detectionMethod}`);
 	if (detectionMethod === 'smart') {
-		this.logger.info(`Smart detection configured with ${earlyExitDelay}ms early exit delay`);
+		this.logger.info(`[Ventriloquist][${nodeName}][Detect] Smart detection configured with ${earlyExitDelay}ms early exit delay`);
 	}
 
 	// Check if an explicit session ID was provided
@@ -885,14 +891,14 @@ export async function execute(
 
 		// If an explicit sessionId was provided, try to get that page first
 		if (explicitSessionId) {
-			this.logger.info(`Looking for explicitly provided session ID: ${explicitSessionId}`);
+			this.logger.info(`[Ventriloquist][${nodeName}][Detect] Looking for explicitly provided session ID: ${explicitSessionId}`);
 			page = Ventriloquist.getPage(workflowId, explicitSessionId);
 
 			if (page) {
 				sessionId = explicitSessionId;
-				this.logger.info(`Found existing page with explicit session ID: ${sessionId}`);
+				this.logger.info(`[Ventriloquist][${nodeName}][Detect] Found existing page with explicit session ID: ${sessionId}`);
 			} else {
-				this.logger.warn(`Provided session ID ${explicitSessionId} not found, will create a new session`);
+				this.logger.warn(`[Ventriloquist][${nodeName}][Detect] Provided session ID ${explicitSessionId} not found, will create a new session`);
 			}
 		}
 
@@ -905,12 +911,12 @@ export async function execute(
 				// Use the first available page
 				page = pages[0];
 				sessionId = `existing_${Date.now()}`;
-				this.logger.info('Using existing page from browser session');
+				this.logger.info(`[Ventriloquist][${nodeName}][Detect] Using existing page from browser session`);
 			} else {
 				// Create a new page if none exists
 				page = await browser.newPage();
 				sessionId = newSessionId;
-				this.logger.info(`Created new page with session ID: ${sessionId}`);
+				this.logger.info(`[Ventriloquist][${nodeName}][Detect] Created new page with session ID: ${sessionId}`);
 
 				// Store the new page for future operations
 				Ventriloquist.storePage(workflowId, sessionId, page);
@@ -930,8 +936,10 @@ export async function execute(
 		const pageTitle = await page.title();
 		let screenshot = '';
 
+		this.logger.info(`[Ventriloquist][${nodeName}][Detect] Connected to page: URL=${currentUrl}, title=${pageTitle}`);
+
 		try {
-			this.logger.info('Starting detection operations');
+			this.logger.info(`[Ventriloquist][${nodeName}][Detect] Starting detection operations`);
 
 			// Get detections
 			const detectionsData = this.getNodeParameter('detections.detection', index, []) as IDataObject[];
@@ -940,6 +948,8 @@ export async function execute(
 				throw new Error('No detections defined.');
 			}
 
+			this.logger.info(`[Ventriloquist][${nodeName}][Detect] Processing ${detectionsData.length} detection rules`);
+
 			// Initialize results objects
 			const results: IDataObject = {};
 			const detailsInfo: IDataObject[] = [];
@@ -947,10 +957,13 @@ export async function execute(
 			// Process each detection
 			for (const detection of detectionsData) {
 				const detectionName = detection.name as string;
+				const detectionType = detection.detectionType as string;
 				const returnType = (detection.returnType as string) || 'boolean';
 				const successValue = (detection.successValue as string) || 'success';
 				const failureValue = (detection.failureValue as string) || 'failure';
 				const invertResult = detection.invertResult === true;
+
+				this.logger.info(`[Ventriloquist][${nodeName}][Detect] Evaluating detection "${detectionName}" (type: ${detectionType})`);
 
 				// Process the detection with the chosen method
 				const { success, actualValue, details: detectionDetails } = await processDetection(
@@ -974,14 +987,17 @@ export async function execute(
 					invertResult
 				);
 
+				const finalSuccess = invertResult ? !success : success;
+				this.logger.info(`[Ventriloquist][${nodeName}][Detect] Detection "${detectionName}" result: ${finalSuccess ? 'success' : 'failure'}, value=${formattedResult}`);
+
 				// Add the results to the main output
 				results[detectionName] = formattedResult;
 
 				// Add details for debugging if needed
 				detailsInfo.push({
 					name: detectionName,
-					type: detection.detectionType,
-					success: invertResult ? !success : success,
+					type: detectionType,
+					success: finalSuccess,
 					result: formattedResult,
 					actualValue,
 					...detectionDetails,
@@ -990,6 +1006,7 @@ export async function execute(
 
 			// Take a screenshot if requested
 			if (takeScreenshot) {
+				this.logger.debug(`[Ventriloquist][${nodeName}][Detect] Capturing screenshot`);
 				const screenshotBuffer = await page.screenshot({
 					encoding: 'base64',
 					type: 'jpeg',
@@ -998,6 +1015,9 @@ export async function execute(
 
 				screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
 			}
+
+			const executionDuration = Date.now() - startTime;
+			this.logger.info(`[Ventriloquist][${nodeName}][Detect] Completed execution in ${executionDuration}ms`);
 
 			// Build the final output
 			const output: IDataObject = {
@@ -1011,6 +1031,7 @@ export async function execute(
 				url: currentUrl,
 				title: pageTitle,
 				timestamp: new Date().toISOString(),
+				executionDuration,
 			};
 
 			// Only include screenshot if requested
@@ -1027,55 +1048,66 @@ export async function execute(
 			};
 		} catch (error) {
 			// Handle errors
-			this.logger.error(`Detect operation error: ${(error as Error).message}`);
+			this.logger.error(`[Ventriloquist][${nodeName}][Detect] Error during detection: ${(error as Error).message}`);
 
 			// Take error screenshot if requested
 			if (takeScreenshot && page) {
 				try {
+					this.logger.debug(`[Ventriloquist][${nodeName}][Detect] Capturing error screenshot`);
 					const screenshotBuffer = await page.screenshot({
 						encoding: 'base64',
 						type: 'jpeg',
 						quality: 80,
 					});
+
 					screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
-				} catch {
-					// Ignore screenshot errors
+				} catch (screenshotError) {
+					this.logger.warn(`[Ventriloquist][${nodeName}][Detect] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
 				}
 			}
 
-			// Prepare error response
-			const errorResponse = {
-				json: {
-					success: false,
-					operation: 'detect',
-					error: (error as Error).message,
-					sessionId,
-					timestamp: new Date().toISOString(),
-					...(screenshot ? { screenshot } : {}),
-				},
-			};
+			if (continueOnFail) {
+				const executionDuration = Date.now() - startTime;
+				this.logger.info(`[Ventriloquist][${nodeName}][Detect] Continuing despite error (continueOnFail=true), duration=${executionDuration}ms`);
 
-			// If continueOnFail is false, throw the error to fail the node
-			if (!continueOnFail) {
-				throw new Error(`Detect operation failed: ${(error as Error).message}`);
+				// Return error information in the output
+				return {
+					json: {
+						success: false,
+						error: (error as Error).message,
+						operation: 'detect',
+						url: currentUrl || 'unknown',
+						title: pageTitle || 'unknown',
+						sessionId,
+						timestamp: new Date().toISOString(),
+						executionDuration,
+						screenshot,
+					},
+				};
 			}
 
-			// Otherwise, return an error result
-			return errorResponse;
+			// If continueOnFail is false, rethrow the error
+			throw error;
 		}
 	} catch (error) {
-		// If continueOnFail is enabled, try to return a formatted error instead of throwing
+		// Handle session creation errors
+		this.logger.error(`[Ventriloquist][${nodeName}][Detect] Session creation error: ${(error as Error).message}`);
+
 		if (continueOnFail) {
+			const executionDuration = Date.now() - startTime;
+
 			return {
 				json: {
 					success: false,
+					error: (error as Error).message,
 					operation: 'detect',
-					error: `Failed to get or create a page: ${(error as Error).message}`,
+					sessionId: '',
 					timestamp: new Date().toISOString(),
+					executionDuration,
 				},
 			};
 		}
 
-		throw new Error(`Failed to get or create a page: ${(error as Error).message}`);
+		throw error;
 	}
 }
