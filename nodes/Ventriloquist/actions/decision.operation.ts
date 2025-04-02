@@ -1022,6 +1022,11 @@ export const description: INodeProperties[] = [
 									value: 'noWait',
 									description: 'Do not wait after clicking submit',
 								},
+								{
+									name: 'URL Changed',
+									value: 'urlChanged',
+									description: 'Wait only until the URL changes to confirm navigation started',
+								},
 							],
 							default: 'domContentLoaded',
 							description: 'What to wait for after clicking the submit button',
