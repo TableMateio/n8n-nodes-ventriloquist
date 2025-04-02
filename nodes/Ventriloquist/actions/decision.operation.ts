@@ -1981,8 +1981,11 @@ export const description: INodeProperties[] = [
 
 		// Added for better logging
 		const nodeName = this.getNode().name;
+		const nodeId = this.getNode().id;
+		
 		const currentUrl = await puppeteerPage.url();
-		this.logger.info(`[Ventriloquist][${nodeName}][Decision] Starting execution on URL: ${currentUrl}`);
+
+		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Starting execution on URL: ${currentUrl}`);
 
 		try {
 			// Get operation parameters
@@ -1995,9 +1998,12 @@ export const description: INodeProperties[] = [
 			const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
 			const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 
+			// Get existing session ID parameter if available
+			const inputSessionId = this.getNodeParameter('sessionId', index, '') as string;
+
 			// Log parameters for debugging
-			this.logger.info(`[Ventriloquist][${nodeName}][Decision] Parameters: waitForSelectors=${waitForSelectors}, selectorTimeout=${selectorTimeout}, detectionMethod=${detectionMethod}`);
-			this.logger.info(`[Ventriloquist][${nodeName}][Decision] Evaluating ${conditionGroups.length} condition groups with fallbackAction=${fallbackAction}`);
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Parameters: waitForSelectors=${waitForSelectors}, selectorTimeout=${selectorTimeout}, detectionMethod=${detectionMethod}`);
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Evaluating ${conditionGroups.length} condition groups with fallbackAction=${fallbackAction}`);
 
 			// Get routing parameters
 			const enableRouting = this.getNodeParameter('enableRouting', index, false) as boolean;
@@ -2028,19 +2034,32 @@ export const description: INodeProperties[] = [
 				pageTitle: await puppeteerPage.title(),
 				screenshot,
 				executionDuration: 0, // Will be updated at the end
-				sessionId: '', // Will be set below
+				sessionId: inputSessionId, // Use the parameter instead of trying to get it from the page
 			};
 
-			// Get the session ID from the page
-			const sessionId = await puppeteerPage.evaluate(() => {
-				interface VentriloquistWindow extends Window {
-					__VENTRILOQUIST_SESSION_ID__?: string;
-				}
-				return (window as VentriloquistWindow).__VENTRILOQUIST_SESSION_ID__ || '';
-			});
-			resultData.sessionId = sessionId;
+			// If there's an inputSessionId, use it and log it
+			if (inputSessionId) {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using provided session ID: ${inputSessionId}`);
+			} else {
+				// As a fallback, still try to get the session ID from the page
+				try {
+					const pageSessionId = await puppeteerPage.evaluate(() => {
+						interface VentriloquistWindow extends Window {
+							__VENTRILOQUIST_SESSION_ID__?: string;
+						}
+						return (window as VentriloquistWindow).__VENTRILOQUIST_SESSION_ID__ || '';
+					});
 
-			this.logger.info(`[Ventriloquist][${nodeName}][Decision] Connected to session ID: ${sessionId || 'Not found'}`);
+					if (pageSessionId) {
+						resultData.sessionId = pageSessionId;
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Found session ID in page: ${pageSessionId}`);
+					} else {
+						this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] No session ID provided or found in page`);
+					}
+				} catch (error) {
+					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error retrieving session ID from page: ${(error as Error).message}`);
+				}
+			}
 
 			// Check each condition group
 			for (const group of conditionGroups) {
@@ -2059,7 +2078,7 @@ export const description: INodeProperties[] = [
 					}
 				}
 
-				this.logger.info(`[Ventriloquist][${nodeName}][Decision] Checking group: "${groupName}" (type: ${conditionType}, invert: ${invertCondition})`);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Checking group: "${groupName}" (type: ${conditionType}, invert: ${invertCondition})`);
 
 				// Initialize the overall condition result
 				let groupConditionMet = false;
@@ -2262,7 +2281,7 @@ export const description: INodeProperties[] = [
 						routeTaken = groupName;
 						const actionType = group.actionType as string;
 
-						this.logger.info(`[Ventriloquist][${nodeName}][Decision] Condition met for group "${groupName}", taking this route`);
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Condition met for group "${groupName}", taking this route`);
 
 						// For routing capability, store route information
 						if (enableRouting) {
@@ -2270,13 +2289,13 @@ export const description: INodeProperties[] = [
 							if (groupRoute) {
 								// Route numbers are 1-based, but indexes are 0-based
 								routeIndex = groupRoute - 1;
-								this.logger.info(`[Ventriloquist][${nodeName}][Decision] Using route: ${groupRoute} (index: ${routeIndex})`);
+								this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using route: ${groupRoute} (index: ${routeIndex})`);
 							}
 						}
 
 						if (actionType !== 'none') {
 							actionPerformed = actionType;
-							this.logger.info(`[Ventriloquist][${nodeName}][Decision] Performing action: "${actionType}"`);
+							this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Performing action: "${actionType}"`);
 
 							// Add human-like delay if enabled
 							if (useHumanDelays) {
@@ -2289,7 +2308,7 @@ export const description: INodeProperties[] = [
 									const waitAfterAction = group.waitAfterAction as string;
 									const waitTime = group.waitTime as number;
 
-									this.logger.info(`[Ventriloquist][${nodeName}][Decision] Click action: selector="${actionSelector}", waitAfter="${waitAfterAction}", waitTime=${waitTime}ms`);
+									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Click action: selector="${actionSelector}", waitAfter="${waitAfterAction}", waitTime=${waitTime}ms`);
 
 									if (waitForSelectors) {
 										// For actions, we always need to ensure the element exists
@@ -3000,10 +3019,14 @@ export const description: INodeProperties[] = [
 
 					// Exit after the first match - we don't continue checking conditions
 					break;
+				} else {
+					// Important change: This is NOT an error, just a normal condition not being met
+					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Condition not met for group "${groupName}", continuing to next condition`);
 				}
 			} catch (error) {
-				this.logger.error(`[Ventriloquist][${nodeName}][Decision] Error in group "${groupName}": ${(error as Error).message}`);
-				// No need for continue statement as it's the last statement in the loop
+				// This is a genuine error in execution, not just a condition failing
+				this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Action execution error in group "${groupName}": ${(error as Error).message}`);
+				// Continue to the next group if there's an error in this one
 			}
 		}
 
@@ -3297,7 +3320,7 @@ export const description: INodeProperties[] = [
 				quality: 80,
 			}) as string;
 			resultData.screenshot = screenshot;
-			this.logger.debug(`[Ventriloquist][${nodeName}][Decision] Screenshot captured (${screenshot.length} bytes)`);
+			this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Screenshot captured (${screenshot.length} bytes)`);
 		}
 
 		// Update result data
@@ -3308,7 +3331,7 @@ export const description: INodeProperties[] = [
 		resultData.actionPerformed = actionPerformed;
 
 		// Log completion with execution metrics
-		this.logger.info(`[Ventriloquist][${nodeName}][Decision] Completed execution: route="${routeTaken}", action="${actionPerformed}", duration=${resultData.executionDuration}ms`);
+		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Completed execution: route="${routeTaken}", action="${actionPerformed}", duration=${resultData.executionDuration}ms`);
 
 		// Build the output item in accordance with n8n standards
 		const returnItem: INodeExecutionData = {
@@ -3325,11 +3348,11 @@ export const description: INodeProperties[] = [
 			// Put the item in the correct route
 			if (routeIndex >= 0 && routeIndex < routeCount) {
 				routes[routeIndex].push(returnItem);
-				this.logger.info(`[Ventriloquist][${nodeName}][Decision] Sending output to route ${routeIndex + 1}`);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Sending output to route ${routeIndex + 1}`);
 			} else {
 				// Default to route 0 if routeIndex is out of bounds
-				routes[0].push(returnItem);
-				this.logger.warn(`[Ventriloquist][${nodeName}][Decision] Route index ${routeIndex} out of bounds, defaulting to route 1`);
+					routes[0].push(returnItem);
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Route index ${routeIndex} out of bounds, defaulting to route 1`);
 			}
 
 			return routes;
@@ -3339,7 +3362,7 @@ export const description: INodeProperties[] = [
 		return [returnItem];
 	} catch (error) {
 		const errorMessage = (error as Error).message;
-		this.logger.error(`[Ventriloquist][${nodeName}][Decision] Error during execution: ${errorMessage}`);
+		this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error during execution: ${errorMessage}`);
 
 		// Try to get a screenshot on error for debugging
 		let errorScreenshot: string | undefined;
@@ -3352,14 +3375,14 @@ export const description: INodeProperties[] = [
 					type: 'jpeg',
 					quality: 80,
 				}) as string;
-				this.logger.debug(`[Ventriloquist][${nodeName}][Decision] Error screenshot captured (${errorScreenshot.length} bytes)`);
+				this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error screenshot captured (${errorScreenshot.length} bytes)`);
 			} catch (screenshotError) {
-				this.logger.warn(`[Ventriloquist][${nodeName}][Decision] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
 			}
 		}
 
 		if (continueOnFail) {
-			this.logger.info(`[Ventriloquist][${nodeName}][Decision] Continuing despite error (continueOnFail=true)`);
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Continuing despite error (continueOnFail=true)`);
 
 			let errorCurrentUrl = 'unknown';
 			let errorPageTitle = 'unknown';
@@ -3371,19 +3394,22 @@ export const description: INodeProperties[] = [
 				// Ignore errors when trying to get page info
 			}
 
-			// Return error information in the output
+			// Get session ID parameter if available
+			const inputSessionId = this.getNodeParameter('sessionId', index, '') as string;
+
+			// Return error information in the output but preserve the session ID
 			const executionDuration = Date.now() - startTime;
 			const returnItem: INodeExecutionData = {
-				json: {
-					success: false,
-					error: errorMessage,
+					json: {
+						success: false,
+						error: errorMessage,
 						routeTaken: 'error',
 						actionPerformed: 'none',
 						currentUrl: errorCurrentUrl,
-						pageTitle: errorPageTitle,
-						screenshot: errorScreenshot,
-						executionDuration,
-						sessionId: '',
+							pageTitle: errorPageTitle,
+							screenshot: errorScreenshot,
+							executionDuration,
+							sessionId: inputSessionId, // Ensure session ID is preserved on error
 					},
 					pairedItem: { item: index },
 				};
@@ -3398,7 +3424,6 @@ export const description: INodeProperties[] = [
 				return routes;
 			}
 
-			// Single output case - no else needed
 			return [returnItem];
 		}
 
