@@ -1664,6 +1664,12 @@ export const description: INodeProperties[] = [
 
 		let waitUntilOption: puppeteer.PuppeteerLifeCycleEvent | puppeteer.PuppeteerLifeCycleEvent[] = 'domcontentloaded';
 
+        // Set default timeout if not provided
+        const effectiveTimeout = timeout || 30000;
+
+        // For urlChanged, use a shorter timeout
+        const urlChangeTimeout = 6000; // 6 seconds is more reasonable than 30
+
 		switch (waitUntil) {
 			case 'domContentLoaded':
 				waitUntilOption = 'domcontentloaded';
@@ -1672,14 +1678,36 @@ export const description: INodeProperties[] = [
 				waitUntilOption = 'networkidle0';
 				break;
 			case 'fixedTime':
-				await new Promise((resolve) => setTimeout(resolve, timeout));
+				await new Promise((resolve) => setTimeout(resolve, effectiveTimeout));
 				return;
+            case 'urlChanged': {
+                // Store current URL before waiting
+                const currentUrl = page.url();
+                try {
+                    // Wait for URL to change with a shorter timeout
+                    await page.waitForFunction(
+                        (beforeUrl) => window.location.href !== beforeUrl,
+                        { timeout: urlChangeTimeout },
+                        currentUrl
+                    );
+                    return;
+                } catch (error) {
+                    // Check if the URL actually changed despite the timeout
+                    if (page.url() !== currentUrl) {
+                        // URL did change, we just timed out waiting for the event
+                        return;
+                    }
+                    // If we're here, URL didn't change within timeout, fall back to domcontentloaded
+                    waitUntilOption = 'domcontentloaded';
+                }
+                break;
+            }
 			default:
 				waitUntilOption = 'domcontentloaded';
 		}
 
-		if (waitUntil !== 'noWait' && waitUntil !== 'fixedTime') {
-			await page.waitForNavigation({ waitUntil: waitUntilOption, timeout });
+		if (waitUntil !== 'noWait' && waitUntil !== 'fixedTime' && waitUntil !== 'urlChanged') {
+			await page.waitForNavigation({ waitUntil: waitUntilOption, timeout: effectiveTimeout });
 		}
 	}
 
