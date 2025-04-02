@@ -2336,34 +2336,51 @@ export const description: INodeProperties[] = [
 								case 'click': {
 									const actionSelector = group.actionSelector as string;
 									const waitAfterAction = group.waitAfterAction as string;
-									const waitTime = group.waitTime as number;
-
-									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Click action: selector="${actionSelector}", waitAfter="${waitAfterAction}", waitTime=${waitTime}ms`);
-
-									if (waitForSelectors) {
-										// For actions, we always need to ensure the element exists
-										if (detectionMethod === 'smart') {
-											const elementExists = await smartWaitForSelector(
-												puppeteerPage,
-												actionSelector,
-												selectorTimeout,
-												earlyExitDelay,
-												this.logger,
-											);
-
-											if (!elementExists) {
-												throw new Error(`Action element with selector "${actionSelector}" not found`);
-											}
-										} else {
-											await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
-										}
+									// Fix: Ensure waitTime has a default value based on the waitAfterAction type
+									let waitTime = group.waitTime as number;
+									if (waitTime === undefined) {
+										waitTime = waitAfterAction === 'fixedTime' ? 2000 :
+												  waitAfterAction === 'urlChanged' ? 6000 : 30000;
 									}
 
-									this.logger.debug(`Clicking element: ${actionSelector}`);
-									await puppeteerPage.click(actionSelector);
+									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Executing click on "${actionSelector}" (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`);
 
-									// Wait according to specified wait type
-									await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
+									try {
+										// For actions, we always need to ensure the element exists
+										if (waitForSelectors) {
+											if (detectionMethod === 'smart') {
+												const elementExists = await smartWaitForSelector(
+													puppeteerPage,
+													actionSelector,
+													selectorTimeout,
+													earlyExitDelay,
+													this.logger,
+												);
+
+												if (!elementExists) {
+													// Improve error message
+													throw new Error(`Element selector "${actionSelector}" exists in page but is not clickable or visible`);
+												}
+											} else {
+												await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+											}
+										}
+
+										// Perform the click
+										this.logger.debug(`Clicking element: ${actionSelector}`);
+										await puppeteerPage.click(actionSelector);
+										this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Click successful on "${actionSelector}"`);
+
+										// Wait according to specified wait type
+										await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
+									} catch (error) {
+										// Improve error clarity by checking if it's a timeout error
+										const errorMessage = (error as Error).message;
+										if (errorMessage.includes('timeout')) {
+											throw new Error(`Timeout waiting for element "${actionSelector}" (${selectorTimeout}ms)`);
+										}
+										throw error; // Re-throw other errors
+									}
 									break;
 								}
 
@@ -2664,13 +2681,31 @@ export const description: INodeProperties[] = [
 							case 'navigate': {
 								const url = group.url as string;
 								const waitAfterAction = group.waitAfterAction as string;
-								const waitTime = group.waitTime as number;
+								// Fix: Ensure waitTime has a default value based on the waitAfterAction type
+								let waitTime = group.waitTime as number;
+								if (waitTime === undefined) {
+									waitTime = waitAfterAction === 'fixedTime' ? 2000 :
+											  waitAfterAction === 'urlChanged' ? 6000 : 30000;
+								}
 
-								this.logger.debug(`Navigating to URL: ${url}`);
-								await puppeteerPage.goto(url);
+								this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigating to "${url}" (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`);
 
-								// Wait according to specified wait type
-								await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
+								try {
+									await puppeteerPage.goto(url);
+									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation successful to "${url}"`);
+
+									// Wait according to specified wait type
+									await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
+								} catch (error) {
+									const errorMessage = (error as Error).message;
+									if (errorMessage.includes('timeout')) {
+										this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation timeout to "${url}" - continuing anyway`);
+									}
+									// If it's not a timeout error, rethrow it
+									if (!errorMessage.includes('timeout')) {
+										throw error;
+									}
+								}
 								break;
 							}
 						}
