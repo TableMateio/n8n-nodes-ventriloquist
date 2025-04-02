@@ -338,7 +338,7 @@ export class Ventriloquist implements INodeType {
 				return false;
 			}
 
-			// Count all conditions across all groups
+			// For each group, check if it has multiple conditions
 			for (const group of conditionGroups.groups as IDataObject[]) {
 				if (group.conditions && typeof group.conditions === 'object') {
 					const conditions = group.conditions as IDataObject;

@@ -96,6 +96,33 @@ export const description: INodeProperties[] = [
 							},
 						},
 						{
+							displayName: 'Logical Operator',
+							name: 'logicalOperator',
+							type: 'options',
+							options: [
+								{
+									name: 'AND - All Conditions Must Match',
+									value: 'and',
+									description: 'All conditions must be true for the group to match (logical AND)',
+								},
+								{
+									name: 'OR - Any Condition Can Match',
+									value: 'or',
+									description: 'At least one condition must be true for the group to match (logical OR)',
+								},
+							],
+							default: 'and',
+							description: 'How to combine multiple conditions in this group (only appears when you add a second condition)',
+							displayOptions: {
+								show: {
+									'/operation': ['decision'],
+								},
+								hide: {
+									'@node.hasMultipleConditions': [false]
+								}
+							},
+						},
+						{
 							displayName: 'Conditions',
 							name: 'conditions',
 							placeholder: 'Add Condition',
@@ -108,8 +135,7 @@ export const description: INodeProperties[] = [
 								condition: [
 									{
 										conditionType: 'elementExists',
-										selector: '',
-										logicalOperator: 'and'
+										selector: ''
 									}
 								]
 							},
@@ -1419,6 +1445,219 @@ export const description: INodeProperties[] = [
 	}
 
 	/**
+	 * Evaluate a single condition
+	 */
+	async function evaluateCondition(
+		page: puppeteer.Page,
+		condition: IDataObject,
+		conditionType: string,
+		waitForSelectors: boolean,
+		selectorTimeout: number,
+		detectionMethod: string,
+		earlyExitDelay: number,
+		currentUrl: string,
+		index: number,
+		thisNode: IExecuteFunctions
+	): Promise<boolean> {
+		let conditionMet = false;
+
+		switch (conditionType) {
+			case 'elementExists': {
+				const selector = condition.selector as string;
+
+				if (waitForSelectors) {
+					if (detectionMethod === 'smart') {
+						// Use smart DOM-aware detection
+						conditionMet = await smartWaitForSelector(
+							page,
+							selector,
+							selectorTimeout,
+							earlyExitDelay,
+							thisNode.logger,
+						);
+					} else {
+						// Use traditional fixed timeout waiting
+						try {
+							await page.waitForSelector(selector, { timeout: selectorTimeout });
+							conditionMet = true;
+						} catch (error) {
+							conditionMet = false;
+						}
+					}
+				} else {
+					// Just check without waiting
+					const elementExists = await page.$(selector) !== null;
+					conditionMet = elementExists;
+				}
+				break;
+			}
+
+			case 'textContains': {
+				const selector = condition.selector as string;
+				const textToCheck = condition.textToCheck as string;
+				const matchType = condition.matchType as string;
+				const caseSensitive = condition.caseSensitive as boolean;
+
+				if (waitForSelectors) {
+					let elementExists = false;
+					if (detectionMethod === 'smart') {
+						// Use smart DOM-aware detection
+						elementExists = await smartWaitForSelector(
+							page,
+							selector,
+							selectorTimeout,
+							earlyExitDelay,
+							thisNode.logger,
+						);
+					} else {
+						// Use traditional fixed timeout waiting
+						try {
+							await page.waitForSelector(selector, { timeout: selectorTimeout });
+							elementExists = true;
+						} catch (error) {
+							elementExists = false;
+						}
+					}
+
+					if (!elementExists) {
+						conditionMet = false;
+						break;
+					}
+				}
+
+				try {
+					const elementText = await page.$eval(selector, (el) => el.textContent || '');
+					conditionMet = matchStrings(elementText, textToCheck, matchType, caseSensitive);
+				} catch (error) {
+					// Element might not exist
+					conditionMet = false;
+				}
+				break;
+			}
+
+			case 'elementCount': {
+				const selector = condition.selector as string;
+				const expectedCount = condition.expectedCount as number;
+				const countComparison = condition.countComparison as string;
+
+				// For element count, we just check without waiting as we expect some elements might not exist
+				const elements = await page.$$(selector);
+				const actualCount = elements.length;
+
+				conditionMet = compareCount(actualCount, expectedCount, countComparison);
+				break;
+			}
+
+			case 'urlContains': {
+				const urlSubstring = condition.urlSubstring as string;
+				const matchType = condition.matchType as string;
+				const caseSensitive = condition.caseSensitive as boolean;
+
+				conditionMet = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
+				break;
+			}
+
+			case 'expression': {
+				const jsExpression = condition.jsExpression as string;
+
+				try {
+					// Create a safe context for expression evaluation
+					const sandbox = {
+						$input: thisNode.getInputData()[index],
+						$node: thisNode.getNode(),
+					};
+
+					// Evaluate the expression in a safe manner
+					// We're using Function constructor to create an isolated scope
+					const evalFunction = new Function(
+						'$input',
+						'$node',
+						`"use strict"; return (${jsExpression});`,
+					);
+
+					// Execute the function with our safe context
+					conditionMet = Boolean(evalFunction(sandbox.$input, sandbox.$node));
+					thisNode.logger.debug(`Expression evaluation result: ${conditionMet} for: ${jsExpression}`);
+				} catch (error) {
+					thisNode.logger.error(`Error evaluating expression: ${error.message}`);
+					conditionMet = false;
+				}
+				break;
+			}
+
+			case 'inputSource': {
+				const sourceNodeName = condition.sourceNodeName as string;
+
+				try {
+					// Get the node that sent the data
+					const inputData = thisNode.getInputData()[index];
+
+					// Only access source property if it's a data object with the right structure
+					let inputNodeName: string | undefined;
+
+					if (typeof inputData === 'object' &&
+						inputData !== null &&
+						'source' in inputData &&
+						inputData.source !== null &&
+						typeof inputData.source === 'object') {
+
+						const source = inputData.source as IDataObject;
+						if ('node' in source &&
+							source.node !== null &&
+							typeof source.node === 'object') {
+
+							const node = source.node as IDataObject;
+							if ('name' in node && typeof node.name === 'string') {
+								inputNodeName = node.name;
+							}
+						}
+					}
+
+					// Compare with the expected source node name
+					conditionMet = inputNodeName === sourceNodeName;
+					thisNode.logger.debug(`Input source check: ${inputNodeName} === ${sourceNodeName}: ${conditionMet}`);
+				} catch (error) {
+					thisNode.logger.error(`Error checking input source: ${error.message}`);
+					conditionMet = false;
+				}
+				break;
+			}
+
+			case 'executionCount': {
+				const comparison = condition.executionCountComparison as string;
+				const value = condition.executionCountValue as number;
+
+				try {
+					// Get static data for this node to track execution count
+					const nodeContext = thisNode.getWorkflowStaticData('node');
+
+					// Initialize or increment the execution counter
+					if (typeof nodeContext.executionCount !== 'number') {
+						nodeContext.executionCount = 0;
+					}
+
+					nodeContext.executionCount = (nodeContext.executionCount as number) + 1;
+					const currentCount = nodeContext.executionCount as number;
+
+					// Compare using the same helper function we use for element count
+					conditionMet = compareCount(currentCount, value, comparison);
+					thisNode.logger.debug(`Execution count check: ${currentCount} ${comparison} ${value}: ${conditionMet}`);
+				} catch (error) {
+					thisNode.logger.error(`Error checking execution count: ${error.message}`);
+					conditionMet = false;
+				}
+				break;
+			}
+
+			default:
+				thisNode.logger.warn(`Unknown condition type: ${conditionType}`);
+				conditionMet = false;
+		}
+
+		return conditionMet;
+	}
+
+	/**
 	 * Execute the decision operation
 	 */
 	export async function execute(
@@ -1487,6 +1726,9 @@ export const description: INodeProperties[] = [
 					conditions = (group.conditions as IDataObject).condition as IDataObject[];
 				}
 
+				// Get logical operator (default to AND if not set)
+				const logicalOperator = group.logicalOperator as string || 'and';
+
 				// Get route if routing is enabled
 				if (enableRouting) {
 					const groupRoute = group.route as number;
@@ -1496,7 +1738,7 @@ export const description: INodeProperties[] = [
 					}
 				}
 
-				this.logger.debug(`Checking decision group: ${groupName} with ${conditions.length} conditions`);
+				this.logger.debug(`Checking decision group: ${groupName} with ${conditions.length} conditions using ${logicalOperator} logic`);
 
 				// Initialize the overall condition result
 				let groupConditionMet = false;
@@ -1506,228 +1748,105 @@ export const description: INodeProperties[] = [
 					if (conditions.length === 0) {
 						this.logger.debug(`No conditions in group ${groupName}, skipping`);
 						groupConditionMet = false;
-					} else {
-						// Process conditions with their individual logical operators
-						for (let i = 0; i < conditions.length; i++) {
-							const condition = conditions[i];
-							const conditionType = condition.conditionType as string;
-							const invertSingleCondition = condition.invertCondition as boolean || false;
-							const logicalOperator = condition.logicalOperator as string || 'and';
+					} else if (conditions.length === 1) {
+						// Single condition case - just evaluate it directly
+						const condition = conditions[0];
+						const conditionType = condition.conditionType as string;
+						const invertSingleCondition = condition.invertCondition as boolean || false;
 
-							// Evaluate a single condition
-							let conditionMet = false;
+						// Evaluate the single condition
+						groupConditionMet = await evaluateCondition(
+							puppeteerPage,
+							condition,
+							conditionType,
+							waitForSelectors,
+							selectorTimeout,
+							detectionMethod,
+							earlyExitDelay,
+							currentUrl,
+							index,
+							this
+						);
 
-							// Use the same switch structure but with condition object instead of group
-							switch (conditionType) {
-								case 'elementExists': {
-									const selector = condition.selector as string;
-
-									if (waitForSelectors) {
-										if (detectionMethod === 'smart') {
-											// Use smart DOM-aware detection
-											conditionMet = await smartWaitForSelector(
-												puppeteerPage,
-												selector,
-												selectorTimeout,
-												earlyExitDelay,
-												this.logger,
-											);
-										} else {
-											// Use traditional fixed timeout waiting
-											try {
-												await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
-												conditionMet = true;
-											} catch (error) {
-												conditionMet = false;
-											}
-										}
-									} else {
-										// Just check without waiting
-										const elementExists = await puppeteerPage.$(selector) !== null;
-										conditionMet = elementExists;
-									}
-									break;
-								}
-
-								case 'textContains': {
-									const selector = condition.selector as string;
-									const textToCheck = condition.textToCheck as string;
-									const matchType = condition.matchType as string;
-									const caseSensitive = condition.caseSensitive as boolean;
-
-									if (waitForSelectors) {
-										let elementExists = false;
-										if (detectionMethod === 'smart') {
-											// Use smart DOM-aware detection
-											elementExists = await smartWaitForSelector(
-												puppeteerPage,
-												selector,
-												selectorTimeout,
-												earlyExitDelay,
-												this.logger,
-											);
-										} else {
-											// Use traditional fixed timeout waiting
-											try {
-												await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
-												elementExists = true;
-											} catch (error) {
-												elementExists = false;
-											}
-										}
-
-										if (!elementExists) {
-											conditionMet = false;
-											break;
-										}
-									}
-
-									try {
-										const elementText = await puppeteerPage.$eval(selector, (el) => el.textContent || '');
-										conditionMet = matchStrings(elementText, textToCheck, matchType, caseSensitive);
-									} catch (error) {
-										// Element might not exist
-										conditionMet = false;
-									}
-									break;
-								}
-
-								case 'elementCount': {
-									const selector = condition.selector as string;
-									const expectedCount = condition.expectedCount as number;
-									const countComparison = condition.countComparison as string;
-
-									// For element count, we just check without waiting as we expect some elements might not exist
-									const elements = await puppeteerPage.$$(selector);
-									const actualCount = elements.length;
-
-									conditionMet = compareCount(actualCount, expectedCount, countComparison);
-									break;
-								}
-
-								case 'urlContains': {
-									const urlSubstring = condition.urlSubstring as string;
-									const matchType = condition.matchType as string;
-									const caseSensitive = condition.caseSensitive as boolean;
-
-									conditionMet = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
-									break;
-								}
-
-								case 'expression': {
-									const jsExpression = condition.jsExpression as string;
-
-									try {
-										// Create a safe context for expression evaluation
-										const sandbox = {
-											$input: this.getInputData()[index],
-											$node: this.getNode(),
-										};
-
-										// Evaluate the expression in a safe manner
-										// We're using Function constructor to create an isolated scope
-										const evalFunction = new Function(
-											'$input',
-											'$node',
-											`"use strict"; return (${jsExpression});`,
-										);
-
-										// Execute the function with our safe context
-										conditionMet = Boolean(evalFunction(sandbox.$input, sandbox.$node));
-										this.logger.debug(`Expression evaluation result: ${conditionMet} for: ${jsExpression}`);
-									} catch (error) {
-										this.logger.error(`Error evaluating expression: ${error.message}`);
-										conditionMet = false;
-									}
-									break;
-								}
-
-								case 'inputSource': {
-									const sourceNodeName = condition.sourceNodeName as string;
-
-									try {
-										// Get the node that sent the data
-										const inputData = this.getInputData()[index];
-
-										// Only access source property if it's a data object with the right structure
-										let inputNodeName: string | undefined;
-
-										if (typeof inputData === 'object' &&
-											inputData !== null &&
-											'source' in inputData &&
-											inputData.source !== null &&
-											typeof inputData.source === 'object') {
-
-											const source = inputData.source as IDataObject;
-											if ('node' in source &&
-												source.node !== null &&
-												typeof source.node === 'object') {
-
-												const node = source.node as IDataObject;
-												if ('name' in node && typeof node.name === 'string') {
-													inputNodeName = node.name;
-												}
-											}
-										}
-
-										// Compare with the expected source node name
-										conditionMet = inputNodeName === sourceNodeName;
-										this.logger.debug(`Input source check: ${inputNodeName} === ${sourceNodeName}: ${conditionMet}`);
-									} catch (error) {
-										this.logger.error(`Error checking input source: ${error.message}`);
-										conditionMet = false;
-									}
-									break;
-								}
-
-								case 'executionCount': {
-									const comparison = condition.executionCountComparison as string;
-									const value = condition.executionCountValue as number;
-
-									try {
-										// Get static data for this node to track execution count
-										const nodeContext = this.getWorkflowStaticData('node');
-
-										// Initialize or increment the execution counter
-										if (typeof nodeContext.executionCount !== 'number') {
-											nodeContext.executionCount = 0;
-										}
-
-										nodeContext.executionCount = (nodeContext.executionCount as number) + 1;
-										const currentCount = nodeContext.executionCount as number;
-
-										// Compare using the same helper function we use for element count
-										conditionMet = compareCount(currentCount, value, comparison);
-										this.logger.debug(`Execution count check: ${currentCount} ${comparison} ${value}: ${conditionMet}`);
-									} catch (error) {
-										this.logger.error(`Error checking execution count: ${error.message}`);
-										conditionMet = false;
-									}
-									break;
-								}
-							}
-
-							// Apply inversion if specified for this specific condition
-							if (invertSingleCondition) {
-								conditionMet = !conditionMet;
-							}
-
-							// For the first condition, just set the initial result
-							if (i === 0) {
-								groupConditionMet = conditionMet;
-							} else {
-								// Apply the logical operator to combine with previous result
-								if (logicalOperator === 'and') {
-									// AND operator - both must be true
-									groupConditionMet = groupConditionMet && conditionMet;
-								} else {
-									// OR operator - either can be true
-									groupConditionMet = groupConditionMet || conditionMet;
-								}
-							}
-
-							this.logger.debug(`Condition ${i+1} (${conditionType}) result: ${conditionMet}, group result so far: ${groupConditionMet}`);
+						// Apply inversion if needed
+						if (invertSingleCondition) {
+							groupConditionMet = !groupConditionMet;
 						}
+
+						this.logger.debug(`Single condition (${conditionType}) result: ${groupConditionMet}`);
+					} else {
+						// Multiple conditions case - apply logical operator
+						if (logicalOperator === 'and') {
+							// AND logic - start with true, any false makes it false
+							groupConditionMet = true;
+
+							for (const condition of conditions) {
+								const conditionType = condition.conditionType as string;
+								const invertSingleCondition = condition.invertCondition as boolean || false;
+
+								// Evaluate the condition
+								let conditionMet = await evaluateCondition(
+									puppeteerPage,
+									condition,
+									conditionType,
+									waitForSelectors,
+									selectorTimeout,
+									detectionMethod,
+									earlyExitDelay,
+									currentUrl,
+									index,
+									this
+								);
+
+								// Apply inversion if needed
+								if (invertSingleCondition) {
+									conditionMet = !conditionMet;
+								}
+
+								// Short circuit if any condition is false
+								if (!conditionMet) {
+									groupConditionMet = false;
+									this.logger.debug(`Condition (${conditionType}) is false, short-circuiting AND logic`);
+									break;
+								}
+							}
+						} else {
+							// OR logic - start with false, any true makes it true
+							groupConditionMet = false;
+
+							for (const condition of conditions) {
+								const conditionType = condition.conditionType as string;
+								const invertSingleCondition = condition.invertCondition as boolean || false;
+
+								// Evaluate the condition
+								let conditionMet = await evaluateCondition(
+									puppeteerPage,
+									condition,
+									conditionType,
+									waitForSelectors,
+									selectorTimeout,
+									detectionMethod,
+									earlyExitDelay,
+									currentUrl,
+									index,
+									this
+								);
+
+								// Apply inversion if needed
+								if (invertSingleCondition) {
+									conditionMet = !conditionMet;
+								}
+
+								// Short circuit if any condition is true
+								if (conditionMet) {
+									groupConditionMet = true;
+									this.logger.debug(`Condition (${conditionType}) is true, short-circuiting OR logic`);
+									break;
+								}
+							}
+						}
+
+						this.logger.debug(`Multiple conditions with ${logicalOperator} logic result: ${groupConditionMet}`);
 					}
 
 					this.logger.debug(`Decision group ${groupName} final result: ${groupConditionMet}`);
