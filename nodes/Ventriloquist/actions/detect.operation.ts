@@ -474,7 +474,8 @@ function formatReturnValue(
 }
 
 /**
- * Smart wait for element with DOM-aware early exit strategy
+ * Smart Wait For Selector implementation that tries to optimize for detection speed
+ * while still being accurate
  */
 async function smartWaitForSelector(
 	page: puppeteer.Page,
@@ -482,15 +483,17 @@ async function smartWaitForSelector(
 	timeout: number,
 	earlyExitDelay: number,
 	logger: IExecuteFunctions['logger'],
+	nodeName: string,
+	nodeId: string,
 ): Promise<boolean> {
 	// Create a promise that resolves when the element is found
 	const elementPromise = page.waitForSelector(selector, { timeout })
 		.then(() => {
-			logger.debug(`Element found: ${selector}`);
+			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element found: ${selector}`);
 			return true;
 		})
 		.catch(() => {
-			logger.debug(`Element not found within timeout: ${selector}`);
+			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element not found within timeout: ${selector}`);
 			return false;
 		});
 
@@ -503,7 +506,7 @@ async function smartWaitForSelector(
 		};
 	});
 
-	logger.debug(`Current DOM state: ${JSON.stringify(domState)}`);
+	logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Current DOM state: ${JSON.stringify(domState)}`);
 
 	// If DOM is already loaded, do a quick check first
 	if (domState.domContentLoaded) {
@@ -513,13 +516,13 @@ async function smartWaitForSelector(
 		}, selector);
 
 		if (elementExists) {
-			logger.debug(`Element found immediately (DOM already loaded): ${selector}`);
+			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element found immediately (DOM already loaded): ${selector}`);
 			return true;
 		}
 
 		// If DOM is fully loaded and element doesn't exist, we can exit early
 		if (domState.loaded) {
-			logger.debug(`DOM fully loaded but element not found, waiting short delay: ${selector}`);
+			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] DOM fully loaded but element not found, waiting short delay: ${selector}`);
 			await new Promise(resolve => setTimeout(resolve, earlyExitDelay));
 
 			// Check one more time after the delay
@@ -528,11 +531,11 @@ async function smartWaitForSelector(
 			}, selector);
 
 			if (elementExistsAfterDelay) {
-				logger.debug(`Element found after delay: ${selector}`);
+				logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element found after delay: ${selector}`);
 				return true;
 			}
 
-			logger.debug(`Element not found after DOM load and delay, exiting early: ${selector}`);
+			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element not found after DOM load and delay, exiting early: ${selector}`);
 			return false;
 		}
 	}
@@ -547,7 +550,7 @@ async function smartWaitForSelector(
 			() => document.readyState === 'complete',
 			{ timeout: Math.min(timeout, 5000) } // Use smaller timeout for DOM wait
 		).catch(() => {
-			logger.debug('Timed out waiting for DOM to be complete');
+			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Timed out waiting for DOM to be complete`);
 		});
 
 		// Wait for either the element to appear or the DOM to load
@@ -563,7 +566,7 @@ async function smartWaitForSelector(
 
 		// If DOM loaded but element wasn't found, do one quick check
 		if (winner === 'DOM-Loaded') {
-			logger.debug('DOM loaded, performing final element check');
+			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] DOM loaded, performing final element check`);
 
 			// Wait short additional time for any final elements to appear
 			await new Promise(resolve => setTimeout(resolve, earlyExitDelay));
@@ -574,11 +577,11 @@ async function smartWaitForSelector(
 			}, selector);
 
 			if (elementExistsAfterDOM) {
-				logger.debug(`Element found after DOM loaded: ${selector}`);
+				logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element found after DOM loaded: ${selector}`);
 				return true;
 			}
 
-			logger.debug(`DOM loaded but element still not found: ${selector}`);
+			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] DOM loaded but element still not found: ${selector}`);
 			return false;
 		}
 	}
@@ -599,6 +602,8 @@ async function processDetection(
 	detectionMethod: string,
 	earlyExitDelay: number,
 	logger: IExecuteFunctions['logger'],
+	nodeName: string,
+	nodeId: string,
 ): Promise<{
 	success: boolean;
 	actualValue: string | number;
@@ -621,7 +626,7 @@ async function processDetection(
 				if (waitForSelectors) {
 					if (detectionMethod === 'smart') {
 						// Use smart detection approach
-						exists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger);
+						exists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger, nodeName, nodeId);
 					} else {
 						// Use traditional fixed timeout approach
 						await page.waitForSelector(selector, { timeout });
@@ -634,6 +639,7 @@ async function processDetection(
 			} catch (error) {
 				// If timeout occurs while waiting, element doesn't exist
 				exists = false;
+				logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element exists detection failed: ${(error as Error).message}`);
 			}
 
 			detectionSuccess = exists;
@@ -657,7 +663,7 @@ async function processDetection(
 
 					if (detectionMethod === 'smart') {
 						// Use smart detection approach
-						elementExists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger);
+						elementExists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger, nodeName, nodeId);
 					} else {
 						// Use traditional approach with fixed timeout
 						try {
@@ -682,7 +688,7 @@ async function processDetection(
 			} catch (error) {
 				// If error occurs, detection fails
 				textMatches = false;
-				logger.debug(`Text contains detection error: ${(error as Error).message}`);
+				logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Text contains detection error: ${(error as Error).message}`);
 			}
 
 			detectionSuccess = textMatches;
@@ -712,7 +718,7 @@ async function processDetection(
 
 					if (detectionMethod === 'smart') {
 						// Use smart detection approach
-						elementExists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger);
+						elementExists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger, nodeName, nodeId);
 					} else {
 						// Use traditional approach with fixed timeout
 						try {
@@ -741,7 +747,7 @@ async function processDetection(
 			} catch (error) {
 				// If error occurs, detection fails
 				attributeMatches = false;
-				logger.debug(`Attribute value detection error: ${(error as Error).message}`);
+				logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Attribute value detection error: ${(error as Error).message}`);
 			}
 
 			detectionSuccess = attributeMatches;
@@ -768,7 +774,7 @@ async function processDetection(
 				if (waitForSelectors) {
 					if (detectionMethod === 'smart') {
 						// Use smart detection approach - just need to know if at least one element exists
-						const anyElementExists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger);
+						const anyElementExists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger, nodeName, nodeId);
 
 						// If no elements exist in smart mode, we know the count is 0
 						if (!anyElementExists) {
@@ -790,42 +796,124 @@ async function processDetection(
 				}
 
 				// Count all matching elements
-				actualCount = (await page.$$(selector)).length;
-
-				// Compare counts according to the comparison operator
+				actualCount = await page.$$eval(selector, (elements) => elements.length);
 				countMatches = compareCount(actualCount, expectedCount, countComparison);
 			} catch (error) {
 				// If error occurs, detection fails
 				countMatches = false;
 				actualCount = 0;
-				logger.debug(`Element count detection error: ${(error as Error).message}`);
+				logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element count detection error: ${(error as Error).message}`);
 			}
 
 			detectionSuccess = countMatches;
-			actualValue = actualCount;
+			actualValue = actualCount.toString();
 			Object.assign(detectionDetails, {
 				selector,
 				expectedCount,
-				countComparison,
-				actualCount
+				countComparison
 			});
 			break;
 		}
 
 		case 'urlContains': {
-			const urlSubstring = detection.urlSubstring as string;
+			const urlToCheck = detection.urlToCheck as string;
 			const matchType = (detection.matchType as string) || 'contains';
 			const caseSensitive = detection.caseSensitive === true;
 
-			// Check if the URL matches according to the match type
-			const urlMatches = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
+			// Check if the current URL matches the criteria
+			const urlMatches = matchStrings(currentUrl, urlToCheck, matchType, caseSensitive);
 
 			detectionSuccess = urlMatches;
 			actualValue = currentUrl;
 			Object.assign(detectionDetails, {
-				urlSubstring,
+				urlToCheck,
 				matchType,
 				caseSensitive
+			});
+
+			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] URL check: Current=${currentUrl}, Expected=${urlToCheck}, Match=${urlMatches}`);
+			break;
+		}
+
+		case 'jsExpression': {
+			const expression = detection.expression as string;
+			let result: string | boolean = false;
+
+			try {
+				// Evaluate the JavaScript expression in the page context
+				result = await page.evaluate((expr) => {
+					// eslint-disable-next-line no-eval
+					return eval(expr);
+				}, expression);
+
+				// Convert boolean result to string if needed
+				if (typeof result === 'boolean') {
+					detectionSuccess = result;
+					actualValue = result.toString();
+				} else {
+					// For non-boolean results, check if it's truthy
+					detectionSuccess = Boolean(result);
+					actualValue = typeof result === 'object'
+						? JSON.stringify(result)
+						: String(result);
+				}
+			} catch (error) {
+				// If error occurs during evaluation, detection fails
+				detectionSuccess = false;
+				actualValue = `Error: ${(error as Error).message}`;
+				logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] JS expression evaluation error: ${(error as Error).message}`);
+			}
+
+			detectionDetails.expression = expression;
+			break;
+		}
+
+		case 'hasClass': {
+			const selector = detection.selector as string;
+			const className = detection.className as string;
+
+			let hasClass = false;
+
+			try {
+				if (waitForSelectors) {
+					let elementExists = false;
+
+					if (detectionMethod === 'smart') {
+						// Use smart detection approach
+						elementExists = await smartWaitForSelector(page, selector, timeout, earlyExitDelay, logger, nodeName, nodeId);
+					} else {
+						// Use traditional approach with fixed timeout
+						try {
+							await page.waitForSelector(selector, { timeout });
+							elementExists = true;
+						} catch {
+							elementExists = false;
+						}
+					}
+
+					// Only proceed if element exists
+					if (!elementExists) {
+						throw new Error(`Element with selector "${selector}" not found`);
+					}
+				}
+
+				// Check if the element has the specified class
+				hasClass = await page.$eval(
+					selector,
+					(el, cls) => el.classList.contains(cls),
+					className
+				);
+			} catch (error) {
+				// If error occurs, detection fails
+				hasClass = false;
+				logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Has class detection error: ${(error as Error).message}`);
+			}
+
+			detectionSuccess = hasClass;
+			actualValue = hasClass ? 'true' : 'false';
+			Object.assign(detectionDetails, {
+				selector,
+				className
 			});
 			break;
 		}
@@ -851,7 +939,8 @@ export async function execute(
 
 	// Added for better logging
 	const nodeName = this.getNode().name;
-	this.logger.info(`[Ventriloquist][${nodeName}][Detect] Starting execution`);
+	const nodeId = this.getNode().id;
+	this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] ========== START DETECT NODE EXECUTION ==========`);
 
 	// Get parameters
 	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
@@ -868,9 +957,9 @@ export async function execute(
 		: 0;
 
 	// Log the detection approach being used
-	this.logger.info(`[Ventriloquist][${nodeName}][Detect] Parameters: waitForSelectors=${waitForSelectors}, timeout=${timeout}ms, method=${detectionMethod}`);
+	this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Parameters: waitForSelectors=${waitForSelectors}, timeout=${timeout}ms, method=${detectionMethod}`);
 	if (detectionMethod === 'smart') {
-		this.logger.info(`[Ventriloquist][${nodeName}][Detect] Smart detection configured with ${earlyExitDelay}ms early exit delay`);
+		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Smart detection configured with ${earlyExitDelay}ms early exit delay`);
 	}
 
 	// Check if an explicit session ID was provided
@@ -891,14 +980,14 @@ export async function execute(
 
 		// If an explicit sessionId was provided, try to get that page first
 		if (explicitSessionId) {
-			this.logger.info(`[Ventriloquist][${nodeName}][Detect] Looking for explicitly provided session ID: ${explicitSessionId}`);
+			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Looking for explicitly provided session ID: ${explicitSessionId}`);
 			page = Ventriloquist.getPage(workflowId, explicitSessionId);
 
 			if (page) {
 				sessionId = explicitSessionId;
-				this.logger.info(`[Ventriloquist][${nodeName}][Detect] Found existing page with explicit session ID: ${sessionId}`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Found existing page with explicit session ID: ${sessionId}`);
 			} else {
-				this.logger.warn(`[Ventriloquist][${nodeName}][Detect] Provided session ID ${explicitSessionId} not found, will create a new session`);
+				this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Provided session ID ${explicitSessionId} not found, will create a new session`);
 			}
 		}
 
@@ -911,12 +1000,12 @@ export async function execute(
 				// Use the first available page
 				page = pages[0];
 				sessionId = `existing_${Date.now()}`;
-				this.logger.info(`[Ventriloquist][${nodeName}][Detect] Using existing page from browser session`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Using existing page from browser session`);
 			} else {
 				// Create a new page if none exists
 				page = await browser.newPage();
 				sessionId = newSessionId;
-				this.logger.info(`[Ventriloquist][${nodeName}][Detect] Created new page with session ID: ${sessionId}`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Created new page with session ID: ${sessionId}`);
 
 				// Store the new page for future operations
 				Ventriloquist.storePage(workflowId, sessionId, page);
@@ -936,10 +1025,10 @@ export async function execute(
 		const pageTitle = await page.title();
 		let screenshot = '';
 
-		this.logger.info(`[Ventriloquist][${nodeName}][Detect] Connected to page: URL=${currentUrl}, title=${pageTitle}`);
+		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Connected to page: URL=${currentUrl}, title=${pageTitle}`);
 
 		try {
-			this.logger.info(`[Ventriloquist][${nodeName}][Detect] Starting detection operations`);
+			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Starting detection operations`);
 
 			// Get detections
 			const detectionsData = this.getNodeParameter('detections.detection', index, []) as IDataObject[];
@@ -948,7 +1037,7 @@ export async function execute(
 				throw new Error('No detections defined.');
 			}
 
-			this.logger.info(`[Ventriloquist][${nodeName}][Detect] Processing ${detectionsData.length} detection rules`);
+			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Processing ${detectionsData.length} detection rules`);
 
 			// Initialize results objects
 			const results: IDataObject = {};
@@ -963,7 +1052,7 @@ export async function execute(
 				const failureValue = (detection.failureValue as string) || 'failure';
 				const invertResult = detection.invertResult === true;
 
-				this.logger.info(`[Ventriloquist][${nodeName}][Detect] Evaluating detection "${detectionName}" (type: ${detectionType})`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Evaluating detection "${detectionName}" (type: ${detectionType})`);
 
 				// Process the detection with the chosen method
 				const { success, actualValue, details: detectionDetails } = await processDetection(
@@ -974,7 +1063,9 @@ export async function execute(
 					timeout,
 					detectionMethod,
 					earlyExitDelay,
-					this.logger
+					this.logger,
+					nodeName,
+					nodeId
 				);
 
 				// Format the return value based on user preferences
@@ -988,7 +1079,7 @@ export async function execute(
 				);
 
 				const finalSuccess = invertResult ? !success : success;
-				this.logger.info(`[Ventriloquist][${nodeName}][Detect] Detection "${detectionName}" result: ${finalSuccess ? 'success' : 'failure'}, value=${formattedResult}`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Detection "${detectionName}" result: ${finalSuccess ? 'success' : 'failure'}, value=${formattedResult}`);
 
 				// Add the results to the main output
 				results[detectionName] = formattedResult;
@@ -1006,7 +1097,7 @@ export async function execute(
 
 			// Take a screenshot if requested
 			if (takeScreenshot) {
-				this.logger.debug(`[Ventriloquist][${nodeName}][Detect] Capturing screenshot`);
+				this.logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Capturing screenshot`);
 				const screenshotBuffer = await page.screenshot({
 					encoding: 'base64',
 					type: 'jpeg',
@@ -1017,7 +1108,8 @@ export async function execute(
 			}
 
 			const executionDuration = Date.now() - startTime;
-			this.logger.info(`[Ventriloquist][${nodeName}][Detect] Completed execution in ${executionDuration}ms`);
+			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Completed execution in ${executionDuration}ms`);
+			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] ========== END DETECT NODE EXECUTION ==========`);
 
 			// Build the final output
 			const output: IDataObject = {
@@ -1048,12 +1140,12 @@ export async function execute(
 			};
 		} catch (error) {
 			// Handle errors
-			this.logger.error(`[Ventriloquist][${nodeName}][Detect] Error during detection: ${(error as Error).message}`);
+			this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Error during detection: ${(error as Error).message}`);
 
 			// Take error screenshot if requested
 			if (takeScreenshot && page) {
 				try {
-					this.logger.debug(`[Ventriloquist][${nodeName}][Detect] Capturing error screenshot`);
+					this.logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Capturing error screenshot`);
 					const screenshotBuffer = await page.screenshot({
 						encoding: 'base64',
 						type: 'jpeg',
@@ -1062,13 +1154,14 @@ export async function execute(
 
 					screenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
 				} catch (screenshotError) {
-					this.logger.warn(`[Ventriloquist][${nodeName}][Detect] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
+					this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
 				}
 			}
 
 			if (continueOnFail) {
 				const executionDuration = Date.now() - startTime;
-				this.logger.info(`[Ventriloquist][${nodeName}][Detect] Continuing despite error (continueOnFail=true), duration=${executionDuration}ms`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Continuing despite error (continueOnFail=true), duration=${executionDuration}ms`);
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] ========== END DETECT NODE EXECUTION (WITH ERROR) ==========`);
 
 				// Return error information in the output
 				return {
@@ -1091,7 +1184,8 @@ export async function execute(
 		}
 	} catch (error) {
 		// Handle session creation errors
-		this.logger.error(`[Ventriloquist][${nodeName}][Detect] Session creation error: ${(error as Error).message}`);
+		this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Session creation error: ${(error as Error).message}`);
+		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] ========== END DETECT NODE EXECUTION (SESSION ERROR) ==========`);
 
 		if (continueOnFail) {
 			const executionDuration = Date.now() - startTime;
