@@ -96,7 +96,7 @@ export class BrowserlessTransport implements BrowserTransport {
 
 				if (isConnectable) {
 					successfulUrl = wsUrl;
-					this.logger.info(`Found working WebSocket URL: ${wsUrl.replace(this.apiKey, '***TOKEN***')}`);
+					this.logger.info(`Found working WebSocket URL: ${wsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***')}`);
 					break;
 				}
 			}
@@ -105,10 +105,42 @@ export class BrowserlessTransport implements BrowserTransport {
 			if (successfulUrl) {
 				this.logger.info('Connecting to Browserless with Puppeteer...');
 
-				const browser = await puppeteer.connect({
+				// Enhanced connection options for Railway Browserless
+				const isRailway = successfulUrl.includes('railway.app');
+
+				const connectionOptions: puppeteer.ConnectOptions = {
 					browserWSEndpoint: successfulUrl,
 					defaultViewport: { width: 1920, height: 1080 },
-				});
+				};
+
+				// Add Railway-specific options
+				if (isRailway) {
+					this.logger.info('Using Railway-specific connection options');
+
+					// Add special query parameters that Browserless on Railway understands
+					// These help with connection stability and performance
+					if (!successfulUrl.includes('--disable-dev-shm-usage')) {
+						connectionOptions.browserWSEndpoint += '&--disable-dev-shm-usage';
+					}
+
+					if (!successfulUrl.includes('--disable-gpu')) {
+						connectionOptions.browserWSEndpoint += '&--disable-gpu';
+					}
+
+					if (!successfulUrl.includes('--disable-setuid-sandbox')) {
+						connectionOptions.browserWSEndpoint += '&--disable-setuid-sandbox';
+					}
+
+					if (!successfulUrl.includes('--no-sandbox')) {
+						connectionOptions.browserWSEndpoint += '&--no-sandbox';
+					}
+
+					if (this.stealthMode && !successfulUrl.includes('stealth')) {
+						connectionOptions.browserWSEndpoint += '&stealth';
+					}
+				}
+
+				const browser = await puppeteer.connect(connectionOptions);
 
 				this.logger.info('Successfully connected to Browserless!');
 				return browser;
@@ -126,6 +158,11 @@ export class BrowserlessTransport implements BrowserTransport {
    - Copy the BROWSER_WS_ENDPOINT value from Railway
    - Paste it in the "Direct WebSocket URL" field
    - Try with and without adding the token parameter
+3. Verify your Railway deployment is properly configured:
+   - Check that the TOKEN environment variable is set
+   - Ensure MAX_CONCURRENT_SESSIONS is at least 5
+   - Set DEFAULT_STEALTH to true
+   - Set CONNECTION_TIMEOUT to 120000 or higher
 
 For Railway deployments, your WebSocket URL likely looks like:
 wss://browserless-production-xxxx.up.railway.app?token=YOUR_TOKEN
@@ -160,11 +197,33 @@ Error details: ${(error as Error).stack || (error as Error).message}`;
 			// Log the navigation attempt
 			this.logger.info(`Navigating to ${url}`);
 
-			// Navigate to the URL with the appropriate timeout
-			const response = await page.goto(url, {
-				...options,
-				timeout: this.requestTimeout, // Use our request timeout setting
-			});
+			// Navigation block for EACCES and ECONNREFUSED errors
+			let response: puppeteer.HTTPResponse | null = null;
+
+			try {
+				// Navigate to the URL with the appropriate timeout
+				response = await page.goto(url, {
+					...options,
+					timeout: this.requestTimeout, // Use our request timeout setting
+				});
+			} catch (navError) {
+				const errorMessage = (navError as Error).message || '';
+
+				// Handle common errors with Railway Browserless
+				if (errorMessage.includes('Navigation timeout')) {
+					this.logger.warn(`Navigation timeout for ${url}. Continuing with page processing...`);
+					// We'll continue with the page as-is since some content may have loaded
+				} else if (errorMessage.includes('net::ERR_CONNECTION_REFUSED') ||
+						  errorMessage.includes('net::ERR_TUNNEL_CONNECTION_FAILED')) {
+					// Common with Railway when site blocks datacenter IPs
+					throw new Error(`Connection refused by ${domain}. This site may be blocking Railway IPs or datacenter access.`);
+				} else if (errorMessage.includes('net::ERR_NAME_NOT_RESOLVED')) {
+					throw new Error(`Could not resolve domain ${domain}. Please check the URL.`);
+				} else {
+					// For any other navigation errors, rethrow
+					throw navError;
+				}
+			}
 
 			this.logger.info(`Successfully navigated to ${url}`);
 			return { response, domain };
@@ -263,7 +322,7 @@ Error details: ${(error as Error).stack || (error as Error).message}`;
 			page.setDefaultTimeout(this.requestTimeout);
 
 			// Additional context management for Railway deployments
-			if (this.baseUrl.includes('railway.app')) {
+			if (this.baseUrl.includes('railway.app') || (this.wsEndpoint && this.wsEndpoint.includes('railway.app'))) {
 				this.logger.info('Applying Railway-specific browser settings');
 
 				// Enable image loading (some railway deployments block by default)
