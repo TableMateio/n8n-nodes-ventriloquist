@@ -31,8 +31,9 @@ export class BrowserTransportFactory {
       const baseUrl = (credentials.baseUrl as string) || 'https://chrome.browserless.io';
       const stealthMode = credentials.stealthMode !== undefined ? credentials.stealthMode as boolean : true;
       const requestTimeout = credentials.connectionTimeout ? credentials.connectionTimeout as number : 120000;
+      const wsEndpoint = credentials.wsEndpoint as string || undefined;
 
-      logger.info(`Creating Browserless transport with base URL: ${baseUrl}, stealth mode: ${stealthMode}, timeout: ${requestTimeout}ms`);
+      logger.info(`Creating Browserless transport with base URL: ${baseUrl}, direct WebSocket endpoint: ${wsEndpoint || 'none'}`);
 
       return new BrowserlessTransport(
         logger,
@@ -40,6 +41,7 @@ export class BrowserTransportFactory {
         baseUrl,
         stealthMode,
         requestTimeout,
+        wsEndpoint,
       );
     }
 

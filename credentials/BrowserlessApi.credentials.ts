@@ -27,9 +27,18 @@ export class BrowserlessApi implements ICredentialType {
 			name: 'baseUrl',
 			type: 'string',
 			default: 'https://chrome.browserless.io',
-			placeholder: 'https://your-deployment.up.railway.app',
-			description: 'Base URL for Browserless. For Railway deployments, add https:// before your BROWSER_DOMAIN value (e.g., https://browserless-production-xxxx.up.railway.app).',
+			placeholder: 'browserless-production-2a8f.up.railway.app',
+			description: 'Base URL for Browserless. For Railway deployments, simply use your domain WITHOUT https:// (e.g., browserless-production-xxxx.up.railway.app).',
 			required: true,
+		},
+		{
+			displayName: 'Direct WebSocket URL (Optional)',
+			name: 'wsEndpoint',
+			type: 'string',
+			default: '',
+			placeholder: 'wss://browserless-production-2a8f.up.railway.app/browserws',
+			description: 'Direct WebSocket URL if available. For Railway deployments, check the BROWSER_WS_ENDPOINT environment variable and copy it here (without the token part).',
+			required: false,
 		},
 		{
 			displayName: 'Request Timeout',
@@ -52,7 +61,7 @@ export class BrowserlessApi implements ICredentialType {
 	// Test if the credentials are valid
 	test: ICredentialTestRequest = {
 		request: {
-			baseURL: '={{$credentials.baseUrl}}',
+			baseURL: '={{$credentials.baseUrl.startsWith("http") ? $credentials.baseUrl : "https://" + $credentials.baseUrl}}',
 			url: '/healthz',
 			method: 'GET',
 		},
