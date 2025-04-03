@@ -44,3 +44,60 @@ Refer to our [documentation on creating nodes](https://docs.n8n.io/integrations/
 ## License
 
 [MIT](https://github.com/n8n-io/n8n-nodes-starter/blob/master/LICENSE.md)
+
+## Ventriloquist
+
+The Ventriloquist node is an advanced browser automation tool for n8n that allows you to perform web scraping, form filling, clicking, and extracting data from websites. This node supports two different browser providers:
+
+### Supported Browser Providers
+
+#### 1. Bright Data Browser
+
+Bright Data provides a managed browser service with unblocked access to many websites:
+
+- **Advantages**: Excellent IP rotation, built-in unblocking features
+- **Limitations**: Some websites may require special permission
+- **Setup**: Requires a Bright Data subscription and WebSocket endpoint
+
+#### 2. Browserless.io
+
+Browserless is a cloud browser automation service:
+
+- **Advantages**: Simple API, no special permissions needed for most sites
+- **Limitations**: May encounter more CAPTCHAs without additional configuration
+- **Setup**: Requires a Browserless.io API key
+
+### Credential Configuration
+
+#### Bright Data API Credentials
+
+- **WebSocket Endpoint**: Your Bright Data Browser WebSocket URL (required)
+- **Authorized Domains**: List of domains that need authorization (optional)
+- **Password**: For authentication if required (optional)
+
+#### Browserless API Credentials
+
+- **API Key**: Your Browserless API key (required)
+- **Base URL**: Base URL for Browserless (default: `https://chrome.browserless.io`)
+- **Request Timeout**: Maximum time in milliseconds for operations like navigation (default: 120000)
+- **Stealth Mode**: Enable bot detection evasion techniques (default: true)
+
+### Tips for Using Ventriloquist
+
+1. **Session Management**: 
+   - The "Open Browser" operation creates a session
+   - Copy the `sessionId` to subsequent operations
+   - Use the "Close" operation to close sessions when done
+
+2. **Timeouts**:
+   - "Request Timeout" in credentials controls individual operation timeouts
+   - "Session Timeout" in the Open operation controls how long the browser stays open when idle
+
+3. **Choosing a Provider**:
+   - For general scraping, either provider works well
+   - For websites with strong anti-bot measures, Bright Data often works better
+   - For simple automation tasks, Browserless is often easier to set up
+
+4. **Debugging**:
+   - Enable the "Debug" option in the Open operation for troubleshooting
+   - Check logs for detailed information about each step

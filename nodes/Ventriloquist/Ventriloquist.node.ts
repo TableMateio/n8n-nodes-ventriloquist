@@ -21,6 +21,8 @@ import * as detectOperation from './actions/detect.operation';
 import * as decisionOperation from './actions/decision.operation';
 import * as openOperation from './actions/open.operation';
 import * as authenticateOperation from './actions/authenticate.operation';
+import { BrowserTransportFactory } from './transport/BrowserTransportFactory';
+import { BrowserTransport } from './transport/BrowserTransport';
 
 /**
  * Configure outputs for decision operation based on routing parameters
@@ -87,6 +89,8 @@ export class Ventriloquist implements INodeType {
 		logger: any,
 		sessionTimeout?: number,
 		forceNew: boolean = false,
+		credentialType: string = 'brightDataApi',
+		credentials?: ICredentialDataDecryptedObject,
 	): Promise<{ browser: puppeteer.Browser; sessionId: string; brightDataSessionId: string }> {
 		// Clean up old sessions
 		this.cleanupSessions();
@@ -115,50 +119,70 @@ export class Ventriloquist implements INodeType {
 				session = undefined; // Reset session to undefined to create a new one
 			}
 
-			// Extract the Bright Data session ID from the WebSocket URL if possible
-			try {
-				// Bright Data WebSocket URLs typically contain the session ID in a format like:
-				// wss://brd-customer-XXX.bright.com/browser/XXX/sessionID/...
-				// or wss://brd.superproxy.io:9223/XXXX/XXXX-XXXX-XXXX-XXXX
+			// If using Bright Data, try to extract the session ID from the WebSocket URL
+			if (credentialType === 'brightDataApi' && websocketEndpoint) {
+				try {
+					// Bright Data WebSocket URLs typically contain the session ID in a format like:
+					// wss://brd-customer-XXX.bright.com/browser/XXX/sessionID/...
+					// or wss://brd.superproxy.io:9223/XXXX/XXXX-XXXX-XXXX-XXXX
 
-				// First try to extract from standard format with io:port
-				let matches = websocketEndpoint.match(/io:\d+\/([^\/]+\/[^\/\s]+)/);
+					// First try to extract from standard format with io:port
+					let matches = websocketEndpoint.match(/io:\d+\/([^\/]+\/[^\/\s]+)/);
 
-				// If that doesn't work, try alternative format
-				if (!matches?.length) {
-					matches = websocketEndpoint.match(/io\/([^\/]+\/[^\/\s]+)/);
-				}
-
-				// If that doesn't work, try the older format
-				if (!matches?.length) {
-					matches = websocketEndpoint.match(/browser\/[^\/]+\/([^\/]+)/);
-				}
-
-				if (matches?.[1]) {
-					brightDataSessionId = matches[1];
-					logger.info(`Detected Bright Data session ID from WebSocket URL: ${brightDataSessionId}`);
-				} else {
-					// Fallback for other URL formats
-					const fallbackMatches = websocketEndpoint.match(/\/([a-f0-9-]{36}|[a-f0-9-]{7,8}\/[a-f0-9-]{36})/i);
-					if (fallbackMatches?.[1]) {
-						brightDataSessionId = fallbackMatches[1];
-						logger.info(`Extracted Bright Data session ID (fallback): ${brightDataSessionId}`);
-					} else {
-						logger.debug('Could not extract Bright Data session ID from WebSocket URL');
+					// If that doesn't work, try alternative format
+					if (!matches?.length) {
+						matches = websocketEndpoint.match(/io\/([^\/]+\/[^\/\s]+)/);
 					}
+
+					// If that doesn't work, try the older format
+					if (!matches?.length) {
+						matches = websocketEndpoint.match(/browser\/[^\/]+\/([^\/]+)/);
+					}
+
+					if (matches?.[1]) {
+						brightDataSessionId = matches[1];
+						logger.info(`Detected Bright Data session ID from WebSocket URL: ${brightDataSessionId}`);
+					} else {
+						// Fallback for other URL formats
+						const fallbackMatches = websocketEndpoint.match(/\/([a-f0-9-]{36}|[a-f0-9-]{7,8}\/[a-f0-9-]{36})/i);
+						if (fallbackMatches?.[1]) {
+							brightDataSessionId = fallbackMatches[1];
+							logger.info(`Extracted Bright Data session ID (fallback): ${brightDataSessionId}`);
+						} else {
+							logger.debug('Could not extract Bright Data session ID from WebSocket URL');
+						}
+					}
+				} catch (error) {
+					// Ignore errors in extraction, not critical
+					logger.debug('Failed to extract Bright Data session ID from WebSocket URL');
 				}
-			} catch (error) {
-				// Ignore errors in extraction, not critical
-				logger.debug('Failed to extract Bright Data session ID from WebSocket URL');
+			}
+
+			// Create browser transport based on credential type
+			const transportFactory = new BrowserTransportFactory();
+			let transport: BrowserTransport;
+
+			if (credentials) {
+				transport = transportFactory.createTransport(credentialType, logger, credentials);
+			} else if (credentialType === 'brightDataApi' && websocketEndpoint) {
+				// Create a basic BrightDataBrowser with just the endpoint if credentials aren't provided
+				// This is for backward compatibility
+				const dummyCredentials = {
+					websocketEndpoint,
+					authorizedDomains: '',
+				} as ICredentialDataDecryptedObject;
+				transport = transportFactory.createTransport(credentialType, logger, dummyCredentials);
+			} else {
+				throw new Error(`Cannot create browser transport: missing credentials for type ${credentialType}`);
 			}
 
 			// Create a new browser session
 			logger.info(forceNew
 				? 'Forcing creation of new browser session (required for Page.navigate)'
 				: 'Creating new browser session');
-			const browser = await puppeteer.connect({
-				browserWSEndpoint: websocketEndpoint,
-			});
+
+			// Connect to the browser using the transport
+			const browser = await transport.connect();
 
 			// Convert minutes to milliseconds for timeout if provided
 			const timeoutMs = sessionTimeout ? sessionTimeout * 60 * 1000 : 3 * 60 * 1000; // Default to 3 minutes
@@ -369,13 +393,12 @@ export class Ventriloquist implements INodeType {
 		displayName: 'Ventriloquist',
 		name: 'ventriloquist',
 		icon: 'file:ventriloquist.svg',
-		group: ['transform'],
+		group: ['browser'],
 		version: 1,
-		subtitle: '={{$parameter["operation"]}}',
-		description: 'Automate browser actions with Puppeteer',
+		subtitle: '={{ $parameter["operation"] }}',
+		description: 'Automate browser interactions using Bright Data or Browserless',
 		defaults: {
 			name: 'Ventriloquist',
-			color: '#2244BB',
 		},
 		inputs: [NodeConnectionType.Main],
 		outputs: `={{(${configureDecisionOutputs})($parameter)}}`,
@@ -383,9 +406,43 @@ export class Ventriloquist implements INodeType {
 			{
 				name: 'brightDataApi',
 				required: true,
+				displayOptions: {
+					show: {
+						browserService: ['brightData'],
+					},
+				},
+			},
+			{
+				name: 'browserlessApi',
+				required: true,
+				displayOptions: {
+					show: {
+						browserService: ['browserless'],
+					},
+				},
 			},
 		],
 		properties: [
+			{
+				displayName: 'Browser Service',
+				name: 'browserService',
+				type: 'options',
+				options: [
+					{
+						name: 'Bright Data',
+						value: 'brightData',
+						description: 'Use Bright Data browser automation service',
+					},
+					{
+						name: 'Browserless',
+						value: 'browserless',
+						description: 'Use Browserless browser automation service',
+					},
+				],
+				default: 'brightData',
+				description: 'The browser service to use for automation',
+				required: true,
+			},
 			{
 				displayName: 'Operation',
 				name: 'operation',
@@ -742,19 +799,41 @@ export class Ventriloquist implements INodeType {
 		// Always initialize with at least one output
 		returnData.push([]);
 
-		// Get credentials
-		const credentials = (await this.getCredentials(
-			'brightDataApi',
-		)) as ICredentialDataDecryptedObject;
+		// Get the browser service selected by the user
+		let credentials;
+		let credentialType;
+		let websocketEndpoint = '';
 
-		if (!credentials) {
-			throw new Error('No credentials provided for Bright Data API');
+		// Get the browser service selected by the user
+		const browserService = this.getNodeParameter('browserService', 0) as string;
+
+		// Set credential type based on browser service
+		if (browserService === 'brightData') {
+			credentialType = 'brightDataApi';
+			credentials = await this.getCredentials('brightDataApi');
+			websocketEndpoint = credentials.websocketEndpoint as string || '';
+
+			// Validate Bright Data credentials
+			if (!websocketEndpoint) {
+				throw new Error('WebSocket Endpoint is required for Bright Data API');
+			}
+		} else if (browserService === 'browserless') {
+			credentialType = 'browserlessApi';
+			credentials = await this.getCredentials('browserlessApi');
+
+			// Validate Browserless credentials
+			if (!credentials.apiKey) {
+				throw new Error('API Key is required for Browserless API');
+			}
+
+			// For Browserless, we'll build the websocket endpoint dynamically using the baseUrl
+			websocketEndpoint = ''; // Will be built in the transport
+		} else {
+			throw new Error(`Unsupported browser service: ${browserService}`);
 		}
 
-		const websocketEndpoint = credentials.websocketEndpoint as string;
-
-		if (!websocketEndpoint) {
-			throw new Error('WebSocket Endpoint is required');
+		if (!credentials) {
+			throw new Error(`No credentials provided for ${browserService}`);
 		}
 
 		// Process all items
@@ -773,6 +852,7 @@ export class Ventriloquist implements INodeType {
 						i,
 						websocketEndpoint,
 						workflowId,
+						credentialType,
 					);
 
 					// Add execution duration to the result if not already added
@@ -848,6 +928,9 @@ export class Ventriloquist implements INodeType {
 							websocketEndpoint,
 							this.logger,
 							brightDataTimeout,
+							true,
+							credentialType,
+							credentials,
 						);
 						browser = newBrowser;
 

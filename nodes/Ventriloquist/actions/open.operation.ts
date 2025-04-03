@@ -5,8 +5,8 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
-import { BrightDataBrowser } from '../transport/BrightDataBrowser';
 import { Ventriloquist } from '../Ventriloquist.node';
+import { BrowserTransportFactory } from '../transport/BrowserTransportFactory';
 
 /**
  * Open operation description
@@ -75,8 +75,8 @@ export const description: INodeProperties[] = [
 		displayName: 'Session Timeout',
 		name: 'sessionTimeout',
 		type: 'number',
-		default: 3,
-		description: 'Session timeout in minutes',
+		default: 8,
+		description: 'How long (in minutes) to keep the browser session alive after no activity. A higher value (8-10 minutes) is recommended for testing. This is different from Request Timeout in the credentials which controls individual operations.',
 	},
 	{
 		displayName: 'Enable Debug',
@@ -95,6 +95,7 @@ export async function execute(
 	index: number,
 	websocketEndpoint: string,
 	workflowId: string,
+	credentialType: string = 'brightDataApi',
 ): Promise<INodeExecutionData> {
 	// Track execution time
 	const startTime = Date.now();
@@ -116,22 +117,22 @@ export async function execute(
 	) as puppeteer.PuppeteerLifeCycleEvent;
 	const timeout = this.getNodeParameter('timeout', index, 30000) as number;
 	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
-	const sessionTimeout = this.getNodeParameter('sessionTimeout', index, 3) as number;
+	const sessionTimeout = this.getNodeParameter('sessionTimeout', index, 8) as number;
 	const enableDebug = this.getNodeParameter('enableDebug', index, false) as boolean;
 
 	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Opening URL: ${url}`);
 
-	// Get the authorized domains from the credentials
-	const credentials = await this.getCredentials('brightDataApi');
-	const authorizedDomains = (credentials.authorizedDomains as string) || '';
-	const password = (credentials.password as string) || undefined;
+	// Get credentials based on type
+	const credentials = await this.getCredentials(credentialType);
 
-	// Create the BrightDataBrowser instance with authorized domains and password
-	const brightDataBrowser = new BrightDataBrowser(
+	// Create browser transport factory
+	const transportFactory = new BrowserTransportFactory();
+
+	// Create appropriate transport based on credential type
+	const browserTransport = transportFactory.createTransport(
+		credentialType,
 		this.logger,
-		websocketEndpoint,
-		authorizedDomains,
-		password,
+		credentials,
 	);
 
 	let browser: puppeteer.Browser | undefined;
@@ -148,6 +149,8 @@ export async function execute(
 			this.logger,
 			sessionTimeout,
 			true, // Always force a new session for open operation
+			credentialType,
+			credentials,
 		);
 
 		browser = sessionData.browser;
@@ -187,7 +190,9 @@ export async function execute(
 
 		// Navigate to the URL
 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigating to URL: ${url}`);
-		const { response, domain } = await brightDataBrowser.navigateTo(page, url, {
+
+		// Use the transport to navigate
+		const { response, domain } = await browserTransport.navigateTo(page, url, {
 			waitUntil,
 			timeout,
 		});
@@ -197,10 +202,10 @@ export async function execute(
 		// we can still return a useful response with the session ID
 		try {
 			// Get page information
-			const pageInfo = await brightDataBrowser.getPageInfo(page, response);
+			const pageInfo = await browserTransport.getPageInfo(page, response);
 
 			// Take a screenshot
-			const screenshot = await brightDataBrowser.takeScreenshot(page);
+			const screenshot = await browserTransport.takeScreenshot(page);
 
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigation successful: ${pageInfo.url} (${pageInfo.title})`);
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] OPEN OPERATION SUCCESSFUL: Node has finished processing and is ready for the next node`);
@@ -219,6 +224,7 @@ export async function execute(
 				domain,
 				sessionId, // Include session ID in response for other operations to use
 				brightDataSessionId, // Include Bright Data session ID for reference
+				credentialType, // Include the type of credential used
 				timestamp: new Date().toISOString(),
 				executionDuration: Date.now() - startTime,
 				note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations."

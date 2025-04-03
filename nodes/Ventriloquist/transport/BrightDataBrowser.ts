@@ -1,10 +1,11 @@
 import * as puppeteer from 'puppeteer-core';
 import { URL } from 'url';
+import { BrowserTransport } from './BrowserTransport';
 
 /**
  * Class to handle Bright Data browser interactions
  */
-export class BrightDataBrowser {
+export class BrightDataBrowser implements BrowserTransport {
 	private logger: any;
 	private websocketEndpoint: string;
 	private authorizedDomains: string;
