@@ -20,6 +20,7 @@ import * as extractOperation from './actions/extract.operation';
 import * as detectOperation from './actions/detect.operation';
 import * as decisionOperation from './actions/decision.operation';
 import * as openOperation from './actions/open.operation';
+import * as authenticateOperation from './actions/authenticate.operation';
 
 /**
  * Configure outputs for decision operation based on routing parameters
@@ -355,6 +356,14 @@ export class Ventriloquist implements INodeType {
 		}
 	}
 
+	// Get the browserSessions map for other operations
+	public static getSessions(): Map<
+		string,
+		{ browser: puppeteer.Browser; lastUsed: Date; pages: Map<string, puppeteer.Page>; timeout?: number }
+	> {
+		return this.browserSessions;
+	}
+
 	// Methods to handle loading options for dynamic fields like routes
 	description: INodeTypeDescription = {
 		displayName: 'Ventriloquist',
@@ -424,6 +433,12 @@ export class Ventriloquist implements INodeType {
 						value: 'form',
 						description: 'Fill out a form',
 						action: 'Fill out a form',
+					},
+					{
+						name: 'Authenticate',
+						value: 'authenticate',
+						description: 'Handle authentication (TOTP, etc.)',
+						action: 'Authenticate with credentials',
 					},
 				],
 				default: 'open',
@@ -641,6 +656,9 @@ export class Ventriloquist implements INodeType {
 
 			// Properties for 'extract' operation
 			...extractOperation.description,
+
+			// Properties for 'authenticate' operation
+			...authenticateOperation.description,
 
 			// Properties for 'close' operation
 			{
@@ -1210,6 +1228,21 @@ export class Ventriloquist implements INodeType {
 					}
 
 					returnData[0].push(result);
+				} else if (operation === 'authenticate') {
+					// Execute authenticate operation
+					const result = await authenticateOperation.execute.call(
+						this,
+						i,
+						websocketEndpoint,
+						workflowId,
+					);
+
+					// Add execution duration to the result
+					if (result.json) {
+						result.json.executionDuration = Date.now() - startTime;
+					}
+
+					returnData[0].push(result);
 				} else if (operation === 'close') {
 					// Close browser sessions based on the selected mode
 					const closeMode = this.getNodeParameter('closeMode', i, 'session') as string;
@@ -1344,6 +1377,8 @@ export class Ventriloquist implements INodeType {
 							},
 						});
 					}
+				} else {
+					throw new Error(`The operation "${operation}" is not supported!`);
 				}
 			} catch (error: any) {
 				// Clean up the session if there's an error
