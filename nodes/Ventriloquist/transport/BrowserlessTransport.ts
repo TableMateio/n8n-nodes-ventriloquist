@@ -4,6 +4,7 @@ import { BrowserTransport } from './BrowserTransport';
 
 /**
  * Class to handle Browserless browser interactions
+ * Works with both Browserless.io cloud and self-hosted deployments (including Railway)
  */
 export class BrowserlessTransport implements BrowserTransport {
 	private logger: any;
@@ -15,8 +16,8 @@ export class BrowserlessTransport implements BrowserTransport {
 	/**
 	 * Create a BrowserlessTransport instance
 	 * @param logger - Logger instance
-	 * @param apiKey - Browserless API key
-	 * @param baseUrl - Browserless base URL
+	 * @param apiKey - Browserless API token (called TOKEN in Railway)
+	 * @param baseUrl - Browserless base URL (cloud or custom deployment URL)
 	 * @param stealthMode - Whether to use stealth mode
 	 * @param requestTimeout - Request timeout in milliseconds (for navigation, operations)
 	 */
@@ -29,7 +30,7 @@ export class BrowserlessTransport implements BrowserTransport {
 	) {
 		this.logger = logger;
 		this.apiKey = apiKey;
-		this.baseUrl = baseUrl;
+		this.baseUrl = baseUrl.replace(/\/$/, ''); // Remove trailing slash if present
 		this.stealthMode = stealthMode;
 		this.requestTimeout = requestTimeout;
 	}
@@ -37,17 +38,20 @@ export class BrowserlessTransport implements BrowserTransport {
 	/**
 	 * Connect to Browserless browser
 	 * This establishes a connection to the Browserless service via WebSocket
+	 * NOTE: No separate WebSocket endpoint is needed - it's constructed from the base URL
 	 */
 	async connect(): Promise<puppeteer.Browser> {
 		this.logger.info('Connecting to Browserless via WebSocket');
 
 		try {
 			// Construct the WebSocket URL with the API key and stealth mode if enabled
+			// The WS endpoint is automatically derived from the base URL
 			const wsEndpoint = `${this.baseUrl.replace('https://', 'wss://').replace('http://', 'ws://')}/chrome${this.stealthMode ? '/stealth' : ''}?token=${this.apiKey}`;
 
 			// Log the endpoint (hiding API key for security)
-			const sanitizedEndpoint = wsEndpoint.replace(this.apiKey, '***API_KEY***');
+			const sanitizedEndpoint = wsEndpoint.replace(this.apiKey, '***TOKEN***');
 			this.logger.info(`Connecting to Browserless WebSocket endpoint: ${sanitizedEndpoint}`);
+			this.logger.info('Using constructed WebSocket URL - no separate WS endpoint needed');
 
 			// Connect to the browser using the WebSocket endpoint
 			const browser = await puppeteer.connect({
@@ -63,15 +67,19 @@ export class BrowserlessTransport implements BrowserTransport {
 		} catch (error) {
 			// Enhance error message for common Browserless issues
 			if ((error as Error).message.includes('connect ETIMEDOUT')) {
-				throw new Error('Connection to Browserless timed out. Please check your API key and base URL.');
+				throw new Error('Connection to Browserless timed out. Please check your Token and base URL.');
 			}
 
 			if ((error as Error).message.includes('401')) {
-				throw new Error('Authentication failed. Please check your API key.');
+				throw new Error('Authentication failed. Please check your Token (it should be the TOKEN value from your Browserless setup).');
 			}
 
 			if ((error as Error).message.includes('429')) {
 				throw new Error('Browserless rate limit exceeded. Please try again later or upgrade your plan.');
+			}
+
+			if ((error as Error).message.includes('ENOTFOUND')) {
+				throw new Error(`Could not resolve host: ${this.baseUrl}. Please check your Base URL - for Railway deployments, use the full URL provided (e.g., browserless-production-xxxx.up.railway.app).`);
 			}
 
 			// For any other errors, rethrow with original message

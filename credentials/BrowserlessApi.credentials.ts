@@ -1,4 +1,8 @@
-import { type ICredentialType, type INodeProperties } from 'n8n-workflow';
+import {
+	type ICredentialType,
+	type INodeProperties,
+	type ICredentialTestRequest,
+} from 'n8n-workflow';
 
 export class BrowserlessApi implements ICredentialType {
 	name = 'browserlessApi';
@@ -9,13 +13,13 @@ export class BrowserlessApi implements ICredentialType {
 
 	properties: INodeProperties[] = [
 		{
-			displayName: 'API Key',
+			displayName: 'Token',
 			name: 'apiKey',
 			type: 'string',
 			typeOptions: { password: true },
 			default: '',
-			placeholder: 'Your Browserless API Key',
-			description: 'API Key for Browserless Cloud. Get this from your Browserless dashboard.',
+			placeholder: 'Your Browserless API Token',
+			description: 'Token for Browserless Cloud. For Railway deployments, this is the "TOKEN" environment variable.',
 			required: true,
 		},
 		{
@@ -23,8 +27,8 @@ export class BrowserlessApi implements ICredentialType {
 			name: 'baseUrl',
 			type: 'string',
 			default: 'https://chrome.browserless.io',
-			placeholder: 'https://chrome.browserless.io',
-			description: 'Base URL for Browserless. Change only if using a custom deployment or enterprise plan.',
+			placeholder: 'https://your-deployment.up.railway.app',
+			description: 'Base URL for Browserless. For Railway deployments, use your railway-provided domain (e.g., browserless-production-xxxx.up.railway.app).',
 			required: true,
 		},
 		{
@@ -44,4 +48,18 @@ export class BrowserlessApi implements ICredentialType {
 			required: false,
 		},
 	];
+
+	// Test if the credentials are valid
+	test: ICredentialTestRequest = {
+		request: {
+			baseURL: '={{$credentials.baseUrl}}',
+			url: '/stats',
+			method: 'GET',
+			headers: {
+				'Cache-Control': 'no-cache',
+				'Content-Type': 'application/json',
+				'Authorization': '=Bearer {{$credentials.apiKey}}'
+			},
+		},
+	};
 }
