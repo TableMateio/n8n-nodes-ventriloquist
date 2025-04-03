@@ -102,7 +102,10 @@ export async function execute(
 	// Added for better logging
 	const nodeName = this.getNode().name;
 	const nodeId = this.getNode().id;
-	this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] ========== START OPEN NODE EXECUTION ==========`);
+
+	// Visual marker to clearly indicate a new node is starting
+	this.logger.info("============ STARTING NODE EXECUTION ============");
+	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Starting execution`);
 
 	const url = this.getNodeParameter('url', index) as string;
 	const incognito = this.getNodeParameter('incognito', index, false) as boolean;
@@ -116,7 +119,7 @@ export async function execute(
 	const sessionTimeout = this.getNodeParameter('sessionTimeout', index, 3) as number;
 	const enableDebug = this.getNodeParameter('enableDebug', index, false) as boolean;
 
-	this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Opening URL: ${url}`);
+	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Opening URL: ${url}`);
 
 	// Get the authorized domains from the credentials
 	const credentials = await this.getCredentials('brightDataApi');
@@ -151,7 +154,7 @@ export async function execute(
 		sessionId = sessionData.sessionId;
 		brightDataSessionId = sessionData.brightDataSessionId;
 
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Created new browser session with ID: ${sessionId}`);
+		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Created new browser session with ID: ${sessionId}`);
 
 		// Create a new page
 		const context = incognito
@@ -161,12 +164,12 @@ export async function execute(
 
 		// Store the page for future operations
 		Ventriloquist.storePage(workflowId, sessionId, page);
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Stored page reference with session ID: ${sessionId}`);
+		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Stored page reference with session ID: ${sessionId}`);
 
 		// Set up response handling for better error messages
 		page.on('response', (response) => {
 			if (!response.ok()) {
-				this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Open] Response error: ${response.status()} for ${response.url()}`);
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Response error: ${response.status()} for ${response.url()}`);
 			}
 		});
 
@@ -175,14 +178,14 @@ export async function execute(
 			try {
 				// Note: Debug mode is enabled but we can't directly access the debug URL
 				// The session will be visible in Bright Data's console
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Debug mode enabled for this session`);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Debug mode enabled for this session`);
 			} catch (debugError) {
-				this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Open] Failed to enable debugger: ${(debugError as Error).message}`);
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Failed to enable debugger: ${(debugError as Error).message}`);
 			}
 		}
 
 		// Navigate to the URL
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Navigating to URL: ${url}`);
+		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigating to URL: ${url}`);
 		const { response, domain } = await brightDataBrowser.navigateTo(page, url, {
 			waitUntil,
 			timeout,
@@ -198,8 +201,11 @@ export async function execute(
 			// Take a screenshot
 			const screenshot = await brightDataBrowser.takeScreenshot(page);
 
-			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Navigation successful: ${pageInfo.url} (${pageInfo.title})`);
-			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] ========== END OPEN NODE EXECUTION ==========`);
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigation successful: ${pageInfo.url} (${pageInfo.title})`);
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] OPEN OPERATION SUCCESSFUL: Node has finished processing and is ready for the next node`);
+
+			// Add a visual end marker
+			this.logger.info("============ NODE EXECUTION COMPLETE ============");
 
 			// Prepare response data
 			const responseData: IDataObject = {
@@ -224,18 +230,20 @@ export async function execute(
 		} catch (postNavError) {
 			// Handle errors that occur after successful navigation (like execution context destroyed)
 			const errorMessage = (postNavError as Error).message;
-			this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Open] Post-navigation error: ${errorMessage}`);
+			this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Post-navigation error: ${errorMessage}`);
 
 			// If the error is about execution context destruction, it's likely because the page
 			// navigated to a new URL and we're trying to access the old context
 			const isContextDestroyed = errorMessage.includes('Execution context was destroyed');
 
 			if (isContextDestroyed) {
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] Context destroyed due to navigation - this is expected behavior`);
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] This usually happens with redirects or page refreshes during navigation`);
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] The browser session was SUCCESSFULLY created with ID: ${sessionId}`);
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] The session can be used by downstream nodes even though initial navigation triggered redirects`);
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] ========== END OPEN NODE EXECUTION (WITH RECOVERED ERROR) ==========`);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Context destroyed due to navigation - this is expected behavior`);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] This usually happens with redirects or page refreshes during navigation`);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] The browser session was SUCCESSFULLY created with ID: ${sessionId}`);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] The session can be used by downstream nodes even though initial navigation triggered redirects`);
+
+				// Add a visual end marker
+				this.logger.info("============ NODE EXECUTION COMPLETE (WITH RECOVERED ERROR) ============");
 
 				// Even with context destroyed, we can return success with the session ID
 				// This allows following nodes to use the session
@@ -265,7 +273,7 @@ export async function execute(
 		} catch {}
 
 		let errorMessage = (error as Error).message;
-		this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Open] Navigation error: ${errorMessage}`);
+		this.logger.error(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigation error: ${errorMessage}`);
 
 		// Provide more specific error message for common Bright Data errors
 		if (
@@ -280,7 +288,8 @@ export async function execute(
 			errorMessage = `This website (${domain}) requires special permission from Bright Data. Please add "${domain}" to the 'Domains For Authorization' field in your Bright Data credentials or contact Bright Data support to get this domain authorized for your account. Error details: ${(error as Error).message}`;
 		}
 
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Open] ========== END OPEN NODE EXECUTION (WITH ERROR) ==========`);
+		// Add a visual end marker
+		this.logger.info("============ NODE EXECUTION COMPLETE (WITH ERROR) ============");
 
 		// If continueOnFail is false, throw the error to fail the node
 		if (!continueOnFail) {
