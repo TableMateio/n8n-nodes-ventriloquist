@@ -44,16 +44,23 @@ export class BrowserlessTransport implements BrowserTransport {
 		this.logger.info('Connecting to Browserless via WebSocket');
 
 		try {
-			// Construct the WebSocket URL with the API key and stealth mode if enabled
-			// The WS endpoint is automatically derived from the base URL
-			const wsEndpoint = `${this.baseUrl.replace('https://', 'wss://').replace('http://', 'ws://')}/chrome${this.stealthMode ? '/stealth' : ''}?token=${this.apiKey}`;
+			// Ensure base URL has protocol
+			let formattedBaseUrl = this.baseUrl;
+			if (!formattedBaseUrl.startsWith('http')) {
+				formattedBaseUrl = `https://${formattedBaseUrl}`;
+				this.logger.info(`Adding https:// prefix to base URL: ${formattedBaseUrl}`);
+			}
 
-			// Log the endpoint (hiding API key for security)
+			// Construct the WebSocket URL with the token
+			// For Railway deployments, the URL format is: wss://domain.railway.app/browserws?token=TOKEN
+			const wsEndpoint = `${formattedBaseUrl.replace('https://', 'wss://').replace('http://', 'ws://')}/browserws?token=${this.apiKey}`;
+
+			// Log the endpoint (hiding token for security)
 			const sanitizedEndpoint = wsEndpoint.replace(this.apiKey, '***TOKEN***');
 			this.logger.info(`Connecting to Browserless WebSocket endpoint: ${sanitizedEndpoint}`);
-			this.logger.info('Using constructed WebSocket URL - no separate WS endpoint needed');
 
 			// Connect to the browser using the WebSocket endpoint
+			this.logger.info('Attempting connection to WebSocket endpoint...');
 			const browser = await puppeteer.connect({
 				browserWSEndpoint: wsEndpoint,
 				defaultViewport: {
@@ -71,7 +78,11 @@ export class BrowserlessTransport implements BrowserTransport {
 			}
 
 			if ((error as Error).message.includes('401')) {
-				throw new Error('Authentication failed. Please check your Token (it should be the TOKEN value from your Browserless setup).');
+				throw new Error('Authentication failed. Please check your Token value - use exactly what is shown for TOKEN in your Railway variables.');
+			}
+
+			if ((error as Error).message.includes('403')) {
+				throw new Error('Forbidden access. Your TOKEN might not have permission to access the service.');
 			}
 
 			if ((error as Error).message.includes('429')) {
@@ -79,11 +90,20 @@ export class BrowserlessTransport implements BrowserTransport {
 			}
 
 			if ((error as Error).message.includes('ENOTFOUND')) {
-				throw new Error(`Could not resolve host: ${this.baseUrl}. Please check your Base URL - for Railway deployments, use the full URL provided (e.g., browserless-production-xxxx.up.railway.app).`);
+				throw new Error(`Could not resolve host: ${this.baseUrl}. Please check your Base URL - use exactly the BROWSER_DOMAIN value (e.g., browserless-production-xxxx.up.railway.app).`);
 			}
 
+			// WebSocket connection errors
+			if ((error as Error).message.includes('WebSocket') || (error as Error).message.includes('not found')) {
+				this.logger.error('WebSocket connection error details:', error);
+				throw new Error(`WebSocket connection failed. For Railway deployments, try using path /browserws instead of /chrome. Full error: ${(error as Error).message}`);
+			}
+
+			// Log the full error for debugging
+			this.logger.error('Connection error details:', error);
+
 			// For any other errors, rethrow with original message
-			throw error;
+			throw new Error(`Connection failed: ${(error as Error).message}`);
 		}
 	}
 
@@ -185,33 +205,62 @@ export class BrowserlessTransport implements BrowserTransport {
 	 * @param page - Puppeteer Page
 	 */
 	private async configurePageForScraping(page: puppeteer.Page): Promise<void> {
-		// Set a realistic user agent
-		await page.setUserAgent(
-			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-		);
+		try {
+			// Set a realistic user agent
+			await page.setUserAgent(
+				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+			);
 
-		// Set viewport to standard desktop resolution
-		await page.setViewport({
-			width: 1920,
-			height: 1080,
-		});
+			// Set viewport to standard desktop resolution
+			await page.setViewport({
+				width: 1920,
+				height: 1080,
+			});
 
-		// Set common language headers
-		await page.setExtraHTTPHeaders({
-			'Accept-Language': 'en-US,en;q=0.9',
-			'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-			'Accept-Encoding': 'gzip, deflate, br',
-		});
+			// Set common language headers
+			await page.setExtraHTTPHeaders({
+				'Accept-Language': 'en-US,en;q=0.9',
+				'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+				'Accept-Encoding': 'gzip, deflate, br',
+				'Cache-Control': 'no-cache',
+				'Pragma': 'no-cache',
+			});
 
-		// Enable JavaScript
-		await page.setJavaScriptEnabled(true);
+			// Enable JavaScript
+			await page.setJavaScriptEnabled(true);
 
-		// Set timeout for all operations based on our request timeout
-		page.setDefaultTimeout(this.requestTimeout);
+			// Set timeout for all operations based on our request timeout
+			page.setDefaultTimeout(this.requestTimeout);
 
-		// Additional evasion if using stealth mode (already handled by Browserless, but for completeness)
-		if (this.stealthMode) {
-			this.logger.info('Using stealth mode for bot detection evasion');
+			// Additional context management for Railway deployments
+			if (this.baseUrl.includes('railway.app')) {
+				this.logger.info('Applying Railway-specific browser settings');
+
+				// Enable image loading (some railway deployments block by default)
+				await page.setRequestInterception(false);
+
+				// Set extra browser context options (will only apply to future contexts)
+				const client = await page.target().createCDPSession();
+				await client.send('Network.enable');
+				await client.send('Network.setBypassServiceWorker', { bypass: true });
+
+				// Additional network settings
+				try {
+					// Attempt to clear cache and cookies for clean state
+					await client.send('Network.clearBrowserCache');
+					await client.send('Network.clearBrowserCookies');
+				} catch (err) {
+					this.logger.warn('Could not clear browser cache/cookies, continuing anyway');
+				}
+			}
+
+			// Additional evasion if using stealth mode (already handled by Browserless, but for completeness)
+			if (this.stealthMode) {
+				this.logger.info('Using stealth mode for bot detection evasion');
+			}
+		} catch (err) {
+			// Log error but don't fail - these are optimizations, not critical functions
+			this.logger.warn(`Could not apply all page optimizations: ${(err as Error).message}`);
 		}
 	}
 

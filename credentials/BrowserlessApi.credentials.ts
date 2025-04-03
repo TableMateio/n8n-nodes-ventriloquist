@@ -18,8 +18,8 @@ export class BrowserlessApi implements ICredentialType {
 			type: 'string',
 			typeOptions: { password: true },
 			default: '',
-			placeholder: 'Your Browserless API Token',
-			description: 'Token for Browserless Cloud. For Railway deployments, this is the "TOKEN" environment variable.',
+			placeholder: 'Your Browserless TOKEN value',
+			description: 'Token for Browserless. For Railway deployments, use the "TOKEN" environment variable (not BROWSER_TOKEN).',
 			required: true,
 		},
 		{
@@ -28,7 +28,7 @@ export class BrowserlessApi implements ICredentialType {
 			type: 'string',
 			default: 'https://chrome.browserless.io',
 			placeholder: 'https://your-deployment.up.railway.app',
-			description: 'Base URL for Browserless. For Railway deployments, use your railway-provided domain (e.g., browserless-production-xxxx.up.railway.app).',
+			description: 'Base URL for Browserless. For Railway deployments, add https:// before your BROWSER_DOMAIN value (e.g., https://browserless-production-xxxx.up.railway.app).',
 			required: true,
 		},
 		{
@@ -53,13 +53,8 @@ export class BrowserlessApi implements ICredentialType {
 	test: ICredentialTestRequest = {
 		request: {
 			baseURL: '={{$credentials.baseUrl}}',
-			url: '/stats',
+			url: '/healthz',
 			method: 'GET',
-			headers: {
-				'Cache-Control': 'no-cache',
-				'Content-Type': 'application/json',
-				'Authorization': '=Bearer {{$credentials.apiKey}}'
-			},
 		},
 	};
 }
