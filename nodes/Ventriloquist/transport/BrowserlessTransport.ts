@@ -42,50 +42,6 @@ export class BrowserlessTransport implements BrowserTransport {
 	}
 
 	/**
-	 * Get the enhanced browserWSEndpoint with all needed options
-	 * @returns The enhanced browserWSEndpoint string
-	 */
-	private getEnhancedBrowserWSEndpoint(): string | null {
-		if (!this.lastSuccessfulWsUrl) {
-			this.logger.warn('No successful WebSocket URL available. Connect method must be called first.');
-			return null;
-		}
-
-		let enhancedUrl = this.lastSuccessfulWsUrl;
-
-		// Add Railway-specific options
-		if (this.lastSuccessfulWsUrl.includes('railway.app')) {
-			// Add special query parameters that Browserless on Railway understands
-			// These help with connection stability and performance
-			if (!enhancedUrl.includes('--disable-dev-shm-usage')) {
-				enhancedUrl += '&--disable-dev-shm-usage';
-			}
-
-			if (!enhancedUrl.includes('--disable-gpu')) {
-				enhancedUrl += '&--disable-gpu';
-			}
-
-			if (!enhancedUrl.includes('--disable-setuid-sandbox')) {
-				enhancedUrl += '&--disable-setuid-sandbox';
-			}
-
-			if (!enhancedUrl.includes('--no-sandbox')) {
-				enhancedUrl += '&--no-sandbox';
-			}
-
-			if (this.stealthMode && !enhancedUrl.includes('stealth')) {
-				enhancedUrl += '&stealth';
-			}
-
-			if (!enhancedUrl.includes('&keep-alive')) {
-				enhancedUrl += '&keep-alive';
-			}
-		}
-
-		return enhancedUrl;
-	}
-
-	/**
 	 * Connect to Browserless browser
 	 * This establishes a connection to the Browserless service via WebSocket
 	 */
@@ -131,20 +87,18 @@ export class BrowserlessTransport implements BrowserTransport {
 				// Convert to WebSocket protocol
 				const wsBaseUrl = formattedBaseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
 
-				// Add various formats to try
-				const directConnectionUrl = `${wsBaseUrl}?token=${this.apiKey}`;
-				const browserWsUrl = `${wsBaseUrl}/browserws?token=${this.apiKey}`;
-				const chromeUrl = `${wsBaseUrl}/chrome?token=${this.apiKey}`;
+				// Add various formats to try - SIMPLIFIED for Railway compatibility
+				// For Railway, the simple format works best: wss://domain?token=TOKEN
+				const directConnectionUrl = `${wsBaseUrl}?token=${this.apiKey}`; // Direct connection - works best for Railway
+				if (!wsUrlsToTry.includes(directConnectionUrl)) wsUrlsToTry.push(directConnectionUrl);
 
-				if (!wsUrlsToTry.includes(directConnectionUrl)) wsUrlsToTry.push(directConnectionUrl); // Direct connection
-				if (!wsUrlsToTry.includes(browserWsUrl)) wsUrlsToTry.push(browserWsUrl); // Standard browserws path
-				if (!wsUrlsToTry.includes(chromeUrl)) wsUrlsToTry.push(chromeUrl); // Legacy chrome path
-			}
-
-			// 3. Add the exact URL format from the error message if it looks like that format
-			const railwayFormat = `wss://${this.baseUrl.replace('https://', '').replace('http://', '')}?token=${this.apiKey}`;
-			if (!wsUrlsToTry.includes(railwayFormat)) {
-				wsUrlsToTry.push(railwayFormat);
+				// Only add these for non-Railway instances or as fallbacks
+				if (!this.baseUrl.includes('railway.app')) {
+					const browserWsUrl = `${wsBaseUrl}/browserws?token=${this.apiKey}`; // Standard browserws path
+					const chromeUrl = `${wsBaseUrl}/chrome?token=${this.apiKey}`; // Legacy chrome path
+					if (!wsUrlsToTry.includes(browserWsUrl)) wsUrlsToTry.push(browserWsUrl);
+					if (!wsUrlsToTry.includes(chromeUrl)) wsUrlsToTry.push(chromeUrl);
+				}
 			}
 
 			// Test each WebSocket URL before trying to connect with Puppeteer
@@ -166,40 +120,25 @@ export class BrowserlessTransport implements BrowserTransport {
 			if (successfulUrl) {
 				this.logger.info('Connecting to Browserless with Puppeteer...');
 
-				// Get enhanced URL with all options
-				const enhancedUrl = this.getEnhancedBrowserWSEndpoint();
-				if (!enhancedUrl) {
-					throw new Error('Failed to create enhanced WebSocket URL');
+				// For Railway, keep the URL simple with minimal parameters
+				let finalWsUrl = successfulUrl;
+
+				// Add minimal options only if using Railway and stealth mode is enabled
+				if (this.baseUrl.includes('railway.app') && this.stealthMode && !finalWsUrl.includes('stealth')) {
+					// Only add stealth mode if requested - this is the only parameter known to work reliably
+					finalWsUrl += '&stealth=true';
 				}
 
-				// Connect with enhanced options
+				// Connect with minimal options
 				const connectionOptions: puppeteer.ConnectOptions = {
-					browserWSEndpoint: enhancedUrl,
+					browserWSEndpoint: finalWsUrl,
 					defaultViewport: { width: 1920, height: 1080 },
 				};
 
-				// Add special options for Railway
-				if (successfulUrl.includes('railway.app')) {
-					this.logger.info('Using Railway-specific connection options');
-					// Note: Railway deployments often have certificate issues
-					// Adding this parameter as part of the browserWSEndpoint instead
-					if (!enhancedUrl.includes('&ignoreHTTPSErrors=true')) {
-						connectionOptions.browserWSEndpoint += '&ignoreHTTPSErrors=true';
-					}
-				}
-
+				this.logger.info(`Connecting with WebSocket URL: ${finalWsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***')}`);
 				const browser = await puppeteer.connect(connectionOptions);
 
 				this.logger.info('Successfully connected to Browserless!');
-
-				// Test connection immediately
-				const pages = await browser.pages().catch(e => {
-					this.logger.error(`Initial browser.pages() call failed: ${e.message}`);
-					throw new Error(`Connection established but browser is not responding properly: ${e.message}`);
-				});
-
-				this.logger.info(`Connection verified with ${pages.length} existing pages`);
-
 				return browser;
 			}
 

@@ -17,17 +17,17 @@ export class BrowserlessApi implements ICredentialType {
 			type: 'options',
 			options: [
 				{
+					name: 'Direct WebSocket URL (Recommended for Railway)',
+					value: 'direct',
+					description: 'Connect using a direct WebSocket URL (most reliable option)',
+				},
+				{
 					name: 'Standard (Domain + Token)',
 					value: 'standard',
 					description: 'Connect using domain and token separately',
 				},
-				{
-					name: 'Direct WebSocket URL (Railway)',
-					value: 'direct',
-					description: 'Connect using a direct WebSocket URL (recommended for Railway)',
-				},
 			],
-			default: 'standard',
+			default: 'direct',
 			description: 'How to connect to the Browserless service',
 		},
 		{
@@ -93,7 +93,7 @@ export class BrowserlessApi implements ICredentialType {
 			displayName: 'Note: Railway Deployments',
 			name: 'railwayNote',
 			type: 'notice',
-			default: 'Railway-hosted Browserless instances only respond to WebSocket connections. Use the "Direct WebSocket URL" connection type with the full WebSocket URL from Railway. You can use the test utility to verify your connection: "pnpm run test:browserless your-websocket-url"',
+			default: 'For Railway deployments, the "Direct WebSocket URL" connection type is strongly recommended. Use the complete WebSocket URL from the BROWSER_WS_ENDPOINT variable.',
 		},
 	];
 
