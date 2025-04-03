@@ -2450,7 +2450,8 @@ export const description: INodeProperties[] = [
 			// Validate session ID - add extra logging to help debug issues
 			if (!inputSessionId) {
 				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] WARNING: No session ID provided in the 'Session ID' field`);
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] You must provide the session ID from a previous Open operation in the 'Session ID' field`);
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Will attempt to use the existing session for this workflow - this may work but is not reliable`);
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] For best results, you should provide the session ID from a previous Open operation in the 'Session ID' field`);
 			} else {
 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using session ID: ${inputSessionId}`);
 			}

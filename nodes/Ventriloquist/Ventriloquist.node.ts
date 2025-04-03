@@ -1055,18 +1055,27 @@ export class Ventriloquist implements INodeType {
 							page = existingPage;
 						} else {
 							// Use latest page from the browser (fall back to creating a new one if needed)
-							const browser = await Ventriloquist.getOrCreateSession(
-								workflowId,
-								websocketEndpoint,
-								this.logger,
-							);
-							const pages = await browser.browser.pages();
+							// IMPORTANT: Don't create a new session, just get the existing one for this workflow
+							this.logger.info(`No session ID provided, trying to use the existing session for workflow ID: ${workflowId}`);
+
+							// Get the existing session without creating a new one
+							const existingSession = Ventriloquist.browserSessions.get(workflowId);
+
+							if (!existingSession) {
+								throw new Error(`No existing browser session found for this workflow. Please run the Open operation first.`);
+							}
+
+							this.logger.info(`Found existing browser session for workflow: ${workflowId}`);
+							const browser = existingSession.browser;
+							const pages = await browser.pages();
 
 							if (pages.length > 0) {
 								page = pages[pages.length - 1]; // Use the most recently created page
+								this.logger.info(`Using the most recent page from the existing session`);
 							} else {
-								// Create a new page if none exists
-								page = await browser.browser.newPage();
+								// Create a new page in the existing session
+								page = await browser.newPage();
+								this.logger.info(`Created new page in existing browser session`);
 							}
 						}
 
