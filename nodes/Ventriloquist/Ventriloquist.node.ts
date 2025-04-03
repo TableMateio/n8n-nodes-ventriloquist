@@ -90,56 +90,67 @@ export class Ventriloquist implements INodeType {
 		// Clean up old sessions
 		this.cleanupSessions();
 
-		// Create unique workflowId if forceNew is true to force a new session
-		const sessionWorkflowId = forceNew ? `${workflowId}_${Date.now()}` : workflowId;
+		logger.info(`Looking for session with workflow ID: ${workflowId}`);
 
-		// Check if we have an existing session for this workflow
-		let session = this.browserSessions.get(sessionWorkflowId);
+		// Check if we already have a session for this workflowId (ignoring forceNew for lookup)
+		let session = this.browserSessions.get(workflowId);
 		let brightDataSessionId = '';
 
-		// Extract the Bright Data session ID from the WebSocket URL if possible
-		try {
-			// Bright Data WebSocket URLs typically contain the session ID in a format like:
-			// wss://brd-customer-XXX.bright.com/browser/XXX/sessionID/...
-			// or wss://brd.superproxy.io:9223/XXXX/XXXX-XXXX-XXXX-XXXX
+		// This is the key change: We always use the basic workflowId as the sessionId
+		// This ensures consistent IDs even when forceNew is used
+		const sessionId = `session_${workflowId}`;
 
-			// First try to extract from standard format with io:port
-			let matches = websocketEndpoint.match(/io:\d+\/([^\/]+\/[^\/\s]+)/);
-
-			// If that doesn't work, try alternative format
-			if (!matches?.length) {
-				matches = websocketEndpoint.match(/io\/([^\/]+\/[^\/\s]+)/);
-			}
-
-			// If that doesn't work, try the older format
-			if (!matches?.length) {
-				matches = websocketEndpoint.match(/browser\/[^\/]+\/([^\/]+)/);
-			}
-
-			if (matches?.[1]) {
-				brightDataSessionId = matches[1];
-				logger.info(`Detected Bright Data session ID from WebSocket URL: ${brightDataSessionId}`);
-			} else {
-				// Fallback for other URL formats
-				const fallbackMatches = websocketEndpoint.match(/\/([a-f0-9-]{36}|[a-f0-9-]{7,8}\/[a-f0-9-]{36})/i);
-				if (fallbackMatches?.[1]) {
-					brightDataSessionId = fallbackMatches[1];
-					logger.info(`Extracted Bright Data session ID (fallback): ${brightDataSessionId}`);
-				} else {
-					logger.debug('Could not extract Bright Data session ID from WebSocket URL');
+		// Create a new session only if we don't have one yet or if forceNew is true
+		if (!session || forceNew) {
+			// If forceNew is true but we have an existing session, close it first
+			if (forceNew && session) {
+				logger.info(`Forcing new session, closing existing session for workflow: ${workflowId}`);
+				try {
+					await session.browser.close();
+				} catch (error) {
+					logger.warn(`Error closing existing session: ${(error as Error).message}`);
 				}
+				this.browserSessions.delete(workflowId);
+				session = undefined; // Reset session to undefined to create a new one
 			}
-		} catch (error) {
-			// Ignore errors in extraction, not critical
-			logger.debug('Failed to extract Bright Data session ID from WebSocket URL');
-		}
 
-		// Create a unique ID for the session that will be consistent across operations
-		// We use the full workflowId (including timestamp if forceNew is true) to ensure uniqueness
-		// This guarantees that the "forceNew" flag will create a truly new session with a new ID
-		const sessionId = `session_${sessionWorkflowId}`;
+			// Extract the Bright Data session ID from the WebSocket URL if possible
+			try {
+				// Bright Data WebSocket URLs typically contain the session ID in a format like:
+				// wss://brd-customer-XXX.bright.com/browser/XXX/sessionID/...
+				// or wss://brd.superproxy.io:9223/XXXX/XXXX-XXXX-XXXX-XXXX
 
-		if (!session) {
+				// First try to extract from standard format with io:port
+				let matches = websocketEndpoint.match(/io:\d+\/([^\/]+\/[^\/\s]+)/);
+
+				// If that doesn't work, try alternative format
+				if (!matches?.length) {
+					matches = websocketEndpoint.match(/io\/([^\/]+\/[^\/\s]+)/);
+				}
+
+				// If that doesn't work, try the older format
+				if (!matches?.length) {
+					matches = websocketEndpoint.match(/browser\/[^\/]+\/([^\/]+)/);
+				}
+
+				if (matches?.[1]) {
+					brightDataSessionId = matches[1];
+					logger.info(`Detected Bright Data session ID from WebSocket URL: ${brightDataSessionId}`);
+				} else {
+					// Fallback for other URL formats
+					const fallbackMatches = websocketEndpoint.match(/\/([a-f0-9-]{36}|[a-f0-9-]{7,8}\/[a-f0-9-]{36})/i);
+					if (fallbackMatches?.[1]) {
+						brightDataSessionId = fallbackMatches[1];
+						logger.info(`Extracted Bright Data session ID (fallback): ${brightDataSessionId}`);
+					} else {
+						logger.debug('Could not extract Bright Data session ID from WebSocket URL');
+					}
+				}
+			} catch (error) {
+				// Ignore errors in extraction, not critical
+				logger.debug('Failed to extract Bright Data session ID from WebSocket URL');
+			}
+
 			// Create a new browser session
 			logger.info(forceNew
 				? 'Forcing creation of new browser session (required for Page.navigate)'
@@ -158,9 +169,11 @@ export class Ventriloquist implements INodeType {
 				timeout: timeoutMs, // Store timeout in milliseconds
 			};
 
-			this.browserSessions.set(sessionWorkflowId, session);
+			// Store using base workflowId (without timestamp) to ensure operations can find it later
+			this.browserSessions.set(workflowId, session);
 			logger.info(`New browser session created with ${timeoutMs}ms timeout (${sessionTimeout || 3} minutes)`);
 			logger.info(`Session ID for this session: ${sessionId}`);
+			logger.info(`Session will be stored with workflow ID: ${workflowId}`);
 		} else {
 			// Update last used timestamp
 			session.lastUsed = new Date();
@@ -175,6 +188,7 @@ export class Ventriloquist implements INodeType {
 			}
 
 			logger.info(`Reusing existing browser session with ID: ${sessionId}`);
+			logger.info(`Session is stored with workflow ID: ${workflowId}`);
 		}
 
 		return { browser: session.browser, sessionId, brightDataSessionId };
