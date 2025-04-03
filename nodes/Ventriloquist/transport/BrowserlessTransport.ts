@@ -14,6 +14,7 @@ export class BrowserlessTransport implements BrowserTransport {
 	private wsEndpoint: string | undefined;
 	private stealthMode: boolean;
 	private requestTimeout: number;
+	private lastSuccessfulWsUrl: string | null = null;
 
 	/**
 	 * Create a BrowserlessTransport instance
@@ -41,6 +42,50 @@ export class BrowserlessTransport implements BrowserTransport {
 	}
 
 	/**
+	 * Get the enhanced browserWSEndpoint with all needed options
+	 * @returns The enhanced browserWSEndpoint string
+	 */
+	private getEnhancedBrowserWSEndpoint(): string | null {
+		if (!this.lastSuccessfulWsUrl) {
+			this.logger.warn('No successful WebSocket URL available. Connect method must be called first.');
+			return null;
+		}
+
+		let enhancedUrl = this.lastSuccessfulWsUrl;
+
+		// Add Railway-specific options
+		if (this.lastSuccessfulWsUrl.includes('railway.app')) {
+			// Add special query parameters that Browserless on Railway understands
+			// These help with connection stability and performance
+			if (!enhancedUrl.includes('--disable-dev-shm-usage')) {
+				enhancedUrl += '&--disable-dev-shm-usage';
+			}
+
+			if (!enhancedUrl.includes('--disable-gpu')) {
+				enhancedUrl += '&--disable-gpu';
+			}
+
+			if (!enhancedUrl.includes('--disable-setuid-sandbox')) {
+				enhancedUrl += '&--disable-setuid-sandbox';
+			}
+
+			if (!enhancedUrl.includes('--no-sandbox')) {
+				enhancedUrl += '&--no-sandbox';
+			}
+
+			if (this.stealthMode && !enhancedUrl.includes('stealth')) {
+				enhancedUrl += '&stealth';
+			}
+
+			if (!enhancedUrl.includes('&keep-alive')) {
+				enhancedUrl += '&keep-alive';
+			}
+		}
+
+		return enhancedUrl;
+	}
+
+	/**
 	 * Connect to Browserless browser
 	 * This establishes a connection to the Browserless service via WebSocket
 	 */
@@ -52,15 +97,26 @@ export class BrowserlessTransport implements BrowserTransport {
 			const wsUrlsToTry: string[] = [];
 			let successfulUrl: string | null = null;
 
-			// 1. If direct WebSocket endpoint is provided, add it first
+			// 0. If we have a last successful URL, try that first
+			if (this.lastSuccessfulWsUrl) {
+				this.logger.info('Using previously successful WebSocket URL first');
+				wsUrlsToTry.push(this.lastSuccessfulWsUrl);
+			}
+
+			// 1. If direct WebSocket endpoint is provided, add it next
 			if (this.wsEndpoint) {
 				// Check if endpoint already has a token
 				if (this.wsEndpoint.includes('token=')) {
 					// Already has token, use as is
-					wsUrlsToTry.push(this.wsEndpoint);
+					if (!wsUrlsToTry.includes(this.wsEndpoint)) {
+						wsUrlsToTry.push(this.wsEndpoint);
+					}
 				} else {
 					// Add token to the URL
-					wsUrlsToTry.push(`${this.wsEndpoint}${this.wsEndpoint.includes('?') ? '&' : '?'}token=${this.apiKey}`);
+					const wsUrlWithToken = `${this.wsEndpoint}${this.wsEndpoint.includes('?') ? '&' : '?'}token=${this.apiKey}`;
+					if (!wsUrlsToTry.includes(wsUrlWithToken)) {
+						wsUrlsToTry.push(wsUrlWithToken);
+					}
 				}
 			}
 
@@ -76,9 +132,13 @@ export class BrowserlessTransport implements BrowserTransport {
 				const wsBaseUrl = formattedBaseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
 
 				// Add various formats to try
-				wsUrlsToTry.push(`${wsBaseUrl}?token=${this.apiKey}`); // Direct connection
-				wsUrlsToTry.push(`${wsBaseUrl}/browserws?token=${this.apiKey}`); // Standard browserws path
-				wsUrlsToTry.push(`${wsBaseUrl}/chrome?token=${this.apiKey}`); // Legacy chrome path
+				const directConnectionUrl = `${wsBaseUrl}?token=${this.apiKey}`;
+				const browserWsUrl = `${wsBaseUrl}/browserws?token=${this.apiKey}`;
+				const chromeUrl = `${wsBaseUrl}/chrome?token=${this.apiKey}`;
+
+				if (!wsUrlsToTry.includes(directConnectionUrl)) wsUrlsToTry.push(directConnectionUrl); // Direct connection
+				if (!wsUrlsToTry.includes(browserWsUrl)) wsUrlsToTry.push(browserWsUrl); // Standard browserws path
+				if (!wsUrlsToTry.includes(chromeUrl)) wsUrlsToTry.push(chromeUrl); // Legacy chrome path
 			}
 
 			// 3. Add the exact URL format from the error message if it looks like that format
@@ -96,6 +156,7 @@ export class BrowserlessTransport implements BrowserTransport {
 
 				if (isConnectable) {
 					successfulUrl = wsUrl;
+					this.lastSuccessfulWsUrl = wsUrl; // Store for future use
 					this.logger.info(`Found working WebSocket URL: ${wsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***')}`);
 					break;
 				}
@@ -105,44 +166,40 @@ export class BrowserlessTransport implements BrowserTransport {
 			if (successfulUrl) {
 				this.logger.info('Connecting to Browserless with Puppeteer...');
 
-				// Enhanced connection options for Railway Browserless
-				const isRailway = successfulUrl.includes('railway.app');
+				// Get enhanced URL with all options
+				const enhancedUrl = this.getEnhancedBrowserWSEndpoint();
+				if (!enhancedUrl) {
+					throw new Error('Failed to create enhanced WebSocket URL');
+				}
 
+				// Connect with enhanced options
 				const connectionOptions: puppeteer.ConnectOptions = {
-					browserWSEndpoint: successfulUrl,
+					browserWSEndpoint: enhancedUrl,
 					defaultViewport: { width: 1920, height: 1080 },
 				};
 
-				// Add Railway-specific options
-				if (isRailway) {
+				// Add special options for Railway
+				if (successfulUrl.includes('railway.app')) {
 					this.logger.info('Using Railway-specific connection options');
-
-					// Add special query parameters that Browserless on Railway understands
-					// These help with connection stability and performance
-					if (!successfulUrl.includes('--disable-dev-shm-usage')) {
-						connectionOptions.browserWSEndpoint += '&--disable-dev-shm-usage';
-					}
-
-					if (!successfulUrl.includes('--disable-gpu')) {
-						connectionOptions.browserWSEndpoint += '&--disable-gpu';
-					}
-
-					if (!successfulUrl.includes('--disable-setuid-sandbox')) {
-						connectionOptions.browserWSEndpoint += '&--disable-setuid-sandbox';
-					}
-
-					if (!successfulUrl.includes('--no-sandbox')) {
-						connectionOptions.browserWSEndpoint += '&--no-sandbox';
-					}
-
-					if (this.stealthMode && !successfulUrl.includes('stealth')) {
-						connectionOptions.browserWSEndpoint += '&stealth';
+					// Note: Railway deployments often have certificate issues
+					// Adding this parameter as part of the browserWSEndpoint instead
+					if (!enhancedUrl.includes('&ignoreHTTPSErrors=true')) {
+						connectionOptions.browserWSEndpoint += '&ignoreHTTPSErrors=true';
 					}
 				}
 
 				const browser = await puppeteer.connect(connectionOptions);
 
 				this.logger.info('Successfully connected to Browserless!');
+
+				// Test connection immediately
+				const pages = await browser.pages().catch(e => {
+					this.logger.error(`Initial browser.pages() call failed: ${e.message}`);
+					throw new Error(`Connection established but browser is not responding properly: ${e.message}`);
+				});
+
+				this.logger.info(`Connection verified with ${pages.length} existing pages`);
+
 				return browser;
 			}
 
@@ -188,6 +245,27 @@ Error details: ${(error as Error).stack || (error as Error).message}`;
 		},
 	): Promise<{ response: puppeteer.HTTPResponse | null; domain: string }> {
 		try {
+			// Verify page is still valid before proceeding
+			try {
+				// Simple check to see if page is still functional
+				await page.evaluate(() => true).catch(async e => {
+					this.logger.warn(`Page appears to be disconnected: ${e.message}`);
+					// Try to reload the page if possible
+					this.logger.info('Attempting to reconnect page...');
+
+					// Check if the browser is still connected
+					try {
+						const browser = page.browser();
+						const pages = await browser.pages();
+						this.logger.info(`Browser has ${pages.length} pages available`);
+					} catch (browserError) {
+						throw new Error(`Browser disconnected: ${(browserError as Error).message}`);
+					}
+				});
+			} catch (pageError) {
+				throw new Error(`Page validation failed: ${(pageError as Error).message}`);
+			}
+
 			// Extract domain for logging and status reporting
 			const domain = this.extractDomain(url);
 
