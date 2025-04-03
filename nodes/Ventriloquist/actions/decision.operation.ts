@@ -1936,6 +1936,55 @@ export const description: INodeProperties[] = [
 	}
 
 	/**
+	 * Enhanced navigation waiting with better logging
+	 */
+	async function enhancedWaitForNavigation(
+		page: puppeteer.Page,
+		options: puppeteer.WaitForOptions,
+		logger: IExecuteFunctions['logger'],
+		logPrefix: string
+	): Promise<void> {
+		logger.info(`${logPrefix} Waiting for navigation with options: ${JSON.stringify(options)}`);
+
+		try {
+			// Create a promise for navigation
+			const navigationPromise = page.waitForNavigation(options);
+
+			// Create a promise for navigation events
+			const eventLogsPromise = new Promise<void>(resolve => {
+				// Listen for events that might indicate navigation
+				page.on('load', () => logger.info(`${logPrefix} Page load event fired`));
+				page.on('domcontentloaded', () => logger.info(`${logPrefix} DOMContentLoaded event fired`));
+				page.on('framenavigated', (frame) => {
+					if (frame === page.mainFrame()) {
+						logger.info(`${logPrefix} Main frame navigated to: ${frame.url()}`);
+					}
+				});
+				page.on('request', request => {
+					if (request.isNavigationRequest()) {
+						logger.info(`${logPrefix} Navigation request to: ${request.url()}`);
+					}
+				});
+				page.on('response', response => {
+					if (response.request().isNavigationRequest()) {
+						logger.info(`${logPrefix} Navigation response from: ${response.url()} (status: ${response.status()})`);
+					}
+				});
+
+				// Resolve after 500ms to allow events to be captured but not block
+				setTimeout(resolve, 500);
+			});
+
+			// Wait for both promises - the navigation promise is the "real" one
+			await Promise.all([navigationPromise, eventLogsPromise]);
+			logger.info(`${logPrefix} Navigation completed successfully`);
+		} catch (error) {
+			logger.warn(`${logPrefix} Navigation error: ${(error as Error).message}`);
+			throw error;
+		}
+	}
+
+	/**
 	 * Safely matches strings according to the specified match type
 	 */
 	function matchStrings(value: string, targetValue: string, matchType: string, caseSensitive: boolean): boolean {
@@ -1990,57 +2039,8 @@ export const description: INodeProperties[] = [
 		}
 	}
 
-	/**
-	 * Enhanced navigation waiting with better logging
-	 */
-	async function enhancedWaitForNavigation(
-		page: puppeteer.Page,
-		options: puppeteer.WaitForOptions,
-		logger: any,
-		logPrefix: string
-	): Promise<void> {
-		logger.info(`${logPrefix} Waiting for navigation with options: ${JSON.stringify(options)}`);
-
-		try {
-			// Create a promise for navigation
-			const navigationPromise = page.waitForNavigation(options);
-
-			// Create a promise for navigation events
-			const eventLogsPromise = new Promise<void>(resolve => {
-				// Listen for events that might indicate navigation
-				page.on('load', () => logger.info(`${logPrefix} Page load event fired`));
-				page.on('domcontentloaded', () => logger.info(`${logPrefix} DOMContentLoaded event fired`));
-				page.on('framenavigated', (frame) => {
-					if (frame === page.mainFrame()) {
-						logger.info(`${logPrefix} Main frame navigated to: ${frame.url()}`);
-					}
-				});
-				page.on('request', request => {
-					if (request.isNavigationRequest()) {
-						logger.info(`${logPrefix} Navigation request to: ${request.url()}`);
-					}
-				});
-				page.on('response', response => {
-					if (response.request().isNavigationRequest()) {
-						logger.info(`${logPrefix} Navigation response from: ${response.url()} (status: ${response.status()})`);
-					}
-				});
-
-				// Resolve after 500ms to allow events to be captured but not block
-				setTimeout(resolve, 500);
-			});
-
-			// Wait for both promises - the navigation promise is the "real" one
-			await Promise.all([navigationPromise, eventLogsPromise]);
-			logger.info(`${logPrefix} Navigation completed successfully`);
-		} catch (error) {
-			logger.warn(`${logPrefix} Navigation error: ${(error as Error).message}`);
-			throw error;
-		}
-	}
-
 	// Find the existing waitForNavigation function and replace it
-	async function waitForNavigation(page: puppeteer.Page, waitUntil: string, timeout: number): Promise<void> {
+	async function waitForNavigation(page: puppeteer.Page, waitUntil: string, timeout: number, logger: IExecuteFunctions['logger'] = console as any): Promise<void> {
 		// Default waitUntil option based on input string
 		let waitUntilOption: puppeteer.PuppeteerLifeCycleEvent | puppeteer.PuppeteerLifeCycleEvent[] = 'domcontentloaded';
 
@@ -2063,13 +2063,14 @@ export const description: INodeProperties[] = [
 				break;
 			default:
 				waitUntilOption = 'domcontentloaded';
+				break;
 		}
 
 		// Call the enhanced function
 		await enhancedWaitForNavigation(page, {
 			waitUntil: waitUntilOption,
 			timeout,
-		}, console, '[Navigation]');
+		}, logger, '[Navigation]');
 	}
 
 	/**
