@@ -5,6 +5,8 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
+import { BrowserTransportFactory } from '../transport/BrowserTransportFactory';
+import { Ventriloquist } from '../Ventriloquist.node';
 
 /**
  * Decision operation description
@@ -2411,7 +2413,7 @@ export const description: INodeProperties[] = [
 	export async function execute(
 		this: IExecuteFunctions,
 		index: number,
-		puppeteerPage: puppeteer.Page,
+		initialPage: puppeteer.Page,
 	): Promise<INodeExecutionData[][] | INodeExecutionData[]> {
 		const startTime = Date.now();
 
@@ -2419,11 +2421,21 @@ export const description: INodeProperties[] = [
 		const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 		let screenshot: string | undefined;
 
+		// Create a variable for the page that we can safely modify
+		let puppeteerPage: puppeteer.Page = initialPage;
+
 		// Added for better logging
 		const nodeName = this.getNode().name;
 		const nodeId = this.getNode().id;
 
-		const currentUrl = await puppeteerPage.url();
+		// Get the current URL (this might fail if the page is disconnected)
+		let currentUrl = '';
+		try {
+			currentUrl = await puppeteerPage.url();
+		} catch (error) {
+			this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error getting current URL: ${(error as Error).message}`);
+			this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] This might indicate the page is disconnected - will attempt to reconnect`);
+		}
 
 		// Visual marker to clearly indicate a new node is starting
 		this.logger.info("============ STARTING NODE EXECUTION ============");
@@ -2456,6 +2468,98 @@ export const description: INodeProperties[] = [
 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using session ID: ${inputSessionId}`);
 			}
 
+			// Check if the page is still connected by trying a simple operation
+			let pageConnected = true;
+			try {
+				// Simple operation to check if page is still connected
+				await puppeteerPage.evaluate(() => document.readyState);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Page connection verified`);
+			} catch (error) {
+				pageConnected = false;
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Page appears to be disconnected: ${(error as Error).message}`);
+			}
+
+			// If page is disconnected and we have a session ID, try to reconnect
+			if (!pageConnected && inputSessionId) {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Attempting to reconnect to session: ${inputSessionId}`);
+
+				try {
+					// Get the browser session info
+					const workflowId = this.getWorkflow().id || '';
+					if (!workflowId) {
+						throw new Error('Could not get workflow ID for reconnection');
+					}
+
+					// Get current browser session
+					type BrowserSession = {
+						browser: puppeteer.Browser;
+						lastUsed: Date;
+						pages: Map<string, puppeteer.Page>;
+						timeout?: number;
+						credentialType?: string;
+					};
+
+					const session = Ventriloquist.getSessions().get(workflowId) as BrowserSession | undefined;
+					if (!session) {
+						throw new Error(`No browser session found for workflow ID: ${workflowId}`);
+					}
+
+					// Get credentials based on type
+					const credentialType = session.credentialType || 'browserlessApi';
+					const credentials = await this.getCredentials(credentialType);
+
+					// Create transport to handle reconnection
+					const transportFactory = new BrowserTransportFactory();
+					const browserTransport = transportFactory.createTransport(
+						credentialType,
+						this.logger,
+						credentials,
+					);
+
+					// Check if the transport has reconnect capability
+					if (browserTransport.reconnect) {
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to ${credentialType} session: ${inputSessionId}`);
+
+						// Reconnect to the browser
+						const browser = await browserTransport.reconnect(inputSessionId);
+
+						// Get or create a new page
+						const pages = await browser.pages();
+						if (pages.length > 0) {
+							puppeteerPage = pages[0];
+						} else {
+							puppeteerPage = await browser.newPage();
+						}
+
+						// Store the updated page reference
+						Ventriloquist.storePage(workflowId, inputSessionId, puppeteerPage);
+
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Successfully reconnected to session: ${inputSessionId}`);
+						pageConnected = true;
+
+						// Update current URL after reconnection
+						currentUrl = await puppeteerPage.url();
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] After reconnection, page URL is: ${currentUrl}`);
+					} else {
+						this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Transport doesn't support reconnection`);
+					}
+				} catch (reconnectError) {
+					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnection failed: ${(reconnectError as Error).message}`);
+					throw new Error(`Could not reconnect to session ${inputSessionId}: ${(reconnectError as Error).message}`);
+				}
+			}
+
+			// Verify the document content to ensure we have a valid page
+			try {
+				const docHtml = await puppeteerPage.evaluate(() => document.documentElement.outerHTML.length);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Document verified - contains ${docHtml} characters of HTML`);
+			} catch (docError) {
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Cannot access document: ${(docError as Error).message}`);
+				if (!continueOnFail) {
+					throw new Error(`Cannot access page document: ${(docError as Error).message}`);
+				}
+			}
+
 			// Get routing parameters
 			const enableRouting = this.getNodeParameter('enableRouting', index, false) as boolean;
 
@@ -2463,7 +2567,14 @@ export const description: INodeProperties[] = [
 			let routeTaken = 'none';
 			let actionPerformed = 'none';
 			let routeIndex = 0;
-			const pageUrl = await puppeteerPage.url();
+			let pageUrl = '';
+
+			try {
+				pageUrl = await puppeteerPage.url();
+			} catch (urlError) {
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error getting page URL: ${(urlError as Error).message}`);
+				pageUrl = 'unknown';
+			}
 
 			// Prepare the result data structure
 			const resultData: {
