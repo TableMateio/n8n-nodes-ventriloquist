@@ -2533,42 +2533,66 @@ export const description: INodeProperties[] = [
 
 					// Get credentials based on type
 					const credentialType = session.credentialType || 'browserlessApi';
-					const credentials = await this.getCredentials(credentialType);
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using credential type: ${credentialType} for reconnection`);
 
-					// Create transport to handle reconnection
-					const transportFactory = new BrowserTransportFactory();
-					const browserTransport = transportFactory.createTransport(
-						credentialType,
-						this.logger,
-						credentials,
-					);
+					try {
+						const credentials = await this.getCredentials(credentialType);
 
-					// Check if the transport has reconnect capability
-					if (browserTransport.reconnect) {
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to ${credentialType} session: ${inputSessionId}`);
+						// Create transport to handle reconnection
+						const transportFactory = new BrowserTransportFactory();
+						const browserTransport = transportFactory.createTransport(
+							credentialType,
+							this.logger,
+							credentials,
+						);
 
-						// Reconnect to the browser - this uses the existing session, not creating a new one
-						const browser = await browserTransport.reconnect(inputSessionId);
+						// Check if the transport has reconnect capability
+						if (browserTransport.reconnect) {
+							this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to ${credentialType} session: ${inputSessionId}`);
 
-						// Get or create a new page
-						const pages = await browser.pages();
-						if (pages.length > 0) {
-							puppeteerPage = pages[0];
+							try {
+								// Reconnect to the browser - this uses the existing session, not creating a new one
+								const browser = await browserTransport.reconnect(inputSessionId);
+
+								// Update the session with the reconnected browser
+								session.browser = browser;
+								session.lastUsed = new Date();
+
+								// Get or create a new page
+								const pages = await browser.pages();
+								if (pages.length > 0) {
+									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using existing page from reconnected browser`);
+									puppeteerPage = pages[0];
+								} else {
+									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Creating new page in reconnected browser`);
+									puppeteerPage = await browser.newPage();
+								}
+
+								// Store the updated page reference
+								Ventriloquist.storePage(workflowId, inputSessionId, puppeteerPage);
+
+								this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Successfully reconnected to session: ${inputSessionId}`);
+								pageConnected = true;
+
+								// Update current URL after reconnection
+								try {
+									currentUrl = await puppeteerPage.url();
+									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] After reconnection, page URL is: ${currentUrl}`);
+								} catch (urlError) {
+									this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Could not get URL after reconnection: ${(urlError as Error).message}`);
+									currentUrl = 'unknown (connection issues)';
+								}
+							} catch (reconnectOpError) {
+								this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Browser reconnection operation failed: ${(reconnectOpError as Error).message}`);
+								throw reconnectOpError;
+							}
 						} else {
-							puppeteerPage = await browser.newPage();
+							this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Transport doesn't support reconnection for provider: ${credentialType}`);
+							throw new Error(`Transport type ${credentialType} doesn't support reconnection`);
 						}
-
-						// Store the updated page reference
-						Ventriloquist.storePage(workflowId, inputSessionId, puppeteerPage);
-
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Successfully reconnected to session: ${inputSessionId}`);
-						pageConnected = true;
-
-						// Update current URL after reconnection
-						currentUrl = await puppeteerPage.url();
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] After reconnection, page URL is: ${currentUrl}`);
-					} else {
-						this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Transport doesn't support reconnection`);
+					} catch (credentialError) {
+						this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error getting credentials for reconnection: ${(credentialError as Error).message}`);
+						throw new Error(`Could not get credentials for reconnection: ${(credentialError as Error).message}`);
 					}
 				} catch (reconnectError) {
 					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnection failed: ${(reconnectError as Error).message}`);
