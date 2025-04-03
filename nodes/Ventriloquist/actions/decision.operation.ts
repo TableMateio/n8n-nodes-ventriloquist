@@ -1991,58 +1991,85 @@ export const description: INodeProperties[] = [
 	}
 
 	/**
-	 * Wait for navigation based on waitUntil parameter
+	 * Enhanced navigation waiting with better logging
 	 */
-	async function waitForNavigation(page: puppeteer.Page, waitUntil: string, timeout: number): Promise<void> {
-		if (waitUntil === 'noWait') return;
+	async function enhancedWaitForNavigation(
+		page: puppeteer.Page,
+		options: puppeteer.WaitForOptions,
+		logger: any,
+		logPrefix: string
+	): Promise<void> {
+		logger.info(`${logPrefix} Waiting for navigation with options: ${JSON.stringify(options)}`);
 
+		try {
+			// Create a promise for navigation
+			const navigationPromise = page.waitForNavigation(options);
+
+			// Create a promise for navigation events
+			const eventLogsPromise = new Promise<void>(resolve => {
+				// Listen for events that might indicate navigation
+				page.on('load', () => logger.info(`${logPrefix} Page load event fired`));
+				page.on('domcontentloaded', () => logger.info(`${logPrefix} DOMContentLoaded event fired`));
+				page.on('framenavigated', (frame) => {
+					if (frame === page.mainFrame()) {
+						logger.info(`${logPrefix} Main frame navigated to: ${frame.url()}`);
+					}
+				});
+				page.on('request', request => {
+					if (request.isNavigationRequest()) {
+						logger.info(`${logPrefix} Navigation request to: ${request.url()}`);
+					}
+				});
+				page.on('response', response => {
+					if (response.request().isNavigationRequest()) {
+						logger.info(`${logPrefix} Navigation response from: ${response.url()} (status: ${response.status()})`);
+					}
+				});
+
+				// Resolve after 500ms to allow events to be captured but not block
+				setTimeout(resolve, 500);
+			});
+
+			// Wait for both promises - the navigation promise is the "real" one
+			await Promise.all([navigationPromise, eventLogsPromise]);
+			logger.info(`${logPrefix} Navigation completed successfully`);
+		} catch (error) {
+			logger.warn(`${logPrefix} Navigation error: ${(error as Error).message}`);
+			throw error;
+		}
+	}
+
+	// Find the existing waitForNavigation function and replace it
+	async function waitForNavigation(page: puppeteer.Page, waitUntil: string, timeout: number): Promise<void> {
+		// Default waitUntil option based on input string
 		let waitUntilOption: puppeteer.PuppeteerLifeCycleEvent | puppeteer.PuppeteerLifeCycleEvent[] = 'domcontentloaded';
 
-        // Set default timeout if not provided
-        const effectiveTimeout = timeout || 30000;
-
-        // For urlChanged, use a shorter timeout
-        const urlChangeTimeout = 6000; // 6 seconds is more reasonable than 30
-
+		// Parse waitUntil string into appropriate option
 		switch (waitUntil) {
-			case 'domContentLoaded':
+			case 'load':
+				waitUntilOption = 'load';
+				break;
+			case 'domcontentloaded':
 				waitUntilOption = 'domcontentloaded';
 				break;
-			case 'navigationComplete':
+			case 'networkidle0':
 				waitUntilOption = 'networkidle0';
 				break;
-			case 'fixedTime':
-				await new Promise((resolve) => setTimeout(resolve, effectiveTimeout));
-				return;
-            case 'urlChanged': {
-                // Store current URL before waiting
-                const currentUrl = page.url();
-                try {
-                    // Wait for URL to change with a shorter timeout
-                    await page.waitForFunction(
-                        (beforeUrl) => window.location.href !== beforeUrl,
-                        { timeout: urlChangeTimeout },
-                        currentUrl
-                    );
-                    return;
-                } catch (error) {
-                    // Check if the URL actually changed despite the timeout
-                    if (page.url() !== currentUrl) {
-                        // URL did change, we just timed out waiting for the event
-                        return;
-                    }
-                    // If we're here, URL didn't change within timeout, fall back to domcontentloaded
-                    waitUntilOption = 'domcontentloaded';
-                }
-                break;
-            }
+			case 'networkidle2':
+				waitUntilOption = 'networkidle2';
+				break;
+			case 'multiple':
+				waitUntilOption = ['domcontentloaded', 'networkidle0'];
+				break;
 			default:
 				waitUntilOption = 'domcontentloaded';
 		}
 
-		if (waitUntil !== 'noWait' && waitUntil !== 'fixedTime' && waitUntil !== 'urlChanged') {
-			await page.waitForNavigation({ waitUntil: waitUntilOption, timeout: effectiveTimeout });
-		}
+		// Call the enhanced function
+		await enhancedWaitForNavigation(page, {
+			waitUntil: waitUntilOption,
+			timeout,
+		}, console, '[Navigation]');
 	}
 
 	/**
@@ -3241,11 +3268,61 @@ export const description: INodeProperties[] = [
 													await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
 												}
 
-												// Click the submit button
-												await puppeteerPage.click(submitSelector);
+												// Log before clicking submit
+												this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] About to click submit button: ${submitSelector}`);
 
-												// Wait according to specified wait type
-												await waitForNavigation(puppeteerPage, waitAfterSubmit, waitSubmitTime);
+												try {
+													// Capture navigation events that might occur from the form submission
+													const logPrefix = `[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}]`;
+
+													// Create a promise that will resolve when the next navigation happens
+													const navigationPromise = puppeteerPage.waitForNavigation({
+														waitUntil: waitAfterSubmit === 'multiple' ? ['domcontentloaded', 'networkidle0'] :
+															(waitAfterSubmit as puppeteer.PuppeteerLifeCycleEvent || 'domcontentloaded'),
+														timeout: waitSubmitTime
+													});
+
+													// Click the submit button
+													this.logger.info(`${logPrefix} Clicking submit button ${submitSelector}`);
+													await puppeteerPage.click(submitSelector);
+													this.logger.info(`${logPrefix} Submit button clicked successfully`);
+
+													// Wait for navigation to complete
+													this.logger.info(`${logPrefix} Waiting for navigation to complete (timeout: ${waitSubmitTime}ms)`);
+													await navigationPromise;
+													this.logger.info(`${logPrefix} Navigation completed successfully after form submission`);
+
+													// Verify the page is still connected
+													await puppeteerPage.evaluate(() => document.readyState)
+														.then(readyState => {
+															this.logger.info(`${logPrefix} Page ready state after navigation: ${readyState}`);
+														})
+														.catch(error => {
+															this.logger.warn(`${logPrefix} Error checking page state after navigation: ${error.message}`);
+															this.logger.warn(`${logPrefix} This may indicate the page context was destroyed during navigation`);
+														});
+												} catch (navError) {
+													this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation error after form submission: ${(navError as Error).message}`);
+													this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] This is often normal with redirects - attempting to continue`);
+
+													// Try to verify the page is still usable
+													try {
+														const currentUrl = await puppeteerPage.url();
+														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Current URL after navigation error: ${currentUrl}`);
+													} catch (urlError) {
+														this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error getting URL after navigation: ${(urlError as Error).message}`);
+														this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Page context might be destroyed - attempting to reconnect`);
+
+														// If we have a session ID, try to reconnect
+														if (inputSessionId) {
+															this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Attempting to reconnect session after navigation error`);
+
+															// Try to reconnect - you need to implement this part based on your reconnection logic
+															// For now, we'll just throw an error to make the issue visible
+															throw new Error(`Page context destroyed during form submission navigation. A reconnection is needed to continue using this session.`);
+														}
+													}
+												}
 											}
 										}
 										else {
@@ -3898,11 +3975,61 @@ export const description: INodeProperties[] = [
 													await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
 												}
 
-												// Click the submit button
-												await puppeteerPage.click(submitSelector);
+												// Log before clicking submit
+												this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] About to click submit button: ${submitSelector}`);
 
-												// Wait according to specified wait type
-												await waitForNavigation(puppeteerPage, waitAfterSubmit, waitSubmitTime);
+												try {
+													// Capture navigation events that might occur from the form submission
+													const logPrefix = `[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}]`;
+
+													// Create a promise that will resolve when the next navigation happens
+													const navigationPromise = puppeteerPage.waitForNavigation({
+														waitUntil: waitAfterSubmit === 'multiple' ? ['domcontentloaded', 'networkidle0'] :
+															(waitAfterSubmit as puppeteer.PuppeteerLifeCycleEvent || 'domcontentloaded'),
+														timeout: waitSubmitTime
+													});
+
+													// Click the submit button
+													this.logger.info(`${logPrefix} Clicking submit button ${submitSelector}`);
+													await puppeteerPage.click(submitSelector);
+													this.logger.info(`${logPrefix} Submit button clicked successfully`);
+
+													// Wait for navigation to complete
+													this.logger.info(`${logPrefix} Waiting for navigation to complete (timeout: ${waitSubmitTime}ms)`);
+													await navigationPromise;
+													this.logger.info(`${logPrefix} Navigation completed successfully after form submission`);
+
+													// Verify the page is still connected
+													await puppeteerPage.evaluate(() => document.readyState)
+														.then(readyState => {
+															this.logger.info(`${logPrefix} Page ready state after navigation: ${readyState}`);
+														})
+														.catch(error => {
+															this.logger.warn(`${logPrefix} Error checking page state after navigation: ${error.message}`);
+															this.logger.warn(`${logPrefix} This may indicate the page context was destroyed during navigation`);
+														});
+												} catch (navError) {
+													this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation error after form submission: ${(navError as Error).message}`);
+													this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] This is often normal with redirects - attempting to continue`);
+
+													// Try to verify the page is still usable
+													try {
+														const currentUrl = await puppeteerPage.url();
+														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Current URL after navigation error: ${currentUrl}`);
+													} catch (urlError) {
+														this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error getting URL after navigation: ${(urlError as Error).message}`);
+														this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Page context might be destroyed - attempting to reconnect`);
+
+														// If we have a session ID, try to reconnect
+														if (inputSessionId) {
+															this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Attempting to reconnect session after navigation error`);
+
+															// Try to reconnect - you need to implement this part based on your reconnection logic
+															// For now, we'll just throw an error to make the issue visible
+															throw new Error(`Page context destroyed during form submission navigation. A reconnection is needed to continue using this session.`);
+														}
+													}
+												}
 											}
 										}
 										else {
