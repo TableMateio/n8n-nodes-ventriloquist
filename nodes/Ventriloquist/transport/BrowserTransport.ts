@@ -10,6 +10,12 @@ export interface BrowserTransport {
   connect(): Promise<puppeteer.Browser>;
 
   /**
+   * Reconnect to an existing session
+   * @param sessionId - The ID of the session to reconnect to
+   */
+  reconnect?(sessionId: string): Promise<puppeteer.Browser>;
+
+  /**
    * Navigate to a URL
    * @param page - Puppeteer Page
    * @param url - URL to navigate to

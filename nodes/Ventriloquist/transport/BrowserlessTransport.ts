@@ -41,50 +41,70 @@ export class BrowserlessTransport implements BrowserTransport {
 	}
 
 	/**
+	 * Get WebSocket URL for connecting to Browserless
+	 * This is extracted as a separate method to ensure consistent URL construction
+	 */
+	private getWebSocketUrl(): string {
+		let wsUrl: string;
+
+		// 1. If direct WebSocket endpoint is provided, use it (highest priority)
+		if (this.wsEndpoint) {
+			// Check if endpoint already has a token
+			if (!this.wsEndpoint.includes('token=') && this.apiKey) {
+				// Add token to the URL if not present and we have a token
+				wsUrl = `${this.wsEndpoint}${this.wsEndpoint.includes('?') ? '&' : '?'}token=${this.apiKey}`;
+			} else {
+				// Use as is
+				wsUrl = this.wsEndpoint;
+			}
+		}
+		// 2. If we have a base URL, construct a simple WebSocket URL
+		else if (this.baseUrl) {
+			let formattedBaseUrl = this.baseUrl;
+			// Add protocol if missing
+			if (!formattedBaseUrl.startsWith('http')) {
+				formattedBaseUrl = `https://${formattedBaseUrl}`;
+			}
+
+			// Convert to WebSocket protocol
+			const wsBaseUrl = formattedBaseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
+
+			// Simplest format for Railway compatibility: wss://domain?token=TOKEN
+			wsUrl = `${wsBaseUrl}?token=${this.apiKey}`;
+		}
+		// 3. If neither is provided, we can't connect
+		else {
+			throw new Error('Either a WebSocket endpoint or base URL must be provided');
+		}
+
+		// Add stealth mode if enabled and not already present
+		if (this.stealthMode && !wsUrl.includes('stealth=')) {
+			wsUrl += (wsUrl.includes('?') ? '&' : '?') + 'stealth=true';
+		}
+
+		return wsUrl;
+	}
+
+	/**
+	 * Get a safe version of the WebSocket URL for logging (with masked token)
+	 */
+	private getLogSafeWebSocketUrl(wsUrl: string): string {
+		return wsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***');
+	}
+
+	/**
 	 * Connect to Browserless browser
 	 * This establishes a connection to the Browserless service via WebSocket
 	 */
 	async connect(): Promise<puppeteer.Browser> {
-		this.logger.info('Connecting to Browserless via WebSocket');
+		this.logger.info('Connecting to Browserless with Puppeteer...');
 
 		try {
-			// Simplify the WebSocket URL handling for more reliability
-			// For Railway deployments, the simplest format works best: wss://domain?token=TOKEN
-			let wsUrl: string | null = null;
+			// Get the WebSocket URL for connecting
+			const wsUrl = this.getWebSocketUrl();
+			const logSafeUrl = this.getLogSafeWebSocketUrl(wsUrl);
 
-			// 1. If direct WebSocket endpoint is provided, use it (highest priority)
-			if (this.wsEndpoint) {
-				// Check if endpoint already has a token
-				if (!this.wsEndpoint.includes('token=') && this.apiKey) {
-					// Add token to the URL if not present and we have a token
-					wsUrl = `${this.wsEndpoint}${this.wsEndpoint.includes('?') ? '&' : '?'}token=${this.apiKey}`;
-				} else {
-					// Use as is
-					wsUrl = this.wsEndpoint;
-				}
-			}
-			// 2. If we have a base URL, construct a simple WebSocket URL
-			else if (this.baseUrl) {
-				let formattedBaseUrl = this.baseUrl;
-				// Add protocol if missing
-				if (!formattedBaseUrl.startsWith('http')) {
-					formattedBaseUrl = `https://${formattedBaseUrl}`;
-				}
-
-				// Convert to WebSocket protocol
-				const wsBaseUrl = formattedBaseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
-
-				// Simplest format for Railway compatibility: wss://domain?token=TOKEN
-				wsUrl = `${wsBaseUrl}?token=${this.apiKey}`;
-			}
-			// 3. If neither is provided, we can't connect
-			else {
-				throw new Error('Either a WebSocket endpoint or base URL must be provided');
-			}
-
-			// Mask the token in logs
-			const logSafeUrl = wsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***');
-			this.logger.info(`Attempting to connect with WebSocket URL: ${logSafeUrl}`);
+			this.logger.info(`Connecting with WebSocket URL: ${logSafeUrl}`);
 
 			// Test the connection before using it
 			const isConnectable = await testBrowserlessConnection(wsUrl, this.logger);
@@ -93,17 +113,13 @@ export class BrowserlessTransport implements BrowserTransport {
 				throw new Error(`Could not connect to Browserless WebSocket URL: ${logSafeUrl}`);
 			}
 
-			this.logger.info(`Found working WebSocket URL: ${logSafeUrl}`);
-
 			// Connect with Puppeteer using minimal options
 			const connectionOptions: puppeteer.ConnectOptions = {
 				browserWSEndpoint: wsUrl,
 				defaultViewport: { width: 1920, height: 1080 },
 			};
 
-			this.logger.info(`Connecting with WebSocket URL: ${logSafeUrl}`);
 			const browser = await puppeteer.connect(connectionOptions);
-
 			this.logger.info('Successfully connected to Browserless!');
 			return browser;
 		} catch (error) {
@@ -127,6 +143,68 @@ wss://browserless-production-xxxx.up.railway.app?token=YOUR_TOKEN
 Error details: ${(error as Error).stack || (error as Error).message}`;
 
 			this.logger.error('Connection error details:', error);
+			throw new Error(errorMessage);
+		}
+	}
+
+	/**
+	 * Reconnect to an existing session or create a new one
+	 * Specifically designed for subsequent nodes to connect to session created in previous nodes
+	 * @param sessionId - The ID of the session to reconnect to
+	 */
+	async reconnect(sessionId: string): Promise<puppeteer.Browser> {
+		this.logger.info(`Attempting to reconnect to Browserless session: ${sessionId}`);
+
+		try {
+			// Get the WebSocket URL for connecting with session ID
+			let wsUrl = this.getWebSocketUrl();
+
+			// Add session ID to the URL if it's a valid format (session_XXXX)
+			if (sessionId && sessionId.startsWith('session_')) {
+				// Make sure we keep the existing session ID in the URL
+				wsUrl += (wsUrl.includes('?') ? '&' : '?') + `sessionId=${sessionId}`;
+			}
+
+			const logSafeUrl = this.getLogSafeWebSocketUrl(wsUrl);
+			this.logger.info(`Reconnecting with WebSocket URL: ${logSafeUrl}`);
+
+			// Connect with Puppeteer using minimal options
+			const connectionOptions: puppeteer.ConnectOptions = {
+				browserWSEndpoint: wsUrl,
+				defaultViewport: { width: 1920, height: 1080 },
+			};
+
+			const browser = await puppeteer.connect(connectionOptions);
+			this.logger.info(`Successfully reconnected to Browserless session: ${sessionId}`);
+
+			// Verify that we have at least one page to work with
+			const pages = await browser.pages();
+			if (pages.length === 0) {
+				this.logger.warn('Reconnected browser has no pages, creating a new one');
+				await browser.newPage();
+			} else {
+				this.logger.info(`Reconnected browser has ${pages.length} pages available`);
+			}
+
+			return browser;
+		} catch (error) {
+			// Enhanced error diagnosis for reconnection issues
+			this.logger.error(`Failed to reconnect to session ${sessionId}: ${(error as Error).message}`);
+
+			// Provide specific guidance for reconnection errors
+			let errorMessage = `Reconnection to session ${sessionId} failed: ${(error as Error).message}\n\n`;
+			errorMessage += `This is likely because:
+1. The previous browser session has been closed or timed out
+2. The WebSocket connection parameters have changed
+3. The session ID is not being properly maintained between nodes
+
+Try the following:
+1. Make sure you're using Direct WebSocket URL in your credentials
+2. Pass the session ID from the previous node explicitly
+3. Increase session timeout to at least 8 minutes (current setting)
+
+Error details: ${(error as Error).stack || (error as Error).message}`;
+
 			throw new Error(errorMessage);
 		}
 	}

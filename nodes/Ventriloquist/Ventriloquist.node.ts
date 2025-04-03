@@ -1,18 +1,19 @@
+import * as puppeteer from 'puppeteer-core';
 import {
 	NodeConnectionType,
-	type IExecuteFunctions,
-	type INodeExecutionData,
-	type INodeType,
-	type INodeTypeDescription,
-	type IDataObject,
-	type ICredentialDataDecryptedObject,
-	type INodeParameters,
-	type INodePropertyOptions,
-	type ILoadOptionsFunctions,
 } from 'n8n-workflow';
-
-// Import puppeteer-core for browser automation
-import * as puppeteer from 'puppeteer-core';
+import type {
+	IDataObject,
+	IExecuteFunctions,
+	ILoadOptionsFunctions,
+	INodeExecutionData,
+	INodeParameters,
+	INodePropertyOptions,
+	INodeType,
+	INodeTypeDescription,
+	ICredentialDataDecryptedObject,
+} from 'n8n-workflow';
+import { BrowserTransportFactory } from './transport/BrowserTransportFactory';
 
 // Import actions
 import * as formOperation from './actions/form.operation';
@@ -21,8 +22,6 @@ import * as detectOperation from './actions/detect.operation';
 import * as decisionOperation from './actions/decision.operation';
 import * as openOperation from './actions/open.operation';
 import * as authenticateOperation from './actions/authenticate.operation';
-import { BrowserTransportFactory } from './transport/BrowserTransportFactory';
-import { BrowserTransport } from './transport/BrowserTransport';
 
 /**
  * Configure outputs for decision operation based on routing parameters
@@ -160,21 +159,23 @@ export class Ventriloquist implements INodeType {
 
 			// Create browser transport based on credential type
 			const transportFactory = new BrowserTransportFactory();
-			let transport: BrowserTransport;
 
+			// Handle case where credentials might be undefined
+			let finalCredentials: ICredentialDataDecryptedObject;
 			if (credentials) {
-				transport = transportFactory.createTransport(credentialType, logger, credentials);
+				finalCredentials = credentials;
 			} else if (credentialType === 'brightDataApi' && websocketEndpoint) {
 				// Create a basic BrightDataBrowser with just the endpoint if credentials aren't provided
 				// This is for backward compatibility
-				const dummyCredentials = {
+				finalCredentials = {
 					websocketEndpoint,
 					authorizedDomains: '',
 				} as ICredentialDataDecryptedObject;
-				transport = transportFactory.createTransport(credentialType, logger, dummyCredentials);
 			} else {
 				throw new Error(`Cannot create browser transport: missing credentials for type ${credentialType}`);
 			}
+
+			let transport = transportFactory.createTransport(credentialType, logger, finalCredentials);
 
 			// Create a new browser session
 			logger.info(forceNew
@@ -182,7 +183,39 @@ export class Ventriloquist implements INodeType {
 				: 'Creating new browser session');
 
 			// Connect to the browser using the transport
-			const browser = await transport.connect();
+			let browser: puppeteer.Browser;
+
+			// For Browserless, we need to handle session management differently
+			if (credentialType === 'browserlessApi') {
+				try {
+					// Check if we're creating a completely new session or reconnecting to an existing one
+					if (forceNew) {
+						// Connect to new session
+						logger.info('Creating new Browserless session');
+						browser = await transport.connect();
+					} else {
+						// Try to reconnect to existing session if possible
+						logger.info(`Attempting to reconnect to Browserless session: ${sessionId}`);
+
+						// Use the reconnect method if available
+						if (transport.reconnect) {
+							browser = await transport.reconnect(sessionId);
+							logger.info(`Successfully reconnected to Browserless session: ${sessionId}`);
+						} else {
+							// Fallback to regular connect if reconnect isn't implemented
+							logger.warn('Reconnect method not available, using standard connect');
+							browser = await transport.connect();
+						}
+					}
+				} catch (error) {
+					logger.warn(`Failed to connect/reconnect to Browserless: ${(error as Error).message}`);
+					logger.info('Creating new connection as fallback');
+					browser = await transport.connect();
+				}
+			} else {
+				// Standard connect for other providers (like Bright Data)
+				browser = await transport.connect();
+			}
 
 			// Convert minutes to milliseconds for timeout if provided
 			const timeoutMs = sessionTimeout ? sessionTimeout * 60 * 1000 : 3 * 60 * 1000; // Default to 3 minutes
@@ -200,8 +233,65 @@ export class Ventriloquist implements INodeType {
 			logger.info(`Session ID for this session: ${sessionId}`);
 			logger.info(`Session will be stored with workflow ID: ${workflowId}`);
 		} else {
-			// Update last used timestamp
-			session.lastUsed = new Date();
+			// Check if the existing browser is still connected
+			let needReconnect = false;
+
+			try {
+				// Simple check to see if we can still get pages
+				await session.browser.pages();
+				logger.info('Existing browser session is still connected');
+			} catch (error) {
+				logger.warn(`Existing browser session appears disconnected: ${(error as Error).message}`);
+				needReconnect = true;
+			}
+
+			// For Browserless, reconnect if necessary
+			if (needReconnect && credentialType === 'browserlessApi' && credentials) {
+				try {
+					logger.info(`Attempting to reconnect disconnected Browserless session: ${sessionId}`);
+					const transportFactory = new BrowserTransportFactory();
+					const transport = transportFactory.createTransport(credentialType, logger, credentials);
+
+					// Use the reconnect method if available
+					if (transport.reconnect) {
+						const browser = await transport.reconnect(sessionId);
+
+						// Update the session with the new browser
+						session.browser = browser;
+						session.lastUsed = new Date();
+						logger.info('Successfully reconnected to existing Browserless session');
+					} else {
+						// Fallback to regular connect
+						logger.warn('Reconnect method not available, using standard connect');
+						session.browser = await transport.connect();
+						session.lastUsed = new Date();
+					}
+				} catch (reconnectError) {
+					logger.error(`Failed to reconnect to Browserless session: ${(reconnectError as Error).message}`);
+					logger.info('Creating completely new session');
+
+					// Close the existing session and create a new one
+					try {
+						await session.browser.close();
+					} catch (closeError) {
+						logger.warn(`Error closing disconnected session: ${(closeError as Error).message}`);
+					}
+
+					// Create a new session
+					const transportFactory = new BrowserTransportFactory();
+					const transport = transportFactory.createTransport(credentialType, logger, credentials);
+					const browser = await transport.connect();
+
+					// Update the session
+					session.browser = browser;
+					session.lastUsed = new Date();
+					session.pages = new Map();
+					logger.info('Created new Browserless session to replace disconnected one');
+				}
+			} else {
+				// Just update the timestamp for connected sessions
+				session.lastUsed = new Date();
+			}
 
 			// Update timeout if provided and different from current
 			if (sessionTimeout !== undefined) {
