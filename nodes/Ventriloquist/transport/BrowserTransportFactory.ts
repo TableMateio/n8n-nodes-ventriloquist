@@ -31,14 +31,33 @@ export class BrowserTransportFactory {
           throw new Error('Direct WebSocket URL is required when using direct connection mode');
         }
 
-        // For direct connections, pass through the WebSocket URL with minimal modifications
-        // The token should already be in the URL
+        // Prepare the WebSocket URL - add protocol if missing
+        let processedEndpoint = wsEndpoint.trim();
+
+        // Check if the endpoint has a protocol, add one if missing
+        if (!processedEndpoint.startsWith('ws://') && !processedEndpoint.startsWith('wss://') &&
+            !processedEndpoint.startsWith('http://') && !processedEndpoint.startsWith('https://')) {
+          logger.info('WebSocket URL missing protocol - adding wss:// prefix');
+          processedEndpoint = `wss://${processedEndpoint}`;
+        }
+
+        // For direct connections, check if the URL already contains a session ID
+        const hasSessionId = processedEndpoint.includes('sessionId=') ||
+                            processedEndpoint.includes('session=') ||
+                            processedEndpoint.includes('id=');
+
+        if (hasSessionId) {
+          logger.info('WebSocket URL already contains a session ID parameter - preserving for reconnection');
+        }
+
+        // Log the WebSocket URL with masked token for debugging
+        const logSafeUrl = processedEndpoint.replace(/token=([^&]+)/, 'token=***TOKEN***');
+        logger.info(`Creating Browserless transport with direct WebSocket URL: ${logSafeUrl}`);
+        logger.info(`Session parameters present: ${hasSessionId ? 'YES' : 'NO'}`);
+
+        // Added stealth mode handling - users often want this for Browserless
         const stealthMode = credentials.stealthMode !== undefined ? credentials.stealthMode as boolean : true;
         const requestTimeout = credentials.connectionTimeout ? credentials.connectionTimeout as number : 120000;
-
-        // Mask the token in logs
-        const logSafeUrl = wsEndpoint.replace(/token=([^&]+)/, 'token=***TOKEN***');
-        logger.info(`Creating Browserless transport with direct WebSocket URL: ${logSafeUrl}`);
 
         return new BrowserlessTransport(
           logger,
@@ -46,7 +65,7 @@ export class BrowserTransportFactory {
           '', // Empty base URL - we're using direct WebSocket
           stealthMode,
           requestTimeout,
-          wsEndpoint,
+          processedEndpoint, // Use the processed endpoint
         );
       } else {
         // Standard connection mode (domain + token)
@@ -56,7 +75,14 @@ export class BrowserTransportFactory {
 
         // Get credential values with defaults
         const apiKey = credentials.apiKey as string;
-        const baseUrl = (credentials.baseUrl as string) || 'https://chrome.browserless.io';
+        let baseUrl = (credentials.baseUrl as string) || 'https://chrome.browserless.io';
+
+        // Add protocol to base URL if missing
+        if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+          logger.info('Base URL missing protocol - adding https:// prefix');
+          baseUrl = `https://${baseUrl}`;
+        }
+
         const stealthMode = credentials.stealthMode !== undefined ? credentials.stealthMode as boolean : true;
         const requestTimeout = credentials.connectionTimeout ? credentials.connectionTimeout as number : 120000;
 

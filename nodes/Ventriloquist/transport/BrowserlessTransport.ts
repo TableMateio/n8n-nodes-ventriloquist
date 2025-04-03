@@ -49,7 +49,53 @@ export class BrowserlessTransport implements BrowserTransport {
 		this.logger.info('Connecting to Browserless service...');
 
 		try {
-			// Get WebSocket URL using the new method
+			// Special handling for direct WebSocket endpoints
+			if (this.wsEndpoint) {
+				let wsUrl = this.wsEndpoint;
+
+				// Add protocol if missing
+				if (!wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://') &&
+					!wsUrl.startsWith('http://') && !wsUrl.startsWith('https://')) {
+					wsUrl = `wss://${wsUrl}`;
+					this.logger.info(`Added WSS protocol to direct WebSocket URL: ${wsUrl}`);
+				}
+
+				// Convert http protocols to ws if needed
+				if (wsUrl.startsWith('http://')) {
+					wsUrl = wsUrl.replace('http://', 'ws://');
+				} else if (wsUrl.startsWith('https://')) {
+					wsUrl = wsUrl.replace('https://', 'wss://');
+				}
+
+				// Add token if not present
+				if (!wsUrl.includes('token=') && this.apiKey) {
+					try {
+						const wsUrlObj = new URL(wsUrl);
+						wsUrlObj.searchParams.set('token', this.apiKey);
+						wsUrl = wsUrlObj.toString();
+					} catch (urlError) {
+						this.logger.warn(`Could not parse WebSocket URL: ${wsUrl}. Adding token directly.`);
+						wsUrl += (wsUrl.includes('?') ? '&' : '?') + `token=${this.apiKey}`;
+					}
+				}
+
+				// Create connection options
+				const connectionOptions: puppeteer.ConnectOptions = {
+					browserWSEndpoint: wsUrl,
+					defaultViewport: {
+						width: 1280,
+						height: 720,
+					},
+				};
+
+				// Connect to browser
+				this.browser = await puppeteer.connect(connectionOptions);
+				this.logger.info('Successfully connected to Browserless!');
+
+				return this.browser;
+			}
+
+			// Standard approach using baseUrl + path
 			const wsUrl = this.getWsEndpoint();
 
 			// Create connection options
@@ -80,7 +126,57 @@ export class BrowserlessTransport implements BrowserTransport {
 		this.logger.info(`Attempting to reconnect to Browserless session: ${sessionId}`);
 
 		try {
-			// Get the base WebSocket URL
+			// Special handling for direct WebSocket endpoints
+			if (this.wsEndpoint) {
+				let wsUrl = this.wsEndpoint;
+
+				// Add protocol if missing
+				if (!wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://') &&
+					!wsUrl.startsWith('http://') && !wsUrl.startsWith('https://')) {
+					wsUrl = `wss://${wsUrl}`;
+					this.logger.info(`Added WSS protocol to direct WebSocket URL: ${wsUrl}`);
+				}
+
+				// Convert http protocols to ws if needed
+				if (wsUrl.startsWith('http://')) {
+					wsUrl = wsUrl.replace('http://', 'ws://');
+				} else if (wsUrl.startsWith('https://')) {
+					wsUrl = wsUrl.replace('https://', 'wss://');
+				}
+
+				// Add session ID if valid
+				if (sessionId && sessionId.startsWith('session_')) {
+					// Use URL object for proper parameter handling
+					try {
+						const wsUrlObj = new URL(wsUrl);
+						wsUrlObj.searchParams.set('sessionId', sessionId);
+						wsUrl = wsUrlObj.toString();
+					} catch (urlError) {
+						this.logger.warn(`Could not parse WebSocket URL: ${wsUrl}. Adding session ID directly.`);
+						wsUrl += (wsUrl.includes('?') ? '&' : '?') + `sessionId=${sessionId}`;
+					}
+
+					this.logger.info(`Added session parameter to WebSocket URL: ${wsUrl}`);
+				}
+
+				// Create connection options
+				const connectOptions: puppeteer.ConnectOptions = {
+					browserWSEndpoint: wsUrl,
+					defaultViewport: {
+						width: 1280,
+						height: 720,
+					},
+				};
+
+				// Connect to browser
+				this.browser = await puppeteer.connect(connectOptions);
+				this.logger.info(`Successfully reconnected to Browserless session: ${sessionId}`);
+
+				// Return the browser instance
+				return this.browser;
+			}
+
+			// Standard approach using baseUrl + path
 			let wsUrl = this.getWsEndpoint();
 
 			// Add the session ID if valid
@@ -343,7 +439,13 @@ export class BrowserlessTransport implements BrowserTransport {
 	private getWsEndpoint(baseUrl = this.baseUrl, path = '/browserless'): string {
 		try {
 			// Format the base URL properly
-			const formattedBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+			let formattedBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+
+			// Add protocol if missing
+			if (!formattedBaseUrl.startsWith('http://') && !formattedBaseUrl.startsWith('https://')) {
+				formattedBaseUrl = `https://${formattedBaseUrl}`;
+				this.logger.info(`Added HTTPS protocol to base URL: ${formattedBaseUrl}`);
+			}
 
 			// Use URL API for reliable protocol conversion and parameter handling
 			const url = new URL(path, formattedBaseUrl);
