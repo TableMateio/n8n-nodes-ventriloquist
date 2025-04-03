@@ -123,7 +123,7 @@ export class Ventriloquist implements INodeType {
 				try {
 					// Bright Data WebSocket URLs typically contain the session ID in a format like:
 					// wss://brd-customer-XXX.bright.com/browser/XXX/sessionID/...
-					// or wss://brd.superproxy.io:9223/XXXX/XXXX-XXXX-XXXX-XXXX
+					// or wss://brd.superproxy.io:9223/XXXX/XXXX-XXXX-XXXX
 
 					// First try to extract from standard format with io:port
 					let matches = websocketEndpoint.match(/io:\d+\/([^\/]+\/[^\/\s]+)/);
@@ -1012,22 +1012,112 @@ export class Ventriloquist implements INodeType {
 					let attempt = 0;
 
 					try {
-						// Create a session or reuse an existing one
-						const { browser: newBrowser } = await Ventriloquist.getOrCreateSession(
-							workflowId,
-							websocketEndpoint,
-							this.logger,
-							brightDataTimeout,
-							true,
-							credentialType,
-							credentials,
-						);
-						browser = newBrowser;
+						// Store logger instance in a local variable to avoid 'this' in static context issues
+						const logger = this.logger;
+
+						// First, check if we have a valid sessionId from previous operations
+						if (sessionId) {
+							logger.info(`Attempting to reuse existing session with ID: ${sessionId}`);
+
+							// Try to get the existing session for this workflow
+							const existingSession = Ventriloquist.browserSessions.get(workflowId);
+
+							if (existingSession) {
+								logger.info(`Found existing browser session for workflow: ${workflowId}`);
+								browser = existingSession.browser;
+
+								// Check if the browser is still connected
+								try {
+									await browser.pages();
+									logger.info(`Existing browser session is still connected`);
+								} catch (connectionError) {
+									logger.warn(`Existing browser session appears disconnected: ${(connectionError as Error).message}`);
+									logger.info(`Will try to reconnect to existing session`);
+
+									// Create transport to handle reconnection
+									const transportFactory = new BrowserTransportFactory();
+									const browserTransport = transportFactory.createTransport(
+										credentialType,
+										logger,
+										credentials,
+									);
+
+									// Reconnect if the transport supports it
+									if (browserTransport.reconnect) {
+										try {
+											logger.info(`Reconnecting to ${credentialType} session: ${sessionId}`);
+											browser = await browserTransport.reconnect(sessionId);
+											logger.info(`Successfully reconnected to session: ${sessionId}`);
+
+											// Update the session with the new browser
+											existingSession.browser = browser;
+											existingSession.lastUsed = new Date();
+										} catch (reconnectError) {
+											logger.error(`Reconnection failed: ${(reconnectError as Error).message}`);
+											logger.info(`Creating new session as fallback`);
+
+											// If reconnection fails, create new session
+											const { browser: newBrowser } = await Ventriloquist.getOrCreateSession(
+												workflowId,
+												websocketEndpoint,
+												logger,
+												brightDataTimeout,
+												true, // Force new session in this fallback case
+												credentialType,
+												credentials,
+											);
+											browser = newBrowser;
+										}
+									} else {
+										logger.warn(`Transport doesn't support reconnection, creating new session`);
+										// Create new session if reconnect not supported
+										const { browser: newBrowser } = await Ventriloquist.getOrCreateSession(
+											workflowId,
+											websocketEndpoint,
+											logger,
+											brightDataTimeout,
+											true, // Force new session if reconnect not supported
+											credentialType,
+											credentials,
+										);
+										browser = newBrowser;
+									}
+								}
+							} else {
+								logger.warn(`No existing session found for workflow ID: ${workflowId}`);
+								logger.info(`Creating new session with forced ID: ${sessionId}`);
+
+								// Create a new session
+								const { browser: newBrowser } = await Ventriloquist.getOrCreateSession(
+									workflowId,
+									websocketEndpoint,
+									logger,
+									brightDataTimeout,
+									false, // Don't force new - let it create naturally
+									credentialType,
+									credentials,
+								);
+								browser = newBrowser;
+							}
+						} else {
+							logger.info(`No session ID provided, creating or reusing session`);
+							// No specific session ID requested, so get or create as normal
+							const { browser: newBrowser } = await Ventriloquist.getOrCreateSession(
+								workflowId,
+								websocketEndpoint,
+								logger,
+								brightDataTimeout,
+								false, // Don't force a new session unless necessary
+								credentialType,
+								credentials,
+							);
+							browser = newBrowser;
+						}
 
 						// Try to get existing page from session
 						if (sessionId) {
 							page = Ventriloquist.getPage(workflowId, sessionId);
-							this.logger.info(`Found existing page with session ID: ${sessionId}`);
+							logger.info(`Found existing page with session ID: ${sessionId}`);
 						}
 
 						// If no existing page, get the first available page or create a new one
@@ -1036,18 +1126,18 @@ export class Ventriloquist implements INodeType {
 							page = pages.length > 0 ? pages[0] : await browser.newPage();
 							sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 							Ventriloquist.storePage(workflowId, sessionId, page);
-							this.logger.info(`Created new page with session ID: ${sessionId}`);
+							logger.info(`Created new page with session ID: ${sessionId}`);
 						}
 
 						// Get page info for debugging
 						pageTitle = await page.title();
 						pageUrl = page.url();
 
-						this.logger.info(`Current page URL: ${pageUrl}, title: ${pageTitle}`);
+						logger.info(`Current page URL: ${pageUrl}, title: ${pageTitle}`);
 
 						// If waiting for a specific element before clicking, wait for it first
 						if (waitBeforeClickSelector) {
-							this.logger.info(`Waiting for selector "${waitBeforeClickSelector}" before clicking`);
+							logger.info(`Waiting for selector "${waitBeforeClickSelector}" before clicking`);
 							await page.waitForSelector(waitBeforeClickSelector, { timeout: brightDataTimeout });
 						}
 
@@ -1062,19 +1152,19 @@ export class Ventriloquist implements INodeType {
 						}
 
 						// Try clicking the element with retries
-						this.logger.info(`Clicking on selector "${selector}" (attempt ${attempt + 1})`);
+						logger.info(`Clicking on selector "${selector}" (attempt ${attempt + 1})`);
 
 						while (!success && attempt <= retries) {
 							try {
 								// Try standard click first
 								await page.click(selector);
-								this.logger.info('Standard click was successful');
+								logger.info('Standard click was successful');
 								success = true;
 							} catch (clickErr) {
-								this.logger.warn(`Native click failed: ${clickErr.message}, trying alternative method...`);
+								logger.warn(`Native click failed: ${clickErr.message}, trying alternative method...`);
 
 								// If that fails, try JavaScript click execution
-								this.logger.info(`Clicking on selector "${selector}" using JavaScript execution`);
+								logger.info(`Clicking on selector "${selector}" using JavaScript execution`);
 								const jsClickSuccess = await page.evaluate((sel) => {
 									const element = document.querySelector(sel);
 									if (!element) return false;
@@ -1102,11 +1192,11 @@ export class Ventriloquist implements INodeType {
 								}, selector);
 
 								if (jsClickSuccess) {
-									this.logger.info('JavaScript click was successful');
+									logger.info('JavaScript click was successful');
 									success = true;
 								} else {
 									error = new Error('All click methods failed');
-									this.logger.warn(`Click attempt ${attempt + 1} failed: All methods failed`);
+									logger.warn(`Click attempt ${attempt + 1} failed: All methods failed`);
 									attempt++;
 
 									// If there are more retries, wait a bit before retrying
