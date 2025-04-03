@@ -1,6 +1,7 @@
 import * as puppeteer from 'puppeteer-core';
-import { URL } from 'url';
+import { URL } from 'node:url';
 import { BrowserTransport } from './BrowserTransport';
+import { testBrowserlessConnection } from '../utils/testBrowserlessConnection';
 
 /**
  * Class to handle Browserless browser interactions
@@ -47,130 +48,92 @@ export class BrowserlessTransport implements BrowserTransport {
 		this.logger.info('Connecting to Browserless via WebSocket');
 
 		try {
-			// If direct WebSocket endpoint is provided, use it first
+			// List of WebSocket URLs to try in order, starting with the most likely to succeed
+			const wsUrlsToTry: string[] = [];
+			let successfulUrl: string | null = null;
+
+			// 1. If direct WebSocket endpoint is provided, add it first
 			if (this.wsEndpoint) {
-				this.logger.info('Direct WebSocket endpoint provided, trying that first...');
-				try {
-					// Add token to the WebSocket URL if not already included
-					const directWsUrl = this.wsEndpoint.includes('token=')
-						? this.wsEndpoint
-						: `${this.wsEndpoint}${this.wsEndpoint.includes('?') ? '&' : '?'}token=${this.apiKey}`;
-
-					const sanitizedDirectUrl = directWsUrl.replace(this.apiKey, '***TOKEN***');
-					this.logger.info(`Connecting using direct WebSocket URL: ${sanitizedDirectUrl}`);
-
-					const browser = await puppeteer.connect({
-						browserWSEndpoint: directWsUrl,
-						defaultViewport: { width: 1920, height: 1080 },
-					});
-
-					this.logger.info('Successfully connected using direct WebSocket URL!');
-					return browser;
-				} catch (directError) {
-					this.logger.warn(`Direct WebSocket connection failed: ${(directError as Error).message}`);
-					this.logger.info('Falling back to automatic WebSocket URL construction...');
+				// Check if endpoint already has a token
+				if (this.wsEndpoint.includes('token=')) {
+					// Already has token, use as is
+					wsUrlsToTry.push(this.wsEndpoint);
+				} else {
+					// Add token to the URL
+					wsUrlsToTry.push(`${this.wsEndpoint}${this.wsEndpoint.includes('?') ? '&' : '?'}token=${this.apiKey}`);
 				}
 			}
 
-			// Ensure base URL has protocol
-			let formattedBaseUrl = this.baseUrl;
-			if (!formattedBaseUrl.startsWith('http')) {
-				formattedBaseUrl = `https://${formattedBaseUrl}`;
-				this.logger.info(`Adding https:// prefix to base URL: ${formattedBaseUrl}`);
+			// 2. If we have a base URL, construct WebSocket URLs from it
+			if (this.baseUrl) {
+				let formattedBaseUrl = this.baseUrl;
+				// Add protocol if missing
+				if (!formattedBaseUrl.startsWith('http')) {
+					formattedBaseUrl = `https://${formattedBaseUrl}`;
+				}
+
+				// Convert to WebSocket protocol
+				const wsBaseUrl = formattedBaseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
+
+				// Add various formats to try
+				wsUrlsToTry.push(`${wsBaseUrl}?token=${this.apiKey}`); // Direct connection
+				wsUrlsToTry.push(`${wsBaseUrl}/browserws?token=${this.apiKey}`); // Standard browserws path
+				wsUrlsToTry.push(`${wsBaseUrl}/chrome?token=${this.apiKey}`); // Legacy chrome path
 			}
 
-			// We'll try three different WebSocket URL formats, starting with the one most likely to work
-			let wsEndpoint = '';
-			let browser: puppeteer.Browser | null = null;
-			let lastError: Error | null = null;
+			// 3. Add the exact URL format from the error message if it looks like that format
+			const railwayFormat = `wss://${this.baseUrl.replace('https://', '').replace('http://', '')}?token=${this.apiKey}`;
+			if (!wsUrlsToTry.includes(railwayFormat)) {
+				wsUrlsToTry.push(railwayFormat);
+			}
 
-			// Railway typically provides a direct WebSocket endpoint that we should use
-			// Try format 1 (direct connection without path): wss://your-domain.railway.app?token=TOKEN
-			this.logger.info('Trying direct WebSocket connection without path...');
-			try {
-				wsEndpoint = `${formattedBaseUrl.replace('https://', 'wss://').replace('http://', 'ws://')}?token=${this.apiKey}`;
-				const sanitizedEndpoint1 = wsEndpoint.replace(this.apiKey, '***TOKEN***');
-				this.logger.info(`Trying WebSocket endpoint format 1: ${sanitizedEndpoint1}`);
+			// Test each WebSocket URL before trying to connect with Puppeteer
+			this.logger.info(`Will attempt ${wsUrlsToTry.length} different WebSocket URL formats`);
 
-				browser = await puppeteer.connect({
-					browserWSEndpoint: wsEndpoint,
+			for (const wsUrl of wsUrlsToTry) {
+				// Test the connection directly first
+				const isConnectable = await testBrowserlessConnection(wsUrl, this.logger);
+
+				if (isConnectable) {
+					successfulUrl = wsUrl;
+					this.logger.info(`Found working WebSocket URL: ${wsUrl.replace(this.apiKey, '***TOKEN***')}`);
+					break;
+				}
+			}
+
+			// If we found a working URL, connect with Puppeteer
+			if (successfulUrl) {
+				this.logger.info('Connecting to Browserless with Puppeteer...');
+
+				const browser = await puppeteer.connect({
+					browserWSEndpoint: successfulUrl,
 					defaultViewport: { width: 1920, height: 1080 },
 				});
 
-				this.logger.info('Successfully connected using direct WebSocket without path!');
+				this.logger.info('Successfully connected to Browserless!');
 				return browser;
-			} catch (error1) {
-				lastError = error1 as Error;
-				this.logger.warn(`Format 1 failed: ${(error1 as Error).message}`);
-
-				// Try format 2 (standard /browserws path): wss://your-domain.railway.app/browserws?token=TOKEN
-				this.logger.info('Trying with /browserws path...');
-				try {
-					wsEndpoint = `${formattedBaseUrl.replace('https://', 'wss://').replace('http://', 'ws://')}/browserws?token=${this.apiKey}`;
-					const sanitizedEndpoint2 = wsEndpoint.replace(this.apiKey, '***TOKEN***');
-					this.logger.info(`Trying WebSocket endpoint format 2: ${sanitizedEndpoint2}`);
-
-					browser = await puppeteer.connect({
-						browserWSEndpoint: wsEndpoint,
-						defaultViewport: { width: 1920, height: 1080 },
-					});
-
-					this.logger.info('Successfully connected using /browserws path!');
-					return browser;
-				} catch (error2) {
-					this.logger.warn(`Format 2 failed: ${(error2 as Error).message}`);
-
-					// Try format 3 (legacy /chrome path): wss://your-domain.railway.app/chrome?token=TOKEN
-					this.logger.info('Trying with legacy /chrome path...');
-					try {
-						wsEndpoint = `${formattedBaseUrl.replace('https://', 'wss://').replace('http://', 'ws://')}/chrome?token=${this.apiKey}`;
-						const sanitizedEndpoint3 = wsEndpoint.replace(this.apiKey, '***TOKEN***');
-						this.logger.info(`Trying WebSocket endpoint format 3: ${sanitizedEndpoint3}`);
-
-						browser = await puppeteer.connect({
-							browserWSEndpoint: wsEndpoint,
-							defaultViewport: { width: 1920, height: 1080 },
-						});
-
-						this.logger.info('Successfully connected using legacy /chrome path!');
-						return browser;
-					} catch (error3) {
-						this.logger.error(`All connection formats failed. Last error: ${(error3 as Error).message}`);
-						// Continue to error handling below, throwing the original error for better diagnosis
-					}
-				}
 			}
 
-			// If we get here, all connection attempts failed
-			// Enhanced error diagnosis with detailed information about the Railway deployment
-			if (lastError?.message.includes('ERR_INVALID_URL')) {
-				throw new Error(`
-Invalid WebSocket URL format. For Railway deployments:
-1. Use the TOKEN environment variable value (not BROWSER_TOKEN)
-2. For Base URL, try the following formats:
-   - Just the domain: browserless-production-xxxx.up.railway.app
-   - With https://: https://browserless-production-xxxx.up.railway.app
-3. If available, find the BROWSER_WS_ENDPOINT environment variable in Railway and add it to the "Direct WebSocket URL" field.
-
-Full error: ${lastError.message}`);
-			}
-
-			// Rethrow the original error if not an invalid URL error
-			throw lastError;
+			// If we get here, all URLs failed
+			throw new Error('All WebSocket connection attempts failed. Please check your credentials and try again.');
 		} catch (error) {
-			// General error handling for connection issues
+			// Enhanced error diagnosis with detailed information
+			let errorMessage = `Connection to Browserless failed: ${(error as Error).message}\n\n`;
+
+			errorMessage += `Troubleshooting steps:
+1. Double-check your TOKEN value
+2. Try using the exact WebSocket URL directly:
+   - Copy the BROWSER_WS_ENDPOINT value from Railway
+   - Paste it in the "Direct WebSocket URL" field
+   - Try with and without adding the token parameter
+
+For Railway deployments, your WebSocket URL likely looks like:
+wss://browserless-production-xxxx.up.railway.app?token=YOUR_TOKEN
+
+Error details: ${(error as Error).stack || (error as Error).message}`;
+
 			this.logger.error('Connection error details:', error);
-
-			// For any errors, provide detailed troubleshooting information
-			throw new Error(`
-Connection to Browserless failed: ${(error as Error).message}
-
-Troubleshooting steps:
-1. Verify TOKEN value is correct
-2. For Base URL - try just the domain without https://
-3. Direct WebSocket URL - try copying the BROWSER_WS_ENDPOINT value from Railway
-4. Check Railway logs to see if Browserless is running correctly
-5. Try changing the path from /browserws to /chrome in the Direct WebSocket URL`);
+			throw new Error(errorMessage);
 		}
 	}
 

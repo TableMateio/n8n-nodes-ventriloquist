@@ -21,28 +21,53 @@ export class BrowserTransportFactory {
     logger.info(`Creating transport for credential type: ${credentialType}`);
 
     if (credentialType === 'browserlessApi') {
-      // Validate required Browserless credentials
-      if (!credentials.apiKey) {
-        throw new Error('API Key is required for Browserless');
+      const connectionType = credentials.connectionType as string || 'standard';
+      logger.info(`Using Browserless connection type: ${connectionType}`);
+
+      if (connectionType === 'direct') {
+        // Direct WebSocket connection mode (recommended for Railway)
+        const wsEndpoint = credentials.wsEndpoint as string;
+        if (!wsEndpoint) {
+          throw new Error('Direct WebSocket URL is required when using direct connection mode');
+        }
+
+        // For direct connections, we only need the WebSocket URL
+        // We'll pass empty string as the API key because the token is already in the WebSocket URL
+        const stealthMode = credentials.stealthMode !== undefined ? credentials.stealthMode as boolean : true;
+        const requestTimeout = credentials.connectionTimeout ? credentials.connectionTimeout as number : 120000;
+
+        logger.info(`Creating Browserless transport with direct WebSocket URL: ${wsEndpoint.replace(/token=([^&]+)/, 'token=***TOKEN***')}`);
+
+        return new BrowserlessTransport(
+          logger,
+          '', // Empty API key - it's already in the WebSocket URL
+          '', // Empty base URL - we're using direct WebSocket
+          stealthMode,
+          requestTimeout,
+          wsEndpoint,
+        );
+      } else {
+        // Standard connection mode (domain + token)
+        if (!credentials.apiKey) {
+          throw new Error('Token is required for Browserless standard connection');
+        }
+
+        // Get credential values with defaults
+        const apiKey = credentials.apiKey as string;
+        const baseUrl = (credentials.baseUrl as string) || 'https://chrome.browserless.io';
+        const stealthMode = credentials.stealthMode !== undefined ? credentials.stealthMode as boolean : true;
+        const requestTimeout = credentials.connectionTimeout ? credentials.connectionTimeout as number : 120000;
+
+        logger.info(`Creating Browserless transport with base URL: ${baseUrl}`);
+
+        return new BrowserlessTransport(
+          logger,
+          apiKey,
+          baseUrl,
+          stealthMode,
+          requestTimeout,
+        );
       }
-
-      // Get credential values with defaults
-      const apiKey = credentials.apiKey as string;
-      const baseUrl = (credentials.baseUrl as string) || 'https://chrome.browserless.io';
-      const stealthMode = credentials.stealthMode !== undefined ? credentials.stealthMode as boolean : true;
-      const requestTimeout = credentials.connectionTimeout ? credentials.connectionTimeout as number : 120000;
-      const wsEndpoint = credentials.wsEndpoint as string || undefined;
-
-      logger.info(`Creating Browserless transport with base URL: ${baseUrl}, direct WebSocket endpoint: ${wsEndpoint || 'none'}`);
-
-      return new BrowserlessTransport(
-        logger,
-        apiKey,
-        baseUrl,
-        stealthMode,
-        requestTimeout,
-        wsEndpoint,
-      );
     }
 
     if (credentialType === 'brightDataApi') {
