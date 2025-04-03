@@ -3896,7 +3896,7 @@ export const description: INodeProperties[] = [
 														htmlLength: htmlContent.length,
 														elementCount,
 														imageCount,
-															linkCount,
+														linkCount,
 													};
 												} else {
 													// For string output, add metadata as a separate property
@@ -3906,7 +3906,7 @@ export const description: INodeProperties[] = [
 															htmlLength: htmlContent.length,
 															elementCount,
 															imageCount,
-																linkCount,
+															linkCount,
 														}
 													};
 												}
