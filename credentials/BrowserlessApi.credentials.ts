@@ -1,7 +1,6 @@
-import {
-	type ICredentialType,
-	type INodeProperties,
-	type ICredentialTestRequest,
+import type {
+	ICredentialType,
+	INodeProperties,
 } from 'n8n-workflow';
 
 export class BrowserlessApi implements ICredentialType {
@@ -90,14 +89,13 @@ export class BrowserlessApi implements ICredentialType {
 			description: 'Whether to use stealth mode to avoid bot detection. Recommended for most web scraping tasks.',
 			required: false,
 		},
+		{
+			displayName: 'Note: Railway Deployments',
+			name: 'railwayNote',
+			type: 'notice',
+			default: 'Railway-hosted Browserless instances only respond to WebSocket connections. Use the "Direct WebSocket URL" connection type with the full WebSocket URL from Railway. You can use the test utility to verify your connection: "pnpm run test:browserless your-websocket-url"',
+		},
 	];
 
-	// Test if the credentials are valid
-	test: ICredentialTestRequest = {
-		request: {
-			baseURL: '={{$credentials.connectionType === "standard" ? ($credentials.baseUrl.startsWith("http") ? $credentials.baseUrl : "https://" + $credentials.baseUrl) : $credentials.wsEndpoint.replace("wss://", "https://").replace("ws://", "http://").split("?")[0]}}',
-			url: '/healthz',
-			method: 'GET',
-		},
-	};
+	// Not using standard credential test since Railway instances only accept WebSocket connections
 }

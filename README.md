@@ -101,3 +101,37 @@ Browserless is a cloud browser automation service:
 4. **Debugging**:
    - Enable the "Debug" option in the Open operation for troubleshooting
    - Check logs for detailed information about each step
+
+## Testing Browserless Connections
+
+For testing connections to Browserless instances, especially those hosted on Railway:
+
+```bash
+# Install the node package
+npm install -g n8n-nodes-ventriloquist
+
+# Test WebSocket connection directly
+pnpm run test:browserless "wss://your-browserless-app.up.railway.app?token=YOUR_TOKEN"
+```
+
+If the connection is successful, you'll see:
+```
+Testing connection to: wss://your-browserless-app.up.railway.app?token=***TOKEN***
+✅ Connection test SUCCESSFUL
+```
+
+You can also use the standalone Puppeteer test script:
+```bash
+node test-puppeteer-railway.js
+```
+
+### Troubleshooting Railway Deployments
+
+Railway-hosted Browserless instances only respond to WebSocket connections, not HTTP endpoints. Use the "Direct WebSocket URL" connection type in the credentials configuration.
+
+Make sure your Railway deployment has these environment variables:
+- `TOKEN`: Authentication token for Browserless
+- `DEFAULT_STEALTH`: true
+- `CONNECTION_TIMEOUT`: 120000 (2 minutes)
+
+For full setup instructions, see the [Railway Browserless Setup Guide](docs/railway-browserless-setup.md).
