@@ -134,6 +134,11 @@ export class Ventriloquist implements INodeType {
 			logger.debug('Failed to extract Bright Data session ID from WebSocket URL');
 		}
 
+		// Create a unique ID for the session that will be consistent across operations
+		// We use the full workflowId (including timestamp if forceNew is true) to ensure uniqueness
+		// This guarantees that the "forceNew" flag will create a truly new session with a new ID
+		const sessionId = `session_${sessionWorkflowId}`;
+
 		if (!session) {
 			// Create a new browser session
 			logger.info(forceNew
@@ -155,6 +160,7 @@ export class Ventriloquist implements INodeType {
 
 			this.browserSessions.set(sessionWorkflowId, session);
 			logger.info(`New browser session created with ${timeoutMs}ms timeout (${sessionTimeout || 3} minutes)`);
+			logger.info(`Session ID for this session: ${sessionId}`);
 		} else {
 			// Update last used timestamp
 			session.lastUsed = new Date();
@@ -168,11 +174,8 @@ export class Ventriloquist implements INodeType {
 				}
 			}
 
-			logger.info('Reusing existing browser session');
+			logger.info(`Reusing existing browser session with ID: ${sessionId}`);
 		}
-
-		// Create a unique ID for the session
-		const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
 		return { browser: session.browser, sessionId, brightDataSessionId };
 	}

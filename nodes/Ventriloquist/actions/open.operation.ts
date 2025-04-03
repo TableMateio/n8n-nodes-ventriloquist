@@ -155,6 +155,7 @@ export async function execute(
 		brightDataSessionId = sessionData.brightDataSessionId;
 
 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Created new browser session with ID: ${sessionId}`);
+		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] IMPORTANT: This session ID must be passed to subsequent operations.`);
 
 		// Create a new page
 		const context = incognito
@@ -203,6 +204,7 @@ export async function execute(
 
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigation successful: ${pageInfo.url} (${pageInfo.title})`);
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] OPEN OPERATION SUCCESSFUL: Node has finished processing and is ready for the next node`);
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] To use this browser session in the next node, you MUST copy this session ID: ${sessionId}`);
 
 			// Add a visual end marker
 			this.logger.info("============ NODE EXECUTION COMPLETE ============");
@@ -219,6 +221,7 @@ export async function execute(
 				brightDataSessionId, // Include Bright Data session ID for reference
 				timestamp: new Date().toISOString(),
 				executionDuration: Date.now() - startTime,
+				note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations."
 			};
 
 			// Don't close the browser - it will be used by subsequent operations
@@ -267,6 +270,7 @@ export async function execute(
 						contextDestroyedInfo: "This typically happens with redirects. The browser session was successfully created and can be used by following nodes.",
 						timestamp: new Date().toISOString(),
 						executionDuration: Date.now() - startTime,
+						note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations."
 					},
 				};
 			}
@@ -316,6 +320,7 @@ export async function execute(
 					contextDestroyedInfo: "This typically happens with redirects. The browser session was successfully created and can be used by following nodes.",
 					timestamp: new Date().toISOString(),
 					executionDuration: Date.now() - startTime,
+					note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations."
 				},
 			};
 		}
@@ -352,6 +357,7 @@ export async function execute(
 				sessionId: sessionId || 'error_session', // Include session ID even in error case
 				timestamp: new Date().toISOString(),
 				executionDuration: Date.now() - startTime,
+				note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations."
 			},
 		};
 	}

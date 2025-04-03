@@ -2447,6 +2447,14 @@ export const description: INodeProperties[] = [
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Parameters: waitForSelectors=${waitForSelectors}, selectorTimeout=${selectorTimeout}, detectionMethod=${detectionMethod}`);
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Evaluating ${conditionGroups.length} condition groups with fallbackAction=${fallbackAction}`);
 
+			// Validate session ID - add extra logging to help debug issues
+			if (!inputSessionId) {
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] WARNING: No session ID provided in the 'Session ID' field`);
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] You must provide the session ID from a previous Open operation in the 'Session ID' field`);
+			} else {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using session ID: ${inputSessionId}`);
+			}
+
 			// Get routing parameters
 			const enableRouting = this.getNodeParameter('enableRouting', index, false) as boolean;
 
@@ -2482,6 +2490,12 @@ export const description: INodeProperties[] = [
 			// If there's an inputSessionId, use it and log it
 			if (inputSessionId) {
 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using provided session ID: ${inputSessionId}`);
+
+				// Check if the page URL is blank or about:blank, which might indicate a problem
+				if (pageUrl === 'about:blank' || pageUrl === '') {
+					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] WARNING: Page URL is ${pageUrl} - this may indicate the session was not properly loaded`);
+					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Verify that you're using the correct session ID from the Open operation`);
+				}
 			} else {
 				// As a fallback, still try to get the session ID from the page
 				try {
