@@ -75,7 +75,7 @@ export class BrowserlessTransport implements BrowserTransport {
 						wsUrl = wsUrlObj.toString();
 					} catch (urlError) {
 						this.logger.warn(`Could not parse WebSocket URL: ${wsUrl}. Adding token directly.`);
-						wsUrl += (wsUrl.includes('?') ? '&' : '?') + `token=${this.apiKey}`;
+						wsUrl += `${wsUrl.includes('?') ? '&' : '?'}token=${this.apiKey}`;
 					}
 				}
 
@@ -153,7 +153,7 @@ export class BrowserlessTransport implements BrowserTransport {
 						wsUrl = wsUrlObj.toString();
 					} catch (urlError) {
 						this.logger.warn(`Could not parse WebSocket URL: ${wsUrl}. Adding session ID directly.`);
-						wsUrl += (wsUrl.includes('?') ? '&' : '?') + `sessionId=${sessionId}`;
+						wsUrl += `${wsUrl.includes('?') ? '&' : '?'}sessionId=${sessionId}`;
 					}
 
 					this.logger.info(`Added session parameter to WebSocket URL: ${wsUrl}`);
@@ -436,7 +436,7 @@ export class BrowserlessTransport implements BrowserTransport {
 		}
 	}
 
-	private getWsEndpoint(baseUrl = this.baseUrl, path = '/browserless'): string {
+	private getWsEndpoint(baseUrl = this.baseUrl, path = ''): string {
 		try {
 			// Format the base URL properly
 			let formattedBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
@@ -447,6 +447,24 @@ export class BrowserlessTransport implements BrowserTransport {
 				this.logger.info(`Added HTTPS protocol to base URL: ${formattedBaseUrl}`);
 			}
 
+			// Special handling for Railway deployments
+			const isRailwayDeployment = formattedBaseUrl.includes('railway.app');
+			if (isRailwayDeployment) {
+				this.logger.info('Detected Railway deployment - using simplified WebSocket URL structure');
+				// For Railway, the simplest format usually works best: wss://domain?token=TOKEN
+				const domain = formattedBaseUrl.replace('https://', '').replace('http://', '');
+				let railwayWsUrl = `wss://${domain}`;
+
+				// Add token if we have one
+				if (this.apiKey) {
+					railwayWsUrl += `${railwayWsUrl.includes('?') ? '&' : '?'}token=${this.apiKey}`;
+				}
+
+				this.logger.info(`Created Railway WebSocket URL: ${railwayWsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***')}`);
+				return railwayWsUrl;
+			}
+
+			// Standard approach for non-Railway deployments
 			// Use URL API for reliable protocol conversion and parameter handling
 			const url = new URL(path, formattedBaseUrl);
 			const wsUrl = new URL(url.toString());
@@ -460,7 +478,9 @@ export class BrowserlessTransport implements BrowserTransport {
 				this.logger.debug('Added API key to WebSocket URL');
 			}
 
-			return wsUrl.toString();
+			const finalUrl = wsUrl.toString();
+			this.logger.info(`Created WebSocket URL: ${finalUrl.replace(/token=([^&]+)/, 'token=***TOKEN***')}`);
+			return finalUrl;
 		} catch (error) {
 			this.logger.error(`Error creating WebSocket URL: ${(error as Error).message}`);
 			throw new Error(`Could not create WebSocket URL from ${baseUrl}: ${(error as Error).message}`);
