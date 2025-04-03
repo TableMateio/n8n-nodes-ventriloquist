@@ -1477,12 +1477,16 @@ export class Ventriloquist implements INodeType {
 						});
 					}
 				} else if (operation === 'extract') {
+					// Get session ID if provided
+					const explicitSessionId = this.getNodeParameter('explicitSessionId', i, '') as string;
+
 					// Execute extract operation
 					const result = await extractOperation.execute.call(
 						this,
 						i,
 						websocketEndpoint,
 						workflowId,
+						explicitSessionId,
 					);
 
 					// Add execution duration to the result

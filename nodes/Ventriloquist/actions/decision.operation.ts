@@ -2547,7 +2547,7 @@ export const description: INodeProperties[] = [
 					if (browserTransport.reconnect) {
 						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to ${credentialType} session: ${inputSessionId}`);
 
-						// Reconnect to the browser
+						// Reconnect to the browser - this uses the existing session, not creating a new one
 						const browser = await browserTransport.reconnect(inputSessionId);
 
 						// Get or create a new page

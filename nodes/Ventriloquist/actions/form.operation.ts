@@ -761,12 +761,13 @@ export async function execute(
 	let sessionId = '';
 
 	try {
-		// Create a session or reuse an existing one
+		// Create a session or reuse an existing one - explicitly NOT forcing a new session
 		const { browser, sessionId: newSessionId } = await Ventriloquist.getOrCreateSession(
 			workflowId,
 			websocketEndpoint,
 			this.logger,
 			undefined,
+			false, // Don't force a new session
 		);
 
 		// If an explicit sessionId was provided, try to get that page first

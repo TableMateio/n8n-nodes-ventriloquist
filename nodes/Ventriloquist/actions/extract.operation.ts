@@ -467,15 +467,17 @@ export async function execute(
 	index: number,
 	websocketEndpoint: string,
 	workflowId: string,
+	explicitSessionId?: string,
 ): Promise<INodeExecutionData> {
 	const startTime = Date.now();
-	// Get parameters for the extract operation
+
+	// Get the node and extract parameters
 	const selector = this.getNodeParameter('selector', index) as string;
 	const extractionType = this.getNodeParameter('extractionType', index) as string;
 	const waitForSelector = this.getNodeParameter('waitForSelector', index, true) as boolean;
 	const timeout = this.getNodeParameter('timeout', index, 30000) as number;
-	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 	const useHumanDelays = this.getNodeParameter('useHumanDelays', index, false) as boolean;
+	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 	const debugPageContent = this.getNodeParameter('debugPageContent', index, false) as boolean;
 
@@ -485,39 +487,65 @@ export async function execute(
 	this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] ========== START EXTRACT NODE EXECUTION ==========`);
 	this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Parameters: selector=${selector}, extractionType=${extractionType}, timeout=${timeout}ms`);
 
-	// Get or create browser session
-	let page: puppeteer.Page;
-	let sessionId: string;
+	// Create page variable with appropriate type and default values
+	let page: puppeteer.Page | undefined;
+	let sessionId = ''; // Initialize with empty string
 
 	try {
-		// Create a session or reuse an existing one
-		const { browser, sessionId: newSessionId } = await Ventriloquist.getOrCreateSession(
-			workflowId,
-			websocketEndpoint,
-			this.logger,
-			undefined,
-		);
+		// Check if an explicit session ID was provided to reuse
+		if (explicitSessionId) {
+			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Looking for explicitly provided session ID: ${explicitSessionId}`);
+			const existingPage = Ventriloquist.getPage(workflowId, explicitSessionId);
 
-		// Try to get any existing page from the browser
-		const pages = await browser.pages();
-
-		if (pages.length > 0) {
-			// Use the first available page
-			page = pages[0];
-			sessionId = `existing_${Date.now()}`;
-			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Using existing page from browser session`);
-		} else {
-			// Create a new page if none exists
-			page = await browser.newPage();
-			sessionId = newSessionId;
-			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Created new page with session ID: ${sessionId}`);
-
-			// Store the new page for future operations
-			Ventriloquist.storePage(workflowId, sessionId, page);
-
-			// Navigate to a blank page to initialize it
-			await page.goto('about:blank');
+			if (existingPage) {
+				page = existingPage;
+				sessionId = explicitSessionId;
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Found existing page with explicit session ID: ${sessionId}`);
+			} else {
+				this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Provided session ID ${explicitSessionId} not found, will create a new session`);
+			}
 		}
+
+		// If no page is found yet, get or create a session
+		if (!page) {
+			// Create a session or reuse an existing one - explicitly NOT forcing a new session
+			const { browser, sessionId: newSessionId } = await Ventriloquist.getOrCreateSession(
+				workflowId,
+				websocketEndpoint,
+				this.logger,
+				undefined,
+				false, // Don't force a new session - reuse existing
+			);
+
+			// Try to get any existing page from the browser
+			const pages = await browser.pages();
+
+			if (pages.length > 0) {
+				// Use the first available page
+				page = pages[0];
+				sessionId = `existing_${Date.now()}`;
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Using existing page from browser session`);
+			} else {
+				// Create a new page if none exists
+				page = await browser.newPage();
+				sessionId = newSessionId;
+				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Created new page with session ID: ${sessionId}`);
+
+				// Store the new page for future operations
+				Ventriloquist.storePage(workflowId, sessionId, page);
+
+				// Navigate to a blank page to initialize it
+				await page.goto('about:blank');
+			}
+		}
+
+		// At this point we must have a page - add a final check
+		if (!page) {
+			throw new Error('Failed to get or create a valid page');
+		}
+
+		// Ensure the page is properly stored in the session registry
+		Ventriloquist.storePage(workflowId, sessionId, page);
 	} catch (error) {
 		this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to get or create a page: ${(error as Error).message}`);
 		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] ========== END EXTRACT NODE EXECUTION (SESSION ERROR) ==========`);
@@ -545,10 +573,6 @@ export async function execute(
 				throw error;
 			}
 		}
-
-		// Ensure the page is properly stored in the session registry
-		Ventriloquist.storePage(workflowId, sessionId, page);
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Ensured page reference in session store before extraction`);
 
 		let extractedData: IDataObject | string | Array<string | IDataObject> = '';
 		let extractionDetails: IDataObject = {};
