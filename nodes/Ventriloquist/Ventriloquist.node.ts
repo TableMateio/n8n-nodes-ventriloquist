@@ -19,6 +19,7 @@ import * as formOperation from './actions/form.operation';
 import * as extractOperation from './actions/extract.operation';
 import * as detectOperation from './actions/detect.operation';
 import * as decisionOperation from './actions/decision.operation';
+import * as openOperation from './actions/open.operation';
 
 /**
  * Configure outputs for decision operation based on routing parameters
@@ -278,59 +279,35 @@ export class Ventriloquist implements INodeType {
 		return { totalSessions, closedSessions: closedCount };
 	}
 
-	// Enable the debugger for a Bright Data session
-	private static async enableDebugger(page: puppeteer.Page, logger: any): Promise<{ debugUrl: string | null; brightDataDebugInfo: string | null }> {
+	// Enable debugger for a Bright Data session
+	public static async enableDebugger(
+		page: puppeteer.Page,
+		logger: any
+	): Promise<{ debugUrl: string | null; brightDataDebugInfo: string | null }> {
+		// Initialize debug information
+		let debugUrl: string | null = null;
+		let brightDataDebugInfo: string | null = null;
+
 		try {
-			// Create a CDP session to interact with Chrome DevTools Protocol
-			const client = await page.target().createCDPSession();
+			// Note: Currently not possible to directly get debug URL from Bright Data via Puppeteer
+			// This is mostly a placeholder for future enhancement
+			logger.info('Debug mode enabled for this session');
 
-			// Get the current frame ID
-			const frameId = (page.mainFrame() as any)._id;
-
-			// Get the debug URL from Bright Data
-			// Using any type to handle Bright Data's custom CDP commands
-			const response = await (client as any).send('Page.inspect', { frameId });
-			const inspectUrl = response?.url;
-
-			let brightDataDebugInfo = null;
-			if (inspectUrl) {
-				logger.info(`Debug URL available: ${inspectUrl}`);
-
-				// Extract the Bright Data session ID from the URL
-				// Need to handle URLs in the format:
-				// https://cdn.brightdata.com/static/devtools/129/inspector.html?wss=brd.superproxy.io:9223/c8d53695/5f046fe22-8a0b-477a...
-				// We need to extract parts like "c8d53695/5f046fe22-8a0b-477a-ab11-13a741c0b54f"
-
-				// First try to extract from standard format
-				let matches = inspectUrl.match(/io:\d+\/([^\/]+\/[^\/&?]+)/);
-
-				// If that doesn't work, try alternative format
-				if (!matches?.length) {
-					matches = inspectUrl.match(/io\/([^\/]+\/[^\/&?]+)/);
+			// Try to get session info from browser
+			try {
+				const client = await page.target().createCDPSession();
+				const info = await client.send('Browser.getVersion');
+				if (info && info.product) {
+					brightDataDebugInfo = info.product;
+					logger.info(`Browser debug info: ${brightDataDebugInfo}`);
 				}
-
-				if (matches?.[1]) {
-					brightDataDebugInfo = matches[1];
-					logger.info(`Bright Data dashboard session ID detected: ${brightDataDebugInfo}`);
-				} else {
-					// Fallback for other URL formats - at least extract something useful from the URL
-					logger.warn(`Could not extract Bright Data session ID from URL format: ${inspectUrl}`);
-
-					// Extract any part that might be a session ID
-					const fallbackMatches = inspectUrl.match(/\/([a-f0-9-]{36}|[a-f0-9-]{7,8}\/[a-f0-9-]{36})/i);
-					if (fallbackMatches?.[1]) {
-						brightDataDebugInfo = fallbackMatches[1];
-						logger.info(`Extracted potential Bright Data session ID (fallback): ${brightDataDebugInfo}`);
-					}
-				}
-
-				return { debugUrl: inspectUrl, brightDataDebugInfo };
+			} catch (debugError) {
+				logger.warn(`Could not get detailed debug info: ${(debugError as Error).message}`);
 			}
 
-			logger.warn('Could not get debug URL from Bright Data');
-			return { debugUrl: null, brightDataDebugInfo: null };
+			return { debugUrl, brightDataDebugInfo };
 		} catch (error) {
-			logger.warn(`Failed to enable debugger: ${error}`);
+			logger.warn(`Failed to enable debugger: ${(error as Error).message}`);
 			return { debugUrl: null, brightDataDebugInfo: null };
 		}
 	}
@@ -755,124 +732,20 @@ export class Ventriloquist implements INodeType {
 
 			try {
 				if (operation === 'open') {
-					const url = this.getNodeParameter('url', i) as string;
-					const incognito = this.getNodeParameter('incognito', i, false) as boolean;
-					const waitUntil = this.getNodeParameter(
-						'waitUntil',
+					// Execute open operation using the implementation from open.operation.ts
+					const result = await openOperation.execute.call(
+						this,
 						i,
-						'networkidle0',
-					) as puppeteer.PuppeteerLifeCycleEvent;
-					const timeout = this.getNodeParameter('timeout', i, 30000) as number;
-					const enableDebug = this.getNodeParameter('enableDebug', i, false) as boolean;
-					const captureScreenshot = this.getNodeParameter('captureScreenshot', i, true) as boolean;
-					const sessionTimeout = this.getNodeParameter('sessionTimeout', i, 3) as number;
-					const continueOnFail = this.getNodeParameter('continueOnFail', i, true) as boolean;
+						websocketEndpoint,
+						workflowId,
+					);
 
-					// Double the timeout for Bright Data as recommended in their docs
-					const brightDataTimeout = timeout * 2;
-
-					try {
-						// Get or create a browser session
-						const { browser, sessionId, brightDataSessionId } = await Ventriloquist.getOrCreateSession(
-							workflowId,
-							websocketEndpoint,
-							this.logger,
-							sessionTimeout,
-						);
-
-						// Create a new page
-						const context = incognito
-							? (await browser.browserContexts()[0]) || browser.defaultBrowserContext()
-							: browser.defaultBrowserContext();
-						const page = await context.newPage();
-
-						// Store the page in the session
-						Ventriloquist.storePage(workflowId, sessionId, page);
-
-						// Enable debugging if requested
-						let debugUrl = null;
-						let brightDataDebugInfo = null;
-						if (enableDebug) {
-							const debugInfo = await Ventriloquist.enableDebugger(page, this.logger);
-							debugUrl = debugInfo.debugUrl;
-							brightDataDebugInfo = debugInfo.brightDataDebugInfo;
-						}
-
-						// Navigate to URL with increased timeout for Bright Data
-						this.logger.info(`Navigating to ${url} with timeout ${brightDataTimeout}ms`);
-						const response = await page.goto(url, {
-							waitUntil,
-							timeout: brightDataTimeout,
-						});
-
-						// Extract some basic page information
-						const title = await page.title();
-						const currentUrl = page.url();
-						const status = response ? response.status() : null;
-
-						// Return page data
-						const responseData: IDataObject = {
-							success: true,
-							operation,
-							url: currentUrl,
-							title,
-							status,
-							sessionId, // Include the sessionId in the output for subsequent operations
-							incognito,
-							timestamp: new Date().toISOString(),
-							brightDataSessionId,
-						};
-
-						// Capture screenshot if requested
-						if (captureScreenshot) {
-							// Take a screenshot (base64 encoded)
-							const screenshot = await page.screenshot({
-								encoding: 'base64',
-								type: 'jpeg',
-								quality: 80,
-							});
-							responseData.screenshot = `data:image/jpeg;base64,${screenshot}`;
-						}
-
-						// Include debug URL if available
-						if (debugUrl) {
-							responseData.debugUrl = debugUrl;
-						}
-
-						// Include Bright Data dashboard session ID if available
-						if (brightDataDebugInfo) {
-							responseData.brightDataDebugInfo = brightDataDebugInfo;
-						}
-
-						// Calculate execution duration
-						const executionDuration = Date.now() - startTime;
-						responseData.executionDuration = executionDuration;
-
-						returnData[0].push({
-							json: responseData,
-						});
-					} catch (error) {
-						// Handle the error based on continueOnFail setting
-						if (!continueOnFail) {
-							// If we shouldn't continue on fail, rethrow the error
-							throw new Error(`Open browser operation failed: ${(error as Error).message}`);
-						}
-
-						// Calculate execution duration even for failed operations
-						const executionDuration = Date.now() - startTime;
-
-						// Otherwise, return an error response and continue
-						returnData[0].push({
-							json: {
-								success: false,
-								operation,
-								error: (error as Error).message,
-								url,
-								timestamp: new Date().toISOString(),
-								executionDuration,
-							},
-						});
+					// Add execution duration to the result if not already added
+					if (result.json && !result.json.executionDuration) {
+						result.json.executionDuration = Date.now() - startTime;
 					}
+
+					returnData[0].push(result);
 				} else if (operation === 'click') {
 					// Try to get sessionId from previous operations
 					let sessionId = '';
