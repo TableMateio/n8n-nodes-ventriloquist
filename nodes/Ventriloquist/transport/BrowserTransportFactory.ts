@@ -21,7 +21,7 @@ export class BrowserTransportFactory {
     logger.info(`Creating transport for credential type: ${credentialType}`);
 
     if (credentialType === 'browserlessApi') {
-      const connectionType = credentials.connectionType as string || 'standard';
+      const connectionType = credentials.connectionType as string || 'direct';
       logger.info(`Using Browserless connection type: ${connectionType}`);
 
       if (connectionType === 'direct') {
@@ -31,12 +31,14 @@ export class BrowserTransportFactory {
           throw new Error('Direct WebSocket URL is required when using direct connection mode');
         }
 
-        // For direct connections, we only need the WebSocket URL
-        // We'll pass empty string as the API key because the token is already in the WebSocket URL
+        // For direct connections, pass through the WebSocket URL with minimal modifications
+        // The token should already be in the URL
         const stealthMode = credentials.stealthMode !== undefined ? credentials.stealthMode as boolean : true;
         const requestTimeout = credentials.connectionTimeout ? credentials.connectionTimeout as number : 120000;
 
-        logger.info(`Creating Browserless transport with direct WebSocket URL: ${wsEndpoint.replace(/token=([^&]+)/, 'token=***TOKEN***')}`);
+        // Mask the token in logs
+        const logSafeUrl = wsEndpoint.replace(/token=([^&]+)/, 'token=***TOKEN***');
+        logger.info(`Creating Browserless transport with direct WebSocket URL: ${logSafeUrl}`);
 
         return new BrowserlessTransport(
           logger,
@@ -60,6 +62,7 @@ export class BrowserTransportFactory {
 
         logger.info(`Creating Browserless transport with base URL: ${baseUrl}`);
 
+        // Keep transport creation simpler - don't prefix URL if not needed
         return new BrowserlessTransport(
           logger,
           apiKey,

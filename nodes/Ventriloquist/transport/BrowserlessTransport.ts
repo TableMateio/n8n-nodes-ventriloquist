@@ -14,7 +14,6 @@ export class BrowserlessTransport implements BrowserTransport {
 	private wsEndpoint: string | undefined;
 	private stealthMode: boolean;
 	private requestTimeout: number;
-	private lastSuccessfulWsUrl: string | null = null;
 
 	/**
 	 * Create a BrowserlessTransport instance
@@ -49,35 +48,23 @@ export class BrowserlessTransport implements BrowserTransport {
 		this.logger.info('Connecting to Browserless via WebSocket');
 
 		try {
-			// List of WebSocket URLs to try in order, starting with the most likely to succeed
-			const wsUrlsToTry: string[] = [];
-			let successfulUrl: string | null = null;
+			// Simplify the WebSocket URL handling for more reliability
+			// For Railway deployments, the simplest format works best: wss://domain?token=TOKEN
+			let wsUrl: string | null = null;
 
-			// 0. If we have a last successful URL, try that first
-			if (this.lastSuccessfulWsUrl) {
-				this.logger.info('Using previously successful WebSocket URL first');
-				wsUrlsToTry.push(this.lastSuccessfulWsUrl);
-			}
-
-			// 1. If direct WebSocket endpoint is provided, add it next
+			// 1. If direct WebSocket endpoint is provided, use it (highest priority)
 			if (this.wsEndpoint) {
 				// Check if endpoint already has a token
-				if (this.wsEndpoint.includes('token=')) {
-					// Already has token, use as is
-					if (!wsUrlsToTry.includes(this.wsEndpoint)) {
-						wsUrlsToTry.push(this.wsEndpoint);
-					}
+				if (!this.wsEndpoint.includes('token=') && this.apiKey) {
+					// Add token to the URL if not present and we have a token
+					wsUrl = `${this.wsEndpoint}${this.wsEndpoint.includes('?') ? '&' : '?'}token=${this.apiKey}`;
 				} else {
-					// Add token to the URL
-					const wsUrlWithToken = `${this.wsEndpoint}${this.wsEndpoint.includes('?') ? '&' : '?'}token=${this.apiKey}`;
-					if (!wsUrlsToTry.includes(wsUrlWithToken)) {
-						wsUrlsToTry.push(wsUrlWithToken);
-					}
+					// Use as is
+					wsUrl = this.wsEndpoint;
 				}
 			}
-
-			// 2. If we have a base URL, construct WebSocket URLs from it
-			if (this.baseUrl) {
+			// 2. If we have a base URL, construct a simple WebSocket URL
+			else if (this.baseUrl) {
 				let formattedBaseUrl = this.baseUrl;
 				// Add protocol if missing
 				if (!formattedBaseUrl.startsWith('http')) {
@@ -87,80 +74,54 @@ export class BrowserlessTransport implements BrowserTransport {
 				// Convert to WebSocket protocol
 				const wsBaseUrl = formattedBaseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
 
-				// Add various formats to try - SIMPLIFIED for Railway compatibility
-				// For Railway, the simple format works best: wss://domain?token=TOKEN
-				const directConnectionUrl = `${wsBaseUrl}?token=${this.apiKey}`; // Direct connection - works best for Railway
-				if (!wsUrlsToTry.includes(directConnectionUrl)) wsUrlsToTry.push(directConnectionUrl);
-
-				// Only add these for non-Railway instances or as fallbacks
-				if (!this.baseUrl.includes('railway.app')) {
-					const browserWsUrl = `${wsBaseUrl}/browserws?token=${this.apiKey}`; // Standard browserws path
-					const chromeUrl = `${wsBaseUrl}/chrome?token=${this.apiKey}`; // Legacy chrome path
-					if (!wsUrlsToTry.includes(browserWsUrl)) wsUrlsToTry.push(browserWsUrl);
-					if (!wsUrlsToTry.includes(chromeUrl)) wsUrlsToTry.push(chromeUrl);
-				}
+				// Simplest format for Railway compatibility: wss://domain?token=TOKEN
+				wsUrl = `${wsBaseUrl}?token=${this.apiKey}`;
+			}
+			// 3. If neither is provided, we can't connect
+			else {
+				throw new Error('Either a WebSocket endpoint or base URL must be provided');
 			}
 
-			// Test each WebSocket URL before trying to connect with Puppeteer
-			this.logger.info(`Will attempt ${wsUrlsToTry.length} different WebSocket URL formats`);
+			// Mask the token in logs
+			const logSafeUrl = wsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***');
+			this.logger.info(`Attempting to connect with WebSocket URL: ${logSafeUrl}`);
 
-			for (const wsUrl of wsUrlsToTry) {
-				// Test the connection directly first
-				const isConnectable = await testBrowserlessConnection(wsUrl, this.logger);
+			// Test the connection before using it
+			const isConnectable = await testBrowserlessConnection(wsUrl, this.logger);
 
-				if (isConnectable) {
-					successfulUrl = wsUrl;
-					this.lastSuccessfulWsUrl = wsUrl; // Store for future use
-					this.logger.info(`Found working WebSocket URL: ${wsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***')}`);
-					break;
-				}
+			if (!isConnectable) {
+				throw new Error(`Could not connect to Browserless WebSocket URL: ${logSafeUrl}`);
 			}
 
-			// If we found a working URL, connect with Puppeteer
-			if (successfulUrl) {
-				this.logger.info('Connecting to Browserless with Puppeteer...');
+			this.logger.info(`Found working WebSocket URL: ${logSafeUrl}`);
 
-				// For Railway, keep the URL simple with minimal parameters
-				let finalWsUrl = successfulUrl;
+			// Connect with Puppeteer using minimal options
+			const connectionOptions: puppeteer.ConnectOptions = {
+				browserWSEndpoint: wsUrl,
+				defaultViewport: { width: 1920, height: 1080 },
+			};
 
-				// Add minimal options only if using Railway and stealth mode is enabled
-				if (this.baseUrl.includes('railway.app') && this.stealthMode && !finalWsUrl.includes('stealth')) {
-					// Only add stealth mode if requested - this is the only parameter known to work reliably
-					finalWsUrl += '&stealth=true';
-				}
+			this.logger.info(`Connecting with WebSocket URL: ${logSafeUrl}`);
+			const browser = await puppeteer.connect(connectionOptions);
 
-				// Connect with minimal options
-				const connectionOptions: puppeteer.ConnectOptions = {
-					browserWSEndpoint: finalWsUrl,
-					defaultViewport: { width: 1920, height: 1080 },
-				};
-
-				this.logger.info(`Connecting with WebSocket URL: ${finalWsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***')}`);
-				const browser = await puppeteer.connect(connectionOptions);
-
-				this.logger.info('Successfully connected to Browserless!');
-				return browser;
-			}
-
-			// If we get here, all URLs failed
-			throw new Error('All WebSocket connection attempts failed. Please check your credentials and try again.');
+			this.logger.info('Successfully connected to Browserless!');
+			return browser;
 		} catch (error) {
 			// Enhanced error diagnosis with detailed information
 			let errorMessage = `Connection to Browserless failed: ${(error as Error).message}\n\n`;
 
 			errorMessage += `Troubleshooting steps:
 1. Double-check your TOKEN value
-2. Try using the exact WebSocket URL directly:
+2. For Railway, use the Direct WebSocket URL:
    - Copy the BROWSER_WS_ENDPOINT value from Railway
-   - Paste it in the "Direct WebSocket URL" field
-   - Try with and without adding the token parameter
+   - Paste it directly in the "Direct WebSocket URL" field
 3. Verify your Railway deployment is properly configured:
    - Check that the TOKEN environment variable is set
    - Ensure MAX_CONCURRENT_SESSIONS is at least 5
    - Set DEFAULT_STEALTH to true
    - Set CONNECTION_TIMEOUT to 120000 or higher
 
-For Railway deployments, your WebSocket URL likely looks like:
+For Railway deployments, use a simple WebSocket URL:
 wss://browserless-production-xxxx.up.railway.app?token=YOUR_TOKEN
 
 Error details: ${(error as Error).stack || (error as Error).message}`;
