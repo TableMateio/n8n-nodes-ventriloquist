@@ -232,9 +232,18 @@ export async function execute(
 			const errorMessage = (postNavError as Error).message;
 			this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Post-navigation error: ${errorMessage}`);
 
-			// If the error is about execution context destruction, it's likely because the page
-			// navigated to a new URL and we're trying to access the old context
-			const isContextDestroyed = errorMessage.includes('Execution context was destroyed');
+			// List of error messages related to execution context being destroyed
+			const contextDestroyedErrors = [
+				'Execution context was destroyed',
+				'most likely because of a navigation',
+				'Cannot find context with specified id',
+				'Cannot find execution context'
+			];
+
+			// Check if the error is related to execution context destruction
+			const isContextDestroyed = contextDestroyedErrors.some(errorText =>
+				errorMessage.includes(errorText)
+			);
 
 			if (isContextDestroyed) {
 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Context destroyed due to navigation - this is expected behavior`);
@@ -274,6 +283,42 @@ export async function execute(
 
 		let errorMessage = (error as Error).message;
 		this.logger.error(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigation error: ${errorMessage}`);
+
+		// List of error messages related to execution context being destroyed
+		const contextDestroyedErrors = [
+			'Execution context was destroyed',
+			'most likely because of a navigation',
+			'Cannot find context with specified id',
+			'Cannot find execution context'
+		];
+
+		// Check if the error is related to execution context destruction
+		const isContextDestroyed = contextDestroyedErrors.some(errorText =>
+			errorMessage.includes(errorText)
+		);
+
+		// If it's a context destroyed error and we have a session ID, we can still proceed
+		if (isContextDestroyed && sessionId) {
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Context destroyed in main try/catch - this is expected behavior`);
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] The browser session was SUCCESSFULLY created with ID: ${sessionId}`);
+
+			// Add a visual end marker
+			this.logger.info("============ NODE EXECUTION COMPLETE (WITH RECOVERED ERROR) ============");
+
+			return {
+				json: {
+					success: true, // Mark as success since the session was created
+					operation: 'open',
+					url: url, // Use the original URL since we can't access the current one
+					sessionId, // This is the critical piece of information for subsequent nodes
+					brightDataSessionId,
+					contextDestroyed: true, // Flag to indicate context was destroyed
+					contextDestroyedInfo: "This typically happens with redirects. The browser session was successfully created and can be used by following nodes.",
+					timestamp: new Date().toISOString(),
+					executionDuration: Date.now() - startTime,
+				},
+			};
+		}
 
 		// Provide more specific error message for common Bright Data errors
 		if (
