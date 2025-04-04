@@ -66,7 +66,28 @@ export namespace SessionManager {
       sessionId?: string
     }
   ): string {
-    let wsUrl = websocketEndpoint;
+    // Validate the endpoint - it should not be empty
+    if (!websocketEndpoint || websocketEndpoint.trim() === '') {
+      throw new Error('WebSocket endpoint cannot be empty');
+    }
+
+    let wsUrl = websocketEndpoint.trim();
+
+    // Check if the URL has a host component
+    let hasHost = false;
+    try {
+      // Test if it's already a valid URL
+      new URL(wsUrl);
+      hasHost = true;
+    } catch (e) {
+      // If it's not a valid URL yet, we need to check if it has a hostname
+      hasHost = wsUrl.includes('.') || wsUrl.includes('localhost');
+    }
+
+    // If there's no host, throw an error as we can't create a valid WebSocket connection
+    if (!hasHost) {
+      throw new Error(`Invalid WebSocket endpoint: ${wsUrl}. Endpoint must include a hostname.`);
+    }
 
     // Add protocol if missing
     if (!wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://') &&
@@ -88,6 +109,10 @@ export namespace SessionManager {
         wsUrlObj.searchParams.set('token', options.apiToken);
         wsUrl = wsUrlObj.toString();
       } catch (urlError) {
+        // Check if the URL is valid before appending anything
+        if (!hasHost) {
+          throw new Error(`Cannot add token to invalid URL: ${wsUrl}`);
+        }
         // Fall back to direct string concatenation
         wsUrl += `${wsUrl.includes('?') ? '&' : '?'}token=${options.apiToken}`;
       }
@@ -102,9 +127,20 @@ export namespace SessionManager {
         wsUrlObj.searchParams.set('session', options.sessionId);
         wsUrl = wsUrlObj.toString();
       } catch (urlError) {
+        // Check if the URL is valid before appending anything
+        if (!hasHost) {
+          throw new Error(`Cannot add session ID to invalid URL: ${wsUrl}`);
+        }
         // Fall back to direct string concatenation
         wsUrl += `${wsUrl.includes('?') ? '&' : '?'}sessionId=${options.sessionId}&session=${options.sessionId}`;
       }
+    }
+
+    // Final validation - make sure we have a valid URL
+    try {
+      new URL(wsUrl);
+    } catch (e) {
+      throw new Error(`Resulting WebSocket URL is invalid: ${wsUrl}`);
     }
 
     return wsUrl;

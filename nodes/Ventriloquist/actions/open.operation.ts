@@ -142,148 +142,167 @@ export async function execute(
 
 	try {
 		// Create a new session - Open always creates a new session
-		const sessionResult = await SessionManager.createSession(
-			this.logger,
-			websocketEndpoint,
-			{
-				apiToken: credentials.apiKey as string,
-				workflowId, // For backwards compatibility
-				credentialType,
-			}
-		);
-
-		// Store session details
-		browser = sessionResult.browser;
-		sessionId = sessionResult.sessionId;
-		brightDataSessionId = ''; // To be populated if needed
-
-		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Created new browser session with ID: ${sessionId}`);
-		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] IMPORTANT: This session ID must be passed to subsequent operations.`);
-
-		// Create a new page
-		const context = incognito
-			? await browser.createBrowserContext()
-			: browser.defaultBrowserContext();
-		page = await context.newPage();
-
-		// Store the page for future operations
-		const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-		SessionManager.storePage(sessionId, pageId, page);
-		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Stored page reference with session ID: ${sessionId}`);
-
-		// Set up response handling for better error messages
-		page.on('response', (response) => {
-			if (!response.ok()) {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Response error: ${response.status()} for ${response.url()}`);
-			}
-		});
-
-		// Enable debugging if requested
-		if (enableDebug) {
-			try {
-				// Note: Debug mode is enabled but we can't directly access the debug URL
-				// The session will be visible in Bright Data's console
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Debug mode enabled for this session`);
-			} catch (debugError) {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Failed to enable debugger: ${(debugError as Error).message}`);
-			}
+		// Make sure we have a valid websocketEndpoint
+		if (!websocketEndpoint || websocketEndpoint.trim() === '') {
+			throw new Error('WebSocket endpoint is required. Please check your credentials configuration.');
 		}
 
-		// Navigate to the URL
-		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigating to URL: ${url}`);
-
-		// Use the transport to navigate
-		const { response, domain } = await browserTransport.navigateTo(page, url, {
-			waitUntil,
-			timeout,
-		});
-
-		// Separate try/catch block for post-navigation operations
-		// This ensures that if the execution context is destroyed during navigation,
-		// we can still return a useful response with the session ID
 		try {
-			// Get page information
-			const pageInfo = await browserTransport.getPageInfo(page, response);
-
-			// Take a screenshot
-			const screenshot = await takeScreenshot(page, this.logger);
-
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigation successful: ${pageInfo.url} (${pageInfo.title})`);
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] OPEN OPERATION SUCCESSFUL: Node has finished processing and is ready for the next node`);
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] To use this browser session in the next node, you MUST copy this session ID: ${sessionId}`);
-
-			// Add a visual end marker
-			this.logger.info("============ NODE EXECUTION COMPLETE ============");
-
-			// Prepare response data
-			const responseData: IDataObject = {
-				success: true,
-				operation: 'open',
-				...pageInfo,
-				screenshot,
-				incognito,
-				domain,
-				sessionId, // Include session ID in response for other operations to use
-				brightDataSessionId, // Include Bright Data session ID for reference
-				credentialType, // Include the type of credential used
-				timestamp: new Date().toISOString(),
-				executionDuration: Date.now() - startTime,
-				note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations."
-			};
-
-			// Don't close the browser - it will be used by subsequent operations
-			// The session cleanup mechanism will handle closing it after timeout
-
-			return {
-				json: responseData,
-			};
-		} catch (postNavError) {
-			// Handle errors that occur after successful navigation (like execution context destroyed)
-			const errorMessage = (postNavError as Error).message;
-			this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Post-navigation error: ${errorMessage}`);
-
-			// List of error messages related to execution context being destroyed
-			const contextDestroyedErrors = [
-				'Execution context was destroyed',
-				'most likely because of a navigation',
-				'Cannot find context with specified id',
-				'Cannot find execution context'
-			];
-
-			// Check if the error is related to execution context destruction
-			const isContextDestroyed = contextDestroyedErrors.some(errorText =>
-				errorMessage.includes(errorText)
+			const sessionResult = await SessionManager.createSession(
+				this.logger,
+				websocketEndpoint,
+				{
+					apiToken: credentials.apiKey as string,
+					workflowId, // For backwards compatibility
+					credentialType,
+				}
 			);
 
-			if (isContextDestroyed) {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Context destroyed due to navigation - this is expected behavior`);
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] This usually happens with redirects or page refreshes during navigation`);
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] The browser session was SUCCESSFULLY created with ID: ${sessionId}`);
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] The session can be used by downstream nodes even though initial navigation triggered redirects`);
+			// Store session details
+			browser = sessionResult.browser;
+			sessionId = sessionResult.sessionId;
+			brightDataSessionId = ''; // To be populated if needed
 
-				// Add a visual end marker
-				this.logger.info("============ NODE EXECUTION COMPLETE (WITH RECOVERED ERROR) ============");
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Created new browser session with ID: ${sessionId}`);
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] IMPORTANT: This session ID must be passed to subsequent operations.`);
 
-				// Even with context destroyed, we can return success with the session ID
-				// This allows following nodes to use the session
-				return {
-					json: {
-						success: true, // Mark as success since the session was created
-						operation: 'open',
-						url: url, // Use the original URL since we can't access the current one
-						sessionId, // This is the critical piece of information for subsequent nodes
-						brightDataSessionId,
-						contextDestroyed: true, // Flag to indicate context was destroyed
-						contextDestroyedInfo: "This typically happens with redirects. The browser session was successfully created and can be used by following nodes.",
-						timestamp: new Date().toISOString(),
-						executionDuration: Date.now() - startTime,
-						note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations."
-					},
-				};
+			// Create a new page
+			const context = incognito
+				? await browser.createBrowserContext()
+				: browser.defaultBrowserContext();
+			page = await context.newPage();
+
+			// Store the page for future operations
+			const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+			SessionManager.storePage(sessionId, pageId, page);
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Stored page reference with session ID: ${sessionId}`);
+
+			// Set up response handling for better error messages
+			page.on('response', (response) => {
+				if (!response.ok()) {
+					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Response error: ${response.status()} for ${response.url()}`);
+				}
+			});
+
+			// Enable debugging if requested
+			if (enableDebug) {
+				try {
+					// Note: Debug mode is enabled but we can't directly access the debug URL
+					// The session will be visible in Bright Data's console
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Debug mode enabled for this session`);
+				} catch (debugError) {
+					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Failed to enable debugger: ${(debugError as Error).message}`);
+				}
 			}
 
-			// For other post-navigation errors, rethrow to be handled by the outer catch block
-			throw postNavError;
+			// Navigate to the URL
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigating to URL: ${url}`);
+
+			// Use the transport to navigate
+			const { response, domain } = await browserTransport.navigateTo(page, url, {
+				waitUntil,
+				timeout,
+			});
+
+			// Separate try/catch block for post-navigation operations
+			// This ensures that if the execution context is destroyed during navigation,
+			// we can still return a useful response with the session ID
+			try {
+				// Get page information
+				const pageInfo = await browserTransport.getPageInfo(page, response);
+
+				// Take a screenshot
+				const screenshot = await takeScreenshot(page, this.logger);
+
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigation successful: ${pageInfo.url} (${pageInfo.title})`);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] OPEN OPERATION SUCCESSFUL: Node has finished processing and is ready for the next node`);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] To use this browser session in the next node, you MUST copy this session ID: ${sessionId}`);
+
+				// Add a visual end marker
+				this.logger.info("============ NODE EXECUTION COMPLETE ============");
+
+				// Prepare response data
+				const responseData: IDataObject = {
+					success: true,
+					operation: 'open',
+					...pageInfo,
+					screenshot,
+					incognito,
+					domain,
+					sessionId, // Include session ID in response for other operations to use
+					brightDataSessionId, // Include Bright Data session ID for reference
+					credentialType, // Include the type of credential used
+					timestamp: new Date().toISOString(),
+					executionDuration: Date.now() - startTime,
+					note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations."
+				};
+
+				// Don't close the browser - it will be used by subsequent operations
+				// The session cleanup mechanism will handle closing it after timeout
+
+				return {
+					json: responseData,
+				};
+			} catch (postNavError) {
+				// Handle errors that occur after successful navigation (like execution context destroyed)
+				const errorMessage = (postNavError as Error).message;
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Post-navigation error: ${errorMessage}`);
+
+				// List of error messages related to execution context being destroyed
+				const contextDestroyedErrors = [
+					'Execution context was destroyed',
+					'most likely because of a navigation',
+					'Cannot find context with specified id',
+					'Cannot find execution context'
+				];
+
+				// Check if the error is related to execution context destruction
+				const isContextDestroyed = contextDestroyedErrors.some(errorText =>
+					errorMessage.includes(errorText)
+				);
+
+				if (isContextDestroyed) {
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Context destroyed due to navigation - this is expected behavior`);
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] This usually happens with redirects or page refreshes during navigation`);
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] The browser session was SUCCESSFULLY created with ID: ${sessionId}`);
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] The session can be used by downstream nodes even though initial navigation triggered redirects`);
+
+					// Add a visual end marker
+					this.logger.info("============ NODE EXECUTION COMPLETE (WITH RECOVERED ERROR) ============");
+
+					// Even with context destroyed, we can return success with the session ID
+					// This allows following nodes to use the session
+					return {
+						json: {
+							success: true, // Mark as success since the session was created
+							operation: 'open',
+							url: url, // Use the original URL since we can't access the current one
+							sessionId, // This is the critical piece of information for subsequent nodes
+							brightDataSessionId,
+							contextDestroyed: true, // Flag to indicate context was destroyed
+							contextDestroyedInfo: "This typically happens with redirects. The browser session was successfully created and can be used by following nodes.",
+							timestamp: new Date().toISOString(),
+							executionDuration: Date.now() - startTime,
+							note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations."
+						},
+					};
+				}
+
+				// For other post-navigation errors, rethrow to be handled by the outer catch block
+				throw postNavError;
+			}
+		} catch (sessionError) {
+			// More specific error handling for session creation
+			this.logger.error(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Session creation error: ${(sessionError as Error).message}`);
+
+			// Verify credentials and connection settings for better error reporting
+			if ((sessionError as Error).message.includes('WebSocket endpoint')) {
+				throw new Error(`Invalid WebSocket endpoint configuration: ${(sessionError as Error).message}. Please check your Browserless credentials configuration.`);
+			}
+			if ((sessionError as Error).message.includes('token')) {
+				throw new Error(`Authentication error: ${(sessionError as Error).message}. Please check your API token in credentials.`);
+			}
+			throw sessionError;
 		}
 	} catch (error) {
 		// Handle navigation and general errors
