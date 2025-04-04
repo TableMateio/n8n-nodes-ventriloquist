@@ -36,6 +36,12 @@ import {
 	IDetectionOptions,
 	IDetectionResult
 } from '../utils/detectionUtils';
+import {
+	executeAction,
+	ActionType,
+	IActionParameters,
+	IActionOptions
+} from '../utils/actionUtils';
 
 /**
  * Decision operation description
@@ -2659,38 +2665,44 @@ export const description: INodeProperties[] = [
 									}
 
 									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-										`Executing click on "${actionSelector}" (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`));
+										`Executing click action on "${actionSelector}" using action utility`));
 
 									try {
-										// Use the waitAndClick utility which handles both waiting for the selector and clicking it
-										const clickResult = await waitAndClick(
+										// Create options and parameters for the action
+										const actionOptions: IActionOptions = {
+											waitForSelector: waitForSelectors,
+											selectorTimeout,
+											detectionMethod,
+											earlyExitDelay,
+											nodeName,
+											nodeId,
+											index,
+											useHumanDelays
+										};
+
+										const actionParameters: IActionParameters = {
+											selector: actionSelector,
+											waitAfterAction,
+											waitTime,
+											waitSelector: group.waitSelector as string
+										};
+
+										// Execute the click action using the utility
+										const actionResult = await executeAction(
 											puppeteerPage,
-											actionSelector,
-											{
-												waitTimeout: selectorTimeout,
-												retries: 2,
-												waitBetweenRetries: 1000,
-												logger: this.logger
-											}
+											'click' as ActionType,
+											actionParameters,
+											actionOptions,
+											this.logger
 										);
 
-										// Handle click failures
-										if (!clickResult.success) {
-											throw new Error(`Decision action: Failed to click element "${actionSelector}": ${clickResult.error?.message || 'Unknown error'}`);
+										// Handle action failures
+										if (!actionResult.success) {
+											throw new Error(`Decision action failed: ${actionResult.error}`);
 										}
 
 										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Click successful on "${actionSelector}"`));
-
-										// Handle post-click waiting
-										if (waitAfterAction === 'fixedTime') {
-											await new Promise(resolve => setTimeout(resolve, waitTime));
-										} else if (waitAfterAction === 'urlChanged') {
-											await puppeteerPage.waitForNavigation({ timeout: waitTime });
-										} else if (waitAfterAction === 'selector') {
-											const waitSelector = group.waitSelector as string;
-											await puppeteerPage.waitForSelector(waitSelector, { timeout: waitTime });
-										}
+											`Click action completed successfully using action utility`));
 
 										// After successful action, exit immediately
 										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
