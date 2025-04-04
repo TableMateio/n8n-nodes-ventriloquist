@@ -125,6 +125,30 @@ export async function execute(
 	// Get credentials based on type
 	const credentials = await this.getCredentials(credentialType);
 
+	// Extract WebSocket endpoint from credentials based on credential type
+	let actualWebsocketEndpoint = '';
+	if (credentialType === 'brightDataApi') {
+		actualWebsocketEndpoint = credentials.websocketEndpoint as string;
+	} else if (credentialType === 'browserlessApi') {
+		const connectionType = credentials.connectionType as string || 'direct';
+		if (connectionType === 'direct') {
+			actualWebsocketEndpoint = credentials.wsEndpoint as string;
+		} else {
+			// For standard connection, we'll use the baseUrl and apiKey
+			const baseUrl = (credentials.baseUrl as string) || 'https://chrome.browserless.io';
+			const apiKey = credentials.apiKey;
+			if (!apiKey) {
+				throw new Error('API token is required for Browserless standard connection');
+			}
+			actualWebsocketEndpoint = `${baseUrl.replace(/^http/, 'ws')}/chrome?token=${apiKey}`;
+		}
+	}
+
+	// Check if we have a valid WebSocket endpoint
+	if (!actualWebsocketEndpoint || actualWebsocketEndpoint.trim() === '') {
+		throw new Error(`WebSocket endpoint is required but not configured for ${credentialType}. Please check your credentials configuration.`);
+	}
+
 	// Create browser transport factory
 	const transportFactory = new BrowserTransportFactory();
 
@@ -142,15 +166,10 @@ export async function execute(
 
 	try {
 		// Create a new session - Open always creates a new session
-		// Make sure we have a valid websocketEndpoint
-		if (!websocketEndpoint || websocketEndpoint.trim() === '') {
-			throw new Error('WebSocket endpoint is required. Please check your credentials configuration.');
-		}
-
 		try {
 			const sessionResult = await SessionManager.createSession(
 				this.logger,
-				websocketEndpoint,
+				actualWebsocketEndpoint,
 				{
 					apiToken: credentials.apiKey as string,
 					workflowId, // For backwards compatibility
