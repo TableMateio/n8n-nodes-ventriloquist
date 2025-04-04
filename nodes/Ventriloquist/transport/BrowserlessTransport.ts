@@ -391,14 +391,7 @@ export class BrowserlessTransport implements BrowserTransport {
 			wsUrl = `wss://${wsUrl}`;
 		}
 
-		// Add path only for Browserless.io cloud
-		// For Railway or custom deployments, don't add any path
-		const isCloudBrowserless = this.baseUrl.includes('browserless.io');
-		if (isCloudBrowserless && !wsUrl.includes('/browserless')) {
-			wsUrl = `${wsUrl}/browserless`;
-		}
-
-		// Don't add /chrome or any other path for Railway
+		// Do not add any paths - use the base URL exactly as provided
 
 		// Add token parameter if an API key is provided
 		if (this.apiKey) {
