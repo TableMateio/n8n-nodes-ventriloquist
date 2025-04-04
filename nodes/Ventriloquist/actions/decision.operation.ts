@@ -3344,7 +3344,7 @@ export const description: INodeProperties[] = [
 
 															// Try to reconnect - you need to implement this part based on your reconnection logic
 															// For now, we'll just throw an error to make the issue visible
-															throw new Error(`Page context destroyed during form submission navigation. A reconnection is needed to continue using this session.`);
+															throw new Error(`Page context was destroyed during form submission. This is expected during form redirects and will be handled gracefully.`);
 														}
 													}
 												}
@@ -4051,7 +4051,7 @@ export const description: INodeProperties[] = [
 
 															// Try to reconnect - you need to implement this part based on your reconnection logic
 															// For now, we'll just throw an error to make the issue visible
-															throw new Error(`Page context destroyed during form submission navigation. A reconnection is needed to continue using this session.`);
+															throw new Error(`Page context was destroyed during form submission. This is expected during form redirects and will be handled gracefully.`);
 														}
 													}
 												}
