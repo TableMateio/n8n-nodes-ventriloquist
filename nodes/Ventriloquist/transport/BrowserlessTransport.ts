@@ -28,7 +28,7 @@ export class BrowserlessTransport implements BrowserTransport {
 	constructor(
 		logger: any,
 		apiKey: string,
-		baseUrl = 'https://chrome.browserless.io',
+		baseUrl = 'https://browserless.io',
 		stealthMode = true,
 		requestTimeout = 120000,
 		wsEndpoint?: string,
@@ -39,6 +39,14 @@ export class BrowserlessTransport implements BrowserTransport {
 		this.wsEndpoint = wsEndpoint;
 		this.stealthMode = stealthMode;
 		this.requestTimeout = requestTimeout;
+
+		// Log all connection parameters (mask sensitive data)
+		this.logger.info(`BrowserlessTransport initialized with:
+- Base URL: ${this.baseUrl}
+- API Key: ${this.apiKey ? '***' : 'None'}
+- Direct WS Endpoint: ${this.wsEndpoint ? this.wsEndpoint.replace(/token=([^&]+)/, 'token=***') : 'None'}
+- Stealth Mode: ${this.stealthMode}
+- Request Timeout: ${this.requestTimeout}ms`);
 	}
 
 	/**

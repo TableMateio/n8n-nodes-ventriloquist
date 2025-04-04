@@ -75,13 +75,21 @@ export class BrowserTransportFactory {
 
         // Get credential values with defaults
         const apiKey = credentials.apiKey as string;
-        let baseUrl = (credentials.baseUrl as string) || 'https://chrome.browserless.io';
+        let baseUrl = (credentials.baseUrl as string) || 'https://browserless.io';
 
         // Add protocol to base URL if missing
         if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
           logger.info('Base URL missing protocol - adding https:// prefix');
           baseUrl = `https://${baseUrl}`;
         }
+
+        // Check if this is a Railway deployment or custom deployment
+        const isRailwayDeployment = baseUrl.includes('railway.app') ||
+                                   baseUrl.includes('up.railway') ||
+                                   baseUrl.includes('railway.internal');
+
+        logger.info(`Detected deployment type: ${isRailwayDeployment ? 'Railway' : 'Standard Browserless'}`);
+        logger.info(`Using Browserless base URL: ${baseUrl}`);
 
         const stealthMode = credentials.stealthMode !== undefined ? credentials.stealthMode as boolean : true;
         const requestTimeout = credentials.connectionTimeout ? credentials.connectionTimeout as number : 120000;
