@@ -3456,7 +3456,7 @@ export const description: INodeProperties[] = [
 																	}
 
 																	// Update the session's page reference
-																	SessionManager.storePage(workflowId, sessionId, puppeteerPage);
+																	SessionManager.storePage(sessionId, `page_${Date.now()}`, puppeteerPage);
 																	this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
 																		`Successfully reconnected and updated page reference`));
 																} else {
