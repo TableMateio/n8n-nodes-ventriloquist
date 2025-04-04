@@ -14,7 +14,9 @@ import {
 	handleMultiSelectField,
 	handlePasswordField,
 	submitForm,
-	getHumanDelay
+	getHumanDelay,
+	processFormField,
+	retryFormSubmission
 } from '../utils/formOperations';
 import {
 	smartWaitForSelector,
@@ -658,7 +660,6 @@ export async function execute(
 				return {
 					readyState: document.readyState,
 					bodyExists: !!document.body,
-
 					contentLoaded: document.readyState === 'interactive' || document.readyState === 'complete',
 				};
 			});
@@ -759,280 +760,78 @@ export async function execute(
 				await new Promise(resolve => setTimeout(resolve, delay));
 			}
 
-			// Handle different field types
-			let fieldSuccess = false;
-			let fieldResult: IDataObject = {
-				fieldType,
-				selector,
-				success: false,
-			};
+			// Process the form field using the utility function
+			const { success, fieldResult } = await processFormField(page, field, this.logger);
 
-			switch (fieldType) {
-				case 'text':
-				case 'textarea': {
-					const value = field.value as string;
-					const clearField = field.clearField as boolean;
-					const humanLike = field.humanLike as boolean || false;
-
-					fieldSuccess = await fillTextField(
-						page,
-						selector,
-						value,
-						{
-							clearField,
-							humanLike,
-							pressEnter: false,
-						},
-						this.logger
-					);
-
-					fieldResult = {
-						fieldType,
-						selector,
-						value,
-						success: fieldSuccess,
-					};
-					break;
-				}
-
-				case 'select': {
-					const value = field.value as string;
-					const matchType = field.matchType as string || 'exact';
-					const fuzzyThreshold = field.fuzzyThreshold as number || 0.5;
-
-					const selectResult = await handleSelectField(
-						page,
-						selector,
-						value,
-						{
-							matchType: matchType as 'exact' | 'textContains' | 'fuzzy',
-							fuzzyThreshold,
-						},
-						this.logger
-					);
-
-					fieldSuccess = selectResult.success;
-					fieldResult = {
-						fieldType,
-						selector,
-						requestedValue: value,
-						selectedValue: selectResult.selectedValue,
-						selectedText: selectResult.selectedText,
-						matchType,
-						matchDetails: selectResult.matchDetails,
-						success: fieldSuccess,
-					};
-					break;
-				}
-
-				case 'checkbox': {
-					const checked = field.checked as boolean;
-
-					fieldSuccess = await handleCheckboxField(
-						page,
-						selector,
-						checked,
-						this.logger
-					);
-
-					fieldResult = {
-						fieldType,
-						selector,
-						checked,
-						success: fieldSuccess,
-					};
-					break;
-				}
-
-				case 'radio': {
-					// For radio buttons, just click to select
-					try {
-						await page.click(selector);
-						fieldSuccess = true;
-					} catch (error) {
-						this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Error clicking radio button: ${(error as Error).message}`);
-						fieldSuccess = false;
-					}
-
-					fieldResult = {
-						fieldType,
-						selector,
-						value: field.value,
-						success: fieldSuccess,
-					};
-					break;
-				}
-
-				case 'file': {
-					const filePath = field.filePath as string;
-
-					fieldSuccess = await handleFileUpload(
-						page,
-						selector,
-						filePath,
-						this.logger
-					);
-
-					fieldResult = {
-						fieldType,
-						selector,
-						filePath,
-						success: fieldSuccess,
-					};
-					break;
-				}
-
-				case 'multiSelect': {
-					const multiSelectValues = ((field.multiSelectValues as string) || '').split(',').map(v => v.trim()).filter(v => v);
-
-					fieldSuccess = await handleMultiSelectField(
-						page,
-						selector,
-						multiSelectValues,
-						this.logger
-					);
-
-					fieldResult = {
-						fieldType,
-						selector,
-						values: multiSelectValues,
-						success: fieldSuccess,
-					};
-					break;
-				}
-
-				case 'password': {
-					const value = field.value as string;
-					const clearField = field.clearField as boolean;
-					const hasCloneField = field.hasCloneField as boolean;
-					const cloneSelector = field.cloneSelector as string;
-
-					fieldSuccess = await handlePasswordField(
-						page,
-						selector,
-						value,
-						{
-							clearField,
-							hasCloneField,
-							cloneSelector,
-						},
-						this.logger
-					);
-
-					fieldResult = {
-						fieldType,
-						selector,
-						success: fieldSuccess,
-					};
-					break;
-				}
-
-				default:
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Unsupported field type: ${fieldType}`);
-					fieldResult = {
-						fieldType,
-						selector,
-						success: false,
-						error: `Unsupported field type: ${fieldType}`,
-					};
-			}
+			// Add context to the field result
+			fieldResult.nodeId = nodeId;
+			fieldResult.nodeName = nodeName;
 
 			// Add the field result to our results collection
 			results.push(fieldResult);
 
 			// If the field failed and we're not continuing on failure, throw an error
-			if (!fieldSuccess && !continueOnFail) {
+			if (!success && !continueOnFail) {
 				throw new Error(`Failed to fill form field: ${selector} (type: ${fieldType})`);
 			}
 		}
 
 		// Submit the form if requested
 		let formSubmissionResult: IDataObject = {};
+		let retryResults: IDataObject[] = [];
 
 		if (submitFormAfterFill && submitSelector) {
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Submitting form using selector: ${submitSelector}`);
 
-			// Get the current URL and title before submission for comparison
-			const beforeUrl = await page.url();
-			const beforeTitle = await page.title();
+			if (retrySubmission) {
+				// Use the retry utility
+				const retrySubmissionResult = await retryFormSubmission(
+					page,
+					submitSelector,
+					{
+						waitAfterSubmit: waitAfterSubmit as 'noWait' | 'fixedTime' | 'domContentLoaded' | 'navigationComplete' | 'urlChanged',
+						waitTime,
+						maxRetries,
+						retryDelay,
+					},
+					this.logger
+				);
 
-			// Submit the form and wait as specified
-			const submitResult = await submitForm(
-				page,
-				submitSelector,
-				{
-					waitAfterSubmit: waitAfterSubmit as 'noWait' | 'fixedTime' | 'domContentLoaded' | 'navigationComplete' | 'urlChanged',
-					waitTime,
-				},
-				this.logger
-			);
+				formSubmissionResult = retrySubmissionResult.finalResult;
+				retryResults = retrySubmissionResult.retryResults;
 
-			// Store the submission result
-			formSubmissionResult = submitResult;
+				// Add the initial submission result
+				results.push({
+					fieldType: 'formSubmission',
+					success: formSubmissionResult.success,
+					details: formSubmissionResult
+				});
 
-			// Add to results array
-			results.push({
-				fieldType: 'formSubmission',
-				success: submitResult.success,
-				details: submitResult
-			});
-
-			// If no change detected and retries are enabled, attempt again
-			if (!submitResult.urlChanged && !submitResult.titleChanged && retrySubmission) {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No page change detected, will retry submission up to ${maxRetries} times`);
-
-				let retryCount = 0;
-				let retrySuccess = false;
-
-				while (retryCount < maxRetries && !retrySuccess) {
-					retryCount++;
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Retry attempt ${retryCount}/${maxRetries} after ${retryDelay}ms delay`);
-
-					// Wait before retrying
-					await new Promise(resolve => setTimeout(resolve, retryDelay));
-
-					// Try submitting again
-					const retrySubmitResult = await submitForm(
-						page,
-						submitSelector,
-						{
-							waitAfterSubmit: waitAfterSubmit as 'noWait' | 'fixedTime' | 'domContentLoaded' | 'navigationComplete' | 'urlChanged',
-							waitTime,
-						},
-						this.logger
-					);
-
-					retrySuccess = !!(retrySubmitResult.urlChanged || retrySubmitResult.titleChanged);
-
-					if (retrySuccess) {
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Retry ${retryCount} successful`);
-
-						// Update the result with the successful retry
-						formSubmissionResult = retrySubmitResult;
-
-						// Add retry result to results
-						results.push({
-							fieldType: 'formSubmissionRetry',
-							retryAttempt: retryCount,
-							success: true,
-							details: retrySubmitResult
-						});
-
-						break;
-					}
-
-					// Add failed retry to results
+				// Add retry results to the results array
+				for (const retryResult of retryResults) {
 					results.push({
 						fieldType: 'formSubmissionRetry',
-						retryAttempt: retryCount,
-						success: false,
-						details: retrySubmitResult
+						...retryResult
 					});
 				}
+			} else {
+				// Simple submission without retry
+				formSubmissionResult = await submitForm(
+					page,
+					submitSelector,
+					{
+						waitAfterSubmit: waitAfterSubmit as 'noWait' | 'fixedTime' | 'domContentLoaded' | 'navigationComplete' | 'urlChanged',
+						waitTime,
+					},
+					this.logger
+				);
 
-				if (!retrySuccess) {
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] All ${maxRetries} retries failed`);
-				}
+				// Add to results array
+				results.push({
+					fieldType: 'formSubmission',
+					success: formSubmissionResult.success,
+					details: formSubmissionResult
+				});
 			}
 
 			// Store the page reference for future operations

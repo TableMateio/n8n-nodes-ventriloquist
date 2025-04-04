@@ -735,3 +735,297 @@ export async function handlePasswordField(
 		return false;
 	}
 }
+
+/**
+ * Process a form field based on its type
+ */
+export async function processFormField(
+	page: Page,
+	field: IDataObject,
+	logger: ILogger
+): Promise<{
+	success: boolean;
+	fieldResult: IDataObject;
+}> {
+	const fieldType = field.fieldType as string;
+	const selector = field.selector as string;
+
+	let fieldSuccess = false;
+	let fieldResult: IDataObject = {
+		fieldType,
+		selector,
+		success: false,
+	};
+
+	switch (fieldType) {
+		case 'text':
+		case 'textarea': {
+			const value = field.value as string;
+			const clearField = field.clearField as boolean;
+			const humanLike = field.humanLike as boolean || false;
+
+			fieldSuccess = await fillTextField(
+				page,
+				selector,
+				value,
+				{
+					clearField,
+					humanLike,
+					pressEnter: false,
+				},
+				logger
+			);
+
+			fieldResult = {
+				fieldType,
+				selector,
+				value,
+				success: fieldSuccess,
+			};
+			break;
+		}
+
+		case 'select': {
+			const value = field.value as string;
+			const matchType = field.matchType as string || 'exact';
+			const fuzzyThreshold = field.fuzzyThreshold as number || 0.5;
+
+			const selectResult = await handleSelectField(
+				page,
+				selector,
+				value,
+				{
+					matchType: matchType as 'exact' | 'textContains' | 'fuzzy',
+					fuzzyThreshold,
+				},
+				logger
+			);
+
+			fieldSuccess = selectResult.success;
+			fieldResult = {
+				fieldType,
+				selector,
+				requestedValue: value,
+				selectedValue: selectResult.selectedValue,
+				selectedText: selectResult.selectedText,
+				matchType,
+				matchDetails: selectResult.matchDetails,
+				success: fieldSuccess,
+			};
+			break;
+		}
+
+		case 'checkbox': {
+			const checked = field.checked as boolean;
+
+			fieldSuccess = await handleCheckboxField(
+				page,
+				selector,
+				checked,
+				logger
+			);
+
+			fieldResult = {
+				fieldType,
+				selector,
+				checked,
+				success: fieldSuccess,
+			};
+			break;
+		}
+
+		case 'radio': {
+			// For radio buttons, just click to select
+			try {
+				await page.click(selector);
+				fieldSuccess = true;
+			} catch (error) {
+				logger.error(`Error clicking radio button: ${(error as Error).message}`);
+				fieldSuccess = false;
+			}
+
+			fieldResult = {
+				fieldType,
+				selector,
+				value: field.value,
+				success: fieldSuccess,
+			};
+			break;
+		}
+
+		case 'file': {
+			const filePath = field.filePath as string;
+
+			fieldSuccess = await handleFileUpload(
+				page,
+				selector,
+				filePath,
+				logger
+			);
+
+			fieldResult = {
+				fieldType,
+				selector,
+				filePath,
+				success: fieldSuccess,
+			};
+			break;
+		}
+
+		case 'multiSelect': {
+			const multiSelectValues = ((field.multiSelectValues as string) || '').split(',').map(v => v.trim()).filter(v => v);
+
+			fieldSuccess = await handleMultiSelectField(
+				page,
+				selector,
+				multiSelectValues,
+				logger
+			);
+
+			fieldResult = {
+				fieldType,
+				selector,
+				values: multiSelectValues,
+				success: fieldSuccess,
+			};
+			break;
+		}
+
+		case 'password': {
+			const value = field.value as string;
+			const clearField = field.clearField as boolean;
+			const hasCloneField = field.hasCloneField as boolean;
+			const cloneSelector = field.cloneSelector as string;
+
+			fieldSuccess = await handlePasswordField(
+				page,
+				selector,
+				value,
+				{
+					clearField,
+					hasCloneField,
+					cloneSelector,
+				},
+				logger
+			);
+
+			fieldResult = {
+				fieldType,
+				selector,
+				success: fieldSuccess,
+			};
+			break;
+		}
+
+		default:
+			logger.warn(`Unsupported field type: ${fieldType}`);
+			fieldResult = {
+				fieldType,
+				selector,
+				success: false,
+				error: `Unsupported field type: ${fieldType}`,
+			};
+	}
+
+	return {
+		success: fieldSuccess,
+		fieldResult,
+	};
+}
+
+/**
+ * Retry form submission if the initial submission doesn't cause a page change
+ */
+export async function retryFormSubmission(
+	page: Page,
+	submitSelector: string,
+	options: {
+		waitAfterSubmit: 'noWait' | 'fixedTime' | 'domContentLoaded' | 'navigationComplete' | 'urlChanged';
+		waitTime: number;
+		maxRetries: number;
+		retryDelay: number;
+	},
+	logger: ILogger
+): Promise<{
+	success: boolean;
+	finalResult: IDataObject;
+	retryResults: IDataObject[];
+}> {
+	let retryCount = 0;
+	let retrySuccess = false;
+	const retryResults: IDataObject[] = [];
+	let finalResult: IDataObject = {};
+
+	// First attempt
+	const initialResult = await submitForm(
+		page,
+		submitSelector,
+		{
+			waitAfterSubmit: options.waitAfterSubmit,
+			waitTime: options.waitTime,
+		},
+		logger
+	);
+
+	// If first attempt succeeded with a page change, return immediately
+	if (initialResult.urlChanged || initialResult.titleChanged) {
+		return {
+			success: true,
+			finalResult: initialResult,
+			retryResults: []
+		};
+	}
+
+	logger.info(`No page change detected, will retry submission up to ${options.maxRetries} times`);
+
+	// Store the initial attempt as our starting point
+	finalResult = initialResult;
+
+	// Retry loop
+	while (retryCount < options.maxRetries && !retrySuccess) {
+		retryCount++;
+		logger.info(`Retry attempt ${retryCount}/${options.maxRetries} after ${options.retryDelay}ms delay`);
+
+		// Wait before retrying
+		await new Promise(resolve => setTimeout(resolve, options.retryDelay));
+
+		// Try submitting again
+		const retrySubmitResult = await submitForm(
+			page,
+			submitSelector,
+			{
+				waitAfterSubmit: options.waitAfterSubmit,
+				waitTime: options.waitTime,
+			},
+			logger
+		);
+
+		retrySuccess = !!(retrySubmitResult.urlChanged || retrySubmitResult.titleChanged);
+
+		// Create retry result record
+		const retryResultRecord = {
+			retryAttempt: retryCount,
+			success: retrySuccess,
+			details: retrySubmitResult
+		};
+
+		// Add to retry results collection
+		retryResults.push(retryResultRecord);
+
+		if (retrySuccess) {
+			logger.info(`Retry ${retryCount} successful`);
+			finalResult = retrySubmitResult;
+			break;
+		}
+	}
+
+	if (!retrySuccess) {
+		logger.warn(`All ${options.maxRetries} retries failed`);
+	}
+
+	return {
+		success: retrySuccess,
+		finalResult,
+		retryResults
+	};
+}
