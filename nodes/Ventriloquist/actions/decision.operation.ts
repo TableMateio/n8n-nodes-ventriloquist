@@ -823,7 +823,7 @@ export const description: INodeProperties[] = [
 							name: 'extractAttributeName',
 							type: 'string',
 							default: '',
-							placeholder: 'href, src, data-id',
+							placeholder: 'href, src, data-ID',
 							description: 'Name of the attribute to extract from the element',
 							displayOptions: {
 								show: {
@@ -1118,7 +1118,7 @@ export const description: INodeProperties[] = [
 											type: 'string',
 											default: '',
 											placeholder: '#input-field, .form-control, input[name="email"]',
-											description: 'CSS selector to target the form field. Use "#id" for IDs, ".class" for classes, "tag" for HTML elements, or "tag[attr=value]" for attributes.',
+											description: 'CSS selector to target the form field. Use "#ID" for IDs, ".class" for classes, "tag" for HTML elements, or "tag[attr=value]" for attributes.',
 											required: true,
 										},
 										{
