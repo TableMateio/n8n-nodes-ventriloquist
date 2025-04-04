@@ -9,12 +9,6 @@ import { SessionManager } from '../utils/sessionManager';
 import {
 	formatExtractedDataForLog,
 	getHumanDelay,
-	extractTextContent,
-	extractHtmlContent,
-	extractInputValue,
-	extractAttributeValue,
-	extractTableData,
-	extractMultipleElements,
 	getPageInfo,
 } from '../utils/extractionUtils';
 import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';

@@ -1,7 +1,6 @@
 import type {
 	IDataObject,
 	Logger as ILogger,
-	INodeExecutionData,
 } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
 import {

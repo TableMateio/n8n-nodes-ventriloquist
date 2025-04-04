@@ -1,21 +1,9 @@
-import type {
-	IDataObject,
-	Logger as ILogger,
-} from 'n8n-workflow';
+import type { IDataObject, Logger as ILogger } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
 import { formatOperationLog } from './resultUtils';
-import { waitAndClick } from './clickOperations';
-import { processFormField } from './formOperations';
 import { navigateWithRetry } from './navigationUtils';
-import {
-	extractTextContent,
-	extractHtmlContent,
-	extractInputValue,
-	extractAttributeValue,
-	extractTableData,
-	extractMultipleElements
-} from './extractionUtils';
-import { smartWaitForSelector } from './detectionUtils';
+import { processFormField } from './formOperations';
+import { waitAndClick } from './clickOperations';
 
 /**
  * Action types supported by the action executor
