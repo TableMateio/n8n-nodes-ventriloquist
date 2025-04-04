@@ -586,43 +586,66 @@ export async function execute(
 	let sessionId = '';
 
 	try {
+		// Log session state for debugging
+		const sessionsInfo = SessionManager.getSessionsDebugInfo();
+		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Available sessions: ${JSON.stringify(sessionsInfo)}`);
+
 		// If using an explicit session ID, try to get that page first
 		if (explicitSessionId) {
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Looking for explicitly provided session ID: ${explicitSessionId}`);
-			page = SessionManager.getPage(workflowId, explicitSessionId);
 
-			if (page) {
+			// Try to find the page across all workflow IDs
+			const foundPage = SessionManager.findPageBySessionId(explicitSessionId);
+
+			if (foundPage) {
+				page = foundPage.page;
+				// Store the session info
+				const pageWorkflowId = foundPage.workflowId;
 				sessionId = explicitSessionId;
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found existing page with explicit session ID: ${sessionId}`);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found existing page with explicit session ID: ${sessionId} in workflow ${pageWorkflowId}`);
 			} else {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Provided session ID ${explicitSessionId} not found, will check for existing sessions`);
+				// Fall back to direct lookup in the current workflow
+				page = SessionManager.getPage(workflowId, explicitSessionId);
+
+				if (page) {
+					sessionId = explicitSessionId;
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found existing page with explicit session ID: ${sessionId} in current workflow`);
+				} else {
+					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Provided session ID ${explicitSessionId} not found, will check for existing sessions`);
+				}
 			}
 		}
 
 		// If we don't have a page yet, check if there's an existing session
 		if (!page) {
-			// Check if we already have a session for this workflow
-			const existingSession = SessionManager.getSession(workflowId);
+			// First, look for sessions across all workflow IDs that might contain pages
+			const sessions = Array.from(SessionManager.getSessions().entries());
 
-			if (existingSession) {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found existing browser session for workflow ${workflowId}`);
+			if (sessions.length > 0) {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found ${sessions.length} existing browser sessions`);
 
-				// Try to use an existing page from the session
-				const pages = Array.from(existingSession.pages.values());
+				// Try to find a session with pages
+				for (const [sessionWorkflowId, sessionData] of sessions) {
+					if (sessionData.pages.size > 0) {
+						// Use the first page from the first session that has pages
+						const pageEntries = Array.from(sessionData.pages.entries());
+						page = pageEntries[0][1];
+						sessionId = pageEntries[0][0];
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Using existing page with session ID: ${sessionId} from workflow ${sessionWorkflowId}`);
+						break;
+					}
+				}
 
-				if (pages.length > 0) {
-					page = pages[0];  // Use the first available page
-					sessionId = Array.from(existingSession.pages.keys())[0];
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Using existing page with session ID: ${sessionId}`);
-				} else {
-					// Create a new page in the existing browser
+				// If we still don't have a page, try to create one in the first available session
+				if (!page) {
+					const [sessionWorkflowId, sessionData] = sessions[0];
 					try {
-						page = await existingSession.browser.newPage();
+						page = await sessionData.browser.newPage();
 						sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Created new page with session ID: ${sessionId}`);
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Created new page with session ID: ${sessionId} in existing session for workflow ${sessionWorkflowId}`);
 
 						// Store the new page
-						SessionManager.storePage(workflowId, sessionId, page);
+						SessionManager.storePage(sessionWorkflowId, sessionId, page);
 					} catch (pageError) {
 						this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Failed to create new page: ${(pageError as Error).message}`);
 						throw new Error(`Failed to create new page: ${(pageError as Error).message}`);
@@ -630,7 +653,7 @@ export async function execute(
 				}
 			} else if (websocketEndpoint) {
 				// Only try to create a new session if we have a valid websocket endpoint
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No existing session found, creating a new one with endpoint: ${websocketEndpoint}`);
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No existing sessions found, creating a new one with endpoint: ${websocketEndpoint}`);
 
 				// Create a new browser session
 				const { browser, sessionId: newSessionId } = await SessionManager.getOrCreateSession(

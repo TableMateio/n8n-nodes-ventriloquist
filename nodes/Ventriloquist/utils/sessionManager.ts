@@ -22,10 +22,25 @@ export namespace SessionManager {
   const sessions = new Map<string, IBrowserSession>();
 
   /**
-   * Get all active sessions
+   * Get all active sessions with additional debug information
    */
   export function getSessions(): Map<string, IBrowserSession> {
     return sessions;
+  }
+
+  /**
+   * Get debug information about all sessions
+   */
+  export function getSessionsDebugInfo(): { workflowId: string; pagesCount: number; lastUsed: Date }[] {
+    const info = [];
+    for (const [workflowId, session] of sessions.entries()) {
+      info.push({
+        workflowId,
+        pagesCount: session.pages.size,
+        lastUsed: session.lastUsed,
+      });
+    }
+    return info;
   }
 
   /**
@@ -334,5 +349,30 @@ export namespace SessionManager {
       logger.warn(`Session appears to be disconnected: ${(error as Error).message}`);
       return true; // Connection is lost
     }
+  }
+
+  /**
+   * Find a page by its sessionId across all workflows
+   */
+  export function findPageBySessionId(sessionId: string): { page: Page; workflowId: string } | undefined {
+    for (const [workflowId, session] of sessions.entries()) {
+      const page = session.pages.get(sessionId);
+      if (page) {
+        return { page, workflowId };
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Find a session containing a page with the given sessionId
+   */
+  export function findSessionBySessionId(sessionId: string): { session: IBrowserSession; workflowId: string } | undefined {
+    for (const [workflowId, session] of sessions.entries()) {
+      if (session.pages.has(sessionId)) {
+        return { session, workflowId };
+      }
+    }
+    return undefined;
   }
 }
