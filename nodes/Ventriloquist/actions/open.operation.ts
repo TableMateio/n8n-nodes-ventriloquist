@@ -5,8 +5,9 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
-import { Ventriloquist } from '../Ventriloquist.node';
 import { BrowserTransportFactory } from '../transport/BrowserTransportFactory';
+import { SessionManager } from '../utils/sessionManager';
+import { takeScreenshot } from '../utils/navigationUtils';
 
 /**
  * Open operation description
@@ -117,7 +118,6 @@ export async function execute(
 	) as puppeteer.PuppeteerLifeCycleEvent;
 	const timeout = this.getNodeParameter('timeout', index, 30000) as number;
 	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
-	const sessionTimeout = this.getNodeParameter('sessionTimeout', index, 8) as number;
 	const enableDebug = this.getNodeParameter('enableDebug', index, false) as boolean;
 
 	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Opening URL: ${url}`);
@@ -135,27 +135,27 @@ export async function execute(
 		credentials,
 	);
 
-	let browser: puppeteer.Browser | undefined;
+	let browser: puppeteer.Browser;
 	let page: puppeteer.Page | undefined;
 	let sessionId = '';
 	let brightDataSessionId = '';
 
 	try {
-		// Always create a new session for the open operation to avoid Page.navigate limits
-		// This forces a new session by passing forceNew=true
-		const sessionData = await Ventriloquist.getOrCreateSession(
-			workflowId,
-			websocketEndpoint,
+		// Create a new session - Open always creates a new session
+		const sessionResult = await SessionManager.createSession(
 			this.logger,
-			sessionTimeout,
-			true, // Always force a new session for open operation
-			credentialType,
-			credentials,
+			websocketEndpoint,
+			{
+				apiToken: credentials.apiKey as string,
+				workflowId, // For backwards compatibility
+				credentialType,
+			}
 		);
 
-		browser = sessionData.browser;
-		sessionId = sessionData.sessionId;
-		brightDataSessionId = sessionData.brightDataSessionId;
+		// Store session details
+		browser = sessionResult.browser;
+		sessionId = sessionResult.sessionId;
+		brightDataSessionId = ''; // To be populated if needed
 
 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Created new browser session with ID: ${sessionId}`);
 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] IMPORTANT: This session ID must be passed to subsequent operations.`);
@@ -167,7 +167,8 @@ export async function execute(
 		page = await context.newPage();
 
 		// Store the page for future operations
-		Ventriloquist.storePage(workflowId, sessionId, page);
+		const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+		SessionManager.storePage(sessionId, pageId, page);
 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Stored page reference with session ID: ${sessionId}`);
 
 		// Set up response handling for better error messages
@@ -205,7 +206,7 @@ export async function execute(
 			const pageInfo = await browserTransport.getPageInfo(page, response);
 
 			// Take a screenshot
-			const screenshot = await browserTransport.takeScreenshot(page);
+			const screenshot = await takeScreenshot(page, this.logger);
 
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigation successful: ${pageInfo.url} (${pageInfo.title})`);
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] OPEN OPERATION SUCCESSFUL: Node has finished processing and is ready for the next node`);
@@ -285,86 +286,56 @@ export async function execute(
 			throw postNavError;
 		}
 	} catch (error) {
-		// Extract domain if possible
-		let domain = '';
-		try {
-			domain = new URL(url).hostname;
-		} catch {}
+		// Handle navigation and general errors
+		this.logger.error(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Error: ${(error as Error).message}`);
 
-		let errorMessage = (error as Error).message;
-		this.logger.error(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigation error: ${errorMessage}`);
+		// Create an error object
+		const errorData: IDataObject = {
+			error: (error as Error).message,
+			url,
+			timestamp: new Date().toISOString(),
+		};
 
-		// List of error messages related to execution context being destroyed
-		const contextDestroyedErrors = [
-			'Execution context was destroyed',
-			'most likely because of a navigation',
-			'Cannot find context with specified id',
-			'Cannot find execution context'
-		];
+		// Try to take a screenshot if we have a page
+		if (page) {
+			try {
+				const errorScreenshot = await takeScreenshot(page, this.logger);
+				if (errorScreenshot) {
+					errorData.screenshot = errorScreenshot;
+				}
+			} catch (screenshotError) {
+				this.logger.warn(`Could not take error screenshot: ${(screenshotError as Error).message}`);
+			}
+		}
 
-		// Check if the error is related to execution context destruction
-		const isContextDestroyed = contextDestroyedErrors.some(errorText =>
-			errorMessage.includes(errorText)
-		);
+		// Clean up resources if continueOnFail is not enabled
+		if (!continueOnFail && sessionId) {
+			try {
+				await SessionManager.closeSessions(this.logger, { sessionId });
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Closed browser session due to error`);
+			} catch (closeError) {
+				this.logger.warn(`Failed to close browser session: ${(closeError as Error).message}`);
+			}
+		}
 
-		// If it's a context destroyed error and we have a session ID, we can still proceed
-		if (isContextDestroyed && sessionId) {
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Context destroyed in main try/catch - this is expected behavior`);
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] The browser session was SUCCESSFULLY created with ID: ${sessionId}`);
-
-			// Add a visual end marker
-			this.logger.info("============ NODE EXECUTION COMPLETE (WITH RECOVERED ERROR) ============");
-
+		if (continueOnFail) {
+			// Return a partial result with error information
 			return {
 				json: {
-					success: true, // Mark as success since the session was created
+					success: false,
 					operation: 'open',
-					url: url, // Use the original URL since we can't access the current one
-					sessionId, // This is the critical piece of information for subsequent nodes
+					url,
+					sessionId,
 					brightDataSessionId,
-					contextDestroyed: true, // Flag to indicate context was destroyed
-					contextDestroyedInfo: "This typically happens with redirects. The browser session was successfully created and can be used by following nodes.",
+					error: (error as Error).message,
+					errorDetails: errorData,
 					timestamp: new Date().toISOString(),
 					executionDuration: Date.now() - startTime,
-					note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations."
 				},
 			};
 		}
 
-		// Provide more specific error message for common Bright Data errors
-		if (
-			errorMessage.includes('This website') &&
-			errorMessage.includes('requires special permission from Bright Data')
-		) {
-			// Error message already properly formatted by BrightDataBrowser.navigateTo()
-		} else if (
-			(error as Error).message.includes('proxy_error') ||
-			(error as Error).message.includes('Forbidden: target site requires special permission')
-		) {
-			errorMessage = `This website (${domain}) requires special permission from Bright Data. Please add "${domain}" to the 'Domains For Authorization' field in your Bright Data credentials or contact Bright Data support to get this domain authorized for your account. Error details: ${(error as Error).message}`;
-		}
-
-		// Add a visual end marker
-		this.logger.info("============ NODE EXECUTION COMPLETE (WITH ERROR) ============");
-
-		// If continueOnFail is false, throw the error to fail the node
-		if (!continueOnFail) {
-			throw new Error(`Open operation failed: ${errorMessage}`);
-		}
-
-		// Otherwise, return an error response
-		return {
-			json: {
-				success: false,
-				operation: 'open',
-				error: errorMessage,
-				domain,
-				url,
-				sessionId: sessionId || 'error_session', // Include session ID even in error case
-				timestamp: new Date().toISOString(),
-				executionDuration: Date.now() - startTime,
-				note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations."
-			},
-		};
+		// If continueOnFail is false, actually throw the error
+		throw error;
 	}
 }
