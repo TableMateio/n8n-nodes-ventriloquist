@@ -7,7 +7,7 @@ import type {
 import type * as puppeteer from 'puppeteer-core';
 import { SessionManager } from '../utils/sessionManager';
 import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
-import { createErrorResponse } from '../utils/errorUtils';
+import { createErrorResponse, safeExecute } from '../utils/errorUtils';
 
 
 
@@ -4162,14 +4162,36 @@ export const description: INodeProperties[] = [
 
 			// Take screenshot if requested
 			if (takeScreenshot) {
-				screenshot = await puppeteerPage.screenshot({
-					encoding: 'base64',
-					type: 'jpeg',
-					quality: 80,
-				}) as string;
-				resultData.screenshot = screenshot;
-				this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-					`Screenshot captured (${screenshot.length} bytes)`));
+				// Use safeExecute to safely take a screenshot
+				const screenshotResult = await safeExecute(
+					async () => {
+						return await puppeteerPage.screenshot({
+							encoding: 'base64',
+							type: 'jpeg',
+							quality: 80,
+						}) as string;
+					},
+					{
+						operation: 'Decision-Screenshot',
+						continueOnFail: true, // Always continue even if screenshot fails
+						logger: this.logger,
+						errorContext: {
+							nodeId,
+							nodeName,
+							sessionId,
+						}
+					}
+				);
+
+				if (screenshotResult.success && screenshotResult.result) {
+					screenshot = screenshotResult.result;
+					resultData.screenshot = screenshot;
+					this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+						`Screenshot captured (${screenshot.length} bytes)`));
+				} else {
+					this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+						`Failed to capture screenshot: ${screenshotResult.errorResponse?.error || 'Unknown error'}`));
+				}
 			}
 
 			// Update result data
