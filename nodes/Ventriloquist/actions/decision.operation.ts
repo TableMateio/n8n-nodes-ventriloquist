@@ -2411,6 +2411,8 @@ export const description: INodeProperties[] = [
 				sessionId: string;
 				error?: string; // Add error property for error handling
 				formFields?: IDataObject[];
+				formSubmission?: IDataObject;
+				formSubmissionRetries?: IDataObject[];
 			} = {
 				success: true,
 				routeTaken,
@@ -2905,6 +2907,7 @@ export const description: INodeProperties[] = [
 												`Using complex form fill with ${formFields.length} fields`));
 
 											// Process each form field
+											const results: IDataObject[] = [];
 											for (const field of formFields) {
 												const selector = field.selector as string;
 												const fieldType = field.fieldType as string || 'text';
@@ -2933,190 +2936,35 @@ export const description: INodeProperties[] = [
 													await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
 												}
 
-												// Handle different field types
-												switch (fieldType) {
-													case 'text': {
-														const value = field.value as string || '';
-														const clearField = field.clearField as boolean ?? true;
-														const pressEnter = field.pressEnter as boolean || false;
-														const humanLike = field.humanLike as boolean ?? true;
+												// Process the form field using the utility function
+												const { success, fieldResult } = await processFormField(
+													puppeteerPage,
+													field,
+													this.logger
+												);
 
-														// Enhanced debugging for form typing
-														const credentialType = group._credentialType || 'unknown';
-														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-															`Filling form field: ${selector} with value: ${value} (human-like: ${humanLike}, credential type: ${credentialType})`));
+												// Add context to the field result
+												fieldResult.nodeId = nodeId;
+												fieldResult.nodeName = nodeName;
 
-														// Clear field if requested
-														if (clearField) {
-															// Click three times to select all text
-															await puppeteerPage.click(selector, { clickCount: 3 });
-															// Delete selected text
-															await puppeteerPage.keyboard.press('Backspace');
-														}
+												// Add the field result to our results collection
+												results.push(fieldResult);
 
-														// Try to verify the field is ready for input
-														try {
-															const isVisible = await puppeteerPage.evaluate((sel) => {
-																const element = document.querySelector(sel);
-																if (!element) return 'Element not found';
-																const style = window.getComputedStyle(element);
-																const rect = element.getBoundingClientRect();
-																return {
-																	visible: style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0,
-																	tag: element.tagName.toLowerCase(),
-																	type: element instanceof HTMLInputElement ? element.type : 'not-input'
-																};
-															}, selector);
-															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-																`Field status: ${JSON.stringify(isVisible)}`));
-														} catch (fieldCheckError) {
-															this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-																`Could not check field visibility: ${(fieldCheckError as Error).message}`));
-														}
-
-														// Use human-like typing with random delays between keystrokes
-														try {
-															if (humanLike) {
-																this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-																	`Using human-like typing for ${value.length} characters`));
-																for (const char of value) {
-																	this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-																		`Typing character: ${char}`));
-																	await puppeteerPage.type(selector, char, { delay: Math.floor(Math.random() * 150) + 25 });
-																}
-															} else {
-																// Fast direct typing without delays for non-human-like mode
-																this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-																	`Using fast typing for "${value}"`));
-																await puppeteerPage.type(selector, value, { delay: 0 });
-															}
-															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-																`Typing completed for selector: ${selector}`));
-														} catch (typeError) {
-															this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-																`Error during typing: ${(typeError as Error).message}`));
-
-															// Try alternative input method as fallback
-															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-																`Trying alternative input method`));
-															try {
-																await puppeteerPage.evaluate((sel, val) => {
-																	const element = document.querySelector(sel);
-																	if (element && (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
-																		element.value = val;
-																		element.dispatchEvent(new Event('input', { bubbles: true }));
-																		element.dispatchEvent(new Event('change', { bubbles: true }));
-																	}
-																}, selector, value);
-															} catch (evalError) {
-																throw new Error(`Both typing methods failed: ${(typeError as Error).message} AND ${(evalError as Error).message}`);
-															}
-														}
-
-														// Focus the next field or blur current field to trigger validation
-														await puppeteerPage.evaluate((sel) => {
-															const element = document.querySelector(sel);
-															if (element) {
-																	(element as HTMLElement).blur();
-															}
-														}, selector);
-
-														// Press Enter if requested
-														if (pressEnter) {
-															await puppeteerPage.keyboard.press('Enter');
-														}
-														break;
-													}
-													case 'password': {
-														const value = field.value as string || '';
-														const clearField = field.clearField as boolean ?? true;
-														const credentialType = group._credentialType || 'unknown';
-
-														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-															`Filling password field: ${selector} (value masked) using ${credentialType}`));
-
-														// Clear field if needed
-														if (clearField) {
-															// For Browserless, use triple-click to select all
-															await puppeteerPage.click(selector, { clickCount: 3 });
-															await puppeteerPage.keyboard.press('Backspace');
-														}
-
-														if (credentialType === 'browserless') {
-															// For Browserless, we need a multi-layered approach
-															try {
-																// First try the direct type method (most reliable for Browserless)
-																this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-																	`Using direct type for password with Browserless`));
-																await puppeteerPage.click(selector);
-																await puppeteerPage.type(selector, value, { delay: 10 });
-															} catch (typeError) {
-																this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-																	`Direct typing failed for password: ${(typeError as Error).message}`));
-
-																// Fall back to JS method
-																try {
-																	await puppeteerPage.evaluate((sel, val) => {
-																		const element = document.querySelector(sel);
-																		if (element && element instanceof HTMLInputElement) {
-																			element.value = val;
-																			element.dispatchEvent(new Event('input', { bubbles: true }));
-																			element.dispatchEvent(new Event('change', { bubbles: true }));
-																		}
-																	}, selector, value);
-																} catch (evalError) {
-																	this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-																		`Both password input methods failed: ${(evalError as Error).message}`));
-																	throw new Error(`Failed to input password using both methods`);
-																}
-															}
-														} else {
-															// For other providers like Bright Data, use safer JS evaluation approach
-															try {
-																await puppeteerPage.evaluate((sel, val) => {
-																	const element = document.querySelector(sel);
-																	if (element && element instanceof HTMLInputElement) {
-																		// Check if element is a password field
-																		const isPasswordField = element.type === 'password';
-																		const originalType = element.type;
-
-																		try {
-																			// Temporarily change type to text if it's a password field
-																			if (isPasswordField) {
-																				element.setAttribute('type', 'text');
-																			}
-
-																			// Set value and dispatch events
-																			element.value = val;
-																			element.dispatchEvent(new Event('input', { bubbles: true }));
-																			element.dispatchEvent(new Event('change', { bubbles: true }));
-
-																			// Change back to original type (password)
-																			element.setAttribute('type', originalType || 'password');
-																		} catch (err) {
-																			console.error('Error while manipulating password field:', err);
-																		}
-																	}
-																}, selector, value);
-															} catch (evalError) {
-																this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-																	`JS eval password input failed: ${(evalError as Error).message}`));
-
-																// Last resort: try direct typing
-																this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-																	`Falling back to direct typing for password`));
-																await puppeteerPage.click(selector);
-																await puppeteerPage.type(selector, value);
-															}
-														}
-														break;
-													}
+												// If the field failed and we're not continuing on failure, throw an error
+												if (!success && !continueOnFail) {
+													throw new Error(`Failed to fill form field: ${selector} (type: ${fieldType})`);
 												}
 											}
 
+											// Add form results to response data
+											if (!resultData.formFields) {
+												resultData.formFields = [];
+											}
+											(resultData.formFields as IDataObject[]).push(...results);
+
 											// Submit the form if requested
 											if (submitForm && submitSelector) {
-												this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
 													`Submitting form using selector: ${submitSelector}`));
 
 												// Wait a short time before submitting (feels more human)
@@ -3124,224 +2972,61 @@ export const description: INodeProperties[] = [
 													await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
 												}
 
-												// Log before clicking submit
-												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-													`About to click submit button: ${submitSelector}`));
-
 												try {
-													// Capture navigation events that might occur from the form submission
-													const logPrefix = `[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}]`;
-
 													// Create a promise that will resolve when the next navigation happens
-													const navigationPromise = puppeteerPage.waitForNavigation({
-														waitUntil: waitAfterSubmit === 'multiple' ? ['domcontentloaded', 'networkidle0'] :
-															(waitAfterSubmit as puppeteer.PuppeteerLifeCycleEvent || 'domcontentloaded'),
-														timeout: waitSubmitTime
-													});
+													const navigationPromise = waitAfterSubmit !== 'noWait' ?
+														puppeteerPage.waitForNavigation({
+															waitUntil: waitAfterSubmit === 'multiple' ? ['domcontentloaded', 'networkidle0'] :
+																(waitAfterSubmit as puppeteer.PuppeteerLifeCycleEvent || 'domcontentloaded'),
+															timeout: waitSubmitTime
+														}) :
+														Promise.resolve();
 
 													// Click the submit button
-													this.logger.info(`${logPrefix} Clicking submit button ${submitSelector}`);
+													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+														`Clicking submit button: ${submitSelector}`));
 													await puppeteerPage.click(submitSelector);
-													this.logger.info(`${logPrefix} Submit button clicked successfully`);
+													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+														`Submit button clicked successfully`));
 
 													// Wait for navigation to complete
-													this.logger.info(`${logPrefix} Waiting for navigation to complete (timeout: ${waitSubmitTime}ms)`);
-													await navigationPromise;
-													this.logger.info(`${logPrefix} Navigation completed successfully after form submission`);
+													if (waitAfterSubmit !== 'noWait') {
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Waiting for navigation to complete (timeout: ${waitSubmitTime}ms)`));
+														await navigationPromise;
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Navigation completed successfully after form submission`));
+													}
 
-													// Verify the page is still connected
-													await puppeteerPage.evaluate(() => document.readyState)
-														.then(readyState => {
-															this.logger.info(`${logPrefix} Page ready state after navigation: ${readyState}`);
-														})
-														.catch(error => {
-															this.logger.warn(`${logPrefix} Error checking page state after navigation: ${error.message}`);
-															this.logger.warn(`${logPrefix} This may indicate the page context was destroyed during navigation`);
-														});
+													// Store form submission result
+													resultData.formSubmission = {
+														success: true,
+														submitSelector,
+														waitAfterSubmit,
+														waitSubmitTime
+													};
 												} catch (navError) {
 													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
 														`Navigation error after form submission: ${(navError as Error).message}`));
 													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
 														`This is often normal with redirects - attempting to continue`));
 
-													// Try to verify the page is still usable
-													try {
-														const currentUrl = await puppeteerPage.url();
-														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-															`Current URL after navigation error: ${currentUrl}`));
-													} catch (urlError) {
-														this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-															`Error getting URL after navigation: ${(urlError as Error).message}`));
-														this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-															`Page context might be destroyed - attempting to reconnect`));
-
-														// If we have a session ID, try to reconnect
-														if (sessionId) {
-															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-																`Attempting to reconnect session after navigation error`));
-
-															try {
-																// Get browser session information
-																const workflowId = this.getWorkflow().id || '';
-																if (!workflowId) {
-																	throw new Error('Could not get workflow ID for reconnection');
-																}
-
-																// Get session info
-																let session = null;
-																const allSessions = SessionManager.getAllSessions();
-																let sessionId = '';
-
-																// Find the session with matching workflowId
-																for (const sessionInfo of allSessions) {
-																	if (sessionInfo.info.workflowId === workflowId) {
-																		sessionId = sessionInfo.sessionId;
-																		session = SessionManager.getSession(sessionId);
-																		break;
-																	}
-																}
-
-																if (!session) {
-																	throw new Error(`No browser session found for workflow ID: ${workflowId}`);
-																}
-
-																// Use the existing browser from the session
-																if (session.browser) {
-																	this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-																		`Reconnecting to existing browser session`));
-
-																	// Get a new page from the existing browser
-																	const pages = await session.browser.pages();
-																	if (pages.length === 0) {
-																		// Create a new page if none exist
-																		puppeteerPage = await session.browser.newPage();
-																		this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-																			`Created new page after reconnection`));
-																	} else {
-																		// Use the first available page
-																		puppeteerPage = pages[0];
-																		this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-																			`Using existing page after reconnection`));
-																	}
-
-																	// Update the session's page reference
-																	SessionManager.storePage(sessionId, `page_${Date.now()}`, puppeteerPage);
-																	this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-																		`Successfully reconnected and updated page reference`));
-																} else {
-																	this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-																		`No browser instance in session - cannot reconnect`));
-																	throw new Error(`Cannot reconnect after form submission - no browser instance available`);
-																}
-															} catch (reconnectError) {
-																this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-																	`Reconnection failed: ${(reconnectError as Error).message}`));
-																throw new Error(`Could not reconnect to session ${sessionId} after form submission: ${(reconnectError as Error).message}`);
-															}
-														}
-													}
-													// } catch (urlError) {
-													// 	this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error getting URL after navigation: ${(urlError as Error).message}`);
-													// 	this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Page context might be destroyed - attempting to reconnect`);
-
-													// 	// If we have a session ID, try to reconnect
-													// 	if (sessionId) {
-													// 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Attempting to reconnect session after navigation error`);
-
-													// 		try {
-													// 			// Get browser session information
-													// 			const workflowId = this.getWorkflow().id || '';
-													// 			if (!workflowId) {
-													// 				throw new Error('Could not get workflow ID for reconnection');
-													// 			}
-
-													// 			// Get session info
-													// 			const session = SessionManager.getAllSessions().get(workflowId);
-													// 			if (!session) {
-													// 				throw new Error(`No browser session found for workflow ID: ${workflowId}`);
-													// 			}
-
-													// 			// Get credentials based on type
-													// 			const credentialType = session.credentialType || 'brightDataApi';
-													// 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using credential type: ${credentialType} for reconnection`);
-
-													// 			// Get credentials from workflow
-													// 			const credentials = await this.getCredentials(credentialType);
-
-													// 			// Create transport to handle reconnection
-													// 			const transportFactory = new BrowserTransportFactory();
-													// 			const browserTransport = transportFactory.createTransport(
-													// 				credentialType,
-													// 				this.logger,
-													// 				credentials,
-													// 			);
-
-													// 			// Check if the transport has reconnect capability
-													// 			if (browserTransport.reconnect) {
-													// 				// Reconnect to the session
-													// 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to session: ${sessionId}`);
-													// 				const reconnectedBrowser = await browserTransport.reconnect(sessionId);
-
-													// 				// Get a new page from the reconnected browser
-													// 				const pages = await reconnectedBrowser.pages();
-													// 				if (pages.length === 0) {
-													// 					// Create a new page if none exist
-													// 					puppeteerPage = await reconnectedBrowser.newPage();
-													// 					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Created new page after reconnection`);
-													// 				} else {
-													// 					// Use the first available page
-													// 					puppeteerPage = pages[0];
-													// 					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using existing page after reconnection`);
-													// 				}
-
-													// 				// Update the session's page reference
-													// 				Ventriloquist.storePage(workflowId, sessionId, puppeteerPage);
-													// 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Successfully reconnected and updated page reference`);
-
-													// 				// Form submission was likely successful, continue execution
-													// 			} else {
-													// 				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Transport doesn't support reconnection for provider: ${credentialType}`);
-													// 				throw new Error(`Cannot reconnect after form submission with ${credentialType}`);
-													// 			}
-													// 		} catch (reconnectError) {
-													// 			this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnection failed: ${(reconnectError as Error).message}`);
-													// 			throw new Error(`Could not reconnect to session ${sessionId} after form submission: ${(reconnectError as Error).message}`);
-													// 		}
-													// 	}
-													// }
+													// Store form submission result with error
+													resultData.formSubmission = {
+														success: false,
+														error: (navError as Error).message,
+														submitSelector,
+														waitAfterSubmit,
+														waitSubmitTime
+													};
 												}
 											}
 										}
-										else {
-											// Neither approach is available, log an error
-											throw new Error(`Decision group "${groupName}" has a fill action but no valid selector or form fields.`);
-										}
-
-										// After successful form fill, exit immediately
-										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Decision point "${groupName}": Form fill completed successfully - exiting decision node`));
-										resultData.success = true;
-										resultData.routeTaken = groupName;
-										resultData.actionPerformed = actionType;
-										resultData.currentUrl = await puppeteerPage.url();
-										resultData.pageTitle = await puppeteerPage.title();
-										resultData.executionDuration = Date.now() - startTime;
-
-										// Take screenshot if requested
-										if (takeScreenshot) {
-											const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
-											if (screenshotResult !== null) {
-												resultData.screenshot = screenshotResult;
-											}
-										}
-
-										// Return the result immediately after successful action
-										return [this.helpers.returnJsonArray([resultData])];
 									} catch (error) {
 										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Error during fill action: ${(error as Error).message}`));
+													`Error during fill action: ${(error as Error).message}`));
 										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Action execution error in group "${groupName}": ${(error as Error).message}`));
+													`Action execution error in group "${groupName}": ${(error as Error).message}`));
 
 										if (continueOnFail) {
 											// If continueOnFail is enabled, update result and move on
