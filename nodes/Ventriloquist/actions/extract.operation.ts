@@ -15,11 +15,19 @@ import {
 	extractAttributeValue,
 	extractTableData,
 	extractMultipleElements,
-	takePageScreenshot,
 	getPageInfo,
 } from '../utils/extractionUtils';
 import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
 import { createErrorResponse } from '../utils/errorUtils';
+
+/**
+ * Extended PageInfo interface with bodyText
+ */
+interface PageInfo {
+	url: string;
+	title: string;
+	bodyText: string;
+}
 
 /**
  * Extract operation description
@@ -559,7 +567,7 @@ export async function execute(
 					this.logger,
 					nodeName,
 					nodeId
-				);
+				) as string | IDataObject[];
 
 				// Set extraction details
 				extractionDetails = {
@@ -585,11 +593,11 @@ export async function execute(
 					page,
 					selector,
 					{
-						extractionType: extractionSubType,
-						attribute: extractionAttribute,
+						attributeName: extractionAttribute,
+						extractionProperty: extractionSubType,
 						limit: outputLimit,
-						extractProperty,
-						propertyKey,
+						outputFormat: extractProperty ? 'object' : 'array',
+						separator: propertyKey,
 					},
 					this.logger,
 					nodeName,
@@ -611,7 +619,7 @@ export async function execute(
 
 		// Debug page content if enabled
 		if (debugPageContent) {
-			const pageInfo = await getPageInfo(page);
+			const pageInfo = await getPageInfo(page) as PageInfo;
 			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
 				`Page info: URL=${pageInfo.url}, title=${pageInfo.title}`));
 			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
@@ -619,7 +627,7 @@ export async function execute(
 		}
 
 		// Format the data for logging (avoid large outputs)
-		const logSafeData = formatExtractedDataForLog(extractedData);
+		const logSafeData = formatExtractedDataForLog(extractedData, extractionType);
 		this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
 			`Extraction result (${extractionType}): ${logSafeData}`));
 
@@ -673,4 +681,5 @@ export async function execute(
 		};
 	}
 }
+
 
