@@ -5,11 +5,12 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
-import { Ventriloquist } from '../Ventriloquist.node';
 import { SessionManager } from '../utils/sessionManager';
 import { formatOperationLog } from '../utils/resultUtils';
 import { createErrorResponse } from '../utils/errorUtils';
 import { createSuccessResponse } from '../utils/resultUtils';
+
+
 
 /**
  * Decision operation description
@@ -3036,7 +3037,15 @@ export const description: INodeProperties[] = [
 
 									// Get browser session information and credential type for compatibility
 									const workflowId = this.getWorkflow().id || '';
-									const session = Ventriloquist.getSessions().get(workflowId);
+									// Get all active sessions and find the one for this workflow
+									const allSessions = SessionManager.getAllSessions();
+									let session = null;
+									for (const sessionInfo of allSessions) {
+										if (sessionInfo.info.workflowId === workflowId) {
+											session = SessionManager.getSession(sessionInfo.sessionId);
+											break;
+										}
+									}
 									let credentialType = 'brightDataApi'; // Default
 
 									if (session && typeof (session as any).credentialType === 'string') {
@@ -3410,7 +3419,19 @@ export const description: INodeProperties[] = [
 																}
 
 																// Get session info
-																const session = Ventriloquist.getSessions().get(workflowId);
+																let session = null;
+																const allSessions = SessionManager.getAllSessions();
+																let sessionId = '';
+
+																// Find the session with matching workflowId
+																for (const sessionInfo of allSessions) {
+																	if (sessionInfo.info.workflowId === workflowId) {
+																		sessionId = sessionInfo.sessionId;
+																		session = SessionManager.getSession(sessionId);
+																		break;
+																	}
+																}
+
 																if (!session) {
 																	throw new Error(`No browser session found for workflow ID: ${workflowId}`);
 																}
@@ -3435,7 +3456,7 @@ export const description: INodeProperties[] = [
 																	}
 
 																	// Update the session's page reference
-																	Ventriloquist.storePage(workflowId, sessionId, puppeteerPage);
+																	SessionManager.storePage(workflowId, sessionId, puppeteerPage);
 																	this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
 																		`Successfully reconnected and updated page reference`));
 																} else {
@@ -3466,7 +3487,7 @@ export const description: INodeProperties[] = [
 													// 			}
 
 													// 			// Get session info
-													// 			const session = Ventriloquist.getSessions().get(workflowId);
+													// 			const session = SessionManager.getAllSessions().get(workflowId);
 													// 			if (!session) {
 													// 				throw new Error(`No browser session found for workflow ID: ${workflowId}`);
 													// 			}
@@ -3973,7 +3994,7 @@ export const description: INodeProperties[] = [
 															elementCount,
 																imageCount,
 																linkCount,
-													}
+												}
 												};
 											}
 										}
@@ -4187,7 +4208,7 @@ export const description: INodeProperties[] = [
 			// Create standardized success response
 			const successResponse = await createSuccessResponse({
 				operation: 'Decision',
-				sessionId: explicitSessionId,
+				sessionId: sessionId || '',
 				page: puppeteerPage,
 				logger: this.logger,
 				startTime,
@@ -4199,6 +4220,13 @@ export const description: INodeProperties[] = [
 					pageTitle: resultData.pageTitle,
 				},
 			});
+
+			// Store the page reference for future operations to ensure the session is properly maintained
+			if (sessionId && workflowId) {
+				SessionManager.storePage(sessionId, `page_${Date.now()}`, puppeteerPage);
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+					`Stored page reference with session ID: ${sessionId}`));
+			}
 
 			// Build the output item in accordance with n8n standards
 			const returnItem: INodeExecutionData = {
@@ -4235,7 +4263,7 @@ export const description: INodeProperties[] = [
 			const errorResponse = await createErrorResponse({
 				error,
 				operation: 'Decision',
-				sessionId: explicitSessionId,
+				sessionId: sessionId || '',
 				nodeId,
 				nodeName,
 				page: puppeteerPage,
