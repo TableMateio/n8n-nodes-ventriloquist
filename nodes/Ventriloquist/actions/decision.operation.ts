@@ -8,7 +8,7 @@ import type * as puppeteer from 'puppeteer-core';
 import { SessionManager } from '../utils/sessionManager';
 import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
 import { createErrorResponse } from '../utils/errorUtils';
-import { processFormField, getHumanDelay } from '../utils/formOperations';
+import { getHumanDelay } from '../utils/formOperations';
 import { takeScreenshot as captureScreenshot } from '../utils/navigationUtils';
 import { executeAction, ActionType, IActionParameters, IActionOptions } from '../utils/actionUtils';
 // Add import for conditionUtils module
@@ -2434,21 +2434,36 @@ export const description: INodeProperties[] = [
 												} : {})
 											};
 
-											const { success, fieldResult } = await processFormField(
+											// Create options for the action
+											const actionOptions: IActionOptions = {
+												waitForSelector: waitForSelectors,
+												selectorTimeout,
+												detectionMethod,
+												earlyExitDelay,
+												nodeName,
+												nodeId,
+												index,
+												useHumanDelays
+											};
+
+											// Execute the fill action using the utility
+											const actionResult = await executeAction(
 												puppeteerPage,
+												'fill' as ActionType,
 												field,
+												actionOptions,
 												this.logger
 											);
 
-											if (!success) {
-												throw new Error(`Failed to fill form field: ${actionSelector} (type: ${fieldType})`);
+											if (!actionResult.success) {
+												throw new Error(`Failed to fill form field: ${actionSelector} (type: ${fieldType}) - ${actionResult.error || 'Unknown error'}`);
 											}
 
 											// Store field result for response
 											if (!resultData.formFields) {
 												resultData.formFields = [];
 											}
-											(resultData.formFields as IDataObject[]).push(fieldResult);
+											(resultData.formFields as IDataObject[]).push(actionResult.details);
 
 											// Handle post-fill waiting
 											if (waitAfterAction === 'fixedTime') {
@@ -2472,61 +2487,40 @@ export const description: INodeProperties[] = [
 											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
 												`Using complex form fill with ${formFields.length} fields`));
 
-											// Process each form field
-											const results: IDataObject[] = [];
+											// Create action options once
+											const actionOptions: IActionOptions = {
+												waitForSelector: waitForSelectors,
+												selectorTimeout,
+												detectionMethod,
+												earlyExitDelay,
+												nodeName,
+												nodeId,
+												index,
+												useHumanDelays
+											};
+
+											// Process each form field using actionUtils
 											for (const field of formFields) {
-												const selector = field.selector as string;
-												const fieldType = field.fieldType as string || 'text';
-
-												// Wait for the element if needed
-												if (waitForSelectors) {
-													if (detectionMethod === 'smart') {
-														const elementExists = await smartWaitForSelector(
-															puppeteerPage,
-															selector,
-															selectorTimeout,
-															earlyExitDelay,
-															this.logger,
-														);
-
-														if (!elementExists) {
-															throw new Error(`Form field element with selector "${selector}" not found`);
-														}
-													} else {
-														await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
-													}
-												}
-
-												// Add a human-like delay if enabled
-												if (useHumanDelays) {
-													await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
-												}
-
-												// Process the form field using the utility function
-												const { success, fieldResult } = await processFormField(
+												// Execute the fill action using the utility
+												const actionResult = await executeAction(
 													puppeteerPage,
+													'fill' as ActionType,
 													field,
+													actionOptions,
 													this.logger
 												);
 
-												// Add context to the field result
-												fieldResult.nodeId = nodeId;
-												fieldResult.nodeName = nodeName;
-
-												// Add the field result to our results collection
-												results.push(fieldResult);
-
-												// If the field failed and we're not continuing on failure, throw an error
-												if (!success && !continueOnFail) {
-													throw new Error(`Failed to fill form field: ${selector} (type: ${fieldType})`);
+												// Handle action failures
+												if (!actionResult.success) {
+													throw new Error(`Failed to fill form field: ${field.selector as string} (type: ${field.fieldType as string}) - ${actionResult.error || 'Unknown error'}`);
 												}
-											}
 
-											// Add form results to response data
-											if (!resultData.formFields) {
-												resultData.formFields = [];
+												// Store field result for response
+												if (!resultData.formFields) {
+													resultData.formFields = [];
+												}
+												(resultData.formFields as IDataObject[]).push(actionResult.details);
 											}
-											(resultData.formFields as IDataObject[]).push(...results);
 
 											// Submit the form if requested
 											if (submitForm && submitSelector) {

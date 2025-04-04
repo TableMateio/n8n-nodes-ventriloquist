@@ -7,7 +7,6 @@ import type {
 import type { Page } from 'puppeteer-core';
 import { SessionManager } from '../utils/sessionManager';
 import {
-	processFormField,
 	retryFormSubmission,
 	getHumanDelay,
 	submitForm
@@ -15,6 +14,14 @@ import {
 import {
 	takeScreenshot
 } from '../utils/navigationUtils';
+import {
+	executeAction
+} from '../utils/actionUtils';
+import type {
+	IActionParameters,
+	IActionOptions,
+	ActionType
+} from '../utils/actionUtils';
 
 /**
  * Form operation description
@@ -689,19 +696,43 @@ export async function execute(
 				await new Promise(resolve => setTimeout(resolve, delay));
 			}
 
-			// Process the form field using the utility function
-			const { success, fieldResult } = await processFormField(page, field, this.logger);
+			// Create parameters and options for the action executor
+			const actionParameters: IActionParameters = {
+				...field, // Include all field properties from the form definition
+				selector
+			};
 
-			// Add context to the field result
-			fieldResult.nodeId = nodeId;
-			fieldResult.nodeName = nodeName;
+			const actionOptions: IActionOptions = {
+				waitForSelector: waitForSelectors,
+				selectorTimeout,
+				detectionMethod: 'standard',
+				earlyExitDelay: 500,
+				nodeName,
+				nodeId,
+				index,
+				useHumanDelays
+			};
+
+			// Execute the action using the action utils module
+			const actionResult = await executeAction(
+				page,
+				'fill' as ActionType,
+				actionParameters,
+				actionOptions,
+				this.logger
+			);
 
 			// Add the field result to our results collection
-			results.push(fieldResult);
+			results.push({
+				fieldType,
+				selector,
+				success: actionResult.success,
+				details: actionResult.details
+			});
 
 			// If the field failed and we're not continuing on failure, throw an error
-			if (!success && !continueOnFail) {
-				throw new Error(`Failed to fill form field: ${selector} (type: ${fieldType})`);
+			if (!actionResult.success && !continueOnFail) {
+				throw new Error(`Failed to fill form field: ${selector} (type: ${fieldType}) - ${actionResult.error || 'Unknown error'}`);
 			}
 		}
 
