@@ -10,6 +10,10 @@ import { formatOperationLog, createSuccessResponse, createTimingLog } from '../u
 import { createErrorResponse } from '../utils/errorUtils';
 import { waitAndClick } from '../utils/clickOperations';
 import { matchStrings, compareCount } from '../utils/detectionUtils';
+import {
+	processFormField
+} from '../utils/formOperations';
+import { takeScreenshot as captureScreenshot } from '../utils/navigationUtils';
 
 /**
  * Decision operation description
@@ -2406,6 +2410,7 @@ export const description: INodeProperties[] = [
 				extractedData?: Record<string, unknown>;
 				sessionId: string;
 				error?: string; // Add error property for error handling
+				formFields?: IDataObject[];
 			} = {
 				success: true,
 				routeTaken,
@@ -2763,8 +2768,10 @@ export const description: INodeProperties[] = [
 
 										// Take screenshot if requested
 										if (takeScreenshot) {
-											screenshot = await puppeteerPage.screenshot({ encoding: 'base64' });
-											resultData.screenshot = screenshot;
+											const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
+											if (screenshotResult !== null) {
+												resultData.screenshot = screenshotResult;
+											}
 										}
 
 										// Return the result immediately after successful action
@@ -2815,6 +2822,7 @@ export const description: INodeProperties[] = [
 											const actionSelector = group.actionSelector as string;
 											const actionValue = group.actionValue as string;
 											const waitAfterAction = group.waitAfterAction as string;
+											const fieldType = group.fieldType as string || 'text';
 											let waitTime = group.waitTime as number;
 											if (waitTime === undefined) {
 												waitTime = waitAfterAction === 'fixedTime' ? 2000 :
@@ -2843,20 +2851,36 @@ export const description: INodeProperties[] = [
 												}
 											}
 
-											// Clear the field first
-											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-												`Clearing field: ${actionSelector}`));
-											await puppeteerPage.evaluate((selector: string) => {
-												const element = document.querySelector(selector) as HTMLInputElement;
-												if (element) {
-														element.value = '';
-												}
-											}, actionSelector);
+											// Process the form field using our utility function
+											const field: IDataObject = {
+												fieldType,
+												selector: actionSelector,
+												value: actionValue,
+												// Add options based on field type
+												...(fieldType === 'text' ? {
+													clearField: true,
+													humanLike: useHumanDelays
+												} : {}),
+												...(fieldType === 'password' ? {
+													clearField: true
+												} : {})
+											};
 
-											// Fill the field
-											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-												`Filling field: ${actionSelector} (value masked)`));
-											await puppeteerPage.type(actionSelector, actionValue);
+											const { success, fieldResult } = await processFormField(
+												puppeteerPage,
+												field,
+												this.logger
+											);
+
+											if (!success) {
+												throw new Error(`Failed to fill form field: ${actionSelector} (type: ${fieldType})`);
+											}
+
+											// Store field result for response
+											if (!resultData.formFields) {
+												resultData.formFields = [];
+											}
+											(resultData.formFields as IDataObject[]).push(fieldResult);
 
 											// Handle post-fill waiting
 											if (waitAfterAction === 'fixedTime') {
@@ -3305,8 +3329,10 @@ export const description: INodeProperties[] = [
 
 										// Take screenshot if requested
 										if (takeScreenshot) {
-											screenshot = await puppeteerPage.screenshot({ encoding: 'base64' });
-											resultData.screenshot = screenshot;
+											const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
+											if (screenshotResult !== null) {
+												resultData.screenshot = screenshotResult;
+											}
 										}
 
 										// Return the result immediately after successful action
@@ -3567,8 +3593,10 @@ export const description: INodeProperties[] = [
 
 									// Take screenshot if requested
 									if (takeScreenshot) {
-										screenshot = await puppeteerPage.screenshot({ encoding: 'base64' });
-										resultData.screenshot = screenshot;
+										const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
+										if (screenshotResult !== null) {
+											resultData.screenshot = screenshotResult;
+										}
 									}
 
 									// Return the result immediately after successful action
