@@ -50,6 +50,28 @@ export interface CloseSessionResult {
 }
 
 /**
+ * Options for getting or creating a page session
+ */
+export interface GetOrCreatePageSessionOptions {
+  explicitSessionId?: string;  // A specific session ID to use
+  websocketEndpoint: string;   // WebSocket endpoint for creating new sessions if needed
+  workflowId?: string;         // Workflow ID for tracking
+  operationName?: string;      // Name of the operation (e.g., 'click', 'form')
+  nodeId?: string;             // ID of the node for logging
+  nodeName?: string;           // Name of the node for logging
+  index?: number;              // Index of the node execution for logging
+}
+
+/**
+ * Result of get or create page session operation
+ */
+export interface GetOrCreatePageSessionResult {
+  page: Page | null;
+  sessionId: string;
+  isNewSession: boolean;
+}
+
+/**
  * Namespace to manage browser sessions
  */
 export namespace SessionManager {
@@ -191,6 +213,198 @@ export namespace SessionManager {
     }
 
     return wsUrl;
+  }
+
+  /**
+   * Get or create a page session
+   * This function centralizes the common session management logic that was previously
+   * duplicated across multiple operation files. It handles checking for explicit
+   * session IDs, finding existing sessions, and creating new sessions as needed.
+   */
+  export async function getOrCreatePageSession(
+    logger: ILogger,
+    options: GetOrCreatePageSessionOptions
+  ): Promise<GetOrCreatePageSessionResult> {
+    const {
+      explicitSessionId,
+      websocketEndpoint,
+      workflowId,
+      operationName = 'operation',
+      nodeId = 'unknown',
+      nodeName = 'unknown',
+      index = 0
+    } = options;
+
+    const logPrefix = `[Ventriloquist][${nodeName}#${index}][${operationName}][${nodeId}]`;
+
+    // Initialize result
+    let page: Page | null = null;
+    let sessionId = '';
+    let isNewSession = false;
+
+    // Visual marker to clearly indicate a new node is starting
+    logger.info("============ STARTING SESSION MANAGEMENT ============");
+    logger.info(`${logPrefix} Starting session management`);
+
+    // Log session state for debugging
+    const sessionsInfo = getAllSessions();
+    logger.info(`${logPrefix} Available sessions: ${JSON.stringify(sessionsInfo)}`);
+
+    // If using an explicit session ID, try to get that page first
+    if (explicitSessionId) {
+      logger.info(`${logPrefix} Looking for explicitly provided session ID: ${explicitSessionId}`);
+
+      // Get the session with the provided ID
+      const existingSession = getSession(explicitSessionId);
+
+      if (existingSession) {
+        // Get the page from the session
+        const existingPage = getPage(explicitSessionId);
+        if (existingPage) {
+          page = existingPage;
+          sessionId = explicitSessionId;
+          logger.info(`${logPrefix} Found existing session with ID: ${sessionId}`);
+        } else if (existingSession.browser) {
+          // No page found in session, create a new one
+          logger.info(`${logPrefix} No page found in session, creating a new one`);
+          try {
+            page = await existingSession.browser.newPage();
+
+            // Generate a page ID and store it
+            const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+            storePage(explicitSessionId, pageId, page);
+            sessionId = explicitSessionId;
+          } catch (pageError) {
+            logger.error(`${logPrefix} Failed to create new page: ${(pageError as Error).message}`);
+          }
+        }
+      } else {
+        // Try to connect to the session
+        logger.info(`${logPrefix} Session not found locally, attempting to connect to: ${explicitSessionId}`);
+
+        try {
+          // Try to connect to the session
+          const result = await connectToSession(
+            logger,
+            explicitSessionId,
+            websocketEndpoint
+          );
+
+          sessionId = explicitSessionId;
+
+          // If we got a browser but no page, create one
+          if (result.browser) {
+            if (result.page) {
+              page = result.page;
+            } else {
+              page = await result.browser.newPage();
+              // Store the page in the session
+              const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+              storePage(sessionId, pageId, page);
+            }
+
+            logger.info(`${logPrefix} Successfully connected to session: ${sessionId}`);
+          }
+        } catch (connectError) {
+          logger.warn(`${logPrefix} Could not connect to session: ${(connectError as Error).message}`);
+        }
+      }
+    }
+
+    // If we don't have a page yet, check for existing sessions or create a new one
+    if (!page) {
+      // Get all active sessions
+      const allSessions = getAllSessions();
+
+      if (allSessions.length > 0) {
+        logger.info(`${logPrefix} Found ${allSessions.length} existing sessions`);
+
+        // Try to get a page from any session
+        for (const sessionInfo of allSessions) {
+          // Try to get the session
+          const session = getSession(sessionInfo.sessionId);
+          if (session && session.pages.size > 0) {
+            // Use the first page from this session
+            const existingPage = getPage(sessionInfo.sessionId);
+            if (existingPage) {
+              page = existingPage;
+              sessionId = sessionInfo.sessionId;
+              logger.info(`${logPrefix} Using existing page from session: ${sessionId}`);
+              break;
+            }
+          }
+        }
+
+        // If still no page, try to create one in the first available session
+        if (!page) {
+          const firstSessionId = allSessions[0].sessionId;
+          const firstSession = getSession(firstSessionId);
+
+          if (firstSession?.browser) {
+            try {
+              page = await firstSession.browser.newPage();
+              // Store the page in the session
+              const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+              storePage(firstSessionId, pageId, page);
+              sessionId = firstSessionId;
+
+              logger.info(`${logPrefix} Created new page in existing session: ${sessionId}`);
+            } catch (pageError) {
+              logger.error(`${logPrefix} Failed to create new page: ${(pageError as Error).message}`);
+            }
+          }
+        }
+      }
+
+      // If we still don't have a page, create a new session
+      if (!page && websocketEndpoint) {
+        logger.info(`${logPrefix} Creating new browser session`);
+
+        try {
+          // Create a new session
+          const result = await createSession(logger, websocketEndpoint, {
+            workflowId, // Store workflowId for backwards compatibility
+          });
+
+          isNewSession = true;
+          sessionId = result.sessionId;
+
+          // Create a new page
+          if (result.browser) {
+            page = await result.browser.newPage();
+            // Store the page in the session
+            const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+            storePage(sessionId, pageId, page);
+
+            logger.info(`${logPrefix} Created new session with ID: ${sessionId}`);
+
+            // Navigate to a blank page to initialize it
+            await page.goto('about:blank');
+          }
+        } catch (sessionError) {
+          logger.error(`${logPrefix} Failed to create browser session: ${(sessionError as Error).message}`);
+          throw new Error(`Failed to create browser session: ${(sessionError as Error).message}`);
+        }
+      } else if (!page) {
+        // No existing session and no websocket endpoint
+        logger.error(`${logPrefix} Cannot create a new session without a valid websocket endpoint`);
+        throw new Error('Cannot create a new session without a valid websocket endpoint. Please connect this node to an Open node or provide an explicit session ID.');
+      }
+    }
+
+    // At this point we must have a valid page or we would have thrown an error
+    if (!page) {
+      logger.error(`${logPrefix} Failed to get or create a page`);
+      throw new Error('Failed to get or create a page');
+    }
+
+    logger.info(`${logPrefix} Successfully obtained page with session ID: ${sessionId}`);
+
+    return {
+      page,
+      sessionId,
+      isNewSession
+    };
   }
 
   /**

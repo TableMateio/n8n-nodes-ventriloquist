@@ -102,146 +102,20 @@ export async function execute(
   const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 
   try {
-    // Log session state for debugging
-    const sessionsInfo = SessionManager.getAllSessions();
-    this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Available sessions: ${JSON.stringify(sessionsInfo)}`);
+    // Use the centralized session management instead of duplicating code
+    const sessionResult = await SessionManager.getOrCreatePageSession(this.logger, {
+      explicitSessionId,
+      websocketEndpoint,
+      workflowId,
+      operationName: 'Click',
+      nodeId,
+      nodeName,
+      index,
+    });
 
-    // If using an explicit session ID, try to get that page first
-    if (explicitSessionId) {
-      this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Looking for explicitly provided session ID: ${explicitSessionId}`);
+    page = sessionResult.page;
+    sessionId = sessionResult.sessionId;
 
-      // Get the session with the provided ID
-      const existingSession = SessionManager.getSession(explicitSessionId);
-
-      if (existingSession) {
-        // Get the page from the session
-        const existingPage = SessionManager.getPage(explicitSessionId);
-        if (existingPage) {
-          page = existingPage;
-          sessionId = explicitSessionId;
-          this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Found existing session with ID: ${sessionId}`);
-        } else if (existingSession.browser) {
-          // No page found in session, create a new one
-          this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] No page found in session, creating a new one`);
-          page = await existingSession.browser.newPage();
-
-          // Generate a page ID and store it
-          const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-          SessionManager.storePage(explicitSessionId, pageId, page);
-          sessionId = explicitSessionId;
-        }
-      } else {
-        // Try to connect to the session
-        this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Session not found locally, attempting to connect to: ${explicitSessionId}`);
-
-        try {
-          // Try to connect to the session
-          const result = await SessionManager.connectToSession(
-            this.logger,
-            explicitSessionId,
-            websocketEndpoint
-          );
-
-          sessionId = explicitSessionId;
-
-          // If we got a browser but no page, create one
-          if (result.browser) {
-            if (result.page) {
-              page = result.page;
-            } else {
-              page = await result.browser.newPage();
-              // Store the page in the session
-              const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-              SessionManager.storePage(sessionId, pageId, page);
-            }
-
-            this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Successfully connected to session: ${sessionId}`);
-          }
-        } catch (connectError) {
-          this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Could not connect to session: ${(connectError as Error).message}`);
-        }
-      }
-    }
-
-    // If we don't have a page yet, check for existing sessions or create a new one
-    if (!page) {
-      // Get all active sessions
-      const allSessions = SessionManager.getAllSessions();
-
-      if (allSessions.length > 0) {
-        this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Found ${allSessions.length} existing sessions`);
-
-        // Try to get a page from any session
-        for (const sessionInfo of allSessions) {
-          // Try to get the session
-          const session = SessionManager.getSession(sessionInfo.sessionId);
-          if (session && session.pages.size > 0) {
-            // Use the first page from this session
-            const existingPage = SessionManager.getPage(sessionInfo.sessionId);
-            if (existingPage) {
-              page = existingPage;
-              sessionId = sessionInfo.sessionId;
-              this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Using existing page from session: ${sessionId}`);
-              break;
-            }
-          }
-        }
-
-        // If still no page, try to create one in the first available session
-        if (!page) {
-          const firstSessionId = allSessions[0].sessionId;
-          const firstSession = SessionManager.getSession(firstSessionId);
-
-          if (firstSession && firstSession.browser) {
-            try {
-              page = await firstSession.browser.newPage();
-              // Store the page in the session
-              const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-              SessionManager.storePage(firstSessionId, pageId, page);
-              sessionId = firstSessionId;
-
-              this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Created new page in existing session: ${sessionId}`);
-            } catch (pageError) {
-              this.logger.error(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Failed to create new page: ${(pageError as Error).message}`);
-            }
-          }
-        }
-      }
-
-      // If we still don't have a page, create a new session
-      if (!page && websocketEndpoint) {
-        this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Creating new browser session`);
-
-        try {
-          // Create a new session
-          const result = await SessionManager.createSession(this.logger, websocketEndpoint, {
-            workflowId, // Store workflowId for backwards compatibility
-          });
-
-          sessionId = result.sessionId;
-
-          // Create a new page
-          if (result.browser) {
-            page = await result.browser.newPage();
-            // Store the page in the session
-            const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-            SessionManager.storePage(sessionId, pageId, page);
-
-            this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Created new session with ID: ${sessionId}`);
-
-            // Navigate to a blank page to initialize it
-            await page.goto('about:blank');
-          }
-        } catch (sessionError) {
-          throw new Error(`Failed to create browser session: ${(sessionError as Error).message}`);
-        }
-      } else if (!page) {
-        // No existing session and no websocket endpoint
-        throw new Error('Cannot create a new session without a valid websocket endpoint. Please connect this node to an Open node or provide an explicit session ID.');
-      }
-    }
-
-    // At this point we must have a valid page
     if (!page) {
       throw new Error('Failed to get or create a page');
     }
