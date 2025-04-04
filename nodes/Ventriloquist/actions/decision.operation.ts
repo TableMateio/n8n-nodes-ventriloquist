@@ -2532,6 +2532,11 @@ export const description: INodeProperties[] = [
 						throw new Error(`No browser session found for workflow ID: ${workflowId}`);
 					}
 
+					// Try to get credential type from session if available
+					if (session && 'credentialType' in session) {
+						credentialType = (session as any).credentialType;
+					}
+
 					// Get credentials based on type
 					const credentialType = session.credentialType || 'browserlessApi';
 					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using credential type: ${credentialType} for reconnection`);
@@ -3352,23 +3357,23 @@ export const description: INodeProperties[] = [
 
 																// Use the existing browser from the session
 																if (session.browser) {
-																// 	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to existing browser session`);
+																	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to existing browser session`);
 
-																// 	// Get a new page from the existing browser
-																// 	const pages = await session.browser.pages();
-																// 	if (pages.length === 0) {
-																// 		// Create a new page if none exist
-																// 		puppeteerPage = await session.browser.newPage();
-																// 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Created new page after reconnection`);
-																// 	} else {
-																// 		// Use the first available page
-																// 		puppeteerPage = pages[0];
-																// 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using existing page after reconnection`);
-																// 	}
+																	// Get a new page from the existing browser
+																	const pages = await session.browser.pages();
+																	if (pages.length === 0) {
+																		// Create a new page if none exist
+																		puppeteerPage = await session.browser.newPage();
+																		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Created new page after reconnection`);
+																	} else {
+																		// Use the first available page
+																		puppeteerPage = pages[0];
+																		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using existing page after reconnection`);
+																	}
 
-																// 	// Update the session's page reference
-																// 	Ventriloquist.storePage(workflowId, inputSessionId, puppeteerPage);
-																// 	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Successfully reconnected and updated page reference`);
+																	// Update the session's page reference
+																	Ventriloquist.storePage(workflowId, inputSessionId, puppeteerPage);
+																	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Successfully reconnected and updated page reference`);
 																} else {
 																	this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] No browser instance in session - cannot reconnect`);
 																	throw new Error(`Cannot reconnect after form submission - no browser instance available`);

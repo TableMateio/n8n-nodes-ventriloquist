@@ -13,8 +13,6 @@ import {
 	submitForm
 } from '../utils/formOperations';
 import {
-	smartWaitForSelector,
-	getPageDetails,
 	takeScreenshot
 } from '../utils/navigationUtils';
 
@@ -733,9 +731,9 @@ export async function execute(
 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Starting form fill operation`);
 		const results: IDataObject[] = [];
 
-		// Wait for form elements if enabled
+		// Wait for form elements if enabled, but don't use smart waiting - just check basic page readiness
 		if (waitForSelectors) {
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for form elements to appear`);
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Basic page readiness check`);
 
 			// Check if the page is ready first
 			const pageReady = await page.evaluate(() => {
@@ -757,6 +755,20 @@ export async function execute(
 					throw new Error(`Page did not initialize properly: ${(bodyError as Error).message}`);
 				}
 			}
+
+			// Simple wait for page to be fully loaded
+			if (!pageReady.contentLoaded) {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for page content to load`);
+				try {
+					await page.waitForFunction(
+						() => document.readyState === 'complete',
+						{ timeout: selectorTimeout }
+					);
+				} catch (loadError) {
+					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Page load timeout: ${(loadError as Error).message}`);
+					// Continue anyway - page might be usable
+				}
+			}
 		}
 
 		// Fill each form field
@@ -769,71 +781,18 @@ export async function execute(
 			// Wait for the element to be available
 			if (waitForSelectors) {
 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for selector: ${selector} (timeout: ${selectorTimeout}ms)`);
-				try {
-					const elementFound = await smartWaitForSelector(page, selector, selectorTimeout, this.logger);
-
-					if (!elementFound) {
-						throw new Error(`Element not found or not visible: ${selector}`);
-					}
-				} catch (selectorError) {
-					// Get information about the current page for better diagnostics
-					const pageInfo = await getPageDetails(page);
-
-					// Try to take a screenshot if possible for debugging
-					let errorScreenshot = '';
-					try {
-						if (page) {
-							errorScreenshot = await takeScreenshot(page, this.logger) || '';
-						}
-					} catch {
-						// Ignore screenshot errors
-					}
-
-					// Log detailed diagnostic information
-					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Failed to find form field selector: ${selector}`);
-					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Current page: ${pageInfo.url} | Title: ${pageInfo.title}`);
-
-					// Include screenshot information in the logs if available
-					if (errorScreenshot) {
-						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Error screenshot captured for debugging`);
-					}
-
-					// Prepare detailed error information
-					const errorDetails = {
-						message: `Form field selector "${selector}" not found on page after ${selectorTimeout}ms.`,
-						url: pageInfo.url,
-						title: pageInfo.title,
-						selector,
-						fieldType,
-						screenshot: errorScreenshot,
-					};
-
-					// Store the error details for potential use in error handling
-					if (continueOnFail) {
-						// If we're continuing on failure, add this to results as a failed field
-						results.push({
-							fieldType,
-							selector,
-							success: false,
-							error: errorDetails.message,
-							errorDetails,
-						});
-
-						// Skip to the next field without throwing
-						continue;
-					}
-
-					// Throw a more informative error (only reaches here if continueOnFail is false)
-					throw new Error(
-						`Form field selector "${selector}" not found on page after ${selectorTimeout}ms. ` +
-						`Page URL: ${pageInfo.url} | Title: ${pageInfo.title}`
-					);
-				}
+				await page.waitForSelector(selector, { timeout: selectorTimeout })
+					.catch(error => {
+						this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Selector not found: ${selector}, but will try to interact anyway`);
+					});
 			} else {
 				// Check if the element exists first
-				const elementExists = await page.$(selector) !== null;
+				const elementExists = await page.evaluate((sel) => {
+					return document.querySelector(sel) !== null;
+				}, selector);
+
 				if (!elementExists) {
-					throw new Error(`Element with selector "${selector}" not found on page`);
+					this.logger.warn(`Element not found without waiting: ${selector}`);
 				}
 			}
 
