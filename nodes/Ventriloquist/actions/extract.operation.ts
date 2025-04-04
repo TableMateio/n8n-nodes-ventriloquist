@@ -18,6 +18,8 @@ import {
 	takePageScreenshot,
 	getPageInfo,
 } from '../utils/extractionUtils';
+import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
+import { createErrorResponse } from '../utils/errorUtils';
 
 /**
  * Extract operation description
@@ -75,6 +77,18 @@ export const description: INodeProperties[] = [
 		placeholder: '#main-content, .result-title, table.data',
 		description: 'CSS selector to target the element. Use "#ID" for IDs, ".class" for classes, "tag" for HTML elements, or "tag[attr=value]" for attributes.',
 		required: true,
+		displayOptions: {
+			show: {
+				operation: ['extract'],
+			},
+		},
+	},
+	{
+		displayName: 'Session ID',
+		name: 'explicitSessionId',
+		type: 'string',
+		default: '',
+		description: 'Session ID to use (leave empty to use ID from input or create new)',
 		displayOptions: {
 			show: {
 				operation: ['extract'],
@@ -392,9 +406,19 @@ export async function execute(
 	index: number,
 	websocketEndpoint: string,
 	workflowId: string,
-	explicitSessionId?: string,
 ): Promise<INodeExecutionData> {
 	const startTime = Date.now();
+	const items = this.getInputData();
+	let sessionId = '';
+	let page: puppeteer.Page | null = null;
+
+	// Added for better logging
+	const nodeName = this.getNode().name;
+	const nodeId = this.getNode().id;
+
+	// Visual marker to clearly indicate a new node is starting
+	this.logger.info('============ STARTING NODE EXECUTION ============');
+	this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index, 'Starting execution'));
 
 	// Get the node and extract parameters
 	const selector = this.getNodeParameter('selector', index) as string;
@@ -405,107 +429,52 @@ export async function execute(
 	const takeScreenshotOption = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 	const debugPageContent = this.getNodeParameter('debugPageContent', index, false) as boolean;
+	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
 
-	// Added for better logging
-	const nodeName = this.getNode().name;
-	const nodeId = this.getNode().id;
-	this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] ========== START EXTRACT NODE EXECUTION ==========`);
-	this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Parameters: selector=${selector}, extractionType=${extractionType}, timeout=${timeout}ms`);
-
-	// Create page variable with appropriate type and default values
-	let page: puppeteer.Page | undefined;
-	let sessionId = ''; // Initialize with empty string
+	this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
+		`Parameters: selector=${selector}, extractionType=${extractionType}, timeout=${timeout}ms`));
 
 	try {
-		// Check if an explicit session ID was provided to reuse
-		if (explicitSessionId) {
-			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Looking for explicitly provided session ID: ${explicitSessionId}`);
+		// Use the centralized session management instead of duplicating code
+		const sessionResult = await SessionManager.getOrCreatePageSession(this.logger, {
+			explicitSessionId,
+			websocketEndpoint,
+			workflowId,
+			operationName: 'Extract',
+			nodeId,
+			nodeName,
+			index,
+		});
 
-			try {
-				// Use SessionManager to get the page
-				page = SessionManager.getPage(explicitSessionId);
+		page = sessionResult.page;
+		sessionId = sessionResult.sessionId;
 
-				if (page) {
-					sessionId = explicitSessionId;
-					this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Found existing page with explicit session ID: ${sessionId}`);
-				} else {
-					this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Provided session ID ${explicitSessionId} not found, will create a new session`);
-				}
-			} catch (error) {
-				this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Error retrieving page with session ID ${explicitSessionId}: ${(error as Error).message}`);
-			}
-		}
-
-		// If no page is found yet, get or create a session
 		if (!page) {
-			// Get WebSocket URL from credentials
-			const credentials = await this.getCredentials('browserlessApi');
-			const actualWebsocketEndpoint = SessionManager.getWebSocketUrlFromCredentials(
-				this.logger,
-				'browserlessApi',
-				credentials
-			);
-
-			try {
-				// Create a new session
-				const sessionResult = await SessionManager.createSession(
-					this.logger,
-					actualWebsocketEndpoint,
-					{
-						forceNew: false, // Don't force a new session - reuse existing
-						credentialType: 'browserlessApi',
-					}
-				);
-
-				// Store session details
-				const browser = sessionResult.browser;
-				sessionId = sessionResult.sessionId;
-
-				// Try to get existing page or create a new one
-				const pages = await browser.pages();
-				if (pages.length > 0) {
-					// Use the first available page
-					page = pages[0];
-					this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Using existing page from browser session`);
-				} else {
-					// Create a new page
-					page = await browser.newPage();
-					this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Created new page with session ID: ${sessionId}`);
-
-					// Navigate to a blank page to initialize it
-					await page.goto('about:blank');
-				}
-
-				// Store the page for future operations
-				SessionManager.storePage(sessionId, `page_${Date.now()}`, page);
-			} catch (error) {
-				this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to create session: ${(error as Error).message}`);
-				throw new Error(`Failed to create session: ${(error as Error).message}`);
-			}
+			throw new Error('Failed to get or create a page');
 		}
 
-		// At this point we must have a page - add a final check
-		if (!page) {
-			throw new Error('Failed to get or create a valid page');
-		}
-
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Starting extraction operation with selector: ${selector}`);
+		this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
+			`Starting extraction operation with selector: ${selector}`));
 
 		// Add a human-like delay if enabled
 		if (useHumanDelays) {
 			const delay = getHumanDelay();
-			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Adding human-like delay: ${delay}ms`);
+			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
+				`Adding human-like delay: ${delay}ms`));
 			await new Promise(resolve => setTimeout(resolve, delay));
 		}
 
 		// Wait for the selector if needed
 		if (waitForSelector) {
-			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Waiting for selector: ${selector} (timeout: ${timeout}ms)`);
+			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
+				`Waiting for selector: ${selector} (timeout: ${timeout}ms)`));
 			try {
 				await page.waitForSelector(selector, { timeout });
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Selector found: ${selector}`);
+				this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
+					`Selector found: ${selector}`));
 			} catch (error) {
-				this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Selector timeout: ${selector} after ${timeout}ms`);
+				this.logger.error(formatOperationLog('Extract', nodeName, nodeId, index,
+					`Selector timeout: ${selector} after ${timeout}ms`));
 				throw error;
 			}
 		}
@@ -578,73 +547,49 @@ export async function execute(
 				const outputFormat = (tableOptions.outputFormat as string) || 'json';
 
 				// Extract table data using utility function
-				const tableData = await extractTableData(
+				extractedData = await extractTableData(
 					page,
 					selector,
 					{
 						includeHeaders,
 						rowSelector,
 						cellSelector,
-						outputFormat
+						outputFormat,
 					},
 					this.logger,
 					nodeName,
 					nodeId
 				);
 
-				if (typeof tableData === 'string') {
-					extractedData = tableData;
-				} else if (Array.isArray(tableData)) {
-					if (tableData.length > 0 && Array.isArray(tableData[0])) {
-						// Handle string[][] case by converting to IDataObject[]
-						const processedData = tableData.map(row => {
-							if (Array.isArray(row)) {
-								// Convert string[] to IDataObject with numeric indexes
-								const rowObj: IDataObject = {};
-								row.forEach((cell, i) => {
-									rowObj[i.toString()] = cell;
-								});
-								return rowObj;
-							}
-							return row;
-						});
-						extractedData = processedData;
-					} else {
-						extractedData = tableData as IDataObject[];
-					}
-				}
-
 				// Set extraction details
 				extractionDetails = {
-					rowCount: Array.isArray(tableData) ? tableData.length : 0,
-					format: outputFormat,
+					rowSelector,
+					cellSelector,
+					includeHeaders,
+					outputFormat,
 				};
-
-				const truncatedTable = formatExtractedDataForLog(extractedData, 'table');
-				const rowCount = extractionDetails.rowCount || 0;
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted table data (${rowCount} rows): ${truncatedTable}`);
 				break;
 			}
 
 			case 'multiple': {
-				// Extract data from multiple elements
+				// Get multiple options
 				const multipleOptions = this.getNodeParameter('multipleOptions', index, {}) as IDataObject;
-				const extractionProperty = (multipleOptions.extractionProperty as string) || 'textContent';
-				const attributeName = (multipleOptions.attributeName as string) || '';
-				const limit = (multipleOptions.limit as number) || 50;
-				const outputFormat = (multipleOptions.outputFormat as string) || 'array';
-				const separator = (multipleOptions.separator as string) || ',';
+				const extractionSubType = (multipleOptions.extractionSubType as string) || 'text';
+				const extractionAttribute = (multipleOptions.extractionAttribute as string) || '';
+				const outputLimit = (multipleOptions.outputLimit as number) || 0;
+				const extractProperty = multipleOptions.extractProperty as boolean;
+				const propertyKey = (multipleOptions.propertyKey as string) || 'value';
 
-				// Extract data from multiple elements using utility function
+				// Extract from multiple elements
 				extractedData = await extractMultipleElements(
 					page,
 					selector,
 					{
-						attributeName,
-						extractionProperty,
-						limit,
-						outputFormat,
-						separator
+						extractionType: extractionSubType,
+						attribute: extractionAttribute,
+						limit: outputLimit,
+						extractProperty,
+						propertyKey,
 					},
 					this.logger,
 					nodeName,
@@ -653,130 +598,79 @@ export async function execute(
 
 				// Set extraction details
 				extractionDetails = {
-					matchCount: Array.isArray(extractedData) ? extractedData.length : 0,
-					extractionProperty,
-					outputFormat,
-					...(extractionProperty === 'attribute' ? { attributeName } : {}),
+					extractionSubType,
+					limit: outputLimit,
+					...(extractionSubType === 'attribute' ? { attributeName: extractionAttribute } : {}),
 				};
-
-				const truncatedMultiple = formatExtractedDataForLog(extractedData, 'multiple');
-				const elementCount = extractionDetails.matchCount || 0;
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted ${elementCount} elements: ${truncatedMultiple}`);
 				break;
 			}
+
+			default:
+				throw new Error(`Unsupported extraction type: ${extractionType}`);
 		}
 
-		// Get current page info using utility function
-		const { url: currentUrl, title: pageTitle } = await getPageInfo(page);
-
-		// Ensure the page is properly stored again after extraction
-		SessionManager.storePage(sessionId, `page_${Date.now()}`, page);
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Updated page reference in session store after extraction (URL: ${currentUrl})`);
-
-		// Take a screenshot if requested using utility function
-		let screenshot = '';
-		if (takeScreenshotOption) {
-			screenshot = await takePageScreenshot(page, this.logger, nodeName, nodeId);
-		}
-
-		// Include debug page content if requested
-		let htmlContent = '';
+		// Debug page content if enabled
 		if (debugPageContent) {
-			htmlContent = await page.content();
-			this.logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Captured page HTML (${htmlContent.length} bytes)`);
+			const pageInfo = await getPageInfo(page);
+			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
+				`Page info: URL=${pageInfo.url}, title=${pageInfo.title}`));
+			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
+				`Page body preview: ${pageInfo.bodyText.substring(0, 200)}...`));
 		}
 
-		const executionDuration = Date.now() - startTime;
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extraction completed in ${executionDuration}ms`);
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] ========== END EXTRACT NODE EXECUTION ==========`);
+		// Format the data for logging (avoid large outputs)
+		const logSafeData = formatExtractedDataForLog(extractedData);
+		this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
+			`Extraction result (${extractionType}): ${logSafeData}`));
 
-		// Create the output object
-		const result: IDataObject = {
-			success: true,
+		// Log timing information
+		createTimingLog('Extract', startTime, this.logger, nodeName, nodeId, index);
+
+		// Create success response with the extracted data
+		const successResponse = await createSuccessResponse({
 			operation: 'extract',
-			selector,
-			extractionType,
-			extractedData,
-			url: currentUrl,
-			title: pageTitle,
-			timestamp: new Date().toISOString(),
 			sessionId,
-			executionDuration,
-		};
-
-		// Only include screenshot if it was taken
-		if (screenshot) {
-			result.screenshot = screenshot;
-		}
-
-		// Include HTML content if debug was enabled
-		if (htmlContent) {
-			result.htmlContent = htmlContent;
-		}
-
-		// Include extraction details if any were collected
-		if (Object.keys(extractionDetails).length > 0) {
-			result.details = extractionDetails;
-		}
-
-		return {
-			json: result,
-		};
-	} catch (error) {
-		// Handle errors
-		this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extract operation error: ${(error as Error).message}`);
-
-		// Take error screenshot if requested
-		let errorScreenshot = '';
-		if (takeScreenshotOption && page) {
-			try {
-				errorScreenshot = await takePageScreenshot(page, this.logger, nodeName, nodeId);
-			} catch (screenshotError) {
-				this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
-			}
-		}
-
-		// Get some page info if available
-		let currentUrl = 'unknown';
-		let pageTitle = 'unknown';
-		try {
-			if (page) {
-				const pageInfo = await getPageInfo(page);
-				currentUrl = pageInfo.url;
-				pageTitle = pageInfo.title;
-			}
-		} catch (pageInfoError) {
-			this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to get page info: ${(pageInfoError as Error).message}`);
-		}
-
-		const executionDuration = Date.now() - startTime;
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] ========== END EXTRACT NODE EXECUTION (WITH ERROR) ==========`);
-
-		if (continueOnFail) {
-			// Return error information in the output
-			const result: IDataObject = {
-				success: false,
-				operation: 'extract',
+			page,
+			logger: this.logger,
+			startTime,
+			takeScreenshot: takeScreenshotOption,
+			additionalData: {
+				extractionType,
 				selector,
-				error: (error as Error).message,
-				url: currentUrl,
-				title: pageTitle,
-				timestamp: new Date().toISOString(),
-				sessionId: sessionId || 'unknown',
-				executionDuration,
-			};
+				data: extractedData,
+				...extractionDetails,
+			},
+			inputData: items[index].json,
+		});
 
-			// Include error screenshot if available
-			if (errorScreenshot) {
-				result.screenshot = errorScreenshot;
+		return { json: successResponse };
+	} catch (error) {
+		// Use the standardized error response utility
+		const errorResponse = await createErrorResponse({
+			error: error as Error,
+			operation: 'extract',
+			sessionId,
+			nodeId,
+			nodeName,
+			selector,
+			page,
+			logger: this.logger,
+			takeScreenshot: takeScreenshotOption,
+			startTime,
+			additionalData: {
+				...items[index].json,
+				extractionType,
 			}
+		});
 
-			return {
-				json: result,
-			};
+		if (!continueOnFail) {
+			throw error;
 		}
 
-		// Re-throw the error if we should not continue on failure
-		throw error;
+		// Return error as response with continue on fail
+		return {
+			json: errorResponse
+		};
 	}
 }
+

@@ -1,12 +1,13 @@
 import type {
 	IExecuteFunctions,
-	IDataObject,
 	INodeExecutionData,
 	INodeProperties,
 } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
 import * as speakeasy from 'speakeasy';
-import { Ventriloquist } from '../Ventriloquist.node';
+import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
+import { createErrorResponse } from '../utils/errorUtils';
+import { SessionManager } from '../utils/sessionManager';
 
 /**
  * Authenticate operation description
@@ -14,7 +15,7 @@ import { Ventriloquist } from '../Ventriloquist.node';
 export const description: INodeProperties[] = [
 	{
 		displayName: 'Session ID',
-		name: 'sessionId',
+		name: 'explicitSessionId',
 		type: 'string',
 		default: '',
 		description: 'Session ID to use (if not provided, will try to use session from previous operations)',
@@ -183,6 +184,9 @@ export async function execute(
 ): Promise<INodeExecutionData> {
 	// Track execution time
 	const startTime = Date.now();
+	const items = this.getInputData();
+	let sessionId = '';
+	let page: puppeteer.Page | null = null;
 
 	// Added for better logging
 	const nodeName = this.getNode().name;
@@ -190,76 +194,34 @@ export async function execute(
 
 	// Visual marker to clearly indicate a new node is starting
 	this.logger.info('============ STARTING NODE EXECUTION ============');
-	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Starting execution`);
+	this.logger.info(formatOperationLog('Authenticate', nodeName, nodeId, index, 'Starting execution'));
 
 	// Get parameters based on authentication type
 	const authenticationType = this.getNodeParameter('authenticationType', index, 'totp') as string;
 	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 	const captureScreenshot = this.getNodeParameter('captureScreenshot', index, true) as boolean;
-
-	// Get session ID if provided
-	let sessionId = '';
-	let page: puppeteer.Page | undefined;
+	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
 
 	try {
-		// Try to get sessionId from parameters
-		const explicitSessionId = this.getNodeParameter('sessionId', index, '') as string;
+		// Use the centralized session management instead of duplicating code
+		const sessionResult = await SessionManager.getOrCreatePageSession(this.logger, {
+			explicitSessionId,
+			websocketEndpoint,
+			workflowId,
+			operationName: 'Authenticate',
+			nodeId,
+			nodeName,
+			index,
+		});
 
-		if (explicitSessionId) {
-			sessionId = explicitSessionId;
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Using provided session ID: ${sessionId}`);
+		page = sessionResult.page;
+		sessionId = sessionResult.sessionId;
 
-			// Try to get existing page from session
-			page = Ventriloquist.getPage(workflowId, sessionId);
-
-			if (!page) {
-				throw new Error(`Session ID ${sessionId} not found or expired. Please run the Open operation first.`);
-			}
-		} else {
-			// Try to find session ID from input data
-			const items = this.getInputData();
-			for (const item of items) {
-				if (item.json?.sessionId) {
-					sessionId = item.json.sessionId as string;
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Using session ID from input: ${sessionId}`);
-
-					// Try to get page from session
-					page = Ventriloquist.getPage(workflowId, sessionId);
-
-					if (page) {
-						break;
-					}
-				}
-			}
-
-			// If still no page found, try to use existing session for this workflow
-			if (!page) {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] No valid session ID found, trying to use existing session`);
-
-				// Access browserSessions using a getter method or other approach
-				const existingSessions = await Ventriloquist.getSessions();
-				const existingSession = existingSessions.get(workflowId);
-
-				if (!existingSession) {
-					throw new Error('No browser session found. Please run the Open operation first.');
-				}
-
-				const pages = await existingSession.browser.pages();
-
-				if (pages.length > 0) {
-					page = pages[pages.length - 1]; // Use the most recent page
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Using the most recent page from existing session`);
-				} else {
-					throw new Error('No pages found in the existing browser session.');
-				}
-			}
+		if (!page) {
+			throw new Error('Failed to get or create a page');
 		}
 
 		// Now we have a valid page, let's perform the authentication based on the selected type
-		if (!page) {
-			throw new Error('Failed to obtain a valid browser page');
-		}
-
 		if (authenticationType === 'totp') {
 			// Get TOTP parameters
 			const totpSecret = this.getNodeParameter('totpSecret', index) as string;
@@ -278,10 +240,10 @@ export async function execute(
 
 			// Generate TOTP code
 			const totpCode = generateTOTPCode(totpSecret, totpEncoding as 'base32' | 'ascii' | 'hex');
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Generated TOTP code: ${totpCode}`);
+			this.logger.info(formatOperationLog('Authenticate', nodeName, nodeId, index, `Generated TOTP code: ${totpCode}`));
 
 			// Wait for the input field to be visible
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Waiting for input field: ${inputSelector}`);
+			this.logger.info(formatOperationLog('Authenticate', nodeName, nodeId, index, `Waiting for input field: ${inputSelector}`));
 			await page.waitForSelector(inputSelector, { visible: true, timeout: 10000 });
 
 			// Clear the input field if it has any value
@@ -293,91 +255,69 @@ export async function execute(
 			}, inputSelector);
 
 			// Type the TOTP code
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Typing TOTP code into input field`);
+			this.logger.info(formatOperationLog('Authenticate', nodeName, nodeId, index, 'Typing TOTP code into input field'));
 			await page.type(inputSelector, totpCode);
 
 			// If submit button selector is provided, click it
 			if (submitSelector) {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Clicking submit button: ${submitSelector}`);
+				this.logger.info(formatOperationLog('Authenticate', nodeName, nodeId, index, `Clicking submit button: ${submitSelector}`));
 				await page.waitForSelector(submitSelector, { visible: true, timeout: 10000 });
 				await page.click(submitSelector);
 			} else {
 				// Otherwise, press Enter
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] No submit button provided, pressing Enter key`);
+				this.logger.info(formatOperationLog('Authenticate', nodeName, nodeId, index, 'No submit button provided, pressing Enter key'));
 				await page.keyboard.press('Enter');
 			}
 
 			// Wait after submit to allow the page to process the authentication
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Waiting ${waitAfterSubmit}ms after submitting form`);
+			this.logger.info(formatOperationLog('Authenticate', nodeName, nodeId, index, `Waiting ${waitAfterSubmit}ms after submitting form`));
 			await new Promise(resolve => setTimeout(resolve, waitAfterSubmit));
 		}
 		// Add other authentication types here in the future
 
-		// Take a screenshot if requested
-		let screenshot: string | undefined;
-		if (captureScreenshot) {
-			try {
-				screenshot = await page.screenshot({
-					encoding: 'base64',
-					type: 'jpeg',
-					quality: 80,
-					fullPage: false,
-				}) as string;
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Screenshot captured`);
-			} catch (error) {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Failed to capture screenshot: ${(error as Error).message}`);
-			}
-		}
+		// Log timing information
+		createTimingLog('Authenticate', startTime, this.logger, nodeName, nodeId, index);
 
-		// Get current page info
-		const currentUrl = await page.url();
-		const pageTitle = await page.title();
-
-		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Authentication completed on: ${currentUrl} (${pageTitle})`);
-		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] AUTHENTICATION OPERATION SUCCESSFUL: Node has finished processing`);
-
-		// Add a visual end marker
-		this.logger.info('============ NODE EXECUTION COMPLETE ============');
-
-		// Prepare response data
-		const responseData: IDataObject = {
-			success: true,
+		// Prepare success response
+		const successResponse = await createSuccessResponse({
 			operation: 'authenticate',
-			authenticationType,
-			currentUrl,
-			pageTitle,
-			screenshot,
 			sessionId,
-			timestamp: new Date().toISOString(),
-			executionDuration: Date.now() - startTime,
-		};
+			page,
+			logger: this.logger,
+			startTime,
+			takeScreenshot: captureScreenshot,
+			additionalData: {
+				authenticationType,
+			},
+			inputData: items[index].json,
+		});
 
-		return {
-			json: responseData,
-		};
+		return { json: successResponse };
 	} catch (error) {
-		const errorMessage = (error as Error).message;
-		this.logger.error(`[Ventriloquist][${nodeName}#${index}][Authenticate][${nodeId}] Authentication failed: ${errorMessage}`);
+		// Use the standardized error response utility
+		const errorResponse = await createErrorResponse({
+			error: error as Error,
+			operation: 'authenticate',
+			sessionId,
+			nodeId,
+			nodeName,
+			page,
+			logger: this.logger,
+			takeScreenshot: captureScreenshot,
+			startTime,
+			additionalData: {
+				...items[index].json, // Pass through input data
+				authenticationType,
+			}
+		});
 
-		// Add a visual end marker
-		this.logger.info('============ NODE EXECUTION COMPLETE (WITH ERROR) ============');
-
-		// If continueOnFail is false, throw the error to fail the node
 		if (!continueOnFail) {
-			throw new Error(`Authentication failed: ${errorMessage}`);
+			throw error;
 		}
 
-		// Otherwise, return an error response
+		// Return error as response with continue on fail
 		return {
-			json: {
-				success: false,
-				operation: 'authenticate',
-				authenticationType,
-				error: errorMessage,
-				sessionId,
-				timestamp: new Date().toISOString(),
-				executionDuration: Date.now() - startTime,
-			},
+			json: errorResponse
 		};
 	}
 }

@@ -11,6 +11,8 @@ import {
 	processDetection,
 	takePageScreenshot,
 } from '../utils/detectionUtils';
+import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
+import { createErrorResponse } from '../utils/errorUtils';
 
 /**
  * Detect operation description
@@ -305,11 +307,23 @@ export const description: INodeProperties[] = [
 		required: true,
 	},
 	{
-		displayName: 'Wait for Selectors',
+		displayName: 'Session ID',
+		name: 'explicitSessionId',
+		type: 'string',
+		default: '',
+		description: 'Session ID to use (leave empty to use ID from input or create new)',
+		displayOptions: {
+			show: {
+				operation: ['detect'],
+			},
+		},
+	},
+	{
+		displayName: 'Wait For Selectors',
 		name: 'waitForSelectors',
 		type: 'boolean',
 		default: true,
-		description: 'Whether to actively wait for selectors to appear before checking (uses timeout value)',
+		description: 'Whether to wait for selectors to appear within the timeout period',
 		displayOptions: {
 			show: {
 				operation: ['detect'],
@@ -322,31 +336,18 @@ export const description: INodeProperties[] = [
 		type: 'options',
 		options: [
 			{
-				name: 'Smart Detection (DOM-Aware)',
+				name: 'Smart (Auto-Exit When Found)',
 				value: 'smart',
-				description: 'Intelligently detects when the page is fully loaded before checking for elements (faster for elements that don\'t exist)',
+				description: 'Auto-exits when element is found instead of waiting full timeout',
 			},
 			{
-				name: 'Fixed Timeout',
+				name: 'Fixed (Wait Full Timeout)',
 				value: 'fixed',
-				description: 'Simply waits for the specified timeout (may be slower but more thorough)',
+				description: 'Always waits for full timeout period',
 			},
 		],
 		default: 'smart',
-		description: 'Method to use when checking for elements',
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				waitForSelectors: [true],
-			},
-		},
-	},
-	{
-		displayName: 'Timeout',
-		name: 'timeout',
-		type: 'number',
-		default: 5000,
-		description: 'Maximum time in milliseconds to wait for selectors to appear (only applies if Wait for Selectors is enabled)',
+		description: 'Method to use when waiting for elements',
 		displayOptions: {
 			show: {
 				operation: ['detect'],
@@ -359,7 +360,7 @@ export const description: INodeProperties[] = [
 		name: 'earlyExitDelay',
 		type: 'number',
 		default: 500,
-		description: 'Time in milliseconds to wait after DOM is loaded before checking for elements (for Smart Detection only)',
+		description: 'Time in milliseconds to wait after detecting an element before exiting (for Smart detection only)',
 		displayOptions: {
 			show: {
 				operation: ['detect'],
@@ -369,11 +370,23 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: 'Timeout (MS)',
+		name: 'timeout',
+		type: 'number',
+		default: 5000,
+		description: 'Maximum time in milliseconds to wait for detection operations',
+		displayOptions: {
+			show: {
+				operation: ['detect'],
+			},
+		},
+	},
+	{
 		displayName: 'Take Screenshot',
 		name: 'takeScreenshot',
 		type: 'boolean',
 		default: false,
-		description: 'Whether to take a screenshot of the page',
+		description: 'Whether to capture a screenshot after detection',
 		displayOptions: {
 			show: {
 				operation: ['detect'],
@@ -404,17 +417,24 @@ export async function execute(
 	workflowId: string,
 ): Promise<INodeExecutionData> {
 	const startTime = Date.now();
+	const items = this.getInputData();
+	let sessionId = '';
+	let page: puppeteer.Page | null = null;
 
 	// Added for better logging
 	const nodeName = this.getNode().name;
 	const nodeId = this.getNode().id;
-	this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] ========== START DETECT NODE EXECUTION ==========`);
+
+	// Visual marker to clearly indicate a new node is starting
+	this.logger.info('============ STARTING NODE EXECUTION ============');
+	this.logger.info(formatOperationLog('Detect', nodeName, nodeId, index, 'Starting execution'));
 
 	// Get parameters
 	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
 	const timeout = this.getNodeParameter('timeout', index, 5000) as number;
 	const takeScreenshotOption = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
+	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
 
 	// Get new parameters for smart detection
 	const detectionMethod = waitForSelectors
@@ -425,259 +445,156 @@ export async function execute(
 		: 0;
 
 	// Log the detection approach being used
-	this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Parameters: waitForSelectors=${waitForSelectors}, timeout=${timeout}ms, method=${detectionMethod}`);
+	this.logger.info(formatOperationLog('Detect', nodeName, nodeId, index,
+		`Parameters: waitForSelectors=${waitForSelectors}, timeout=${timeout}ms, method=${detectionMethod}`));
+
 	if (detectionMethod === 'smart') {
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Smart detection configured with ${earlyExitDelay}ms early exit delay`);
+		this.logger.info(formatOperationLog('Detect', nodeName, nodeId, index,
+			`Smart detection configured with ${earlyExitDelay}ms early exit delay`));
 	}
 
-	// Check if an explicit session ID was provided
-	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
-
-	// Create page variable with appropriate type and default values
-	let page: puppeteer.Page | undefined;
-	let sessionId = ''; // Initialize with empty string
-
 	try {
-		// Check if an explicit session ID was provided to reuse
-		if (explicitSessionId) {
-			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Looking for explicitly provided session ID: ${explicitSessionId}`);
+		// Use the centralized session management instead of duplicating code
+		const sessionResult = await SessionManager.getOrCreatePageSession(this.logger, {
+			explicitSessionId,
+			websocketEndpoint,
+			workflowId,
+			operationName: 'Detect',
+			nodeId,
+			nodeName,
+			index,
+		});
 
-			try {
-				// Use SessionManager to get the page
-				page = SessionManager.getPage(explicitSessionId);
+		page = sessionResult.page;
+		sessionId = sessionResult.sessionId;
 
-				if (page) {
-					sessionId = explicitSessionId;
-					this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Found existing page with explicit session ID: ${sessionId}`);
-				} else {
-					this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Provided session ID ${explicitSessionId} not found, will create a new session`);
-				}
-			} catch (error) {
-				this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Error retrieving page with session ID ${explicitSessionId}: ${(error as Error).message}`);
-			}
-		}
-
-		// If no page is found yet, get or create a session
 		if (!page) {
-			// Get WebSocket URL from credentials
-			const credentials = await this.getCredentials('browserlessApi');
-			const actualWebsocketEndpoint = SessionManager.getWebSocketUrlFromCredentials(
-				this.logger,
-				'browserlessApi',
-				credentials
-			);
-
-			try {
-				// Create a new session
-				const sessionResult = await SessionManager.createSession(
-					this.logger,
-					actualWebsocketEndpoint,
-					{
-						forceNew: false, // Don't force a new session - reuse existing
-						credentialType: 'browserlessApi',
-					}
-				);
-
-				// Store session details
-				const browser = sessionResult.browser;
-				sessionId = sessionResult.sessionId;
-
-				// Try to get existing page or create a new one
-				const pages = await browser.pages();
-				if (pages.length > 0) {
-					// Use the first available page
-					page = pages[0];
-					this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Using existing page from browser session`);
-				} else {
-					// Create a new page
-					page = await browser.newPage();
-					this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Created new page with session ID: ${sessionId}`);
-
-					// Navigate to a blank page to initialize it
-					await page.goto('about:blank');
-				}
-
-				// Store the page for future operations
-				SessionManager.storePage(sessionId, `page_${Date.now()}`, page);
-			} catch (error) {
-				this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Failed to create session: ${(error as Error).message}`);
-				throw new Error(`Failed to create session: ${(error as Error).message}`);
-			}
-		}
-
-		// At this point we must have a page - add a final check
-		if (!page) {
-			throw new Error('Failed to get or create a valid page');
+			throw new Error('Failed to get or create a page');
 		}
 
 		// Get current page info for later use
 		const currentUrl = page.url();
 		const pageTitle = await page.title();
-		let screenshot = '';
 
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Connected to page: URL=${currentUrl}, title=${pageTitle}`);
+		this.logger.info(formatOperationLog('Detect', nodeName, nodeId, index,
+			`Connected to page: URL=${currentUrl}, title=${pageTitle}`));
 
-		try {
-			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Starting detection operations`);
+		// Get detections
+		const detectionsData = this.getNodeParameter('detections.detection', index, []) as IDataObject[];
 
-			// Get detections
-			const detectionsData = this.getNodeParameter('detections.detection', index, []) as IDataObject[];
+		if (detectionsData.length === 0) {
+			throw new Error('No detections defined.');
+		}
 
-			if (detectionsData.length === 0) {
-				throw new Error('No detections defined.');
+		this.logger.info(formatOperationLog('Detect', nodeName, nodeId, index,
+			`Processing ${detectionsData.length} detection rules`));
+
+		// Initialize results objects
+		const results: IDataObject = {};
+		const detailsInfo: IDataObject[] = [];
+
+		// Process each detection
+		for (const detection of detectionsData) {
+			const detectionName = detection.name as string;
+			const detectionType = detection.detectionType as string;
+			const returnType = (detection.returnType as string) || 'boolean';
+			const successValue = (detection.successValue as string) || 'success';
+			const failureValue = (detection.failureValue as string) || 'failure';
+			const invertResult = detection.invertResult === true;
+
+			this.logger.info(formatOperationLog('Detect', nodeName, nodeId, index,
+				`Evaluating detection "${detectionName}" (type: ${detectionType})`));
+
+			// Process the detection with the chosen method
+			const { success, actualValue, details: detectionDetails } = await processDetection(
+				page,
+				detection,
+				currentUrl,
+				waitForSelectors,
+				timeout,
+				detectionMethod,
+				earlyExitDelay,
+				this.logger,
+				nodeName,
+				nodeId
+			);
+
+			// Format the return value based on user preferences
+			const formattedResult = formatReturnValue(
+				success,
+				actualValue,
+				returnType,
+				successValue,
+				failureValue,
+				invertResult
+			);
+
+			const finalSuccess = invertResult ? !success : success;
+			this.logger.info(formatOperationLog('Detect', nodeName, nodeId, index,
+				`Detection "${detectionName}" result: ${finalSuccess ? 'success' : 'failure'}, value=${formattedResult}`));
+
+			// Add the results to the main output
+			results[detectionName] = formattedResult;
+
+			// Add details for debugging if needed
+			detailsInfo.push({
+				name: detectionName,
+				type: detectionType,
+				success: finalSuccess,
+				actualValue,
+				formattedResult,
+				...detectionDetails,
+			});
+		}
+
+		// Take screenshot if requested
+		if (takeScreenshotOption && page) {
+			await takePageScreenshot(page, this.logger, nodeName, nodeId);
+		}
+
+		// Log timing information
+		createTimingLog('Detect', startTime, this.logger, nodeName, nodeId, index);
+
+		// Create success response with the detection results
+		const successResponse = await createSuccessResponse({
+			operation: 'detect',
+			sessionId,
+			page,
+			logger: this.logger,
+			startTime,
+			takeScreenshot: takeScreenshotOption,
+			additionalData: {
+				detections: results,
+				detectionDetails: detailsInfo,
+			},
+			inputData: items[index].json,
+		});
+
+		return { json: successResponse };
+	} catch (error) {
+		// Use the standardized error response utility
+		const errorResponse = await createErrorResponse({
+			error: error as Error,
+			operation: 'detect',
+			sessionId,
+			nodeId,
+			nodeName,
+			page,
+			logger: this.logger,
+			takeScreenshot: takeScreenshotOption,
+			startTime,
+			additionalData: {
+				...items[index].json,
 			}
+		});
 
-			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Processing ${detectionsData.length} detection rules`);
-
-			// Initialize results objects
-			const results: IDataObject = {};
-			const detailsInfo: IDataObject[] = [];
-
-			// Process each detection
-			for (const detection of detectionsData) {
-				const detectionName = detection.name as string;
-				const detectionType = detection.detectionType as string;
-				const returnType = (detection.returnType as string) || 'boolean';
-				const successValue = (detection.successValue as string) || 'success';
-				const failureValue = (detection.failureValue as string) || 'failure';
-				const invertResult = detection.invertResult === true;
-
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Evaluating detection "${detectionName}" (type: ${detectionType})`);
-
-				// Process the detection with the chosen method
-				const { success, actualValue, details: detectionDetails } = await processDetection(
-					page,
-					detection,
-					currentUrl,
-					waitForSelectors,
-					timeout,
-					detectionMethod,
-					earlyExitDelay,
-					this.logger,
-					nodeName,
-					nodeId
-				);
-
-				// Format the return value based on user preferences
-				const formattedResult = formatReturnValue(
-					success,
-					actualValue,
-					returnType,
-					successValue,
-					failureValue,
-					invertResult
-				);
-
-				const finalSuccess = invertResult ? !success : success;
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Detection "${detectionName}" result: ${finalSuccess ? 'success' : 'failure'}, value=${formattedResult}`);
-
-				// Add the results to the main output
-				results[detectionName] = formattedResult;
-
-				// Add details for debugging if needed
-				detailsInfo.push({
-					name: detectionName,
-					type: detectionType,
-					success: finalSuccess,
-					result: formattedResult,
-					actualValue,
-					...detectionDetails,
-				});
-			}
-
-			// Take a screenshot if requested
-			if (takeScreenshotOption) {
-				screenshot = await takePageScreenshot(page, this.logger, nodeName, nodeId);
-			}
-
-			const executionDuration = Date.now() - startTime;
-			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Completed execution in ${executionDuration}ms`);
-			this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] ========== END DETECT NODE EXECUTION ==========`);
-
-			// Build the final output
-			const output: IDataObject = {
-				// Primary detection results at top level
-				...results,
-
-				// Metadata
-				success: true,
-				operation: 'detect',
-				sessionId,
-				url: currentUrl,
-				title: pageTitle,
-				timestamp: new Date().toISOString(),
-				executionDuration,
-			};
-
-			// Only include screenshot if requested
-			if (screenshot) {
-				output.screenshot = screenshot;
-			}
-
-			// Include details for debugging
-			output._details = detailsInfo;
-
-			// Return the results
-			return {
-				json: output,
-			};
-		} catch (error) {
-			// Handle errors
-			this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Error during detection: ${(error as Error).message}`);
-
-			// Take error screenshot if requested
-			if (takeScreenshotOption && page) {
-				try {
-					screenshot = await takePageScreenshot(page, this.logger, nodeName, nodeId);
-				} catch (screenshotError) {
-					this.logger.warn(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
-				}
-			}
-
-			if (continueOnFail) {
-				const executionDuration = Date.now() - startTime;
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Continuing despite error (continueOnFail=true), duration=${executionDuration}ms`);
-				this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] ========== END DETECT NODE EXECUTION (WITH ERROR) ==========`);
-
-				// Return error information in the output
-				return {
-					json: {
-						success: false,
-						error: (error as Error).message,
-						operation: 'detect',
-						url: currentUrl || 'unknown',
-						title: pageTitle || 'unknown',
-						sessionId,
-						timestamp: new Date().toISOString(),
-						executionDuration,
-						screenshot,
-					},
-				};
-			}
-
-			// If continueOnFail is false, rethrow the error
+		if (!continueOnFail) {
 			throw error;
 		}
-	} catch (error) {
-		// Handle session creation errors
-		this.logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Session creation error: ${(error as Error).message}`);
-		this.logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Detect] ========== END DETECT NODE EXECUTION (SESSION ERROR) ==========`);
 
-		if (continueOnFail) {
-			const executionDuration = Date.now() - startTime;
-
-			return {
-				json: {
-					success: false,
-					error: (error as Error).message,
-					operation: 'detect',
-					sessionId: '',
-					timestamp: new Date().toISOString(),
-					executionDuration,
-				},
-			};
-		}
-
-		throw error;
+		// Return error as response with continue on fail
+		return {
+			json: errorResponse
+		};
 	}
 }
