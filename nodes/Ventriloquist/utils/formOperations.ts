@@ -1,4 +1,3 @@
-import * as puppeteerRuntime from 'puppeteer-core';
 import type { Page, ElementHandle } from 'puppeteer-core';
 import type { IDataObject } from 'n8n-workflow';
 

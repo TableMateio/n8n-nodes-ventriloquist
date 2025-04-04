@@ -7,16 +7,10 @@ import type {
 import type { Page } from 'puppeteer-core';
 import { SessionManager } from '../utils/sessionManager';
 import {
-	fillTextField,
-	handleSelectField,
-	handleCheckboxField,
-	handleFileUpload,
-	handleMultiSelectField,
-	handlePasswordField,
-	submitForm,
-	getHumanDelay,
 	processFormField,
-	retryFormSubmission
+	retryFormSubmission,
+	getHumanDelay,
+	submitForm
 } from '../utils/formOperations';
 import {
 	smartWaitForSelector,
@@ -575,7 +569,6 @@ export async function execute(
 	const retrySubmission = this.getNodeParameter('retrySubmission', index, false) as boolean;
 	const maxRetries = this.getNodeParameter('maxRetries', index, 2) as number;
 	const retryDelay = this.getNodeParameter('retryDelay', index, 1000) as number;
-	const advancedButtonOptions = this.getNodeParameter('advancedButtonOptions', index, false) as boolean;
 
 	// Added for better logging
 	const nodeName = this.getNode().name;
