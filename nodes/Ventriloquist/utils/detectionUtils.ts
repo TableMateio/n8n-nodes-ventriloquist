@@ -703,3 +703,63 @@ export async function takePageScreenshot(
 		return '';
 	}
 }
+
+/**
+ * Check if the execution count of a node matches the expected criteria
+ */
+export async function detectExecutionCount(
+	executionCountValue: number,
+	expectedCount: number,
+	countComparison: string = 'equal',
+	options: IDetectionOptions,
+	logger: ILogger,
+): Promise<IDetectionResult> {
+	const { nodeName, nodeId, index } = options;
+
+	const detailsInfo: IDataObject = {
+		executionCountValue,
+		expectedCount,
+		countComparison
+	};
+
+	// Compare the execution count
+	const countMatches = compareCount(executionCountValue, expectedCount, countComparison);
+
+	logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+		`Execution count detection: ${countMatches ? 'MATCHED' : 'NOT MATCHED'}, current count: ${executionCountValue}, expected ${countComparison} ${expectedCount}`));
+
+	return {
+		success: countMatches,
+		actualValue: executionCountValue,
+		details: detailsInfo,
+	};
+}
+
+/**
+ * Check if input came from a specific node
+ */
+export async function detectInputSource(
+	sourceNodeNameActual: string,
+	sourceNodeNameExpected: string,
+	options: IDetectionOptions,
+	logger: ILogger,
+): Promise<IDetectionResult> {
+	const { nodeName, nodeId, index } = options;
+
+	const detailsInfo: IDataObject = {
+		sourceNodeNameExpected,
+		sourceNodeNameActual
+	};
+
+	// Check if the source node names match (case sensitive)
+	const sourceMatches = sourceNodeNameActual === sourceNodeNameExpected;
+
+	logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+		`Input source detection: ${sourceMatches ? 'MATCHED' : 'NOT MATCHED'}, actual source: "${sourceNodeNameActual}", expected: "${sourceNodeNameExpected}"`));
+
+	return {
+		success: sourceMatches,
+		actualValue: sourceNodeNameActual,
+		details: detailsInfo,
+	};
+}

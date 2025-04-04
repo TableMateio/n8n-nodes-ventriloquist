@@ -31,6 +31,8 @@ import {
 	detectCount,
 	detectUrl,
 	detectExpression,
+	detectExecutionCount,
+	detectInputSource,
 	IDetectionOptions,
 	IDetectionResult
 } from '../utils/detectionUtils';
@@ -2155,6 +2157,40 @@ export const description: INodeProperties[] = [
 				case 'jsExpression': {
 					const jsExpression = condition.jsExpression as string;
 					result = await detectExpression(page, jsExpression, detectionOptions, thisNode.logger);
+					break;
+				}
+
+				case 'executionCount': {
+					// Get the current execution count from the context
+					// This is typically tracked elsewhere in the system
+					// For now we'll use a dummy value of 1 - this should be replaced with actual tracking
+					const executionCountValue = 1; // This should be retrieved from an execution tracker
+					const expectedCount = condition.executionCountValue as number;
+					const countComparison = condition.executionCountComparison as string;
+
+					result = await detectExecutionCount(
+						executionCountValue,
+						expectedCount,
+						countComparison,
+						detectionOptions,
+						thisNode.logger
+					);
+					break;
+				}
+
+				case 'inputSource': {
+					// Get the source node name from context
+					// This would typically come from the workflow execution context
+					// For now we'll use a dummy placeholder approach
+					const actualSourceNodeName = 'unknown'; // This should be retrieved from workflow context
+					const expectedSourceNodeName = condition.sourceNodeName as string;
+
+					result = await detectInputSource(
+						actualSourceNodeName,
+						expectedSourceNodeName,
+						detectionOptions,
+						thisNode.logger
+					);
 					break;
 				}
 
