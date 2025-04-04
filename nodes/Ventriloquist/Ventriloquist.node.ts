@@ -22,8 +22,6 @@ import * as detectOperation from './actions/detect.operation';
 import * as decisionOperation from './actions/decision.operation';
 import * as openOperation from './actions/open.operation';
 import * as authenticateOperation from './actions/authenticate.operation';
-import * as closeOperation from './actions/close.operation';
-import * as clickOperation from './actions/click.operation';
 
 /**
  * Configure outputs for decision operation based on routing parameters
@@ -57,13 +55,7 @@ export class Ventriloquist implements INodeType {
 	// Static map to store browser sessions
 	private static browserSessions: Map<
 		string,
-		{
-			browser: puppeteer.Browser;
-			lastUsed: Date;
-			pages: Map<string, puppeteer.Page>;
-			timeout?: number;
-			credentialType?: string;
-		}
+		{ browser: puppeteer.Browser; lastUsed: Date; pages: Map<string, puppeteer.Page>; timeout?: number }
 	> = new Map();
 
 	// Clean up old sessions (called periodically)
@@ -109,54 +101,62 @@ export class Ventriloquist implements INodeType {
 		let brightDataSessionId = '';
 
 		// This is the key change: We always use the basic workflowId as the sessionId
-		// Generate a session ID for tracking
-		const sessionId = forceNew ? `${workflowId}_${Date.now()}` : workflowId;
+		// This ensures consistent IDs even when forceNew is used
+		const sessionId = `session_${workflowId}`;
 
-		if (credentialType === 'brightDataApi' && websocketEndpoint) {
-			// For Bright Data, try to extract sessionId from the WebSocket URL
-			try {
-				// Check if the WebSocket URL contains a session ID
-				// Bright Data WebSocket URLs typically contain the session ID in a format like:
-				// wss://brd-customer-XXX.bright.com/browser/XXX/sessionID/...
-				// or wss://brd.superproxy.io:9223/XXXX/XXXX-XXXX-XXXX-XXXX
+		// Create a new session only if we don't have one yet or if forceNew is true
+		if (!session || forceNew) {
+			// If forceNew is true but we have an existing session, close it first
+			if (forceNew && session) {
+				logger.info(`Forcing new session, closing existing session for workflow: ${workflowId}`);
+				try {
+					await session.browser.close();
+				} catch (error) {
+					logger.warn(`Error closing existing session: ${(error as Error).message}`);
+				}
+				this.browserSessions.delete(workflowId);
+				session = undefined; // Reset session to undefined to create a new one
+			}
 
-				// First try to extract from standard format with io:port
-				if (websocketEndpoint.includes('superproxy.io:')) {
-					const matches = websocketEndpoint.match(/\/([a-f0-9-]{36})/i);
+			// If using Bright Data, try to extract the session ID from the WebSocket URL
+			if (credentialType === 'brightDataApi' && websocketEndpoint) {
+				try {
+					// Bright Data WebSocket URLs typically contain the session ID in a format like:
+					// wss://brd-customer-XXX.bright.com/browser/XXX/sessionID/...
+					// or wss://brd.superproxy.io:9223/XXXX/XXXX-XXXX-XXXX
+
+					// First try to extract from standard format with io:port
+					let matches = websocketEndpoint.match(/io:\d+\/([^\/]+\/[^\/\s]+)/);
+
+					// If that doesn't work, try alternative format
+					if (!matches?.length) {
+						matches = websocketEndpoint.match(/io\/([^\/]+\/[^\/\s]+)/);
+					}
+
+					// If that doesn't work, try the older format
+					if (!matches?.length) {
+						matches = websocketEndpoint.match(/browser\/[^\/]+\/([^\/]+)/);
+					}
+
 					if (matches?.[1]) {
 						brightDataSessionId = matches[1];
-						logger.info(`Extracted Bright Data session ID: ${brightDataSessionId}`);
-					}
-				} else {
-					// Fallback for other URL formats
-					const fallbackMatches = websocketEndpoint.match(/\/([a-f0-9-]{36}|[a-f0-9-]{7,8}\/[a-f0-9-]{36})/i);
-					if (fallbackMatches?.[1]) {
-						brightDataSessionId = fallbackMatches[1];
-						logger.info(`Extracted Bright Data session ID (fallback): ${brightDataSessionId}`);
+						logger.info(`Detected Bright Data session ID from WebSocket URL: ${brightDataSessionId}`);
 					} else {
-						logger.debug('Could not extract Bright Data session ID from WebSocket URL');
+						// Fallback for other URL formats
+						const fallbackMatches = websocketEndpoint.match(/\/([a-f0-9-]{36}|[a-f0-9-]{7,8}\/[a-f0-9-]{36})/i);
+						if (fallbackMatches?.[1]) {
+							brightDataSessionId = fallbackMatches[1];
+							logger.info(`Extracted Bright Data session ID (fallback): ${brightDataSessionId}`);
+						} else {
+							logger.debug('Could not extract Bright Data session ID from WebSocket URL');
+						}
 					}
+				} catch (error) {
+					// Ignore errors in extraction, not critical
+					logger.debug('Failed to extract Bright Data session ID from WebSocket URL');
 				}
-			} catch (error) {
-				// Ignore errors in extraction, not critical
-				logger.debug('Failed to extract Bright Data session ID from WebSocket URL');
 			}
-		}
 
-		// If we want to force a new session, close any existing one
-		if (forceNew && session) {
-			try {
-				// Close the existing browser
-				await session.browser.close();
-			} catch (error) {
-				logger.warn(`Error closing existing session: ${(error as Error).message}`);
-			}
-			this.browserSessions.delete(workflowId);
-			session = undefined; // Reset session to undefined to create a new one
-		}
-
-		// If no session exists or we closed it, create a new one
-		if (!session) {
 			// Create browser transport based on credential type
 			const transportFactory = new BrowserTransportFactory();
 
@@ -220,13 +220,11 @@ export class Ventriloquist implements INodeType {
 			// Convert minutes to milliseconds for timeout if provided
 			const timeoutMs = sessionTimeout ? sessionTimeout * 60 * 1000 : 3 * 60 * 1000; // Default to 3 minutes
 
-			// Store the browser session for future use
 			session = {
 				browser,
 				lastUsed: new Date(),
-				pages: new Map<string, puppeteer.Page>(),
-				timeout: timeoutMs,
-				credentialType,
+				pages: new Map(),
+				timeout: timeoutMs, // Store timeout in milliseconds
 			};
 
 			// Store using base workflowId (without timestamp) to ensure operations can find it later
@@ -342,6 +340,77 @@ export class Ventriloquist implements INodeType {
 		}
 	}
 
+	// Close all locally tracked browser sessions
+	private static async closeAllSessions(logger: any) {
+		let closedCount = 0;
+		let totalSessions = 0;
+
+		// Create an array of session entries to avoid modification during iteration
+		const sessionEntries = Array.from(this.browserSessions.entries());
+
+		logger.info(`Closing locally tracked browser sessions (${sessionEntries.length} sessions found)`);
+		logger.info(`Note: This only closes sessions tracked by this N8N instance. Check Bright Data console for orphaned sessions.`);
+
+		// Close each locally tracked session
+		for (const [workflowId, session] of sessionEntries) {
+			try {
+				logger.info(`Closing browser session for workflow ID: ${workflowId}`);
+
+				// First try to close all pages in this browser
+				try {
+					// Get all pages in this browser
+					const pages = await session.browser.pages();
+					logger.info(`Found ${pages.length} pages in browser session ${workflowId}`);
+
+					// Close each page
+					for (const page of pages) {
+						try {
+							await page.close();
+							logger.info('Successfully closed a page');
+						} catch (pageError) {
+							logger.warn(`Error closing page: ${pageError}`);
+						}
+					}
+
+					// Try to close all contexts
+					const contexts = await session.browser.browserContexts();
+					logger.info(`Found ${contexts.length} browser contexts in session ${workflowId}`);
+
+					// Close each context (except default)
+					for (const context of contexts) {
+						try {
+							// Skip default context as it can't be closed
+							if (context !== session.browser.defaultBrowserContext()) {
+								await context.close();
+								logger.info('Successfully closed a browser context');
+							}
+						} catch (contextError) {
+							logger.warn(`Error closing browser context: ${contextError}`);
+						}
+					}
+				} catch (innerError) {
+					logger.warn(`Error during detailed cleanup: ${innerError}`);
+				}
+
+				// Finally close the browser itself
+				await session.browser.close();
+				closedCount++;
+				logger.info(`Successfully closed browser for workflow ${workflowId}`);
+			} catch (error) {
+				logger.warn(`Error closing session for workflow ${workflowId}: ${error}`);
+			} finally {
+				this.browserSessions.delete(workflowId);
+			}
+		}
+
+		totalSessions = sessionEntries.length;
+
+		logger.info(`Successfully closed ${closedCount} of ${totalSessions} locally tracked browser sessions`);
+		logger.info(`For any remaining sessions in Bright Data, please visit their console: https://brightdata.com/cp/zones/YOUR_ZONE/stats`);
+
+		return { totalSessions, closedSessions: closedCount };
+	}
+
 	// Enable debugger for a Bright Data session
 	public static async enableDebugger(
 		page: puppeteer.Page,
@@ -404,13 +473,7 @@ export class Ventriloquist implements INodeType {
 	// Get the browserSessions map for other operations
 	public static getSessions(): Map<
 		string,
-		{
-			browser: puppeteer.Browser;
-			lastUsed: Date;
-			pages: Map<string, puppeteer.Page>;
-			timeout?: number;
-			credentialType?: string;
-		}
+		{ browser: puppeteer.Browser; lastUsed: Date; pages: Map<string, puppeteer.Page>; timeout?: number }
 	> {
 		return this.browserSessions;
 	}
@@ -889,20 +952,355 @@ export class Ventriloquist implements INodeType {
 
 					returnData[0].push(result);
 				} else if (operation === 'click') {
-					// Execute click operation using the new implementation
-					const result = await clickOperation.execute.call(
-						this,
-						i,
-						websocketEndpoint,
-						workflowId,
-					);
+					// Try to get sessionId from previous operations
+					let sessionId = '';
+					const captureScreenshot = this.getNodeParameter('captureScreenshot', i, true) as boolean;
 
-					// Add execution duration to the result
-					if (result.json && !result.json.executionDuration) {
-						result.json.executionDuration = Date.now() - startTime;
+					// First, check if an explicit session ID was provided
+					const explicitSessionId = this.getNodeParameter('explicitSessionId', i, '') as string;
+					if (explicitSessionId) {
+						sessionId = explicitSessionId;
+						this.logger.info(`Using explicitly provided session ID: ${sessionId}`);
+					}
+					// If not explicit ID provided, try to get sessionId from the current item
+					else if (items[i].json?.sessionId) {
+						sessionId = items[i].json.sessionId as string;
+					}
+					// For backward compatibility, also check for pageId
+					else if (items[i].json?.pageId) {
+						sessionId = items[i].json.pageId as string;
+						this.logger.info('Using legacy pageId as sessionId for compatibility');
 					}
 
-					returnData[0].push(result);
+					// If no sessionId in current item, look at the input items for a sessionId
+					if (!sessionId) {
+						for (const item of items) {
+							if (item.json?.sessionId) {
+								sessionId = item.json.sessionId as string;
+								break;
+							}
+							// For backward compatibility
+							else if (item.json?.pageId) {
+								sessionId = item.json.pageId as string;
+								this.logger.info('Using legacy pageId as sessionId for compatibility');
+								break;
+							}
+						}
+					}
+
+					// Get the parameters for the click operation
+					const selector = this.getNodeParameter('selector', i) as string;
+					const waitBeforeClickSelector = this.getNodeParameter(
+						'waitBeforeClickSelector',
+						i,
+						'',
+					) as string;
+					const timeout = this.getNodeParameter('timeout', i, 30000) as number;
+					const retries = this.getNodeParameter('retries', i, 0) as number;
+					const continueOnFail = this.getNodeParameter('continueOnFail', i, true) as boolean;
+
+					// Double the timeout for Bright Data as recommended in their docs
+					const brightDataTimeout = timeout * 2;
+
+					// Get or create browser session
+					let page: puppeteer.Page | undefined;
+					let browser: puppeteer.Browser | undefined;
+					let pageTitle = '';
+					let pageUrl = '';
+					let error: Error | undefined;
+					let success = false;
+					let attempt = 0;
+
+					try {
+						// Store logger instance in a local variable to avoid 'this' in static context issues
+						const logger = this.logger;
+
+						// First, check if we have a valid sessionId from previous operations
+						if (sessionId) {
+							logger.info(`Attempting to reuse existing session with ID: ${sessionId}`);
+
+							// Try to get the existing session for this workflow
+							const existingSession = Ventriloquist.browserSessions.get(workflowId);
+
+							if (existingSession) {
+								logger.info(`Found existing browser session for workflow: ${workflowId}`);
+								browser = existingSession.browser;
+
+								// Check if the browser is still connected
+								try {
+									await browser.pages();
+									logger.info(`Existing browser session is still connected`);
+								} catch (connectionError) {
+									logger.warn(`Existing browser session appears disconnected: ${(connectionError as Error).message}`);
+									logger.info(`Will try to reconnect to existing session`);
+
+									// Create transport to handle reconnection
+									const transportFactory = new BrowserTransportFactory();
+									const browserTransport = transportFactory.createTransport(
+										credentialType,
+										logger,
+										credentials,
+									);
+
+									// Reconnect if the transport supports it
+									if (browserTransport.reconnect) {
+										try {
+											logger.info(`Reconnecting to ${credentialType} session: ${sessionId}`);
+											browser = await browserTransport.reconnect(sessionId);
+											logger.info(`Successfully reconnected to session: ${sessionId}`);
+
+											// Update the session with the new browser
+											existingSession.browser = browser;
+											existingSession.lastUsed = new Date();
+										} catch (reconnectError) {
+											logger.error(`Reconnection failed: ${(reconnectError as Error).message}`);
+											logger.info(`Creating new session as fallback`);
+
+											// If reconnection fails, create new session
+											const { browser: newBrowser } = await Ventriloquist.getOrCreateSession(
+												workflowId,
+												websocketEndpoint,
+												logger,
+												brightDataTimeout,
+												true, // Force new session in this fallback case
+												credentialType,
+												credentials,
+											);
+											browser = newBrowser;
+										}
+									} else {
+										logger.warn(`Transport doesn't support reconnection, creating new session`);
+										// Create new session if reconnect not supported
+										const { browser: newBrowser } = await Ventriloquist.getOrCreateSession(
+											workflowId,
+											websocketEndpoint,
+											logger,
+											brightDataTimeout,
+											true, // Force new session if reconnect not supported
+											credentialType,
+											credentials,
+										);
+										browser = newBrowser;
+									}
+								}
+							} else {
+								logger.warn(`No existing session found for workflow ID: ${workflowId}`);
+								logger.info(`Creating new session with forced ID: ${sessionId}`);
+
+								// Create a new session
+								const { browser: newBrowser } = await Ventriloquist.getOrCreateSession(
+									workflowId,
+									websocketEndpoint,
+									logger,
+									brightDataTimeout,
+									false, // Don't force new - let it create naturally
+									credentialType,
+									credentials,
+								);
+								browser = newBrowser;
+							}
+						} else {
+							logger.info(`No session ID provided, creating or reusing session`);
+							// No specific session ID requested, so get or create as normal
+							const { browser: newBrowser } = await Ventriloquist.getOrCreateSession(
+								workflowId,
+								websocketEndpoint,
+								logger,
+								brightDataTimeout,
+								false, // Don't force a new session unless necessary
+								credentialType,
+								credentials,
+							);
+							browser = newBrowser;
+						}
+
+						// Try to get existing page from session
+						if (sessionId) {
+							page = Ventriloquist.getPage(workflowId, sessionId);
+							logger.info(`Found existing page with session ID: ${sessionId}`);
+						}
+
+						// If no existing page, get the first available page or create a new one
+						if (!page) {
+							const pages = await browser.pages();
+							page = pages.length > 0 ? pages[0] : await browser.newPage();
+							sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+							Ventriloquist.storePage(workflowId, sessionId, page);
+							logger.info(`Created new page with session ID: ${sessionId}`);
+						}
+
+						// Get page info for debugging
+						pageTitle = await page.title();
+						pageUrl = page.url();
+
+						logger.info(`Current page URL: ${pageUrl}, title: ${pageTitle}`);
+
+						// If waiting for a specific element before clicking, wait for it first
+						if (waitBeforeClickSelector) {
+							logger.info(`Waiting for selector "${waitBeforeClickSelector}" before clicking`);
+							await page.waitForSelector(waitBeforeClickSelector, { timeout: brightDataTimeout });
+						}
+
+						// Check if the selector exists on the page
+						const selectorExists = await page.evaluate((sel) => {
+							const element = document.querySelector(sel);
+							return element !== null;
+						}, selector);
+
+						if (!selectorExists) {
+							throw new Error(`Element with selector "${selector}" not found on page`);
+						}
+
+						// Try clicking the element with retries
+						logger.info(`Clicking on selector "${selector}" (attempt ${attempt + 1})`);
+
+						while (!success && attempt <= retries) {
+							try {
+								// Try standard click first
+								await page.click(selector);
+								logger.info('Standard click was successful');
+								success = true;
+							} catch (clickErr) {
+								logger.warn(`Native click failed: ${clickErr.message}, trying alternative method...`);
+
+								// If that fails, try JavaScript click execution
+								logger.info(`Clicking on selector "${selector}" using JavaScript execution`);
+								const jsClickSuccess = await page.evaluate((sel) => {
+									const element = document.querySelector(sel);
+									if (!element) return false;
+
+									// Try different approaches
+									try {
+										// 1. Use click() method
+										(element as HTMLElement).click();
+										return true;
+									} catch (e) {
+										try {
+											// 2. Create and dispatch mouse events
+											const event = new MouseEvent('click', {
+												view: window,
+												bubbles: true,
+												cancelable: true,
+												buttons: 1
+											});
+											element.dispatchEvent(event);
+											return true;
+										} catch (e2) {
+											return false;
+										}
+									}
+								}, selector);
+
+								if (jsClickSuccess) {
+									logger.info('JavaScript click was successful');
+									success = true;
+								} else {
+									error = new Error('All click methods failed');
+									logger.warn(`Click attempt ${attempt + 1} failed: All methods failed`);
+									attempt++;
+
+									// If there are more retries, wait a bit before retrying
+									if (attempt <= retries) {
+										await new Promise((resolve) => setTimeout(resolve, 1000));
+									}
+								}
+							}
+						}
+					} catch (error: any) {
+						// Clean up the session if there's an error
+						try {
+							await Ventriloquist.closeSession(workflowId);
+						} catch (cleanupError) {
+							// Ignore cleanup errors
+						}
+
+						if (this.continueOnFail()) {
+							// Calculate execution duration
+							const executionDuration = Date.now() - startTime;
+
+							returnData[0].push({
+								json: {
+									success: false,
+									error: error.message || 'An unknown error occurred',
+									stack: error.stack || '',
+									executionDuration,
+								},
+							});
+							continue;
+						}
+						throw error;
+					}
+
+					// Get updated page info after click
+					const updatedPageTitle = await page.title();
+					const updatedPageUrl = page.url();
+
+					// Take screenshot if requested
+					let screenshot = '';
+					if (captureScreenshot && page) {
+						try {
+							const buffer = await page.screenshot({
+								encoding: 'base64',
+								type: 'jpeg',
+								quality: 80,
+							});
+							screenshot = `data:image/jpeg;base64,${buffer}`;
+						} catch (screenshotError) {
+							this.logger.warn(`Failed to take screenshot: ${(screenshotError as Error).message}`);
+						}
+					}
+
+					if (success) {
+						// Click operation successful
+
+						// Calculate execution duration
+						const executionDuration = Date.now() - startTime;
+
+						returnData[0].push({
+							json: {
+								...items[i].json, // Pass through input data
+								success: true,
+								operation: 'click',
+								selector,
+								sessionId,
+								attempt: attempt,
+								url: updatedPageUrl,
+								title: updatedPageTitle,
+								timestamp: new Date().toISOString(),
+								executionDuration,
+								...(screenshot ? { screenshot } : {}),
+							},
+						});
+					} else {
+						// Click operation failed
+						const errorMessage = error?.message || 'Click operation failed for an unknown reason';
+
+						// Calculate execution duration
+						const executionDuration = Date.now() - startTime;
+
+						if (!continueOnFail) {
+							// If continueOnFail is false, throw the error to fail the node
+							throw new Error(`Click operation failed: ${errorMessage}`);
+						}
+
+						// Otherwise, return an error response but continue execution
+						returnData[0].push({
+							json: {
+								...items[i].json, // Pass through input data
+								success: false,
+								operation: 'click',
+								error: errorMessage,
+								selector,
+								sessionId,
+								attempt: attempt,
+								url: updatedPageUrl,
+								title: updatedPageTitle,
+								timestamp: new Date().toISOString(),
+								executionDuration,
+								...(screenshot ? { screenshot } : {}),
+							},
+						});
+					}
 				} else if (operation === 'form') {
 					// Execute form operation
 					const result = await formOperation.execute.call(
@@ -934,105 +1332,25 @@ export class Ventriloquist implements INodeType {
 
 					returnData[0].push(result);
 				} else if (operation === 'decision') {
+					// Find the session we need to use
+					let page: puppeteer.Page | undefined;
+
 					// Get session ID if provided
-					let sessionId = this.getNodeParameter('sessionId', i, '') as string;
-
-					// Check inputs for session ID
-					if (!sessionId) {
-						// Try to get from the current item or previous items
-						for (const [key, value] of Object.entries(items[i].json)) {
-							if (key === 'sessionId' && typeof value === 'string') {
-								sessionId = value;
-								this.logger.info(`Using sessionId from input data: ${sessionId}`);
-								break;
-							}
-							// For backward compatibility
-							else if (key === 'pageId' && typeof value === 'string') {
-								sessionId = value;
-								this.logger.info('Using legacy pageId as sessionId for compatibility');
-								break;
-							}
-						}
-					}
-
 					try {
-						// Get the existing session page
-						const workflowId = this.getWorkflow().id || '';
-						let page: puppeteer.Page | undefined;
-						let browser: puppeteer.Browser | undefined;
+						// Get existing session ID if provided
+						const existingSessionId = this.getNodeParameter('sessionId', i, '') as string;
 
-						if (sessionId) {
-							// First check if we can directly get the page
-							page = Ventriloquist.getPage(workflowId, sessionId);
-
-							// If page isn't found or seems disconnected, try to reconnect
-							if (!page) {
-								this.logger.warn(`Session ID ${sessionId} page not found directly. Will attempt to reconnect.`);
-							} else {
-								// Verify the page is still connected
-								try {
-									// Simple test to see if page is connected
-									await page.evaluate(() => document.readyState);
-									this.logger.info(`Page with session ID ${sessionId} is still connected.`);
-								} catch (connectionError) {
-									this.logger.warn(`Page with session ID ${sessionId} appears disconnected: ${(connectionError as Error).message}`);
-									this.logger.info(`Will attempt to reconnect to session: ${sessionId}`);
-									page = undefined; // Reset so we try reconnection
-								}
+						// Get the page to use
+						if (existingSessionId) {
+							// Try to get an existing page from the session
+							const existingPage = Ventriloquist.getPage(workflowId, existingSessionId);
+							if (!existingPage) {
+								throw new Error(`Session ID ${existingSessionId} not found. The session may have expired or been closed.`);
 							}
-
-							// If page is still not available, try to reconnect via browser transport
-							if (!page) {
-								// Get the session info
-								const existingSession = Ventriloquist.browserSessions.get(workflowId);
-								if (!existingSession) {
-									throw new Error(`No browser session found for workflow ID: ${workflowId}`);
-								}
-
-								// Get credentials based on the session type
-								const credentialType = existingSession.credentialType || 'browserlessApi';
-								const credentials = await this.getCredentials(credentialType);
-
-								// Create transport for reconnection
-								const transportFactory = new BrowserTransportFactory();
-								const browserTransport = transportFactory.createTransport(
-									credentialType,
-									this.logger,
-									credentials
-								);
-
-								// Check if the transport has reconnect capability
-								if (browserTransport.reconnect) {
-									this.logger.info(`Attempting to reconnect to ${credentialType} session: ${sessionId}`);
-									try {
-										// Reconnect to the browser with the session ID
-										browser = await browserTransport.reconnect(sessionId);
-
-										// Get a page from the reconnected browser
-										const pages = await browser.pages();
-										if (pages.length > 0) {
-											page = pages[0];
-										} else {
-											page = await browser.newPage();
-										}
-
-										// Store the page with the session ID
-										Ventriloquist.storePage(workflowId, sessionId, page);
-										this.logger.info(`Successfully reconnected to session: ${sessionId} and retrieved page`);
-
-										// Update the session with the new browser
-										existingSession.browser = browser;
-										existingSession.lastUsed = new Date();
-									} catch (reconnectError) {
-										this.logger.error(`Failed to reconnect to session ${sessionId}: ${(reconnectError as Error).message}`);
-										throw new Error(`Could not reconnect to session ${sessionId}: ${(reconnectError as Error).message}`);
-									}
-								} else {
-									throw new Error(`Transport doesn't support reconnection for session type: ${credentialType}`);
-								}
-							}
+							page = existingPage;
 						} else {
-							// No session ID provided, try to use an existing session
+							// Use latest page from the browser (fall back to creating a new one if needed)
+							// IMPORTANT: Don't create a new session, just get the existing one for this workflow
 							this.logger.info(`No session ID provided, trying to use the existing session for workflow ID: ${workflowId}`);
 
 							// Get the existing session without creating a new one
@@ -1043,43 +1361,28 @@ export class Ventriloquist implements INodeType {
 							}
 
 							this.logger.info(`Found existing browser session for workflow: ${workflowId}`);
-							browser = existingSession.browser;
+							const browser = existingSession.browser;
+							const pages = await browser.pages();
 
-							// Check if browser is connected
-							try {
-								const pages = await browser.pages();
-
-								if (pages.length > 0) {
-									page = pages[pages.length - 1]; // Use the most recently created page
-									this.logger.info(`Using the most recent page from the existing session`);
-								} else {
-									// Create a new page in the existing session
-									page = await browser.newPage();
-									this.logger.info(`Created new page in existing browser session`);
-								}
-
-								// Generate a session ID if we don't have one yet
-								if (!sessionId) {
-									sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-								}
-
-								// Store this page with its session ID
-								Ventriloquist.storePage(workflowId, sessionId, page);
-							} catch (browserError) {
-								this.logger.error(`Error accessing browser: ${(browserError as Error).message}`);
-								throw new Error(`Error accessing browser session: ${(browserError as Error).message}`);
+							if (pages.length > 0) {
+								page = pages[pages.length - 1]; // Use the most recently created page
+								this.logger.info(`Using the most recent page from the existing session`);
+							} else {
+								// Create a new page in the existing session
+								page = await browser.newPage();
+								this.logger.info(`Created new page in existing browser session`);
 							}
 						}
 
 						if (!page) {
-							throw new Error('No browser page found or could be created after multiple attempts');
+							throw new Error('No browser page found or could be created');
 						}
 
-						// Execute the decision operation with the verified connected page
+						// Execute the decision operation
 						const result = await decisionOperation.execute.call(
 							this,
 							i,
-							page,
+							page
 						);
 
 						// Check if we need to route to different outputs
@@ -1174,16 +1477,12 @@ export class Ventriloquist implements INodeType {
 						});
 					}
 				} else if (operation === 'extract') {
-					// Get session ID if provided
-					const explicitSessionId = this.getNodeParameter('explicitSessionId', i, '') as string;
-
 					// Execute extract operation
 					const result = await extractOperation.execute.call(
 						this,
 						i,
 						websocketEndpoint,
 						workflowId,
-						explicitSessionId,
 					);
 
 					// Add execution duration to the result
@@ -1208,20 +1507,139 @@ export class Ventriloquist implements INodeType {
 
 					returnData[0].push(result);
 				} else if (operation === 'close') {
-					// Execute close operation using our new implementation
-					const result = await closeOperation.execute.call(
-						this,
-						i,
-						websocketEndpoint,
-						workflowId,
-					);
+					// Close browser sessions based on the selected mode
+					const closeMode = this.getNodeParameter('closeMode', i, 'session') as string;
+					const continueOnFail = this.getNodeParameter('continueOnFail', i, true) as boolean;
 
-					// Add execution duration to the result
-					if (result.json && !result.json.executionDuration) {
-						result.json.executionDuration = Date.now() - startTime;
+					try {
+						if (closeMode === 'session') {
+							// Close a specific session
+							let sessionId = '';
+
+							// First, check if an explicit session ID was provided
+							const explicitSessionId = this.getNodeParameter('explicitSessionId', i, '') as string;
+							if (explicitSessionId) {
+								sessionId = explicitSessionId;
+								this.logger.info(`Using explicitly provided session ID: ${sessionId}`);
+							}
+							// If not, try to get sessionId from the current item
+							else if (items[i].json?.sessionId) {
+								sessionId = items[i].json.sessionId as string;
+							}
+							// For backward compatibility, also check for pageId
+							else if (items[i].json?.pageId) {
+								sessionId = items[i].json.pageId as string;
+								this.logger.info('Using legacy pageId as sessionId for compatibility');
+							}
+
+							// If we found a sessionId, close it
+							if (sessionId) {
+								// Get existing page from session
+								const page = Ventriloquist.getPage(workflowId, sessionId);
+								if (page) {
+									await page.close();
+									this.logger.info(`Closed page with session ID: ${sessionId}`);
+								} else {
+									this.logger.warn(`No page found with session ID: ${sessionId}`);
+								}
+
+								// Return success
+								returnData[0].push({
+									json: {
+										...items[i].json, // Pass through input data
+										success: true,
+										operation,
+										closeMode,
+										sessionId,
+										message: `Browser session ${sessionId} closed successfully`,
+										timestamp: new Date().toISOString(),
+										executionDuration: Date.now() - startTime,
+									},
+								});
+							} else {
+								// No session ID found
+								throw new Error('No session ID provided or found in input');
+							}
+						} else if (closeMode === 'all') {
+							// Close all browser sessions
+							const closeResult = await Ventriloquist.closeAllSessions(this.logger);
+
+							// Return success with details
+							returnData[0].push({
+								json: {
+									...items[i].json, // Pass through input data
+									success: true,
+									operation,
+									closeMode,
+									totalSessions: closeResult.totalSessions,
+									closedSessions: closeResult.closedSessions,
+									message: `Closed ${closeResult.closedSessions} of ${closeResult.totalSessions} locally tracked browser sessions`,
+									note: "This operation only closes sessions tracked by this N8N instance. To close orphaned sessions, please visit the Bright Data console.",
+									brightDataConsoleUrl: "https://brightdata.com/cp/zones",
+									timestamp: new Date().toISOString(),
+									executionDuration: Date.now() - startTime,
+								},
+							});
+						} else if (closeMode === 'multiple') {
+							// Close a list of specific sessions
+							const sessionIds = this.getNodeParameter('sessionIds', i, []) as string[];
+							const closedSessions: string[] = [];
+							const failedSessions: string[] = [];
+
+							// Process each session ID
+							for (const sessionId of sessionIds) {
+								try {
+									// Get existing page from session
+									const page = Ventriloquist.getPage(workflowId, sessionId);
+									if (page) {
+										await page.close();
+										closedSessions.push(sessionId);
+										this.logger.info(`Closed page with session ID: ${sessionId}`);
+									} else {
+										failedSessions.push(sessionId);
+										this.logger.warn(`No page found with session ID: ${sessionId}`);
+									}
+								} catch (error) {
+									failedSessions.push(sessionId);
+									this.logger.error(`Error closing session ${sessionId}: ${error}`);
+								}
+							}
+
+							// Return result
+							returnData[0].push({
+								json: {
+									...items[i].json, // Pass through input data
+									success: true,
+									operation,
+									closeMode,
+									closedSessions,
+									failedSessions,
+									message: `Closed ${closedSessions.length} of ${sessionIds.length} sessions successfully`,
+									timestamp: new Date().toISOString(),
+									executionDuration: Date.now() - startTime,
+								},
+							});
+						}
+					} catch (error) {
+						// Handle errors based on continueOnFail setting
+						if (!continueOnFail) {
+							// If continueOnFail is false, throw the error to fail the node
+							throw new Error(`Close operation failed: ${(error as Error).message}`);
+						}
+
+						// Otherwise, return an error response and continue
+						returnData[0].push({
+							json: {
+								...items[i].json, // Pass through input data
+								success: false,
+								operation,
+								closeMode,
+								error: (error as Error).message,
+								timestamp: new Date().toISOString(),
+								executionDuration: Date.now() - startTime,
+							},
+						});
 					}
-
-					returnData[0].push(result);
 				} else {
 					throw new Error(`The operation "${operation}" is not supported!`);
 				}

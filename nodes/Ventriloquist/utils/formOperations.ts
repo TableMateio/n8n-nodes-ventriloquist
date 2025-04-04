@@ -299,79 +299,121 @@ export async function handleCheckboxField(
 	logger: ILogger
 ): Promise<boolean> {
 	try {
-		// Check if the element is visible and exists
-		const elementInfo = await page.evaluate((sel: string) => {
+		// Get current checked state
+		const currentChecked = await page.evaluate((sel: string) => {
 			const element = document.querySelector(sel);
-			if (!element) return { exists: false };
-
-			const rect = element.getBoundingClientRect();
-			const style = window.getComputedStyle(element);
-
-			return {
-				exists: true,
-				checked: (element as HTMLInputElement).checked,
-				isVisible: style.display !== 'none' &&
-				          style.visibility !== 'hidden' &&
-				          style.opacity !== '0' &&
-				          rect.width > 0 &&
-				          rect.height > 0
-			};
+			return element ? (element as HTMLInputElement).checked : false;
 		}, selector);
 
-		if (!elementInfo.exists) {
-			logger.error(`Checkbox element not found: ${selector}`);
-			return false;
-		}
+		// Only click if the current state doesn't match desired state
+		if (currentChecked !== checked) {
+			logger.info('Changing checkbox state for ' + selector + ' from ' + currentChecked + ' to ' + checked);
 
-		if (!elementInfo.isVisible) {
-			logger.warn(`Checkbox exists but is not visible: ${selector}`);
-			// Try to make it visible or find a related label that might be visible
-			const clickResult = await page.evaluate((sel: string) => {
-				// Try to find a related label that might be visible
-				const input = document.querySelector(sel) as HTMLInputElement;
-				if (!input) return false;
+			try {
+				// First try native click - this most closely matches the original implementation
+				await page.click(selector);
+				logger.info('Standard click was successful');
+				return true;
+			} catch (clickErr) {
+				logger.warn(`Native click failed: ${(clickErr as Error).message}, trying alternative method...`);
 
-				// Try to click the label if it exists
-				if (input.id) {
-					const label = document.querySelector(`label[for="${input.id}"]`);
-					if (label) {
-						(label as HTMLElement).click();
-						return true;
-					}
-				}
+				// If that fails, try JavaScript click execution - exactly like the original implementation
+				const jsClickSuccess = await page.evaluate((sel) => {
+					const element = document.querySelector(sel);
+					if (!element) return false;
 
-				// If no label, try to find a parent that's clickable
-				let element = input.parentElement;
-				while (element && element.tagName !== 'BODY') {
-					if (element.querySelector(sel) === input) {
+					// Try different approaches
+					try {
+						// 1. Use click() method
 						(element as HTMLElement).click();
 						return true;
+					} catch (e) {
+						try {
+							// 2. Create and dispatch mouse events
+							const event = new MouseEvent('click', {
+								view: window,
+								bubbles: true,
+								cancelable: true,
+								buttons: 1
+							});
+							element.dispatchEvent(event);
+							return true;
+						} catch (e2) {
+							return false;
+						}
 					}
-					element = element.parentElement;
+				}, selector);
+
+				if (jsClickSuccess) {
+					logger.info('JavaScript click was successful');
+					return true;
+				} else {
+					// Third fallback - try to find a related label that might be more clickable
+					logger.warn(`JavaScript click failed, trying to find associated label...`);
+
+					const labelClickSuccess = await page.evaluate((sel) => {
+						const input = document.querySelector(sel) as HTMLInputElement;
+						if (!input) return false;
+
+						// Try to click the label if it exists
+						if (input.id) {
+							const label = document.querySelector(`label[for="${input.id}"]`);
+							if (label) {
+								(label as HTMLElement).click();
+								return true;
+							}
+						}
+
+						// Try searching up the parent chain
+						let element = input.parentElement;
+						while (element && element.tagName !== 'BODY') {
+							// Look for potential label in parents or siblings
+							const potentialLabel = element.querySelector('label') ||
+												   element.closest('label');
+							if (potentialLabel) {
+								(potentialLabel as HTMLElement).click();
+								return true;
+							}
+							element = element.parentElement;
+						}
+
+						return false;
+					}, selector);
+
+					if (labelClickSuccess) {
+						logger.info('Label click was successful');
+						return true;
+					}
+
+					// Final fallback - force the checked property directly
+					logger.warn('All click attempts failed, forcing checked state directly...');
+					const forcedSuccess = await page.evaluate((sel, shouldBeChecked) => {
+						const element = document.querySelector(sel) as HTMLInputElement;
+						if (!element) return false;
+
+						// Force the checked state
+						element.checked = shouldBeChecked;
+
+						// Dispatch change and input events
+						element.dispatchEvent(new Event('change', { bubbles: true }));
+						element.dispatchEvent(new Event('input', { bubbles: true }));
+
+						return true;
+					}, selector, checked);
+
+					if (forcedSuccess) {
+						logger.info('Successfully forced checked state directly');
+						return true;
+					}
+
+					logger.error('All checkbox interaction methods failed');
+					return false;
 				}
-
-				return false;
-			}, selector);
-
-			if (!clickResult) {
-				logger.error(`Could not interact with invisible checkbox: ${selector}`);
-				return false;
 			}
 		} else {
-			// Only click if the current state doesn't match desired state
-			if (elementInfo.checked !== checked) {
-				// Import and use the robustClick utility instead of direct page.click
-				const clickResult = await robustClick(page, selector, { logger });
-				if (!clickResult.success) {
-					if (clickResult.error) {
-						throw clickResult.error;
-					}
-					throw new Error(`Failed to click checkbox: ${selector}`);
-				}
-			}
+			logger.info(`Checkbox ${selector} already in desired state (${checked})`);
+			return true;
 		}
-
-		return true;
 	} catch (error) {
 		logger.error(`Error handling checkbox field: ${(error as Error).message}`);
 		return false;
