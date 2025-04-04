@@ -8,8 +8,7 @@ import type * as puppeteer from 'puppeteer-core';
 import { SessionManager } from '../utils/sessionManager';
 import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
 import { createErrorResponse, safeExecute } from '../utils/errorUtils';
-
-
+import { waitAndClick } from '../utils/clickOperations';
 
 /**
  * Decision operation description
@@ -2917,29 +2916,23 @@ export const description: INodeProperties[] = [
 										`Executing click on "${actionSelector}" (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`));
 
 									try {
-										// For actions, we always need to ensure the element exists
-										if (waitForSelectors) {
-											if (detectionMethod === 'smart') {
-												const elementExists = await smartWaitForSelector(
-													puppeteerPage,
-													actionSelector,
-													selectorTimeout,
-													earlyExitDelay,
-													this.logger,
-												);
-
-												if (!elementExists) {
-													// Improve error message to indicate this is for decision flow, not an error
-													throw new Error(`Decision action: Element "${actionSelector}" required for this path is not present or visible`);
-												}
-											} else {
-												await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+										// Use the waitAndClick utility which handles both waiting for the selector and clicking it
+										const clickResult = await waitAndClick(
+											puppeteerPage,
+											actionSelector,
+											{
+												waitTimeout: selectorTimeout,
+												retries: 2,
+												waitBetweenRetries: 1000,
+												logger: this.logger
 											}
+										);
+
+										// Handle click failures
+										if (!clickResult.success) {
+											throw new Error(`Decision action: Failed to click element "${actionSelector}": ${clickResult.error?.message || 'Unknown error'}`);
 										}
 
-										// Perform the click
-										this.logger.debug(`Clicking element: ${actionSelector}`);
-										await puppeteerPage.click(actionSelector);
 										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
 											`Click successful on "${actionSelector}"`));
 
@@ -3845,27 +3838,28 @@ export const description: INodeProperties[] = [
 								const waitAfterFallback = this.getNodeParameter('waitAfterFallback', index) as string;
 								const fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index) as number;
 
-								if (waitForSelectors) {
-									// For actions, we always need to ensure the element exists
-									if (detectionMethod === 'smart') {
-										const elementExists = await smartWaitForSelector(
-											puppeteerPage,
-											fallbackSelector,
-											selectorTimeout,
-											earlyExitDelay,
-											this.logger,
-										);
+								this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+									`Executing fallback click on "${fallbackSelector}"`));
 
-										if (!elementExists) {
-											throw new Error(`Fallback element with selector "${fallbackSelector}" not found`);
-										}
-									} else {
-										await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
+								// Use waitAndClick utility for consistent click behavior
+								const clickResult = await waitAndClick(
+									puppeteerPage,
+									fallbackSelector,
+									{
+										waitTimeout: selectorTimeout,
+										retries: 2,
+										waitBetweenRetries: 1000,
+										logger: this.logger
 									}
+								);
+
+								// Handle click failures
+								if (!clickResult.success) {
+									throw new Error(`Fallback action: Failed to click element "${fallbackSelector}": ${clickResult.error?.message || 'Unknown error'}`);
 								}
 
-								this.logger.debug(`Fallback action: Clicking element: ${fallbackSelector}`);
-								await puppeteerPage.click(fallbackSelector);
+								this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+									`Fallback click successful on "${fallbackSelector}"`));
 
 								// Wait according to specified wait type
 								await waitForNavigation(puppeteerPage, waitAfterFallback, fallbackWaitTime);
