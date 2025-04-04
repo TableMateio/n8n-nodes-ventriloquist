@@ -9,6 +9,8 @@ import { formatUrl } from '../utils/navigationUtils';
 import { BrowserTransportFactory } from '../transport/BrowserTransportFactory';
 import { SessionManager } from '../utils/sessionManager';
 
+
+
 // Define the properties for the click operation
 export const description: INodeProperties[] = [
   {
@@ -127,7 +129,8 @@ export async function execute(
     }
 
     // Get credentials for the session
-    const credentialType = this.getNodeParameter('credentialType', 0) as string;
+    const browserService = this.getNodeParameter('browserService', 0) as string;
+    const credentialType = browserService === 'brightData' ? 'brightDataApi' : 'browserlessApi';
     const credentials = await this.getCredentials(credentialType);
 
     // Double timeout for Bright Data as recommended in their docs

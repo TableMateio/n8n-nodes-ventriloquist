@@ -626,7 +626,7 @@ export class Ventriloquist implements INodeType {
 				description: 'Whether to capture and return a screenshot in the response',
 				displayOptions: {
 					show: {
-						operation: ['open', 'click', 'form', 'detect', 'extract'],
+						operation: ['open', 'form', 'detect', 'extract'],
 					},
 				},
 			},
@@ -716,18 +716,6 @@ export class Ventriloquist implements INodeType {
 			},
 
 			// Properties for 'click' operation
-			{
-				displayName: 'Session ID',
-				name: 'explicitSessionId',
-				type: 'string',
-				default: '',
-				description: 'Session ID to use (if not provided, will try to use session from previous operations)',
-				displayOptions: {
-					show: {
-						operation: ['click', 'detect', 'extract', 'form'],
-					},
-				},
-			},
 			...clickOperation.description.map(property => ({
 				...property,
 				displayOptions: {
@@ -738,6 +726,20 @@ export class Ventriloquist implements INodeType {
 					},
 				},
 			})),
+
+			// Session ID for other operations
+			{
+				displayName: 'Session ID',
+				name: 'explicitSessionId',
+				type: 'string',
+				default: '',
+				description: 'Session ID to use (if not provided, will try to use session from previous operations)',
+				displayOptions: {
+					show: {
+						operation: ['detect', 'extract', 'form'],
+					},
+				},
+			},
 
 			// Properties for 'form' operation
 			...formOperation.description,
