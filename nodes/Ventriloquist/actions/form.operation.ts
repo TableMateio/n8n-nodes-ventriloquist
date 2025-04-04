@@ -416,31 +416,6 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: 'Take Screenshot After Submission',
-		name: 'takeScreenshot',
-		type: 'boolean',
-		default: false,
-		description: 'Whether to take a screenshot after form submission',
-		displayOptions: {
-			show: {
-				operation: ['form'],
-				submitForm: [true],
-			},
-		},
-	},
-	{
-		displayName: 'Continue On Fail',
-		name: 'continueOnFail',
-		type: 'boolean',
-		default: true,
-		description: 'Whether to continue execution even when form operations fail (selector not found or timeout)',
-		displayOptions: {
-			show: {
-				operation: ['form'],
-			},
-		},
-	},
-	{
 		displayName: 'Retry Form Submission',
 		name: 'retrySubmission',
 		type: 'boolean',
@@ -551,6 +526,31 @@ export const description: INodeProperties[] = [
 				operation: ['form'],
 				submitForm: [true],
 				advancedButtonOptions: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Continue On Fail',
+		name: 'continueOnFail',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to continue execution even when form operations fail (selector not found or timeout)',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+			},
+		},
+	},
+	{
+		displayName: 'Take Screenshot After Submission',
+		name: 'takeScreenshot',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to take a screenshot after form submission',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+				submitForm: [true],
 			},
 		},
 	},

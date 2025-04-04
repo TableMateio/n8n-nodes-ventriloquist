@@ -66,13 +66,6 @@ export const description: INodeProperties[] = [
 		description: 'Maximum navigation time in milliseconds',
 	},
 	{
-		displayName: 'Continue On Fail',
-		name: 'continueOnFail',
-		type: 'boolean',
-		default: true,
-		description: 'Whether to continue execution even when browser operations fail (cannot connect or navigate)',
-	},
-	{
 		displayName: 'Session Timeout',
 		name: 'sessionTimeout',
 		type: 'number',
@@ -85,6 +78,13 @@ export const description: INodeProperties[] = [
 		type: 'boolean',
 		default: false,
 		description: 'Whether to enable debugging',
+	},
+	{
+		displayName: 'Continue On Fail',
+		name: 'continueOnFail',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to continue execution even when browser operations fail (cannot connect or navigate)',
 	},
 ];
 
