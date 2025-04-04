@@ -586,16 +586,7 @@ export async function execute(
 	let sessionId = '';
 
 	try {
-		// Create a session or reuse an existing one - explicitly NOT forcing a new session
-		const { browser, sessionId: newSessionId } = await SessionManager.getOrCreateSession(
-			workflowId,
-			websocketEndpoint,
-			this.logger,
-			undefined,
-			false, // Don't force a new session
-		);
-
-		// If an explicit sessionId was provided, try to get that page first
+		// If using an explicit session ID, try to get that page first
 		if (explicitSessionId) {
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Looking for explicitly provided session ID: ${explicitSessionId}`);
 			page = SessionManager.getPage(workflowId, explicitSessionId);
@@ -604,22 +595,53 @@ export async function execute(
 				sessionId = explicitSessionId;
 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found existing page with explicit session ID: ${sessionId}`);
 			} else {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Provided session ID ${explicitSessionId} not found, will create a new session`);
+				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Provided session ID ${explicitSessionId} not found, will check for existing sessions`);
 			}
 		}
 
-		// If no explicit session or explicit session not found, proceed with normal flow
-		if (!explicitSessionId || !page) {
-			// Try to get any existing page from the browser
-			const pages = await browser.pages();
+		// If we don't have a page yet, check if there's an existing session
+		if (!page) {
+			// Check if we already have a session for this workflow
+			const existingSession = SessionManager.getSession(workflowId);
 
-			if (pages.length > 0) {
-				// Use the first available page
-				page = pages[0];
-				sessionId = `existing_${Date.now()}`;
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Using existing page from browser session`);
-			} else {
-				// Create a new page if none exists
+			if (existingSession) {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found existing browser session for workflow ${workflowId}`);
+
+				// Try to use an existing page from the session
+				const pages = Array.from(existingSession.pages.values());
+
+				if (pages.length > 0) {
+					page = pages[0];  // Use the first available page
+					sessionId = Array.from(existingSession.pages.keys())[0];
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Using existing page with session ID: ${sessionId}`);
+				} else {
+					// Create a new page in the existing browser
+					try {
+						page = await existingSession.browser.newPage();
+						sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Created new page with session ID: ${sessionId}`);
+
+						// Store the new page
+						SessionManager.storePage(workflowId, sessionId, page);
+					} catch (pageError) {
+						this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Failed to create new page: ${(pageError as Error).message}`);
+						throw new Error(`Failed to create new page: ${(pageError as Error).message}`);
+					}
+				}
+			} else if (websocketEndpoint) {
+				// Only try to create a new session if we have a valid websocket endpoint
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No existing session found, creating a new one with endpoint: ${websocketEndpoint}`);
+
+				// Create a new browser session
+				const { browser, sessionId: newSessionId } = await SessionManager.getOrCreateSession(
+					workflowId,
+					websocketEndpoint,
+					this.logger,
+					undefined,
+					false, // Don't force a new session
+				);
+
+				// Create a new page
 				page = await browser.newPage();
 				sessionId = newSessionId;
 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Created new page with session ID: ${sessionId}`);
@@ -629,6 +651,9 @@ export async function execute(
 
 				// Navigate to a blank page to initialize it
 				await page.goto('about:blank');
+			} else {
+				// No existing session and no websocket endpoint
+				throw new Error('Cannot create a new session without a valid websocket endpoint. Please connect this node to an Open node or provide an explicit session ID.');
 			}
 		}
 
