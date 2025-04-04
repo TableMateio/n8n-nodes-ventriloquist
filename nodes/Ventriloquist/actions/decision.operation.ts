@@ -14,6 +14,18 @@ import {
 	processFormField
 } from '../utils/formOperations';
 import { takeScreenshot as captureScreenshot } from '../utils/navigationUtils';
+import {
+	extractTextContent,
+	extractHtmlContent,
+	extractInputValue,
+	extractAttributeValue,
+	extractTableData,
+	extractMultipleElements,
+	formatExtractedDataForLog
+} from '../utils/extractionUtils';
+import {
+	navigateWithRetry,
+} from '../utils/navigationUtils';
 
 /**
  * Decision operation description
@@ -2198,86 +2210,6 @@ export const description: INodeProperties[] = [
 	}
 
 	/**
-	 * Helper function to format extracted data for logging
-	 * Truncates the data to make it more log-friendly
-	 */
-	function formatExtractedDataForLog(data: any, extractionType: string): string {
-		if (data === null || data === undefined) {
-			return 'null';
-		}
-
-		const truncateLength = 100; // Maximum string length to show in logs
-		const truncateMessage = '... (truncated)';
-
-		if (typeof data === 'string') {
-			// For string data, truncate if too long
-			if (data.length > truncateLength) {
-				return `"${data.substring(0, truncateLength)}${truncateMessage}" (${data.length} chars)`;
-			}
-			return `"${data}"`;
-		} else if (Array.isArray(data)) {
-			// For arrays, summarize content
-			const itemCount = data.length;
-			if (itemCount === 0) {
-				return '[] (empty array)';
-			}
-
-			// Sample a few items from the array
-			const sampleSize = Math.min(3, itemCount);
-			const sample = data.slice(0, sampleSize).map(item => {
-				if (typeof item === 'string') {
-					return item.length > 20 ? `"${item.substring(0, 20)}..."` : `"${item}"`;
-				} else if (typeof item === 'object') {
-					return '[object]';
-				}
-				return String(item);
-			});
-
-			return `[${sample.join(', ')}${itemCount > sampleSize ? `, ... (${itemCount - sampleSize} more)` : ''}]`;
-		} else if (typeof data === 'object') {
-			// For objects, show a sample of keys and values
-			if (data === null) {
-				return 'null';
-			}
-
-			if (extractionType === 'table') {
-				// Special handling for table data
-				const rowCount = Array.isArray(data) ? data.length : Object.prototype.hasOwnProperty.call(data, 'rowCount') ? data.rowCount : 'unknown';
-				return `[Table data: ${rowCount} row(s)]`;
-			}
-
-			// For other objects, sample a few properties
-			const keys = Object.keys(data);
-			if (keys.length === 0) {
-				return '{} (empty object)';
-			}
-
-			// Only show a few keys
-			const sampleSize = Math.min(3, keys.length);
-			const sample = keys.slice(0, sampleSize).map(key => {
-				const value = data[key];
-
-				// Format the value based on its type
-				let valueStr;
-				if (typeof value === 'string') {
-					valueStr = value.length > 15 ? `"${value.substring(0, 15)}..."` : `"${value}"`;
-				} else if (typeof value === 'object') {
-					valueStr = '[object]';
-				} else {
-					valueStr = String(value);
-				}
-
-				return `${key}: ${valueStr}`;
-			});
-
-			return `{${sample.join(', ')}${keys.length > sampleSize ? `, ... (${keys.length - sampleSize} more)` : ''}}`;
-		}
-
-		// For other data types, convert to string
-		return String(data);
-	}
-
-	/**
 	 * Execute decision operation
 	 */
 	export async function execute(
@@ -3073,7 +3005,13 @@ export const description: INodeProperties[] = [
 									let extractedData: string | null | IDataObject | IDataObject[] | string[][] | string[] = null;
 									switch (extractionType) {
 										case 'text':
-											extractedData = await puppeteerPage.$eval(actionSelector, (el) => el.textContent?.trim() || '');
+											extractedData = await extractTextContent(
+												puppeteerPage,
+												actionSelector,
+												this.logger,
+												nodeName,
+												nodeId
+											);
 											break;
 										case 'html': {
 											// Get HTML options
@@ -3081,60 +3019,37 @@ export const description: INodeProperties[] = [
 											const outputFormat = (htmlOptions.outputFormat as string) || 'html';
 											const includeMetadata = htmlOptions.includeMetadata as boolean || false;
 
-											// Extract HTML content
-											const htmlContent = await puppeteerPage.$eval(actionSelector, (el) => el.innerHTML);
-
-											if (outputFormat === 'html') {
-												// Return as raw HTML string
-												extractedData = htmlContent;
-											} else {
-												// Return as JSON object
-												extractedData = { html: htmlContent };
-											}
-
-											// Add metadata if requested
-											if (includeMetadata) {
-												// Calculate basic metadata about the HTML
-												const elementCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('*').length);
-												const imageCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('img').length);
-												const linkCount = await puppeteerPage.$eval(actionSelector, (el) => el.querySelectorAll('a').length);
-
-												if (typeof extractedData === 'object') {
-													extractedData.metadata = {
-														htmlLength: htmlContent.length,
-														elementCount,
-														imageCount,
-														linkCount,
-													};
-												} else {
-													// For string output, add metadata as a separate property
-													extractedData = {
-														html: htmlContent,
-														metadata: {
-															htmlLength: htmlContent.length,
-															elementCount,
-															imageCount,
-															linkCount,
-														}
-													};
-												}
-											}
+											extractedData = await extractHtmlContent(
+												puppeteerPage,
+												actionSelector,
+												{
+													outputFormat,
+													includeMetadata,
+												},
+												this.logger,
+												nodeName,
+												nodeId
+											);
 											break;
 										}
 										case 'value':
-											extractedData = await puppeteerPage.$eval(actionSelector, (el) => {
-												if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
-													return el.value;
-												}
-												return '';
-											});
+											extractedData = await extractInputValue(
+												puppeteerPage,
+												actionSelector,
+												this.logger,
+												nodeName,
+												nodeId
+											);
 											break;
 										case 'attribute': {
 											const attributeName = group.extractAttributeName as string;
-											extractedData = await puppeteerPage.$eval(
+											extractedData = await extractAttributeValue(
+												puppeteerPage,
 												actionSelector,
-												(el, attr) => el.getAttribute(attr) || '',
-												attributeName
+												attributeName,
+												this.logger,
+												nodeName,
+												nodeId
 											);
 											break;
 										}
@@ -3144,69 +3059,23 @@ export const description: INodeProperties[] = [
 											const extractionProperty = multipleOptions.extractionProperty as string || 'textContent';
 											const limit = multipleOptions.limit as number || 50;
 											const outputFormat = multipleOptions.outputFormat as string || 'array';
+											const separator = multipleOptions.separator as string || ',';
+											const attributeName = multipleOptions.attributeName as string || '';
 
-											// Extract data from all matching elements
-											const elements = await puppeteerPage.$$(actionSelector);
-
-											// Limit the number of elements processed
-											const limitedElements = elements.slice(0, limit);
-
-											if (extractionProperty === 'attribute') {
-												const attributeName = multipleOptions.attributeName as string || '';
-												// Extract the specified attribute from each element
-												if (!puppeteerPage) {
-													throw new Error('Page is null or undefined');
-												}
-												const page = puppeteerPage; // Non-null assertion for TypeScript
-												extractedData = await Promise.all(
-													limitedElements.map(async (el) =>
-														page.evaluate(
-															(element, attr) => element.getAttribute(attr) || '',
-															el,
-															attributeName
-														)
-													)
-												);
-											} else {
-												// Extract the specified property from each element
-												if (!puppeteerPage) {
-													throw new Error('Page is null or undefined');
-												}
-												const page = puppeteerPage; // Non-null assertion for TypeScript
-												extractedData = await Promise.all(
-													limitedElements.map(async (el) =>
-														page.evaluate(
-															(element, prop) => {
-																switch (prop) {
-																	case 'textContent':
-																		return element.textContent?.trim() || '';
-																	case 'innerHTML':
-																		return element.innerHTML;
-																	case 'outerHTML':
-																		return element.outerHTML;
-																	default:
-																		return element.textContent?.trim() || '';
-																}
-															},
-															el,
-															extractionProperty
-														)
-													)
-												);
-											}
-
-											// Format the output based on the specified format
-											if (outputFormat === 'json') {
-												const jsonResult: IDataObject = {};
-												(extractedData as string[]).forEach((value, index) => {
-													jsonResult[index.toString()] = value;
-												});
-												extractedData = jsonResult;
-											} else if (outputFormat === 'string') {
-												const separator = multipleOptions.separator as string || ',';
-												extractedData = (extractedData as string[]).join(separator);
-											}
-											// Default is array format, which is already correct
+											extractedData = await extractMultipleElements(
+												puppeteerPage,
+												actionSelector,
+												{
+													extractionProperty,
+													limit,
+													outputFormat,
+													separator,
+													attributeName,
+												},
+												this.logger,
+												nodeName,
+												nodeId
+											);
 											break;
 										}
 										case 'table': {
@@ -3215,42 +3084,21 @@ export const description: INodeProperties[] = [
 											const includeHeaders = tableOptions.includeHeaders as boolean ?? true;
 											const tableRow = tableOptions.rowSelector as string || 'tr';
 											const tableCell = tableOptions.cellSelector as string || 'td,th';
-											const limit = tableOptions.limit as number || 100;
 											const outputFormat = tableOptions.outputFormat as string || 'array';
 
-											// Extract table content
-											const tableData: string[][] = await puppeteerPage.$$eval(
-												`${actionSelector} ${tableRow}`,
-												(rows, cellSelector, maxRows) => {
-													// Limit the number of rows
-													const limitedRows = Array.from(rows).slice(0, maxRows);
-
-													return limitedRows.map(row => {
-														const cells = Array.from(row.querySelectorAll(cellSelector));
-														return cells.map(cell => cell.textContent?.trim() || '');
-													});
+											extractedData = await extractTableData(
+												puppeteerPage,
+												actionSelector,
+												{
+													includeHeaders,
+													rowSelector: tableRow,
+													cellSelector: tableCell,
+													outputFormat,
 												},
-												tableCell,
-												limit
+												this.logger,
+												nodeName,
+												nodeId
 											);
-
-											if (outputFormat === 'json' && includeHeaders && tableData.length > 1) {
-												// Use the first row as headers
-												const headers = tableData[0];
-												const jsonData = tableData.slice(1).map(row => {
-													const obj: IDataObject = {};
-													row.forEach((cell, i) => {
-														if (i < headers.length) {
-															obj[headers[i]] = cell;
-														}
-													});
-													return obj;
-												});
-												extractedData = jsonData;
-											} else {
-												// Return as 2D array
-												extractedData = tableData;
-											}
 											break;
 										}
 									}
@@ -3292,11 +3140,35 @@ export const description: INodeProperties[] = [
 									const waitAfterAction = group.waitAfterAction as string;
 									const waitTime = group.waitTime as number;
 
-									this.logger.debug(`Navigating to URL: ${url}`);
-									await puppeteerPage.goto(url);
+									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+										`Navigating to URL: ${url} (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`));
 
-									// Wait according to specified wait type
-									await waitForNavigation(puppeteerPage, waitAfterAction, waitTime);
+									try {
+										// Use navigationWithRetry utility for more robust navigation
+										const navigationResult = await navigateWithRetry(
+											puppeteerPage,
+											url,
+											{
+												waitUntil: waitAfterAction as 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2',
+												timeout: waitTime,
+												maxRetries: 2,
+												retryDelay: 1000,
+											},
+											this.logger
+										);
+
+										if (!navigationResult) {
+											this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+												`Navigation may have encountered issues, but continuing execution`));
+										} else {
+											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+												`Navigation completed successfully to ${url}`));
+										}
+									} catch (error) {
+										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Navigation error: ${(error as Error).message}`));
+										throw error;
+									}
 									break;
 								}
 							}
