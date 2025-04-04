@@ -22,6 +22,7 @@ import * as detectOperation from './actions/detect.operation';
 import * as decisionOperation from './actions/decision.operation';
 import * as openOperation from './actions/open.operation';
 import * as authenticateOperation from './actions/authenticate.operation';
+import * as closeOperation from './actions/close.operation';
 
 /**
  * Configure outputs for decision operation based on routing parameters
@@ -329,86 +330,16 @@ export class Ventriloquist implements INodeType {
 	// Close session and browser
 	private static async closeSession(workflowId: string) {
 		const session = this.browserSessions.get(workflowId);
-		if (session) {
-			try {
-				await session.browser.close();
-			} catch (error) {
-				// Ignore errors during cleanup
-			} finally {
-				this.browserSessions.delete(workflowId);
-			}
-		}
-	}
-
-	// Close all locally tracked browser sessions
-	private static async closeAllSessions(logger: any) {
-		let closedCount = 0;
-		let totalSessions = 0;
-
-		// Create an array of session entries to avoid modification during iteration
-		const sessionEntries = Array.from(this.browserSessions.entries());
-
-		logger.info(`Closing locally tracked browser sessions (${sessionEntries.length} sessions found)`);
-		logger.info(`Note: This only closes sessions tracked by this N8N instance. Check Bright Data console for orphaned sessions.`);
-
-		// Close each locally tracked session
-		for (const [workflowId, session] of sessionEntries) {
-			try {
-				logger.info(`Closing browser session for workflow ID: ${workflowId}`);
-
-				// First try to close all pages in this browser
-				try {
-					// Get all pages in this browser
-					const pages = await session.browser.pages();
-					logger.info(`Found ${pages.length} pages in browser session ${workflowId}`);
-
-					// Close each page
-					for (const page of pages) {
-						try {
-							await page.close();
-							logger.info('Successfully closed a page');
-						} catch (pageError) {
-							logger.warn(`Error closing page: ${pageError}`);
-						}
-					}
-
-					// Try to close all contexts
-					const contexts = await session.browser.browserContexts();
-					logger.info(`Found ${contexts.length} browser contexts in session ${workflowId}`);
-
-					// Close each context (except default)
-					for (const context of contexts) {
-						try {
-							// Skip default context as it can't be closed
-							if (context !== session.browser.defaultBrowserContext()) {
-								await context.close();
-								logger.info('Successfully closed a browser context');
-							}
-						} catch (contextError) {
-							logger.warn(`Error closing browser context: ${contextError}`);
-						}
-					}
-				} catch (innerError) {
-					logger.warn(`Error during detailed cleanup: ${innerError}`);
-				}
-
-				// Finally close the browser itself
-				await session.browser.close();
-				closedCount++;
-				logger.info(`Successfully closed browser for workflow ${workflowId}`);
-			} catch (error) {
-				logger.warn(`Error closing session for workflow ${workflowId}: ${error}`);
-			} finally {
-				this.browserSessions.delete(workflowId);
-			}
+		if (!session) {
+			return;
 		}
 
-		totalSessions = sessionEntries.length;
-
-		logger.info(`Successfully closed ${closedCount} of ${totalSessions} locally tracked browser sessions`);
-		logger.info(`For any remaining sessions in Bright Data, please visit their console: https://brightdata.com/cp/zones/YOUR_ZONE/stats`);
-
-		return { totalSessions, closedSessions: closedCount };
+		try {
+			await session.browser.close();
+			this.browserSessions.delete(workflowId);
+		} catch (error) {
+			// Handle errors when closing the browser
+		}
 	}
 
 	// Enable debugger for a Bright Data session
@@ -488,7 +419,6 @@ export class Ventriloquist implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Ventriloquist',
 		name: 'ventriloquist',
-		icon: 'file:ventriloquist.svg',
 		group: ['browser'],
 		version: 1,
 		subtitle: '={{ $parameter["operation"] }}',
@@ -501,21 +431,11 @@ export class Ventriloquist implements INodeType {
 		credentials: [
 			{
 				name: 'brightDataApi',
-				required: true,
-				displayOptions: {
-					show: {
-						browserService: ['brightData'],
-					},
-				},
+				required: false,
 			},
 			{
 				name: 'browserlessApi',
-				required: true,
-				displayOptions: {
-					show: {
-						browserService: ['browserless'],
-					},
-				},
+				required: false,
 			},
 		],
 		properties: [
@@ -527,35 +447,33 @@ export class Ventriloquist implements INodeType {
 					{
 						name: 'Bright Data',
 						value: 'brightData',
-						description: 'Use Bright Data browser automation service',
+						description: 'Use Bright Data Web Unlocker, Residential IPs, or similar services',
 					},
 					{
 						name: 'Browserless',
 						value: 'browserless',
-						description: 'Use Browserless browser automation service',
+						description: 'Use Browserless.io for browser automation',
 					},
 				],
 				default: 'brightData',
-				description: 'The browser service to use for automation',
-				required: true,
+				description: 'Which browser service to use for automation',
 			},
 			{
 				displayName: 'Operation',
 				name: 'operation',
 				type: 'options',
-				noDataExpression: true,
 				options: [
 					{
-						name: 'Open Browser',
-						value: 'open',
-						description: 'Open a browser instance',
-						action: 'Open a browser instance',
+						name: 'Authenticate',
+						value: 'authenticate',
+						description: 'Authenticate with a website',
+						action: 'Authenticate with a website',
 					},
 					{
 						name: 'Click',
 						value: 'click',
-						description: 'Click on a specific element on the page',
-						action: 'Click an element on the page',
+						description: 'Click a button or link',
+						action: 'Click a button or link',
 					},
 					{
 						name: 'Close',
@@ -566,159 +484,41 @@ export class Ventriloquist implements INodeType {
 					{
 						name: 'Decision',
 						value: 'decision',
-						description: 'Make conditional decisions based on page state and take action',
-						action: 'Make a decision and take action',
+						description: 'Make a decision and take a specific route',
+						action: 'Make a decision and take a route',
 					},
 					{
 						name: 'Detect',
 						value: 'detect',
-						description: 'Detect elements, text, URL paths, or page state',
-						action: 'Detect page state',
+						description: 'Detect elements or conditions on a page',
+						action: 'Detect elements on a page',
 					},
 					{
 						name: 'Extract',
 						value: 'extract',
-						description: 'Extract data from a webpage',
-						action: 'Extract data from a webpage',
+						description: 'Extract data from a website',
+						action: 'Extract data from a website',
 					},
 					{
-						name: 'Form',
+						name: 'Fill Form',
 						value: 'form',
-						description: 'Fill out a form',
-						action: 'Fill out a form',
+						description: 'Fill in a form',
+						action: 'Fill in a form',
 					},
 					{
-						name: 'Authenticate',
-						value: 'authenticate',
-						description: 'Handle authentication (TOTP, etc.)',
-						action: 'Authenticate with credentials',
+						name: 'Open URL',
+						value: 'open',
+						description: 'Open a URL in a browser',
+						action: 'Open URL in browser',
 					},
 				],
 				default: 'open',
+				noDataExpression: true,
+				description: 'Operation to perform',
 			},
 
 			// Properties for 'open' operation
-			{
-				displayName: 'URL',
-				name: 'url',
-				type: 'string',
-				default: '',
-				placeholder: 'https://example.com',
-				description: 'The URL to navigate to',
-				displayOptions: {
-					show: {
-						operation: ['open'],
-					},
-				},
-			},
-			{
-				displayName: 'Incognito Mode',
-				name: 'incognito',
-				type: 'boolean',
-				default: false,
-				description: 'Whether to use incognito mode',
-				displayOptions: {
-					show: {
-						operation: ['open'],
-					},
-				},
-			},
-			{
-				displayName: 'Capture Screenshot',
-				name: 'captureScreenshot',
-				type: 'boolean',
-				default: true,
-				description: 'Whether to capture and return a screenshot in the response',
-				displayOptions: {
-					show: {
-						operation: ['open', 'click', 'form', 'detect', 'extract'],
-					},
-				},
-			},
-			{
-				displayName: 'Wait Until',
-				name: 'waitUntil',
-				type: 'options',
-				options: [
-					{
-						name: 'Navigation Complete',
-						value: 'networkidle0',
-						description: 'Wait until there are no network connections for at least 500ms',
-					},
-					{
-						name: 'Almost Complete',
-						value: 'networkidle2',
-						description:
-							'Wait until there are no more than 2 network connections for at least 500ms',
-					},
-					{
-						name: 'DOM Content Loaded',
-						value: 'domcontentloaded',
-						description: 'Wait until DOMContentLoaded event is fired',
-					},
-					{
-						name: 'Page Load',
-						value: 'load',
-						description: 'Wait until load event is fired',
-					},
-				],
-				default: 'networkidle0',
-				description: 'When to consider navigation completed',
-				displayOptions: {
-					show: {
-						operation: ['open'],
-					},
-				},
-			},
-			{
-				displayName: 'Timeout',
-				name: 'timeout',
-				type: 'number',
-				default: 30000,
-				description: 'Maximum navigation time in milliseconds',
-				displayOptions: {
-					show: {
-						operation: ['open'],
-					},
-				},
-			},
-			{
-				displayName: 'Enable Debug Mode',
-				name: 'enableDebug',
-				type: 'boolean',
-				default: false,
-				description: 'Enable a debuggable session visible in Bright Data console',
-				displayOptions: {
-					show: {
-						operation: ['open'],
-					},
-				},
-			},
-			{
-				displayName: 'Session Timeout (Minutes)',
-				name: 'sessionTimeout',
-				type: 'number',
-				default: 3,
-				description: 'Close the browser session automatically after this many minutes of inactivity. Lower values help prevent orphaned sessions in Bright Data.',
-				hint: 'The session will close automatically after this period of inactivity to prevent orphaned sessions',
-				displayOptions: {
-					show: {
-						operation: ['open'],
-					},
-				},
-			},
-			{
-				displayName: 'Continue On Fail',
-				name: 'continueOnFail',
-				type: 'boolean',
-				default: true,
-				description: 'Whether to continue execution even when browser operations fail (cannot connect or navigate)',
-				displayOptions: {
-					show: {
-						operation: ['open'],
-					},
-				},
-			},
+			...openOperation.description,
 
 			// Properties for 'click' operation
 			{
@@ -726,74 +526,10 @@ export class Ventriloquist implements INodeType {
 				name: 'explicitSessionId',
 				type: 'string',
 				default: '',
-				description: 'Session ID to use (if not provided, will try to use session from previous operations)',
+				description: 'Session ID to use for this operation. Leave blank to use the most recent session ID from input',
 				displayOptions: {
 					show: {
-						operation: ['click', 'detect', 'extract', 'form'],
-					},
-				},
-			},
-			{
-				displayName: 'Selector',
-				name: 'selector',
-				type: 'string',
-				default: '',
-				placeholder: '#button, .link, div[data-id="123"]',
-				description: 'CSS selector of the element to click',
-				displayOptions: {
-					show: {
-						operation: ['click'],
-					},
-				},
-				required: true,
-			},
-			{
-				displayName: 'Wait Before Click Selector',
-				name: 'waitBeforeClickSelector',
-				type: 'string',
-				default: '',
-				placeholder: '#element-to-wait-for',
-				description:
-					'Wait for this element to appear before clicking the target element (optional)',
-				displayOptions: {
-					show: {
-						operation: ['click'],
-					},
-				},
-			},
-			{
-				displayName: 'Timeout',
-				name: 'timeout',
-				type: 'number',
-				default: 30000,
-				description: 'Maximum wait time in milliseconds',
-				displayOptions: {
-					show: {
-						operation: ['click'],
-					},
-				},
-			},
-			{
-				displayName: 'Retries',
-				name: 'retries',
-				type: 'number',
-				default: 0,
-				description: 'Number of retries if click fails',
-				displayOptions: {
-					show: {
-						operation: ['click'],
-					},
-				},
-			},
-			{
-				displayName: 'Continue On Fail',
-				name: 'continueOnFail',
-				type: 'boolean',
-				default: true,
-				description: 'Whether to continue execution even when click operations fail (cannot find element or timeout)',
-				displayOptions: {
-					show: {
-						operation: ['click'],
+						operation: ['click', 'extract'],
 					},
 				},
 			},
@@ -814,76 +550,7 @@ export class Ventriloquist implements INodeType {
 			...authenticateOperation.description,
 
 			// Properties for 'close' operation
-			{
-				displayName: 'Close Mode',
-				name: 'closeMode',
-				type: 'options',
-				options: [
-					{
-						name: 'Close Session',
-						value: 'session',
-						description: 'Close a specific browser session',
-					},
-					{
-						name: 'Close All Sessions',
-						value: 'all',
-						description: 'Close all browser sessions',
-					},
-					{
-						name: 'Close Multiple Sessions',
-						value: 'multiple',
-						description: 'Close a list of specific browser sessions',
-					},
-				],
-				default: 'session',
-				description: 'How to close browser sessions',
-				displayOptions: {
-					show: {
-						operation: ['close'],
-					},
-				},
-			},
-			{
-				displayName: 'Session ID',
-				name: 'explicitSessionId',
-				type: 'string',
-				default: '',
-				description: 'Session ID to close',
-				displayOptions: {
-					show: {
-						operation: ['close'],
-						closeMode: ['session'],
-					},
-				},
-			},
-			{
-				displayName: 'Session IDs',
-				name: 'sessionIds',
-				type: 'string',
-				typeOptions: {
-					multipleValues: true,
-				},
-				default: [],
-				description: 'List of session IDs to close',
-				displayOptions: {
-					show: {
-						operation: ['close'],
-						closeMode: ['multiple'],
-					},
-				},
-			},
-			{
-				displayName: 'Continue On Fail',
-				name: 'continueOnFail',
-				type: 'boolean',
-				default: true,
-				description: 'Whether to continue execution even when close operations fail',
-				displayOptions: {
-					show: {
-						operation: ['close'],
-					},
-				},
-			},
+			...closeOperation.description,
 		],
 	};
 
@@ -1612,139 +1279,20 @@ export class Ventriloquist implements INodeType {
 
 					returnData[0].push(result);
 				} else if (operation === 'close') {
-					// Close browser sessions based on the selected mode
-					const closeMode = this.getNodeParameter('closeMode', i, 'session') as string;
-					const continueOnFail = this.getNodeParameter('continueOnFail', i, true) as boolean;
+					// Execute close operation
+					const result = await closeOperation.execute.call(
+						this,
+						i,
+						websocketEndpoint,
+						workflowId,
+					);
 
-					try {
-						if (closeMode === 'session') {
-							// Close a specific session
-							let sessionId = '';
-
-							// First, check if an explicit session ID was provided
-							const explicitSessionId = this.getNodeParameter('explicitSessionId', i, '') as string;
-							if (explicitSessionId) {
-								sessionId = explicitSessionId;
-								this.logger.info(`Using explicitly provided session ID: ${sessionId}`);
-							}
-							// If not, try to get sessionId from the current item
-							else if (items[i].json?.sessionId) {
-								sessionId = items[i].json.sessionId as string;
-							}
-							// For backward compatibility, also check for pageId
-							else if (items[i].json?.pageId) {
-								sessionId = items[i].json.pageId as string;
-								this.logger.info('Using legacy pageId as sessionId for compatibility');
-							}
-
-							// If we found a sessionId, close it
-							if (sessionId) {
-								// Get existing page from session
-								const page = Ventriloquist.getPage(workflowId, sessionId);
-								if (page) {
-									await page.close();
-									this.logger.info(`Closed page with session ID: ${sessionId}`);
-								} else {
-									this.logger.warn(`No page found with session ID: ${sessionId}`);
-								}
-
-								// Return success
-								returnData[0].push({
-									json: {
-										...items[i].json, // Pass through input data
-										success: true,
-										operation,
-										closeMode,
-										sessionId,
-										message: `Browser session ${sessionId} closed successfully`,
-										timestamp: new Date().toISOString(),
-										executionDuration: Date.now() - startTime,
-									},
-								});
-							} else {
-								// No session ID found
-								throw new Error('No session ID provided or found in input');
-							}
-						} else if (closeMode === 'all') {
-							// Close all browser sessions
-							const closeResult = await Ventriloquist.closeAllSessions(this.logger);
-
-							// Return success with details
-							returnData[0].push({
-								json: {
-									...items[i].json, // Pass through input data
-									success: true,
-									operation,
-									closeMode,
-									totalSessions: closeResult.totalSessions,
-									closedSessions: closeResult.closedSessions,
-									message: `Closed ${closeResult.closedSessions} of ${closeResult.totalSessions} locally tracked browser sessions`,
-									note: "This operation only closes sessions tracked by this N8N instance. To close orphaned sessions, please visit the Bright Data console.",
-									brightDataConsoleUrl: "https://brightdata.com/cp/zones",
-									timestamp: new Date().toISOString(),
-									executionDuration: Date.now() - startTime,
-								},
-							});
-						} else if (closeMode === 'multiple') {
-							// Close a list of specific sessions
-							const sessionIds = this.getNodeParameter('sessionIds', i, []) as string[];
-							const closedSessions: string[] = [];
-							const failedSessions: string[] = [];
-
-							// Process each session ID
-							for (const sessionId of sessionIds) {
-								try {
-									// Get existing page from session
-									const page = Ventriloquist.getPage(workflowId, sessionId);
-									if (page) {
-										await page.close();
-										closedSessions.push(sessionId);
-										this.logger.info(`Closed page with session ID: ${sessionId}`);
-									} else {
-										failedSessions.push(sessionId);
-										this.logger.warn(`No page found with session ID: ${sessionId}`);
-									}
-								} catch (error) {
-									failedSessions.push(sessionId);
-									this.logger.error(`Error closing session ${sessionId}: ${error}`);
-								}
-							}
-
-							// Return result
-							returnData[0].push({
-								json: {
-									...items[i].json, // Pass through input data
-									success: true,
-									operation,
-									closeMode,
-									closedSessions,
-									failedSessions,
-									message: `Closed ${closedSessions.length} of ${sessionIds.length} sessions successfully`,
-									timestamp: new Date().toISOString(),
-									executionDuration: Date.now() - startTime,
-								},
-							});
-						}
-					} catch (error) {
-						// Handle errors based on continueOnFail setting
-						if (!continueOnFail) {
-							// If continueOnFail is false, throw the error to fail the node
-							throw new Error(`Close operation failed: ${(error as Error).message}`);
-						}
-
-						// Otherwise, return an error response and continue
-						returnData[0].push({
-							json: {
-								...items[i].json, // Pass through input data
-								success: false,
-								operation,
-								closeMode,
-								error: (error as Error).message,
-								timestamp: new Date().toISOString(),
-								executionDuration: Date.now() - startTime,
-							},
-						});
+					// Add execution duration to the result
+					if (result.json && !result.json.executionDuration) {
+						result.json.executionDuration = Date.now() - startTime;
 					}
+
+					returnData[0].push(result);
 				} else {
 					throw new Error(`The operation "${operation}" is not supported!`);
 				}
