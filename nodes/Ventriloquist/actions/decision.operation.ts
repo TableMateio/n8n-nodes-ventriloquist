@@ -18,30 +18,22 @@ import {
 	extractHtmlContent,
 	extractInputValue,
 	extractAttributeValue,
-	extractTableData,
-	extractMultipleElements,
 	formatExtractedDataForLog
 } from '../utils/extractionUtils';
 import {
 	navigateWithRetry,
 } from '../utils/navigationUtils';
 import {
-	detectElement,
-	detectText,
-	detectCount,
-	detectUrl,
-	detectExpression,
-	detectExecutionCount,
-	detectInputSource,
-	IDetectionOptions,
-	IDetectionResult
-} from '../utils/detectionUtils';
-import {
 	executeAction,
 	ActionType,
 	IActionParameters,
 	IActionOptions
 } from '../utils/actionUtils';
+// Add import for conditionUtils module
+import {
+	evaluateConditionGroup,
+	IConditionGroup
+} from '../utils/conditionUtils';
 
 /**
  * Decision operation description
@@ -2075,149 +2067,6 @@ export const description: INodeProperties[] = [
 	}
 
 	/**
-	 * Evaluate a single condition
-	 */
-	async function evaluateCondition(
-		page: puppeteer.Page,
-		condition: IDataObject,
-		conditionType: string,
-		waitForSelectors: boolean,
-		selectorTimeout: number,
-		detectionMethod: string,
-		earlyExitDelay: number,
-		currentUrl: string,
-		index: number,
-		thisNode: IExecuteFunctions
-	): Promise<boolean> {
-		try {
-			// Create detection options once
-			const detectionOptions: IDetectionOptions = {
-				waitForSelectors,
-				selectorTimeout,
-				detectionMethod,
-				earlyExitDelay,
-				nodeName: thisNode.getNode().name,
-				nodeId: thisNode.getNode().id,
-				index,
-			};
-
-			let result: IDetectionResult;
-
-			switch (conditionType) {
-				case 'elementExists': {
-					const selector = condition.selector as string;
-					result = await detectElement(page, selector, detectionOptions, thisNode.logger);
-					break;
-				}
-
-				case 'textContains': {
-					const selector = condition.selector as string;
-					const textToCheck = condition.textToCheck as string;
-					const matchType = condition.matchType as string;
-					const caseSensitive = condition.caseSensitive as boolean;
-
-					result = await detectText(
-						page,
-						selector,
-						textToCheck,
-						matchType,
-						caseSensitive,
-						detectionOptions,
-						thisNode.logger
-					);
-					break;
-				}
-
-				case 'elementCount': {
-					const selector = condition.selector as string;
-					const expectedCount = condition.expectedCount as number;
-					const countComparison = condition.countComparison as string;
-
-					result = await detectCount(
-						page,
-						selector,
-						expectedCount,
-						countComparison,
-						detectionOptions,
-						thisNode.logger
-					);
-					break;
-				}
-
-				case 'urlContains': {
-					const urlSubstring = condition.urlSubstring as string;
-					const matchType = condition.matchType as string || 'contains';
-					const caseSensitive = condition.caseSensitive as boolean || false;
-
-					result = await detectUrl(
-						page,
-						urlSubstring,
-						matchType,
-						caseSensitive,
-						detectionOptions,
-						thisNode.logger
-					);
-					break;
-				}
-
-				case 'jsExpression': {
-					const jsExpression = condition.jsExpression as string;
-					result = await detectExpression(page, jsExpression, detectionOptions, thisNode.logger);
-					break;
-				}
-
-				case 'executionCount': {
-					// Get the current execution count from the context
-					// This is typically tracked elsewhere in the system
-					// For now we'll use a dummy value of 1 - this should be replaced with actual tracking
-					const executionCountValue = 1; // This should be retrieved from an execution tracker
-					const expectedCount = condition.executionCountValue as number;
-					const countComparison = condition.executionCountComparison as string;
-
-					result = await detectExecutionCount(
-						executionCountValue,
-						expectedCount,
-						countComparison,
-						detectionOptions,
-						thisNode.logger
-					);
-					break;
-				}
-
-				case 'inputSource': {
-					// Get the source node name from context
-					// This would typically come from the workflow execution context
-					// For now we'll use a dummy placeholder approach
-					const actualSourceNodeName = 'unknown'; // This should be retrieved from workflow context
-					const expectedSourceNodeName = condition.sourceNodeName as string;
-
-					result = await detectInputSource(
-						actualSourceNodeName,
-						expectedSourceNodeName,
-						detectionOptions,
-						thisNode.logger
-					);
-					break;
-				}
-
-				default:
-					// Unrecognized condition type
-					thisNode.logger.warn(`Unrecognized condition type: ${conditionType}`);
-					return false;
-			}
-
-			return result.success;
-		} catch (error) {
-			// Log the error but don't stop execution
-			thisNode.logger.error(formatOperationLog('Decision', thisNode.getNode().name, thisNode.getNode().id, index,
-				`Error evaluating condition type ${conditionType}: ${(error as Error).message}`));
-
-			// Return false on any error in condition evaluation
-			return false;
-		}
-	}
-
-	/**
 	 * Execute decision operation
 	 */
 	export async function execute(
@@ -2403,10 +2252,6 @@ export const description: INodeProperties[] = [
 			// Check each condition group
 			for (const group of conditionGroups) {
 				const groupName = group.name as string;
-				const invertCondition = group.invertCondition as boolean || false;
-
-				// Get condition type (default to one if not set)
-				const conditionType = group.conditionType as string || 'one';
 
 				// Get route if routing is enabled
 				if (enableRouting) {
@@ -2418,214 +2263,49 @@ export const description: INodeProperties[] = [
 				}
 
 				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-					`Checking group: "${groupName}" (type: ${conditionType}, invert: ${invertCondition})`));
-
-				// Initialize the overall condition result
-				let groupConditionMet = false;
+					`Checking group: "${groupName}"`));
 
 				try {
-					// Handle the different condition types
-					if (conditionType === 'one') {
-						// Handle single condition case with direct parameters (not in a collection)
-						const singleConditionType = group.singleConditionType as string || 'elementExists';
-						const invertSingleCondition = group.singleInvertCondition as boolean || false;
+					// Create a proper IConditionGroup object
+					const conditionGroup: IConditionGroup = {
+						name: group.name as string,
+						conditionType: group.conditionType as string || 'one',
+						singleConditionType: group.singleConditionType as string,
+						singleSelector: group.singleSelector as string,
+						singleTextToCheck: group.singleTextToCheck as string,
+						singleUrlSubstring: group.singleUrlSubstring as string,
+						singleCountComparison: group.singleCountComparison as string,
+						singleExpectedCount: group.singleExpectedCount as number,
+						singleJsExpression: group.singleJsExpression as string,
+						singleSourceNodeName: group.singleSourceNodeName as string,
+						singleExecutionCountComparison: group.singleExecutionCountComparison as string,
+						singleExecutionCountValue: group.singleExecutionCountValue as number,
+						singleMatchType: group.singleMatchType as string,
+						singleCaseSensitive: group.singleCaseSensitive as boolean,
+						singleInvertCondition: group.singleInvertCondition as boolean,
+						invertCondition: group.invertCondition as boolean,
+						// Convert conditions collection if it exists
+						conditions: group.conditions && typeof group.conditions === 'object' &&
+							(group.conditions as IDataObject).condition ?
+							(group.conditions as IDataObject).condition as IDataObject[] :
+							undefined
+					};
 
-						// Create a condition object from the single condition parameters
-						const singleCondition: IDataObject = {
-							conditionType: singleConditionType,
-							invertCondition: invertSingleCondition,
-						};
-
-						// Add specific fields based on condition type
-						switch (singleConditionType) {
-							case 'elementExists':
-							case 'textContains':
-							case 'elementCount':
-								singleCondition.selector = group.singleSelector as string;
-								break;
-							case 'expression':
-								singleCondition.jsExpression = group.singleJsExpression as string;
-								break;
-							case 'inputSource':
-								singleCondition.sourceNodeName = group.singleSourceNodeName as string;
-								break;
-							case 'executionCount':
-								singleCondition.executionCountComparison = group.singleExecutionCountComparison as string;
-								singleCondition.executionCountValue = group.singleExecutionCountValue as number;
-								break;
-							case 'urlContains':
-								singleCondition.urlSubstring = group.singleUrlSubstring as string;
-								break;
-						}
-
-						// Add additional fields for specific condition types
-						if (singleConditionType === 'textContains') {
-							singleCondition.textToCheck = group.singleTextToCheck as string;
-							singleCondition.matchType = group.singleMatchType as string;
-							singleCondition.caseSensitive = group.singleCaseSensitive as boolean;
-						}
-
-						if (singleConditionType === 'urlContains') {
-							singleCondition.matchType = group.singleMatchType as string;
-							singleCondition.caseSensitive = group.singleCaseSensitive as boolean;
-						}
-
-						if (singleConditionType === 'elementCount') {
-							singleCondition.countComparison = group.singleCountComparison as string;
-							singleCondition.expectedCount = group.singleExpectedCount as number;
-						}
-
-						// Evaluate the single condition
-						groupConditionMet = await evaluateCondition(
-							puppeteerPage,
-							singleCondition,
-							singleConditionType,
-							waitForSelectors,
-							selectorTimeout,
-							detectionMethod,
-							earlyExitDelay,
-							currentUrl,
-							index,
-							this
-						);
-
-						// Apply inversion if needed
-						if (invertSingleCondition) {
-							groupConditionMet = !groupConditionMet;
-						}
-
-						this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-							`Single condition (${singleConditionType}) result: ${groupConditionMet}`));
-					} else {
-						// Handle multiple conditions with AND/OR logic
-						// Get conditions and ensure type safety
-						let conditions: IDataObject[] = [];
-						if (group.conditions &&
-							typeof group.conditions === 'object' &&
-							(group.conditions as IDataObject).condition &&
-							Array.isArray((group.conditions as IDataObject).condition)) {
-							conditions = (group.conditions as IDataObject).condition as IDataObject[];
-						}
-
-						this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-							`Checking ${conditions.length} conditions with ${conditionType} logic`));
-
-						// Handle the case of no conditions - default to false
-						if (conditions.length === 0) {
-							this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-								`No conditions in group ${groupName}, skipping`));
-							groupConditionMet = false;
-						} else if (conditions.length === 1) {
-							// Single condition in multiple conditions case
-							const condition = conditions[0];
-							const singleConditionType = condition.conditionType as string;
-							const invertSingleCondition = condition.invertCondition as boolean || false;
-
-							// Evaluate the single condition
-							groupConditionMet = await evaluateCondition(
-								puppeteerPage,
-								condition,
-								singleConditionType,
-								waitForSelectors,
-								selectorTimeout,
-								detectionMethod,
-								earlyExitDelay,
-								currentUrl,
-								index,
-								this
-							);
-
-							// Apply inversion if needed
-							if (invertSingleCondition) {
-								groupConditionMet = !groupConditionMet;
-							}
-
-							this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-								`Single condition in collection (${singleConditionType}) result: ${groupConditionMet}`));
-						} else {
-							// Multiple conditions case - apply logical operator based on conditionType
-							if (conditionType === 'and') {
-								// AND logic - start with true, any false makes it false
-								groupConditionMet = true;
-
-								for (const condition of conditions) {
-									const singleConditionType = condition.conditionType as string;
-									const invertSingleCondition = condition.invertCondition as boolean || false;
-
-									// Evaluate the condition
-									let conditionMet = await evaluateCondition(
-										puppeteerPage,
-										condition,
-										singleConditionType,
-										waitForSelectors,
-										selectorTimeout,
-										detectionMethod,
-										earlyExitDelay,
-										currentUrl,
-										index,
-										this
-									);
-
-									// Apply inversion if needed
-									if (invertSingleCondition) {
-										conditionMet = !conditionMet;
-									}
-
-									// Short circuit if any condition is false
-									if (!conditionMet) {
-										groupConditionMet = false;
-										this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Condition (${singleConditionType}) is false, short-circuiting AND logic`));
-										break;
-									}
-								}
-							} else if (conditionType === 'or') {
-								// OR logic - start with false, any true makes it true
-								groupConditionMet = false;
-
-								for (const condition of conditions) {
-									const singleConditionType = condition.conditionType as string;
-									const invertSingleCondition = condition.invertCondition as boolean || false;
-
-									// Evaluate the condition
-									let conditionMet = await evaluateCondition(
-										puppeteerPage,
-										condition,
-										singleConditionType,
-										waitForSelectors,
-										selectorTimeout,
-										detectionMethod,
-										earlyExitDelay,
-										currentUrl,
-										index,
-										this
-									);
-
-									// Apply inversion if needed
-									if (invertSingleCondition) {
-										conditionMet = !conditionMet;
-									}
-
-									// Short circuit if any condition is true
-									if (conditionMet) {
-										groupConditionMet = true;
-										this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Condition (${singleConditionType}) is true, short-circuiting OR logic`));
-										break;
-									}
-								}
-							}
-
-							this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-								`Multiple conditions with ${conditionType} logic result: ${groupConditionMet}`));
-						}
-					}
-
-					this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-						`Decision group ${groupName} final result: ${groupConditionMet}`));
+					// Use the properly constructed object
+					const conditionGroupResult = await evaluateConditionGroup(
+						puppeteerPage,
+						conditionGroup,
+						waitForSelectors,
+						selectorTimeout,
+						detectionMethod,
+						earlyExitDelay,
+						currentUrl,
+						index,
+						this
+					);
 
 					// If condition is met
-					if (groupConditionMet) {
+					if (conditionGroupResult.success) {
 						routeTaken = groupName;
 						const actionType = group.actionType as string;
 
