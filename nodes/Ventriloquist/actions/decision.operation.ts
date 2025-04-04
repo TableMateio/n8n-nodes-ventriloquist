@@ -2999,8 +2999,23 @@ export const description: INodeProperties[] = [
 									const hasActionSelector = !!group.actionSelector;
 									const hasFormFields = !!(group.formFields && (group.formFields as IDataObject).fields);
 
+									// Get browser session information and credential type for compatibility
+									const workflowId = this.getWorkflow().id || '';
+									const session = Ventriloquist.getSessions().get(workflowId);
+									let credentialType = 'brightDataApi'; // Default
+
+									if (session?.credentialType) {
+										credentialType = session.credentialType;
+										this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using credential type from session: ${credentialType}`);
+									} else {
+										this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] No credential type found in session, defaulting to: ${credentialType}`);
+									}
+
+									// Store credential type for field handling
+									group._credentialType = credentialType;
+
 									// Log what approach we're using for debugging
-									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Form fill approach: ${hasActionSelector ? 'Simple' : hasFormFields ? 'Complex' : 'Unknown'}`);
+									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Form fill approach: ${hasActionSelector ? 'Simple' : hasFormFields ? 'Complex' : 'Unknown'} with provider: ${credentialType}`);
 
 									try {
 										// Handle simple action selector approach
@@ -3106,127 +3121,66 @@ export const description: INodeProperties[] = [
 														const pressEnter = field.pressEnter as boolean || false;
 														const humanLike = field.humanLike as boolean ?? true;
 
-														// Clear field if requested (matching Form node implementation)
-														if (clearField) {
-															this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing field contents before filling`);
-
-															// Use evaluate approach (from Form node) instead of click+backspace
-															await puppeteerPage.evaluate((sel: string) => {
-																const element = document.querySelector(sel);
-																if (element) {
-																	(element as HTMLInputElement).value = '';
-																}
-															}, selector);
-														}
-
-														// First, click to focus the field (additional step to ensure focus)
-														try {
-															await puppeteerPage.click(selector);
-														} catch (clickError) {
-															this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Could not click on field before typing: ${(clickError as Error).message}`);
-														}
-
-														// Type the text with detailed logging
-														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Filling text field: ${selector} with value: ${value} (human-like: ${humanLike})`);
-
-														// Try direct input first (combined approach)
-														try {
-															// Set value directly via JS and dispatch events (reliable method)
-															await puppeteerPage.evaluate((sel, val) => {
-																const element = document.querySelector(sel);
-																if (element && (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
-																	element.value = val;
-																	element.dispatchEvent(new Event('input', { bubbles: true }));
-																	element.dispatchEvent(new Event('change', { bubbles: true }));
-																}
-															}, selector, value);
-														} catch (evaluateError) {
-															this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Direct input failed, falling back to typing: ${(evaluateError as Error).message}`);
-
-															// Fall back to typing method
-															if (humanLike) {
-																for (const char of value) {
-																	await puppeteerPage.type(selector, char, { delay: Math.floor(Math.random() * 150) + 25 });
-																}
-															} else {
-																await puppeteerPage.type(selector, value, { delay: 0 });
-															}
-														}
-
-														// Press Enter if requested
-														if (pressEnter) {
-															await puppeteerPage.keyboard.press('Enter');
-														}
-														break;
-													}
-													case 'password': {
-														const value = field.value as string || '';
-														const clearField = field.clearField as boolean ?? true;
+														// Enhanced debugging for form typing
+														const credentialType = group._credentialType || 'unknown';
+														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Filling form field: ${selector} with value: ${value} (human-like: ${humanLike}, credential type: ${credentialType})`);
 
 														// Clear field if requested
 														if (clearField) {
-															this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing password field: ${selector}`);
-															await puppeteerPage.evaluate((sel: string) => {
-																const element = document.querySelector(sel);
-																if (element) {
-																	(element as HTMLInputElement).value = '';
-																}
-															}, selector);
+															// Click three times to select all text
+															await puppeteerPage.click(selector, { clickCount: 3 });
+															// Delete selected text
+															await puppeteerPage.keyboard.press('Backspace');
 														}
 
-														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Filling password field: ${selector} (value masked)`);
-
-														// First try using the type method (works well with Browserless)
+														// Try to verify the field is ready for input
 														try {
-															// First click to ensure focus
-															await puppeteerPage.click(selector);
-
-															// Try typing directly (this works well with Browserless)
-															await puppeteerPage.type(selector, value);
-														} catch (typeError) {
-															this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Direct typing failed for password, trying alternative: ${(typeError as Error).message}`);
-
-															// Fall back to type-switching technique (works better with Bright Data)
-															await puppeteerPage.evaluate((sel, val) => {
+															const isVisible = await puppeteerPage.evaluate((sel) => {
 																const element = document.querySelector(sel);
-																if (element && element instanceof HTMLInputElement) {
-																	try {
-																		// Save original type
-																		const originalType = element.getAttribute('type');
+																if (!element) return 'Element not found';
+																const style = window.getComputedStyle(element);
+																const rect = element.getBoundingClientRect();
+																return {
+																	visible: style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0,
+																	tag: element.tagName.toLowerCase(),
+																	type: element instanceof HTMLInputElement ? element.type : 'not-input'
+																};
+															}, selector);
+															this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Field status: ${JSON.stringify(isVisible)}`);
+														} catch (fieldCheckError) {
+															this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Could not check field visibility: ${(fieldCheckError as Error).message}`);
+														}
 
-																		// Temporarily change to text type
-																		element.setAttribute('type', 'text');
+														// Use human-like typing with random delays between keystrokes
+														try {
+															if (humanLike) {
+																this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using human-like typing for ${value.length} characters`);
+																for (const char of value) {
+																	this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Typing character: ${char}`);
+																	await puppeteerPage.type(selector, char, { delay: Math.floor(Math.random() * 150) + 25 });
+																}
+															} else {
+																// Fast direct typing without delays for non-human-like mode
+																this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using fast typing for "${value}"`);
+																await puppeteerPage.type(selector, value, { delay: 0 });
+															}
+															this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Typing completed for selector: ${selector}`);
+														} catch (typeError) {
+															this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error during typing: ${(typeError as Error).message}`);
 
-																		// Set the value while it's a text field
+															// Try alternative input method as fallback
+															this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Trying alternative input method`);
+															try {
+																await puppeteerPage.evaluate((sel, val) => {
+																	const element = document.querySelector(sel);
+																	if (element && (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
 																		element.value = val;
-
-																		// Trigger events
 																		element.dispatchEvent(new Event('input', { bubbles: true }));
 																		element.dispatchEvent(new Event('change', { bubbles: true }));
-
-																		// Change back to original type (password)
-																		element.setAttribute('type', originalType || 'password');
-																	} catch (err) {
-																		console.error('Error while manipulating password field:', err);
 																	}
-																}
-															}, selector, value);
-														}
-
-														// Handle clone field if specified (used by some sites with visible/hidden toggle)
-														const hasCloneField = field.hasCloneField as boolean || false;
-														if (hasCloneField) {
-															const cloneSelector = field.cloneSelector as string;
-															if (cloneSelector) {
-																this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Filling clone password field: ${cloneSelector}`);
-
-																try {
-																	// Set clone field using same approach
-																	await puppeteerPage.click(cloneSelector);
-																	await puppeteerPage.type(cloneSelector, value);
-																} catch (cloneError) {
-																	this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error setting clone field: ${(cloneError as Error).message}`);
-																}
+																}, selector, value);
+															} catch (evalError) {
+																throw new Error(`Both typing methods failed: ${(typeError as Error).message} AND ${(evalError as Error).message}`);
 															}
 														}
 
@@ -3238,6 +3192,88 @@ export const description: INodeProperties[] = [
 															}
 														}, selector);
 
+														// Press Enter if requested
+														if (pressEnter) {
+															await puppeteerPage.keyboard.press('Enter');
+														}
+														break;
+													}
+													case 'password': {
+														const value = field.value as string || '';
+														const clearField = field.clearField as boolean ?? true;
+														const credentialType = group._credentialType || 'unknown';
+
+														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Filling password field: ${selector} (value masked) using ${credentialType}`);
+
+														// Clear field if needed
+														if (clearField) {
+															// For Browserless, use triple-click to select all
+															await puppeteerPage.click(selector, { clickCount: 3 });
+															await puppeteerPage.keyboard.press('Backspace');
+														}
+
+														if (credentialType === 'browserless') {
+															// For Browserless, we need a multi-layered approach
+															try {
+																// First try the direct type method (most reliable for Browserless)
+																this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using direct type for password with Browserless`);
+																await puppeteerPage.click(selector);
+																await puppeteerPage.type(selector, value, { delay: 10 });
+															} catch (typeError) {
+																this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Direct typing failed for password: ${(typeError as Error).message}`);
+
+																// Fall back to JS method
+																try {
+																	await puppeteerPage.evaluate((sel, val) => {
+																		const element = document.querySelector(sel);
+																		if (element && element instanceof HTMLInputElement) {
+																			element.value = val;
+																			element.dispatchEvent(new Event('input', { bubbles: true }));
+																			element.dispatchEvent(new Event('change', { bubbles: true }));
+																		}
+																	}, selector, value);
+																} catch (evalError) {
+																	this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Both password input methods failed: ${(evalError as Error).message}`);
+																	throw new Error(`Failed to input password using both methods`);
+																}
+															}
+														} else {
+															// For other providers like Bright Data, use safer JS evaluation approach
+															try {
+																await puppeteerPage.evaluate((sel, val) => {
+																	const element = document.querySelector(sel);
+																	if (element && element instanceof HTMLInputElement) {
+																		// Check if element is a password field
+																		const isPasswordField = element.type === 'password';
+																		const originalType = element.type;
+
+																		try {
+																			// Temporarily change type to text if it's a password field
+																			if (isPasswordField) {
+																				element.setAttribute('type', 'text');
+																			}
+
+																			// Set value and dispatch events
+																			element.value = val;
+																			element.dispatchEvent(new Event('input', { bubbles: true }));
+																			element.dispatchEvent(new Event('change', { bubbles: true }));
+
+																			// Change back to original type (password)
+																			element.setAttribute('type', originalType || 'password');
+																		} catch (err) {
+																			console.error('Error while manipulating password field:', err);
+																		}
+																	}
+																}, selector, value);
+															} catch (evalError) {
+																this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] JS eval password input failed: ${(evalError as Error).message}`);
+
+																// Last resort: try direct typing
+																this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Falling back to direct typing for password`);
+																await puppeteerPage.click(selector);
+																await puppeteerPage.type(selector, value);
+															}
+														}
 														break;
 													}
 												}
