@@ -4,8 +4,23 @@ import type {
 	INodeExecutionData,
 	INodeProperties,
 } from 'n8n-workflow';
-import { Ventriloquist } from '../Ventriloquist.node';
-import type * as puppeteer from 'puppeteer-core';
+import type { Page } from 'puppeteer-core';
+import { SessionManager } from '../utils/sessionManager';
+import {
+	fillTextField,
+	handleSelectField,
+	handleCheckboxField,
+	handleFileUpload,
+	handleMultiSelectField,
+	handlePasswordField,
+	submitForm,
+	getHumanDelay
+} from '../utils/formOperations';
+import {
+	smartWaitForSelector,
+	getPageDetails,
+	takeScreenshot
+} from '../utils/navigationUtils';
 
 /**
  * Form operation description
@@ -536,191 +551,6 @@ export const description: INodeProperties[] = [
 ];
 
 /**
- * Get a random human-like delay between 100-300ms (much faster than before)
- */
-function getHumanDelay(): number {
-	return Math.floor(Math.random() * (300 - 100 + 1) + 100);
-}
-
-/**
- * Ensure an element is visible in the viewport by scrolling to it if needed
- */
-async function ensureElementInViewport(page: puppeteer.Page, selector: string): Promise<boolean> {
-	try {
-		// Check if element exists and is visible
-		const isVisible = await page.evaluate((sel) => {
-			const el = document.querySelector(sel);
-			if (!el) return false;
-
-			const style = window.getComputedStyle(el);
-			const isDisplayed = style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-
-			if (!isDisplayed) return false;
-
-			// Check if element is in viewport
-			const rect = el.getBoundingClientRect();
-			return (
-				rect.top >= 0 &&
-				rect.left >= 0 &&
-				rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
-				rect.right <= (window.innerWidth || document.documentElement.clientWidth)
-			);
-		}, selector);
-
-		// If not visible in viewport, scroll to it
-		if (!isVisible) {
-			await page.evaluate((sel) => {
-				const el = document.querySelector(sel);
-				if (el) {
-					el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-					return true;
-				}
-				return false;
-			}, selector);
-
-			// Wait a moment for the scroll to complete
-			await new Promise(resolve => setTimeout(resolve, 500));
-			return true;
-		}
-
-		return true;
-	} catch (error) {
-		return false;
-	}
-}
-
-/**
- * Try multiple button click methods to ensure click succeeds
- */
-async function robustButtonClick(page: puppeteer.Page, selector: string, logger: {
-	info: (message: string) => void;
-	warn: (message: string) => void;
-	error: (message: string) => void;
-}): Promise<boolean> {
-	try {
-		// Method 1: Standard click
-		logger.info('Attempting standard click method');
-		await page.click(selector);
-		logger.info('Standard click succeeded');
-		return true;
-	} catch (error1) {
-		logger.warn(`Standard click failed: ${(error1 as Error).message}, trying alternate methods`);
-
-		try {
-			// Method 2: JavaScript click via evaluate
-			logger.info('Attempting JavaScript click method');
-			const clickResult = await page.evaluate((sel) => {
-				const button = document.querySelector(sel);
-				if (button) {
-					// Cast to HTMLElement to access click method
-					(button as HTMLElement).click();
-					return { success: true, elementExists: true };
-				}
-				return { success: false, elementExists: false };
-			}, selector);
-
-			if (clickResult.success) {
-				logger.info('JavaScript click succeeded');
-				return true;
-			}
-
-			if (!clickResult.elementExists) {
-				logger.error('Button no longer exists in DOM');
-				return false;
-			}
-
-			// Method 3: Try mousedown + mouseup events
-			logger.info('Attempting mousedown/mouseup events method');
-			await page.evaluate((sel) => {
-				const button = document.querySelector(sel);
-				if (button) {
-					const events = ['mousedown', 'mouseup', 'click'];
-					for (const eventType of events) {
-						const event = new MouseEvent(eventType, {
-							view: window,
-							bubbles: true,
-							cancelable: true,
-							buttons: 1
-						});
-						button.dispatchEvent(event);
-					}
-				}
-			}, selector);
-
-			logger.info('Direct event dispatch attempted');
-			return true;
-		} catch (error2) {
-			logger.error(`All click methods failed: ${(error2 as Error).message}`);
-			return false;
-		}
-	}
-}
-
-/**
- * Calculate simple string similarity (Levenshtein distance based)
- */
-function calculateSimilarity(str1: string, str2: string): number {
-	const track = Array(str2.length + 1).fill(null).map(() =>
-		Array(str1.length + 1).fill(null));
-
-	for (let i = 0; i <= str1.length; i += 1) {
-		track[0][i] = i;
-	}
-
-	for (let j = 0; j <= str2.length; j += 1) {
-		track[j][0] = j;
-	}
-
-	for (let j = 1; j <= str2.length; j += 1) {
-		for (let i = 1; i <= str1.length; i += 1) {
-			const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
-			track[j][i] = Math.min(
-				track[j][i - 1] + 1, // deletion
-				track[j - 1][i] + 1, // insertion
-				track[j - 1][i - 1] + indicator, // substitution
-			);
-		}
-	}
-
-	const distance = track[str2.length][str1.length];
-	const maxLength = Math.max(str1.length, str2.length);
-	if (maxLength === 0) return 1.0; // Both strings are empty
-
-	// Convert distance to similarity score (1 - normalized distance)
-	return 1 - distance / maxLength;
-}
-
-/**
- * Find best match using similarity
- */
-function findBestMatch(target: string, options: Array<{value: string, text: string}>): {
-	bestMatch: {value: string, text: string, rating: number};
-	bestMatchIndex: number;
-} {
-	const targetLower = target.toLowerCase();
-	const ratings = options.map(option => ({
-		value: option.value,
-		text: option.text,
-		rating: calculateSimilarity(targetLower, option.text.toLowerCase())
-	}));
-
-	let bestMatchIndex = 0;
-	let bestRating = 0;
-
-	for (let i = 0; i < ratings.length; i++) {
-		if (ratings[i].rating > bestRating) {
-			bestRating = ratings[i].rating;
-			bestMatchIndex = i;
-		}
-	}
-
-	return {
-		bestMatch: ratings[bestMatchIndex],
-		bestMatchIndex
-	};
-}
-
-/**
  * Execute the form operation
  */
 export async function execute(
@@ -732,11 +562,11 @@ export async function execute(
 	// Get parameters
 	const formFields = this.getNodeParameter('formFields.fields', index, []) as IDataObject[];
 	const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
-	const submitForm = this.getNodeParameter('submitForm', index, true) as boolean;
+	const submitFormAfterFill = this.getNodeParameter('submitForm', index, true) as boolean;
 	const submitSelector = this.getNodeParameter('submitSelector', index, '') as string;
 	const waitAfterSubmit = this.getNodeParameter('waitAfterSubmit', index, 'domContentLoaded') as string;
 	const waitTime = this.getNodeParameter('waitTime', index, 5000) as number;
-	const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
+	const takeScreenshotAfterSubmit = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
 	const selectorTimeout = this.getNodeParameter('selectorTimeout', index, 10000) as number;
 	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
@@ -757,12 +587,12 @@ export async function execute(
 	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
 
 	// Get or create browser session
-	let page: puppeteer.Page | undefined;
+	let page: Page | undefined;
 	let sessionId = '';
 
 	try {
 		// Create a session or reuse an existing one - explicitly NOT forcing a new session
-		const { browser, sessionId: newSessionId } = await Ventriloquist.getOrCreateSession(
+		const { browser, sessionId: newSessionId } = await SessionManager.getOrCreateSession(
 			workflowId,
 			websocketEndpoint,
 			this.logger,
@@ -773,7 +603,7 @@ export async function execute(
 		// If an explicit sessionId was provided, try to get that page first
 		if (explicitSessionId) {
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Looking for explicitly provided session ID: ${explicitSessionId}`);
-			page = Ventriloquist.getPage(workflowId, explicitSessionId);
+			page = SessionManager.getPage(workflowId, explicitSessionId);
 
 			if (page) {
 				sessionId = explicitSessionId;
@@ -800,7 +630,7 @@ export async function execute(
 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Created new page with session ID: ${sessionId}`);
 
 				// Store the new page for future operations
-				Ventriloquist.storePage(workflowId, sessionId, page);
+				SessionManager.storePage(workflowId, sessionId, page);
 
 				// Navigate to a blank page to initialize it
 				await page.goto('about:blank');
@@ -822,12 +652,13 @@ export async function execute(
 		// Wait for form elements if enabled
 		if (waitForSelectors) {
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for form elements to appear`);
-			// Remove the problematic selector '*' wait and replace with a better approach
+
 			// Check if the page is ready first
 			const pageReady = await page.evaluate(() => {
 				return {
 					readyState: document.readyState,
 					bodyExists: !!document.body,
+
 					contentLoaded: document.readyState === 'interactive' || document.readyState === 'complete',
 				};
 			});
@@ -856,28 +687,26 @@ export async function execute(
 			if (waitForSelectors) {
 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for selector: ${selector} (timeout: ${selectorTimeout}ms)`);
 				try {
-					await page.waitForSelector(selector, { timeout: selectorTimeout });
+					const elementFound = await smartWaitForSelector(page, selector, selectorTimeout, this.logger);
+
+					if (!elementFound) {
+						throw new Error(`Element not found or not visible: ${selector}`);
+					}
 				} catch (selectorError) {
 					// Get information about the current page for better diagnostics
-					const currentUrl = page.url();
-					const pageTitle = await page.title();
+					const pageInfo = await getPageDetails(page);
 
 					// Try to take a screenshot if possible for debugging
 					let errorScreenshot = '';
 					try {
-						const screenshotBuffer = await page.screenshot({
-							encoding: 'base64',
-							type: 'jpeg',
-							quality: 50, // Lower quality for smaller size
-						});
-						errorScreenshot = `data:image/jpeg;base64,${screenshotBuffer}`;
+						errorScreenshot = await takeScreenshot(page, this.logger) || '';
 					} catch {
 						// Ignore screenshot errors
 					}
 
 					// Log detailed diagnostic information
 					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Failed to find form field selector: ${selector}`);
-					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Current page: ${currentUrl} | Title: ${pageTitle}`);
+					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Current page: ${pageInfo.url} | Title: ${pageInfo.title}`);
 
 					// Include screenshot information in the logs if available
 					if (errorScreenshot) {
@@ -887,8 +716,8 @@ export async function execute(
 					// Prepare detailed error information
 					const errorDetails = {
 						message: `Form field selector "${selector}" not found on page after ${selectorTimeout}ms.`,
-						url: currentUrl,
-						title: pageTitle,
+						url: pageInfo.url,
+						title: pageInfo.title,
 						selector,
 						fieldType,
 						screenshot: errorScreenshot,
@@ -912,7 +741,7 @@ export async function execute(
 					// Throw a more informative error (only reaches here if continueOnFail is false)
 					throw new Error(
 						`Form field selector "${selector}" not found on page after ${selectorTimeout}ms. ` +
-						`Page URL: ${currentUrl} | Title: ${pageTitle}`
+						`Page URL: ${pageInfo.url} | Title: ${pageInfo.title}`
 					);
 				}
 			} else {
@@ -923,921 +752,233 @@ export async function execute(
 				}
 			}
 
+			// Add human-like delay between form field interactions if enabled
+			if (useHumanDelays) {
+				const delay = getHumanDelay();
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Adding human-like delay of ${delay}ms`);
+				await new Promise(resolve => setTimeout(resolve, delay));
+			}
+
 			// Handle different field types
+			let fieldSuccess = false;
+			let fieldResult: IDataObject = {
+				fieldType,
+				selector,
+				success: false,
+			};
+
 			switch (fieldType) {
-				case 'text': {
+				case 'text':
+				case 'textarea': {
 					const value = field.value as string;
 					const clearField = field.clearField as boolean;
 					const humanLike = field.humanLike as boolean || false;
 
-					// Clear field if requested
-					if (clearField) {
-						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clearing field contents before filling`);
-						await page.evaluate((sel: string) => {
-							const element = document.querySelector(sel);
-							if (element) {
-								(element as HTMLInputElement).value = '';
-							}
-						}, selector);
-					}
+					fieldSuccess = await fillTextField(
+						page,
+						selector,
+						value,
+						{
+							clearField,
+							humanLike,
+							pressEnter: false,
+						},
+						this.logger
+					);
 
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling text field: ${selector} with value: ${value} (human-like: ${humanLike})`);
-
-					// Type text with either human-like typing or direct typing
-					if (humanLike) {
-						// Character-by-character typing with variable delays
-						for (const char of value) {
-							await page.type(selector, char, { delay: Math.floor(Math.random() * 150) + 25 });
-						}
-					} else {
-						// Direct input without character delays
-						await page.type(selector, value, { delay: 0 });
-					}
-
-					// Record the result
-					results.push({
+					fieldResult = {
 						fieldType,
 						selector,
 						value,
-						success: true,
-					});
+						success: fieldSuccess,
+					};
 					break;
 				}
 
 				case 'select': {
 					const value = field.value as string;
-					const matchType = field.matchType as string;
-					let selectedValue = value;
-					let selectedText = '';
-					let matchDetails = '';
+					const matchType = field.matchType as string || 'exact';
+					const fuzzyThreshold = field.fuzzyThreshold as number || 0.5;
 
-					if (matchType === 'exact') {
-						// Simple exact value match
-						await page.select(selector, value);
+					const selectResult = await handleSelectField(
+						page,
+						selector,
+						value,
+						{
+							matchType: matchType as 'exact' | 'textContains' | 'fuzzy',
+							fuzzyThreshold,
+						},
+						this.logger
+					);
 
-						// Try to get the text for this value
-						try {
-							selectedText = await page.$eval(`${selector} option[value="${value}"]`,
-								(el) => (el as HTMLOptionElement).textContent || '');
-						} catch {
-							// If we can't get the text, just leave it blank
-						}
-
-						matchDetails = 'exact match';
-					} else if (matchType === 'textContains' || matchType === 'fuzzy') {
-						// Get all options from the dropdown
-						const options = await page.$$eval(`${selector} option`, (options: Element[]) => {
-							return options.map((option: Element) => ({
-								value: (option as HTMLOptionElement).value,
-								text: option.textContent?.trim() || '',
-							}));
-						});
-
-						if (options.length === 0) {
-							throw new Error(`No options found in dropdown: ${selector}`);
-						}
-
-						if (matchType === 'textContains') {
-							// Find first option containing the text
-							const matchingOption = options.find(option =>
-								option.text.toLowerCase().includes(value.toLowerCase())
-							);
-
-							if (!matchingOption) {
-								throw new Error(`No option with text containing "${value}" found in dropdown: ${selector}`);
-							}
-
-							selectedValue = matchingOption.value;
-							selectedText = matchingOption.text;
-							matchDetails = `text contains match: "${value}" → "${selectedText}"`;
-							this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Selected option with value: ${selectedValue} (${matchDetails})`);
-						} else {
-							// Fuzzy matching
-							const threshold = field.fuzzyThreshold as number || 0.5;
-							const bestMatch = findBestMatch(value, options);
-
-							if (bestMatch.bestMatch.rating < threshold) {
-								throw new Error(`No close matches found for "${value}" in dropdown: ${selector} (best match: "${bestMatch.bestMatch.text}" with score: ${bestMatch.bestMatch.rating.toFixed(2)})`);
-							}
-
-							selectedValue = bestMatch.bestMatch.value;
-							selectedText = bestMatch.bestMatch.text;
-							matchDetails = `fuzzy match: "${value}" → "${selectedText}" (score: ${bestMatch.bestMatch.rating.toFixed(2)})`;
-							this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Selected option with value: ${selectedValue} (${matchDetails})`);
-						}
-
-						// Select the option
-						await page.select(selector, selectedValue);
-					}
-
-					// Record the result with enhanced information
-					results.push({
+					fieldSuccess = selectResult.success;
+					fieldResult = {
 						fieldType,
 						selector,
 						requestedValue: value,
-						selectedValue,
-						selectedText,
+						selectedValue: selectResult.selectedValue,
+						selectedText: selectResult.selectedText,
 						matchType,
-						matchDetails,
-						success: true,
-					});
+						matchDetails: selectResult.matchDetails,
+						success: fieldSuccess,
+					};
 					break;
 				}
 
 				case 'checkbox': {
 					const checked = field.checked as boolean;
-					// Get current checked state
-					const currentChecked = await page.evaluate((sel: string) => {
-						const element = document.querySelector(sel);
-						return element ? (element as HTMLInputElement).checked : false;
-					}, selector);
 
-					// Only click if the current state doesn't match desired state
-					if (currentChecked !== checked) {
-						await page.click(selector);
-					}
+					fieldSuccess = await handleCheckboxField(
+						page,
+						selector,
+						checked,
+						this.logger
+					);
 
-					// Record the result
-					results.push({
+					fieldResult = {
 						fieldType,
 						selector,
 						checked,
-						success: true,
-					});
+						success: fieldSuccess,
+					};
 					break;
 				}
 
 				case 'radio': {
 					// For radio buttons, just click to select
-					await page.click(selector);
+					try {
+						await page.click(selector);
+						fieldSuccess = true;
+					} catch (error) {
+						this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Error clicking radio button: ${(error as Error).message}`);
+						fieldSuccess = false;
+					}
 
-					// Record the result
-					results.push({
+					fieldResult = {
 						fieldType,
 						selector,
 						value: field.value,
-						success: true,
-					});
+						success: fieldSuccess,
+					};
 					break;
 				}
 
 				case 'file': {
 					const filePath = field.filePath as string;
-					if (!filePath) {
-						throw new Error(`File path is required for file input (selector: ${selector})`);
-					}
 
-					// Get the file input element
-					const fileInput = await page.$(selector);
-					if (!fileInput) {
-						throw new Error(`File input element not found: ${selector}`);
-					}
+					fieldSuccess = await handleFileUpload(
+						page,
+						selector,
+						filePath,
+						this.logger
+					);
 
-					// Upload the file
-					// We need to cast to a specific type for the uploadFile method
-					await (fileInput as puppeteer.ElementHandle<HTMLInputElement>).uploadFile(filePath);
-
-					// Record the result
-					results.push({
+					fieldResult = {
 						fieldType,
 						selector,
 						filePath,
-						success: true,
-					});
+						success: fieldSuccess,
+					};
 					break;
 				}
 
 				case 'multiSelect': {
-					const multiSelectValues = (field.multiSelectValues as string || '').split(',').map(v => v.trim()).filter(v => v);
+					const multiSelectValues = ((field.multiSelectValues as string) || '').split(',').map(v => v.trim()).filter(v => v);
 
-					if (multiSelectValues.length === 0) {
-						throw new Error(`No values provided for multi-select field: ${selector}`);
-					}
-
-					// Check if this is a multiple select element
-					const isMultipleSelect = await page.$eval(selector, (el) =>
-						(el as HTMLSelectElement).multiple
+					fieldSuccess = await handleMultiSelectField(
+						page,
+						selector,
+						multiSelectValues,
+						this.logger
 					);
 
-					if (isMultipleSelect) {
-						// For real <select multiple> elements, use the select-multiple capability
-						await page.select(selector, ...multiSelectValues);
-
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Selected ${multiSelectValues.length} options in multiple select`);
-					} else {
-						// For checkbox groups or custom multi-selects, click each value's checkbox
-						for (const value of multiSelectValues) {
-							// Try a few common patterns for checkbox selectors
-							const possibleSelectors = [
-								`${selector} input[value="${value}"]`, // Direct value
-								`${selector} input[data-value="${value}"]`, // Data attribute
-								`${selector} label:has-text("${value}") input`, // Label text
-								`${selector} *:has-text("${value}") input[type="checkbox"]` // Any element with text
-							];
-
-							let clicked = false;
-
-							// Try each selector pattern
-							for (const possibleSelector of possibleSelectors) {
-								try {
-									const exists = await page.$(possibleSelector) !== null;
-									if (exists) {
-										await page.click(possibleSelector);
-										this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clicked multi-select option: ${value} with selector: ${possibleSelector}`);
-										clicked = true;
-										break;
-									}
-								} catch (error) {
-									// Continue to the next selector pattern
-								}
-							}
-
-							if (!clicked) {
-								this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Could not find clickable element for value: ${value} in multi-select: ${selector}`);
-							}
-
-							// Add a tiny delay between clicks to ensure they register separately
-							await new Promise(resolve => setTimeout(resolve, 50));
-						}
-					}
-
-					// Record the result
-					results.push({
+					fieldResult = {
 						fieldType,
 						selector,
 						values: multiSelectValues,
-						success: true,
-					});
+						success: fieldSuccess,
+					};
 					break;
 				}
 
 				case 'password': {
 					const value = field.value as string;
 					const clearField = field.clearField as boolean;
+					const hasCloneField = field.hasCloneField as boolean;
+					const cloneSelector = field.cloneSelector as string;
 
-					// Clear field if requested
-					if (clearField) {
-						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clearing password field contents before filling`);
-						await page.evaluate((sel: string) => {
-							const element = document.querySelector(sel);
-							if (element) {
-								(element as HTMLInputElement).value = '';
-							}
-						}, selector);
-					}
+					fieldSuccess = await handlePasswordField(
+						page,
+						selector,
+						value,
+						{
+							clearField,
+							hasCloneField,
+							cloneSelector,
+						},
+						this.logger
+					);
 
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Filling password field: ${selector} (value masked)`);
-
-					// Use type-switching technique to bypass Bright Data's password restrictions
-					await page.evaluate((sel, val) => {
-						const element = document.querySelector(sel);
-						if (element && element instanceof HTMLInputElement) {
-							try {
-								// Save original type
-								const originalType = element.getAttribute('type');
-
-								// Temporarily change to text type to avoid password restrictions
-								element.setAttribute('type', 'text');
-
-								// Set the value while it's a text field
-								element.value = val;
-
-								// Trigger events
-								element.dispatchEvent(new Event('input', { bubbles: true }));
-								element.dispatchEvent(new Event('change', { bubbles: true }));
-
-								// Change back to original type (password)
-								element.setAttribute('type', originalType || 'password');
-							} catch (err) {
-								console.error('Error while manipulating password field:', err);
-							}
-						}
-					}, selector, value);
-
-					// Focus the next field or blur current field to trigger validation
-					await page.evaluate((sel) => {
-						const element = document.querySelector(sel);
-						if (element) {
-							(element as HTMLElement).blur();
-						}
-					}, selector);
-
-					// Record the result
-					results.push({
+					fieldResult = {
 						fieldType,
 						selector,
-						success: true,
-					});
+						success: fieldSuccess,
+					};
 					break;
 				}
+
+				default:
+					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Unsupported field type: ${fieldType}`);
+					fieldResult = {
+						fieldType,
+						selector,
+						success: false,
+						error: `Unsupported field type: ${fieldType}`,
+					};
 			}
 
-			// Add a human-like delay if enabled
-			if (useHumanDelays) {
-				const delay = getHumanDelay();
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Adding human-like delay: ${delay}ms`);
-				await new Promise(resolve => setTimeout(resolve, delay));
+			// Add the field result to our results collection
+			results.push(fieldResult);
+
+			// If the field failed and we're not continuing on failure, throw an error
+			if (!fieldSuccess && !continueOnFail) {
+				throw new Error(`Failed to fill form field: ${selector} (type: ${fieldType})`);
 			}
 		}
 
 		// Submit the form if requested
-		if (submitForm && submitSelector) {
-			// Capture the current URL and title before submission for comparison
-			const beforeUrl = page.url();
+		let formSubmissionResult: IDataObject = {};
+
+		if (submitFormAfterFill && submitSelector) {
+			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Submitting form using selector: ${submitSelector}`);
+
+			// Get the current URL and title before submission for comparison
+			const beforeUrl = await page.url();
 			const beforeTitle = await page.title();
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Before submission - URL: ${beforeUrl}, Title: ${beforeTitle}`);
 
-			// Declaration of submission result to track throughout all code paths
-			let formSubmissionResult: IDataObject = {
-				urlChanged: false,
-				titleChanged: false,
-				beforeUrl,
-				afterUrl: '',
-				beforeTitle,
-				afterTitle: '',
-			};
+			// Submit the form and wait as specified
+			const submitResult = await submitForm(
+				page,
+				submitSelector,
+				{
+					waitAfterSubmit: waitAfterSubmit as 'noWait' | 'fixedTime' | 'domContentLoaded' | 'navigationComplete' | 'urlChanged',
+					waitTime,
+				},
+				this.logger
+			);
 
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Preparing to submit the form`);
+			// Store the submission result
+			formSubmissionResult = submitResult;
 
-			// Add a slight delay before submitting (feels more human)
-			if (useHumanDelays) {
-				const delay = getHumanDelay();
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Adding human-like delay before submission: ${delay}ms`);
-				await new Promise(resolve => setTimeout(resolve, delay));
-			}
-
-			// Always add a short mandatory delay (500ms) before clicking submit
-			// This helps with form validation and button state changes
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Adding mandatory delay before form submission to allow for validation (500ms)`);
-			await new Promise(resolve => setTimeout(resolve, 500));
-
-			// Check if the submit button exists and is clickable
-			const submitButtonExists = await page.$(submitSelector) !== null;
-			if (!submitButtonExists) {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Submit button with selector "${submitSelector}" not found on page`);
-				throw new Error(`Submit button with selector "${submitSelector}" not found on page`);
-			}
-
-			// Get details about the submit button for debugging
-			try {
-				const buttonDetails = await page.$eval(submitSelector, (el) => ({
-					tagName: el.tagName,
-					id: el.id || '',
-					className: el.className || '',
-					disabled: el.hasAttribute('disabled'),
-					type: el.getAttribute('type') || '',
-					text: el.textContent?.trim() || '',
-					visible: (el as HTMLElement).offsetParent !== null,
-					position: {
-						top: el.getBoundingClientRect().top,
-						left: el.getBoundingClientRect().left,
-					}
-				}));
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found submit button: ${JSON.stringify(buttonDetails)}`);
-
-				// Check if button is disabled
-				if (buttonDetails.disabled) {
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Button is currently disabled. Waiting 1000ms to see if it becomes enabled...`);
-					await new Promise(resolve => setTimeout(resolve, 1000));
-
-					// Check again
-					const updatedDisabled = await page.$eval(submitSelector, el => el.hasAttribute('disabled'));
-					if (updatedDisabled) {
-						this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Button remains disabled. Attempting to click anyway, but it may fail.`);
-					} else {
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Button is now enabled, proceeding with click`);
-					}
-				}
-
-				// Check if button is not visible
-				if (!buttonDetails.visible) {
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Button may not be visible. Will attempt to scroll it into view.`);
-				}
-			} catch (buttonError) {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Error getting submit button details: ${buttonError}`);
-			}
-
-			// Get advanced button options if enabled
-			let scrollIntoView = false;
-			let buttonClickMethod = 'auto';
-			let clickTimeout = 10000;
-
-			if (advancedButtonOptions) {
-				scrollIntoView = this.getNodeParameter('scrollIntoView', index, true) as boolean;
-				buttonClickMethod = this.getNodeParameter('buttonClickMethod', index, 'auto') as string;
-				clickTimeout = this.getNodeParameter('clickTimeout', index, 10000) as number;
-			}
-
-			// Scroll the button into view if requested
-			if (scrollIntoView) {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Scrolling button into view...`);
-				const scrollResult = await ensureElementInViewport(page, submitSelector);
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Scroll into view ${scrollResult ? 'successful' : 'not needed or failed'}`);
-			}
-
-			// Now click the submit button using the appropriate method
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clicking submit button with selector: ${submitSelector} (method: ${buttonClickMethod})`);
-
-			let clickSuccess = false;
-
-			// Create a timeout promise to prevent hanging
-			const clickTimeoutPromise = new Promise<boolean>((resolve) => {
-				setTimeout(() => resolve(false), clickTimeout);
+			// Add to results array
+			results.push({
+				fieldType: 'formSubmission',
+				success: submitResult.success,
+				details: submitResult
 			});
 
-			// Use different click methods based on settings
-			if (buttonClickMethod === 'auto') {
-				// Use the robust click method that tries multiple approaches
-				const clickPromise = robustButtonClick(page, submitSelector, this.logger);
-				clickSuccess = await Promise.race([clickPromise, clickTimeoutPromise]);
-
-				if (!clickSuccess) {
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Button click timed out after ${clickTimeout}ms`);
-				}
-			} else if (buttonClickMethod === 'standard') {
-				// Standard puppeteer click
-				try {
-					await Promise.race([
-						page.click(submitSelector),
-						clickTimeoutPromise
-					]);
-					clickSuccess = true;
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Standard click completed`);
-				} catch (clickError) {
-					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Standard click failed: ${clickError}`);
-					clickSuccess = false;
-				}
-			} else if (buttonClickMethod === 'javascript') {
-				// JavaScript click
-				try {
-					const jsClickPromise = page.evaluate((sel) => {
-						const button = document.querySelector(sel);
-						if (button) {
-							(button as HTMLElement).click();
-							return true;
-						}
-						return false;
-					}, submitSelector);
-
-					clickSuccess = await Promise.race([jsClickPromise, clickTimeoutPromise]);
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] JavaScript click ${clickSuccess ? 'completed' : 'timed out'}`);
-				} catch (clickError) {
-					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] JavaScript click failed: ${clickError}`);
-					clickSuccess = false;
-				}
-			} else if (buttonClickMethod === 'events') {
-				// Direct DOM events
-				try {
-					const eventsClickPromise = page.evaluate((sel) => {
-						const button = document.querySelector(sel);
-						if (button) {
-							const events = ['mousedown', 'mouseup', 'click'];
-							for (const eventType of events) {
-								const event = new MouseEvent(eventType, {
-									view: window,
-									bubbles: true,
-									cancelable: true,
-									buttons: 1
-								});
-								button.dispatchEvent(event);
-							}
-							return true;
-						}
-						return false;
-					}, submitSelector);
-
-					clickSuccess = await Promise.race([eventsClickPromise, clickTimeoutPromise]);
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] DOM events click ${clickSuccess ? 'completed' : 'timed out'}`);
-				} catch (clickError) {
-					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] DOM events click failed: ${clickError}`);
-					clickSuccess = false;
-				}
-			}
-
-			if (clickSuccess) {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Submit button click successful`);
-			} else {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Submit button click may have failed - will continue anyway`);
-			}
-
-			// Handle waiting after submission
-			if (waitAfterSubmit === 'urlChanged') {
-				const urlChangeTimeout = 6000; // 6 seconds is more reasonable than 10
-				const nodeName = this.getNode().name;
-				const nodeId = this.getNode().id;
-
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for URL to change after form submission (timeout: ${urlChangeTimeout}ms)`);
-				try {
-					// Wait for URL to change
-					await page.waitForFunction(
-						(beforeUrl) => window.location.href !== beforeUrl,
-						{ timeout: urlChangeTimeout },
-						beforeUrl
-					);
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] URL change successful: ${beforeUrl} → ${page.url()}`);
-
-					// Store successful navigation result
-					formSubmissionResult = {
-						urlChanged: true,
-						titleChanged: await page.title() !== beforeTitle,
-						beforeUrl,
-						afterUrl: page.url(),
-						beforeTitle,
-						afterTitle: await page.title(),
-						navigationStarted: true,
-					};
-
-					// Store the page reference and results
-					Ventriloquist.storePage(workflowId, sessionId, page);
-					results.push({
-						fieldType: 'formSubmission',
-						success: true,
-						details: formSubmissionResult
-					});
-
-					// Add a short stabilization period
-					await new Promise(resolve => setTimeout(resolve, 500));
-				} catch (urlError) {
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] URL change detection timed out - checking URL directly`);
-
-					// Don't throw an error, just log and continue
-					const fallbackDelay = 2000;
-					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Adding fallback delay of ${fallbackDelay}ms to allow page to stabilize`);
-					await new Promise(resolve => setTimeout(resolve, fallbackDelay));
-
-					// Check if the URL actually changed despite the error
-					const afterUrl = page.url();
-					const afterTitle = await page.title();
-
-					if (afterUrl !== beforeUrl) {
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] URL changed despite detection timeout: ${beforeUrl} → ${afterUrl}`);
-
-						// Store successful navigation result
-						formSubmissionResult = {
-							urlChanged: true,
-							titleChanged: afterTitle !== beforeTitle,
-							beforeUrl,
-							afterUrl,
-							beforeTitle,
-							afterTitle,
-							navigationErrorRecovered: true,
-						};
-
-						// Add result to results array
-						results.push({
-							fieldType: 'formSubmission',
-							success: true,
-							details: formSubmissionResult
-						});
-					} else {
-						// No URL change, likely a real navigation failure
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No URL change detected - form submission may not have triggered navigation`);
-
-						formSubmissionResult = {
-							info: 'Form submitted but no URL change detected',
-							beforeUrl,
-							afterUrl,
-							beforeTitle,
-							afterTitle,
-							urlChanged: false,
-							titleChanged: false,
-						};
-
-						results.push({
-							fieldType: 'formSubmission',
-							success: false,
-							details: formSubmissionResult
-						});
-					}
-				}
-			} else if (waitAfterSubmit === 'navigationComplete') {
-				const navigationTimeout = 60000; // 60 seconds for complete navigation is reasonable
-				const nodeName = this.getNode().name;
-				const nodeId = this.getNode().id;
-
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for navigation to complete (timeout: ${navigationTimeout}ms)`);
-				try {
-					await page.waitForNavigation({
-						timeout: navigationTimeout,
-						waitUntil: ['load', 'domcontentloaded', 'networkidle2']
-					});
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Navigation completed successfully`);
-
-					// Immediately indicate success since DOM is ready
-					formSubmissionResult = {
-						urlChanged: page.url() !== beforeUrl,
-						titleChanged: await page.title() !== beforeTitle,
-						beforeUrl,
-						afterUrl: page.url(),
-						beforeTitle,
-						afterTitle: await page.title(),
-						navigationCompleted: true,
-					};
-
-					// Store the page reference and results
-					Ventriloquist.storePage(workflowId, sessionId, page);
-					results.push({
-						fieldType: 'formSubmission',
-						success: true,
-						details: formSubmissionResult
-					});
-
-					// Wait for network to settle in the background so we don't hold up completion
-					try {
-						await Promise.race([
-							page.waitForNavigation({ waitUntil: ['networkidle2'], timeout: 5000 }),
-							new Promise(resolve => setTimeout(resolve, 5000))
-						]);
-						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Network stabilized after navigation`);
-					} catch (netError) {
-						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Continuing without waiting for full network idle`);
-					}
-
-					// Add a short stabilization period
-					await new Promise(resolve => setTimeout(resolve, 500));
-
-					// Re-store the page reference again
-					Ventriloquist.storePage(workflowId, sessionId, page);
-					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Updated page reference in session store`);
-				} catch (navError) {
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Navigation timeout or expected interruption - checking page state`);
-
-					// Don't throw an error, just log and continue
-					const fallbackDelay = 5000;
-					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Adding fallback delay of ${fallbackDelay}ms to allow page to stabilize`);
-					await new Promise(resolve => setTimeout(resolve, fallbackDelay));
-
-					// Check if the page actually changed despite the navigation error
-					const afterUrl = page.url();
-					const afterTitle = await page.title();
-
-					if (afterUrl !== beforeUrl || afterTitle !== beforeTitle) {
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Page changed despite navigation event timeout: ${beforeUrl} → ${afterUrl}`);
-
-						// Store successful navigation result
-						formSubmissionResult = {
-							urlChanged: afterUrl !== beforeUrl,
-							titleChanged: afterTitle !== beforeTitle,
-							beforeUrl,
-							afterUrl,
-							beforeTitle,
-							afterTitle,
-							navigationErrorRecovered: true,
-						};
-
-						// Add result to results array
-						results.push({
-							fieldType: 'formSubmission',
-							success: true,
-							details: formSubmissionResult
-						});
-					} else {
-						// No page change, likely a real navigation failure
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No page change detected - form submission may not have triggered navigation`);
-
-						formSubmissionResult = {
-							info: 'Form submitted but no page change detected',
-							beforeUrl,
-							afterUrl,
-							beforeTitle,
-							afterTitle,
-							urlChanged: false,
-							titleChanged: false,
-						};
-
-						results.push({
-							fieldType: 'formSubmission',
-							success: false,
-							details: formSubmissionResult
-						});
-					}
-				}
-			} else if (waitAfterSubmit === 'domContentLoaded') {
-				const domContentLoadedTimeout = 30000; // 30 seconds is reasonable
-				const nodeName = this.getNode().name;
-				const nodeId = this.getNode().id;
-
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for DOM content to be loaded (timeout: ${domContentLoadedTimeout}ms)`);
-				try {
-					await page.waitForNavigation({
-						timeout: domContentLoadedTimeout,
-						waitUntil: ['domcontentloaded']
-					});
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] DOM content loaded successfully`);
-
-					// Immediately indicate success since DOM is ready
-					formSubmissionResult = {
-						urlChanged: page.url() !== beforeUrl,
-						titleChanged: await page.title() !== beforeTitle,
-						beforeUrl,
-						afterUrl: page.url(),
-						beforeTitle,
-						afterTitle: await page.title(),
-						navigationCompleted: true,
-					};
-
-					// Store the page reference and results
-					Ventriloquist.storePage(workflowId, sessionId, page);
-					results.push({
-						fieldType: 'formSubmission',
-						success: true,
-						details: formSubmissionResult
-					});
-
-					// Add a short stabilization period
-					await new Promise(resolve => setTimeout(resolve, 500));
-				} catch (navError) {
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] DOM content load timeout - checking page state directly`);
-
-					// Add fallback delay and check for page change
-					const fallbackDelay = 2000;
-					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Adding fallback delay of ${fallbackDelay}ms to allow page to stabilize`);
-					await new Promise(resolve => setTimeout(resolve, fallbackDelay));
-
-					// Check if the page actually changed despite the navigation error
-					const afterUrl = page.url();
-					const afterTitle = await page.title();
-
-					if (afterUrl !== beforeUrl || afterTitle !== beforeTitle) {
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Page changed despite DOM content load timeout: ${beforeUrl} → ${afterUrl}`);
-
-						// Store successful navigation result
-						formSubmissionResult = {
-							urlChanged: afterUrl !== beforeUrl,
-							titleChanged: afterTitle !== beforeTitle,
-							beforeUrl,
-							afterUrl,
-							beforeTitle,
-							afterTitle,
-							navigationErrorRecovered: true,
-						};
-
-						// Add result to results array
-						results.push({
-							fieldType: 'formSubmission',
-							success: true,
-							details: formSubmissionResult
-						});
-					} else {
-						// No page change, likely a real navigation failure
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No page change detected - form submission may not have triggered navigation`);
-
-						formSubmissionResult = {
-							info: 'DOM content load timeout with no page change',
-							beforeUrl,
-							afterUrl,
-							beforeTitle,
-							afterTitle,
-							urlChanged: false,
-							titleChanged: false,
-						};
-
-						results.push({
-							fieldType: 'formSubmission',
-							success: false,
-							details: formSubmissionResult
-						});
-					}
-				}
-			} else if (waitAfterSubmit === 'pageLoad') {
-				const pageLoadTimeout = 30000; // 30 seconds is reasonable
-				const nodeName = this.getNode().name;
-				const nodeId = this.getNode().id;
-
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for page load event (timeout: ${pageLoadTimeout}ms)`);
-				try {
-					await page.waitForNavigation({
-						timeout: pageLoadTimeout,
-						waitUntil: ['load']
-					});
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Page load completed successfully`);
-
-					// Similar success handling as domContentLoaded
-					formSubmissionResult = {
-						urlChanged: page.url() !== beforeUrl,
-						titleChanged: await page.title() !== beforeTitle,
-						beforeUrl,
-						afterUrl: page.url(),
-						beforeTitle,
-						afterTitle: await page.title(),
-						navigationCompleted: true,
-					};
-
-					Ventriloquist.storePage(workflowId, sessionId, page);
-					results.push({
-						fieldType: 'formSubmission',
-						success: true,
-						details: formSubmissionResult
-					});
-
-					// Brief stabilization
-					await new Promise(resolve => setTimeout(resolve, 500));
-				} catch (navError) {
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Page load timeout - checking page state directly`);
-
-					// Fallback handling
-					const fallbackDelay = 2000;
-					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Adding fallback delay of ${fallbackDelay}ms to allow page to stabilize`);
-					await new Promise(resolve => setTimeout(resolve, fallbackDelay));
-
-					// Check if the page actually changed despite the navigation error
-					const afterUrl = page.url();
-					const afterTitle = await page.title();
-
-					if (afterUrl !== beforeUrl || afterTitle !== beforeTitle) {
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Page changed despite page load timeout: ${beforeUrl} → ${afterUrl}`);
-
-						// Store successful navigation result
-						formSubmissionResult = {
-							urlChanged: afterUrl !== beforeUrl,
-							titleChanged: afterTitle !== beforeTitle,
-							beforeUrl,
-							afterUrl,
-							beforeTitle,
-							afterTitle,
-							navigationErrorRecovered: true,
-						};
-
-						// Add result to results array
-						results.push({
-							fieldType: 'formSubmission',
-							success: true,
-							details: formSubmissionResult
-						});
-					} else {
-						// No page change, likely a real navigation failure
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No page change detected - form submission may not have triggered navigation`);
-
-						formSubmissionResult = {
-							info: 'Page load timeout with no page change',
-							beforeUrl,
-							afterUrl,
-							beforeTitle,
-							afterTitle,
-							urlChanged: false,
-							titleChanged: false,
-						};
-
-						results.push({
-							fieldType: 'formSubmission',
-							success: false,
-							details: formSubmissionResult
-						});
-					}
-				}
-			} else if (waitAfterSubmit === 'fixedTime') {
-				const nodeName = this.getNode().name;
-				const nodeId = this.getNode().id;
-
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Using fixed wait time after form submission (${waitTime}ms)`);
-				await new Promise(resolve => setTimeout(resolve, waitTime));
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Fixed wait time completed`);
-
-				// Re-store the page in case the page reference changed during fixed wait
-				Ventriloquist.storePage(workflowId, sessionId, page);
-			} else {
-				// Even with noWait, add a minimal delay to stabilize
-				const nodeName = this.getNode().name;
-				const nodeId = this.getNode().id;
-
-				this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No wait specified, adding minimal stabilization delay (500ms)`);
-				await new Promise(resolve => setTimeout(resolve, 500));
-			}
-
-			// After waiting (regardless of wait method), check if the page actually changed
-			// but only if we haven't already recorded a submission result
-			if (!results.some(r => r.fieldType === 'formSubmission')) {
-				const afterUrl = page.url();
-				const afterTitle = await page.title();
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] After submission - URL: ${afterUrl}, Title: ${afterTitle}`);
-
-				// Add this information to results for debugging
-				formSubmissionResult = {
-					urlChanged: beforeUrl !== afterUrl,
-					titleChanged: beforeTitle !== afterTitle,
-					beforeUrl,
-					afterUrl,
-					beforeTitle,
-					afterTitle,
-				};
-
-				// Log the submission result
-				if (formSubmissionResult.urlChanged || formSubmissionResult.titleChanged) {
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Form submission detected page change - success likely`);
-				} else {
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No page change detected after form submission - may have failed`);
-				}
-
-				// Store the submission result for the response
-				results.push({
-					fieldType: 'formSubmission',
-					success: formSubmissionResult.urlChanged || formSubmissionResult.titleChanged,
-					details: formSubmissionResult
-				});
-			}
-
 			// If no change detected and retries are enabled, attempt again
-			if ((!formSubmissionResult.urlChanged && !formSubmissionResult.titleChanged) && retrySubmission) {
+			if (!submitResult.urlChanged && !submitResult.titleChanged && retrySubmission) {
 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No page change detected, will retry submission up to ${maxRetries} times`);
 
 				let retryCount = 0;
@@ -1850,185 +991,108 @@ export async function execute(
 					// Wait before retrying
 					await new Promise(resolve => setTimeout(resolve, retryDelay));
 
-					// Try to click the submit button again
-					try {
-						// Check if button is still there and get updated info
-						const retryButtonDetails = await page.$eval(submitSelector, (el) => ({
-							tagName: el.tagName,
-							id: el.id || '',
-							disabled: el.hasAttribute('disabled'),
-						}));
+					// Try submitting again
+					const retrySubmitResult = await submitForm(
+						page,
+						submitSelector,
+						{
+							waitAfterSubmit: waitAfterSubmit as 'noWait' | 'fixedTime' | 'domContentLoaded' | 'navigationComplete' | 'urlChanged',
+							waitTime,
+						},
+						this.logger
+					);
 
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Retry submit button state: ${JSON.stringify(retryButtonDetails)}`);
+					retrySuccess = !!(retrySubmitResult.urlChanged || retrySubmitResult.titleChanged);
 
-						// Click again
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clicking submit button again (retry ${retryCount})`);
-						await page.click(submitSelector);
+					if (retrySuccess) {
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Retry ${retryCount} successful`);
 
-						// Handle waiting based on selected method
-						if (waitAfterSubmit === 'navigationComplete') {
-							this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for navigation to complete after retry`);
-							try {
-								// Use a longer timeout and specific waitUntil options for more reliable navigation
-								await page.waitForNavigation({
-									timeout: 60000,  // Increased timeout to 60 seconds
-									waitUntil: ['load', 'domcontentloaded', 'networkidle2']
-								});
-								this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Navigation after retry completed successfully`);
+						// Update the result with the successful retry
+						formSubmissionResult = retrySubmitResult;
 
-								// Add a stabilization period to let the page fully settle
-								this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Adding 1000ms stabilization period after retry navigation`);
-								await new Promise(resolve => setTimeout(resolve, 1000));
+						// Add retry result to results
+						results.push({
+							fieldType: 'formSubmissionRetry',
+							retryAttempt: retryCount,
+							success: true,
+							details: retrySubmitResult
+						});
 
-								// Re-store the page in case the page reference changed during navigation
-								Ventriloquist.storePage(workflowId, sessionId, page);
-							} catch (navError) {
-								this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Navigation timeout or error on retry: ${navError}`);
-								// Don't throw an error, just log and continue
-								this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Adding fallback delay of 5000ms since retry navigation event failed`);
-								await new Promise(resolve => setTimeout(resolve, 5000));
-							}
-						} else if (waitAfterSubmit === 'fixedTime') {
-							this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting ${waitTime}ms after retry submission`);
-							await new Promise(resolve => setTimeout(resolve, waitTime));
-
-							// Re-store the page in case the page reference changed during fixed wait
-							Ventriloquist.storePage(workflowId, sessionId, page);
-						} else {
-							// Even with noWait, add a minimal delay to stabilize
-							await new Promise(resolve => setTimeout(resolve, 500));
-						}
-
-						// Check if page changed after retry
-						const retryUrl = page.url();
-						const retryTitle = await page.title();
-
-						retrySuccess = (retryUrl !== beforeUrl) || (retryTitle !== beforeTitle);
-
-						if (retrySuccess) {
-							this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Retry ${retryCount} successful! Page changed.`);
-
-							// Update the submission result
-							formSubmissionResult.urlChanged = retryUrl !== beforeUrl;
-							formSubmissionResult.titleChanged = retryTitle !== beforeTitle;
-							formSubmissionResult.afterUrl = retryUrl;
-							formSubmissionResult.afterTitle = retryTitle;
-
-							// Update the results entry
-							results[results.length - 1] = {
-								fieldType: 'formSubmission',
-								success: true,
-								details: {
-									...formSubmissionResult,
-									retryAttempt: retryCount,
-									retrySuccess: true
-								}
-							};
-						} else {
-							this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Retry ${retryCount} did not result in page change`);
-						}
-					} catch (retryError) {
-						this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Error during retry ${retryCount}: ${retryError}`);
+						break;
 					}
+
+					// Add failed retry to results
+					results.push({
+						fieldType: 'formSubmissionRetry',
+						retryAttempt: retryCount,
+						success: false,
+						details: retrySubmitResult
+					});
 				}
 
 				if (!retrySuccess) {
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] All ${maxRetries} retry attempts failed to trigger page change`);
-					// Update the results entry with retry information
-					results[results.length - 1] = {
-						fieldType: 'formSubmission',
-						success: false,
-						details: {
-							...formSubmissionResult,
-							retriesAttempted: retryCount,
-							retrySuccess: false
-						}
-					};
+					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] All ${maxRetries} retries failed`);
 				}
 			}
+
+			// Store the page reference for future operations
+			SessionManager.storePage(workflowId, sessionId, page);
 		}
-
-		// Get current page info
-		const currentUrl = page.url();
-
-		// Ensure the page is properly stored in the session registry before continuing
-		Ventriloquist.storePage(workflowId, sessionId, page);
-		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Final update of page reference in session store (URL: ${currentUrl})`);
 
 		// Take a screenshot if requested
-		let screenshot = '';
-		if (takeScreenshot) {
-			try {
-				const screenshotBuffer = await page.screenshot({
-					encoding: 'base64',
-					type: 'jpeg',
-					quality: 80,
-				});
-				screenshot = screenshotBuffer as string;
-			} catch (screenshotError) {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Failed to capture screenshot: ${(screenshotError as Error).message}`);
-			}
+		let screenshot: string | null = null;
+		if (takeScreenshotAfterSubmit) {
+			screenshot = await takeScreenshot(page, this.logger);
 		}
 
-		// Log completion
-		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] FORM OPERATION SUCCESSFUL: Node has finished processing and is ready for the next node`);
-
-		// Add a visual end marker
-		this.logger.info("============ NODE EXECUTION COMPLETE ============");
-
-		// Return the result
-		return {
-			json: {
-				success: true,
-				operation: 'form',
-				sessionId,
-				formResults: results,
-				currentUrl,
-				pageTitle: await page.title(),
-				...(screenshot ? { screenshot } : {}),
-			},
+		// Return the result data
+		const resultData: IDataObject = {
+			sessionId,
+			formFields: results,
+			currentUrl: await page.url(),
+			pageTitle: await page.title(),
 		};
+
+		if (submitFormAfterFill) {
+			resultData.formSubmission = formSubmissionResult;
+		}
+
+		if (screenshot) {
+			resultData.screenshot = screenshot;
+		}
+
+		return this.helpers.returnJsonArray([resultData]) as unknown as INodeExecutionData;
 	} catch (error) {
-		this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Error executing form operation: ${(error as Error).message}`);
+		// Handle any errors
+		this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Error: ${(error as Error).message}`);
 
-		if (takeScreenshot) {
-			try {
-				const errorScreenshot = await page?.screenshot({
-					encoding: 'base64',
-					type: 'jpeg',
-					quality: 70,
-				}) as string;
-				this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Error screenshot captured`);
+		// Take a screenshot for diagnostics if possible
+		let errorScreenshot = null;
+		try {
+			errorScreenshot = await takeScreenshot(page, this.logger);
+		} catch {}
 
-				if (continueOnFail) {
-					return {
-						json: {
-							success: false,
-							operation: 'form',
-							sessionId,
-							error: (error as Error).message,
-							screenshot: errorScreenshot,
-							url: await page?.url(),
-						},
-					};
-				}
-			} catch (screenshotError) {
-				this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
-			}
+		// Throw the error with additional context
+		const errorData: IDataObject = {
+			message: (error as Error).message,
+			sessionId,
+		};
+
+		if (errorScreenshot) {
+			errorData.screenshot = errorScreenshot;
 		}
 
 		if (continueOnFail) {
-			return {
-				json: {
+			// Return partial results if continue on fail is enabled
+			return this.helpers.returnJsonArray([
+				{
 					success: false,
-					operation: 'form',
+					error: errorData,
 					sessionId,
-					error: (error as Error).message,
-					url: await page?.url(),
-				},
-			};
+				}
+			]) as unknown as INodeExecutionData;
 		}
 
-		throw error;
+		throw new Error(`Form operation failed: ${(error as Error).message}`);
 	}
 }
