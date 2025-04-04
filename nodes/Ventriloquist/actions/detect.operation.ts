@@ -19,6 +19,18 @@ import { createErrorResponse } from '../utils/errorUtils';
  */
 export const description: INodeProperties[] = [
 	{
+		displayName: 'Session ID',
+		name: 'explicitSessionId',
+		type: 'string',
+		default: '',
+		description: 'Session ID to use (leave empty to use ID from input or create new)',
+		displayOptions: {
+			show: {
+				operation: ['detect'],
+			},
+		},
+	},
+	{
 		displayName: 'Detections',
 		name: 'detections',
 		placeholder: 'Add Detection',
@@ -307,18 +319,6 @@ export const description: INodeProperties[] = [
 		required: true,
 	},
 	{
-		displayName: 'Session ID',
-		name: 'explicitSessionId',
-		type: 'string',
-		default: '',
-		description: 'Session ID to use (leave empty to use ID from input or create new)',
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-			},
-		},
-	},
-	{
 		displayName: 'Wait For Selectors',
 		name: 'waitForSelectors',
 		type: 'boolean',
@@ -356,20 +356,6 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: 'Early Exit Delay (MS)',
-		name: 'earlyExitDelay',
-		type: 'number',
-		default: 500,
-		description: 'Time in milliseconds to wait after detecting an element before exiting (for Smart detection only)',
-		displayOptions: {
-			show: {
-				operation: ['detect'],
-				waitForSelectors: [true],
-				detectionMethod: ['smart'],
-			},
-		},
-	},
-	{
 		displayName: 'Timeout (MS)',
 		name: 'timeout',
 		type: 'number',
@@ -402,6 +388,20 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ['detect'],
+			},
+		},
+	},
+	{
+		displayName: 'Early Exit Delay (MS)',
+		name: 'earlyExitDelay',
+		type: 'number',
+		default: 500,
+		description: 'Time in milliseconds to wait after detecting an element before exiting (for Smart detection only)',
+		displayOptions: {
+			show: {
+				operation: ['detect'],
+				waitForSelectors: [true],
+				detectionMethod: ['smart'],
 			},
 		},
 	},

@@ -21,6 +21,18 @@ import {
  */
 export const description: INodeProperties[] = [
 	{
+		displayName: 'Session ID',
+		name: 'explicitSessionId',
+		type: 'string',
+		default: '',
+		description: 'Session ID to use (leave empty to use ID from input or create new)',
+		displayOptions: {
+			show: {
+				operation: ['form'],
+			},
+		},
+	},
+	{
 		displayName: 'Use Human-Like Delays',
 		name: 'useHumanDelays',
 		type: 'boolean',

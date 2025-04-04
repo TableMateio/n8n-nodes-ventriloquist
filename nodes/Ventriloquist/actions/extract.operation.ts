@@ -34,6 +34,18 @@ interface PageInfo {
  */
 export const description: INodeProperties[] = [
 	{
+		displayName: 'Session ID',
+		name: 'explicitSessionId',
+		type: 'string',
+		default: '',
+		description: 'Session ID to use (leave empty to use ID from input or create new)',
+		displayOptions: {
+			show: {
+				operation: ['extract'],
+			},
+		},
+	},
+	{
 		displayName: 'Extraction Type',
 		name: 'extractionType',
 		type: 'options',
@@ -92,18 +104,6 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: 'Session ID',
-		name: 'explicitSessionId',
-		type: 'string',
-		default: '',
-		description: 'Session ID to use (leave empty to use ID from input or create new)',
-		displayOptions: {
-			show: {
-				operation: ['extract'],
-			},
-		},
-	},
-	{
 		displayName: 'Wait For Selector',
 		name: 'waitForSelector',
 		type: 'boolean',
@@ -125,6 +125,42 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ['extract'],
 				waitForSelector: [true],
+			},
+		},
+	},
+	{
+		displayName: 'Take Screenshot',
+		name: 'takeScreenshot',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to capture a screenshot after extraction',
+		displayOptions: {
+			show: {
+				operation: ['extract'],
+			},
+		},
+	},
+	{
+		displayName: 'Continue On Fail',
+		name: 'continueOnFail',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to continue execution even when extraction fails',
+		displayOptions: {
+			show: {
+				operation: ['extract'],
+			},
+		},
+	},
+	{
+		displayName: 'Debug Page Content',
+		name: 'debugPageContent',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to include page information in debug logs',
+		displayOptions: {
+			show: {
+				operation: ['extract'],
 			},
 		},
 	},
@@ -357,47 +393,11 @@ export const description: INodeProperties[] = [
 		],
 	},
 	{
-		displayName: 'Take Screenshot',
-		name: 'takeScreenshot',
-		type: 'boolean',
-		default: false,
-		description: 'Whether to take a screenshot of the page',
-		displayOptions: {
-			show: {
-				operation: ['extract'],
-			},
-		},
-	},
-	{
 		displayName: 'Use Human-Like Delays',
 		name: 'useHumanDelays',
 		type: 'boolean',
 		default: false,
 		description: 'Whether to add a random delay before extraction to simulate human behavior',
-		displayOptions: {
-			show: {
-				operation: ['extract'],
-			},
-		},
-	},
-	{
-		displayName: 'Continue On Fail',
-		name: 'continueOnFail',
-		type: 'boolean',
-		default: true,
-		description: 'Whether to continue execution even when the extraction fails (selector not found or timeout)',
-		displayOptions: {
-			show: {
-				operation: ['extract'],
-			},
-		},
-	},
-	{
-		displayName: 'Debug Page Content',
-		name: 'debugPageContent',
-		type: 'boolean',
-		default: false,
-		description: 'Whether to include debug information about page content when extraction fails (helpful for debugging)',
 		displayOptions: {
 			show: {
 				operation: ['extract'],
@@ -681,5 +681,6 @@ export async function execute(
 		};
 	}
 }
+
 
 
