@@ -299,21 +299,75 @@ export async function handleCheckboxField(
 	logger: ILogger
 ): Promise<boolean> {
 	try {
-		// Get current checked state
-		const currentChecked = await page.evaluate((sel: string) => {
+		// Check if the element is visible and exists
+		const elementInfo = await page.evaluate((sel: string) => {
 			const element = document.querySelector(sel);
-			return element ? (element as HTMLInputElement).checked : false;
+			if (!element) return { exists: false };
+
+			const rect = element.getBoundingClientRect();
+			const style = window.getComputedStyle(element);
+
+			return {
+				exists: true,
+				checked: (element as HTMLInputElement).checked,
+				isVisible: style.display !== 'none' &&
+				          style.visibility !== 'hidden' &&
+				          style.opacity !== '0' &&
+				          rect.width > 0 &&
+				          rect.height > 0
+			};
 		}, selector);
 
-		// Only click if the current state doesn't match desired state
-		if (currentChecked !== checked) {
-			// Import and use the robustClick utility instead of direct page.click
-			const clickResult = await robustClick(page, selector, { logger });
-			if (!clickResult.success) {
-				if (clickResult.error) {
-					throw clickResult.error;
+		if (!elementInfo.exists) {
+			logger.error(`Checkbox element not found: ${selector}`);
+			return false;
+		}
+
+		if (!elementInfo.isVisible) {
+			logger.warn(`Checkbox exists but is not visible: ${selector}`);
+			// Try to make it visible or find a related label that might be visible
+			const clickResult = await page.evaluate((sel: string) => {
+				// Try to find a related label that might be visible
+				const input = document.querySelector(sel) as HTMLInputElement;
+				if (!input) return false;
+
+				// Try to click the label if it exists
+				if (input.id) {
+					const label = document.querySelector(`label[for="${input.id}"]`);
+					if (label) {
+						(label as HTMLElement).click();
+						return true;
+					}
 				}
-				throw new Error(`Failed to click checkbox: ${selector}`);
+
+				// If no label, try to find a parent that's clickable
+				let element = input.parentElement;
+				while (element && element.tagName !== 'BODY') {
+					if (element.querySelector(sel) === input) {
+						(element as HTMLElement).click();
+						return true;
+					}
+					element = element.parentElement;
+				}
+
+				return false;
+			}, selector);
+
+			if (!clickResult) {
+				logger.error(`Could not interact with invisible checkbox: ${selector}`);
+				return false;
+			}
+		} else {
+			// Only click if the current state doesn't match desired state
+			if (elementInfo.checked !== checked) {
+				// Import and use the robustClick utility instead of direct page.click
+				const clickResult = await robustClick(page, selector, { logger });
+				if (!clickResult.success) {
+					if (clickResult.error) {
+						throw clickResult.error;
+					}
+					throw new Error(`Failed to click checkbox: ${selector}`);
+				}
 			}
 		}
 
