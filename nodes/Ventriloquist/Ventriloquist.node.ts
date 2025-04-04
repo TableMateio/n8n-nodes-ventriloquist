@@ -656,20 +656,6 @@ export class Ventriloquist implements INodeType {
 				},
 			})),
 
-			// Session ID for other operations
-			{
-				displayName: 'Session ID',
-				name: 'explicitSessionId',
-				type: 'string',
-				default: '',
-				description: 'Session ID to use (if not provided, will try to use session from previous operations)',
-				displayOptions: {
-					show: {
-						operation: ['detect', 'extract', 'form'],
-					},
-				},
-			},
-
 			// Properties for 'form' operation
 			...formOperation.description,
 
