@@ -2778,376 +2778,205 @@ export const description: INodeProperties[] = [
 											}
 
 											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-												`Executing simple fill on "${actionSelector}" (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`));
+												`Executing form fill on "${actionSelector}" using action utility`));
 
-											// For actions, we always need to ensure the element exists
-											if (waitForSelectors) {
-												if (detectionMethod === 'smart') {
-													const elementExists = await smartWaitForSelector(
-														puppeteerPage,
-														actionSelector,
-														selectorTimeout,
-														earlyExitDelay,
-														this.logger,
-													);
-
-													if (!elementExists) {
-														throw new Error(`Decision action: Element "${actionSelector}" required for this path is not present or visible`);
-													}
-												} else {
-													await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
-												}
-											}
-
-											// Process the form field using our utility function
-											const field: IDataObject = {
-												fieldType,
-												selector: actionSelector,
-												value: actionValue,
-												// Add options based on field type
-												...(fieldType === 'text' ? {
-													clearField: true,
-													humanLike: useHumanDelays
-												} : {}),
-												...(fieldType === 'password' ? {
-													clearField: true
-												} : {})
+											// Create options and parameters for the action
+											const actionOptions: IActionOptions = {
+												waitForSelector: waitForSelectors,
+												selectorTimeout,
+												detectionMethod,
+												earlyExitDelay,
+												nodeName,
+												nodeId,
+												index,
+												useHumanDelays
 											};
 
-											const { success, fieldResult } = await processFormField(
+											// Build field parameters
+											const actionParameters: IActionParameters = {
+												selector: actionSelector,
+												value: actionValue,
+												fieldType,
+												waitAfterAction,
+												waitTime,
+												waitSelector: group.waitSelector as string,
+												clearField: true,
+												// Add specific options based on field type
+												...(fieldType === 'password' ? { clearField: true } : {})
+											};
+
+											// Execute the fill action using the utility
+											const actionResult = await executeAction(
 												puppeteerPage,
-												field,
+												'fill' as ActionType,
+												actionParameters,
+												actionOptions,
 												this.logger
 											);
 
-											if (!success) {
-												throw new Error(`Failed to fill form field: ${actionSelector} (type: ${fieldType})`);
+											// Handle action failures
+											if (!actionResult.success) {
+												throw new Error(`Decision action failed: ${actionResult.error}`);
 											}
+
+											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+												`Form fill action completed successfully using action utility`));
 
 											// Store field result for response
 											if (!resultData.formFields) {
 												resultData.formFields = [];
 											}
-											(resultData.formFields as IDataObject[]).push(fieldResult);
+											(resultData.formFields as IDataObject[]).push(actionResult.details);
 
-											// Handle post-fill waiting
-											if (waitAfterAction === 'fixedTime') {
-												await new Promise(resolve => setTimeout(resolve, waitTime));
-											} else if (waitAfterAction === 'urlChanged') {
-												await puppeteerPage.waitForNavigation({ timeout: waitTime });
-											} else if (waitAfterAction === 'selector') {
-												const waitSelector = group.waitSelector as string;
-												await puppeteerPage.waitForSelector(waitSelector, { timeout: waitTime });
-											}
-										}
-										// Handle complex form fields approach
-										else if (hasFormFields) {
-											// Get form parameters
-											const formFields = (group.formFields as IDataObject).fields as IDataObject[] || [];
-											const submitForm = group.submitForm as boolean || false;
-											const submitSelector = group.submitSelector as string || '';
-											const waitAfterSubmit = group.waitAfterSubmit as string || 'domContentLoaded';
-											const waitSubmitTime = group.waitSubmitTime as number || 2000;
-
+											// After successful action, exit immediately
 											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-												`Using complex form fill with ${formFields.length} fields`));
-
-											// Process each form field
-											const results: IDataObject[] = [];
-											for (const field of formFields) {
-												const selector = field.selector as string;
-												const fieldType = field.fieldType as string || 'text';
-
-												// Wait for the element if needed
-												if (waitForSelectors) {
-													if (detectionMethod === 'smart') {
-														const elementExists = await smartWaitForSelector(
-															puppeteerPage,
-															selector,
-															selectorTimeout,
-															earlyExitDelay,
-															this.logger,
-														);
-
-														if (!elementExists) {
-															throw new Error(`Form field element with selector "${selector}" not found`);
-														}
-													} else {
-														await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
-													}
-												}
-
-												// Add a human-like delay if enabled
-												if (useHumanDelays) {
-													await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
-												}
-
-												// Process the form field using the utility function
-												const { success, fieldResult } = await processFormField(
-													puppeteerPage,
-													field,
-													this.logger
-												);
-
-												// Add context to the field result
-												fieldResult.nodeId = nodeId;
-												fieldResult.nodeName = nodeName;
-
-												// Add the field result to our results collection
-												results.push(fieldResult);
-
-												// If the field failed and we're not continuing on failure, throw an error
-												if (!success && !continueOnFail) {
-													throw new Error(`Failed to fill form field: ${selector} (type: ${fieldType})`);
-												}
-											}
-
-											// Add form results to response data
-											if (!resultData.formFields) {
-												resultData.formFields = [];
-											}
-											(resultData.formFields as IDataObject[]).push(...results);
-
-											// Submit the form if requested
-											if (submitForm && submitSelector) {
-												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-													`Submitting form using selector: ${submitSelector}`));
-
-												// Wait a short time before submitting (feels more human)
-												if (useHumanDelays) {
-													await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
-												}
-
-												try {
-													// Create a promise that will resolve when the next navigation happens
-													const navigationPromise = waitAfterSubmit !== 'noWait' ?
-														puppeteerPage.waitForNavigation({
-															waitUntil: waitAfterSubmit === 'multiple' ? ['domcontentloaded', 'networkidle0'] :
-																(waitAfterSubmit as puppeteer.PuppeteerLifeCycleEvent || 'domcontentloaded'),
-															timeout: waitSubmitTime
-														}) :
-														Promise.resolve();
-
-													// Click the submit button
-													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-														`Clicking submit button: ${submitSelector}`));
-													await puppeteerPage.click(submitSelector);
-													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-														`Submit button clicked successfully`));
-
-													// Wait for navigation to complete
-													if (waitAfterSubmit !== 'noWait') {
-														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-															`Waiting for navigation to complete (timeout: ${waitSubmitTime}ms)`));
-														await navigationPromise;
-														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-															`Navigation completed successfully after form submission`));
-													}
-
-													// Store form submission result
-													resultData.formSubmission = {
-														success: true,
-														submitSelector,
-														waitAfterSubmit,
-														waitSubmitTime
-													};
-												} catch (navError) {
-													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-														`Navigation error after form submission: ${(navError as Error).message}`));
-													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-														`This is often normal with redirects - attempting to continue`));
-
-													// Store form submission result with error
-													resultData.formSubmission = {
-														success: false,
-														error: (navError as Error).message,
-														submitSelector,
-														waitAfterSubmit,
-														waitSubmitTime
-													};
-												}
-											}
-										}
-									} catch (error) {
-										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-													`Error during fill action: ${(error as Error).message}`));
-										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-													`Action execution error in group "${groupName}": ${(error as Error).message}`));
-
-										if (continueOnFail) {
-											// If continueOnFail is enabled, update result and move on
-											resultData.success = false;
-											resultData.routeTaken = 'none';
-											resultData.actionPerformed = 'error';
+												`Decision point "${groupName}": Action completed successfully - exiting decision node`));
+											resultData.success = true;
+											resultData.routeTaken = groupName;
+											resultData.actionPerformed = actionType;
 											resultData.currentUrl = await puppeteerPage.url();
 											resultData.pageTitle = await puppeteerPage.title();
-											resultData.error = (error as Error).message;
 											resultData.executionDuration = Date.now() - startTime;
 
-											// Exit the decision node with the error result
-											return [this.helpers.returnJsonArray([resultData])];
-										}
+											// Take screenshot if requested
+											if (takeScreenshot) {
+												const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
+												if (screenshotResult !== null) {
+													resultData.screenshot = screenshotResult;
+												}
+											}
 
-										// If continueOnFail is not enabled, rethrow the error
-										throw error;
+											// Return the result immediately after successful action
+											return [this.helpers.returnJsonArray([resultData])];
+										} catch (error) {
+											this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+												`Error during form fill action: ${(error as Error).message}`));
+											throw error;
+										}
+										break;
 									}
 								}
 								case 'extract': {
 									const actionSelector = group.actionSelector as string;
 									const extractionType = group.extractionType as string;
 
-									if (waitForSelectors) {
-										// For actions, we always need to ensure the element exists
-										if (detectionMethod === 'smart') {
-											const elementExists = await smartWaitForSelector(
-												puppeteerPage,
-												actionSelector,
-												selectorTimeout,
-												earlyExitDelay,
-												this.logger,
-											);
+									// Get extraction options based on the extraction type
+									let extractionParams: IActionParameters = {
+										selector: actionSelector,
+										extractionType
+									};
 
-											if (!elementExists) {
-												throw new Error(`Element with selector "${actionSelector}" not found for extraction`);
-											}
-										} else {
-											await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
-										}
-									}
-
-									// Extract data based on extraction type
-									let extractedData: string | null | IDataObject | IDataObject[] | string[][] | string[] = null;
+									// Add specific options based on extraction type
 									switch (extractionType) {
-										case 'text':
-											extractedData = await extractTextContent(
-												puppeteerPage,
-												actionSelector,
-												this.logger,
-												nodeName,
-												nodeId
-											);
-											break;
 										case 'html': {
 											// Get HTML options
 											const htmlOptions = group.htmlOptions as IDataObject || {};
-											const outputFormat = (htmlOptions.outputFormat as string) || 'html';
-											const includeMetadata = htmlOptions.includeMetadata as boolean || false;
-
-											extractedData = await extractHtmlContent(
-												puppeteerPage,
-												actionSelector,
-												{
-													outputFormat,
-													includeMetadata,
-												},
-												this.logger,
-												nodeName,
-												nodeId
-											);
+											extractionParams.outputFormat = (htmlOptions.outputFormat as string) || 'html';
+											extractionParams.includeMetadata = htmlOptions.includeMetadata as boolean || false;
 											break;
 										}
-										case 'value':
-											extractedData = await extractInputValue(
-												puppeteerPage,
-												actionSelector,
-												this.logger,
-												nodeName,
-												nodeId
-											);
-											break;
 										case 'attribute': {
-											const attributeName = group.extractAttributeName as string;
-											extractedData = await extractAttributeValue(
-												puppeteerPage,
-												actionSelector,
-												attributeName,
-												this.logger,
-												nodeName,
-												nodeId
-											);
+											extractionParams.attributeName = group.extractAttributeName as string;
 											break;
 										}
 										case 'multiple': {
 											// Get options for multiple elements extraction
 											const multipleOptions = group.multipleOptions as IDataObject || {};
-											const extractionProperty = multipleOptions.extractionProperty as string || 'textContent';
-											const limit = multipleOptions.limit as number || 50;
-											const outputFormat = multipleOptions.outputFormat as string || 'array';
-											const separator = multipleOptions.separator as string || ',';
-											const attributeName = multipleOptions.attributeName as string || '';
 
-											extractedData = await extractMultipleElements(
-												puppeteerPage,
-												actionSelector,
-												{
-													extractionProperty,
-													limit,
-													outputFormat,
-													separator,
-													attributeName,
-												},
-												this.logger,
-												nodeName,
-												nodeId
-											);
+											extractionParams = {
+												...extractionParams,
+												extractionProperty: multipleOptions.extractionProperty as string || 'textContent',
+												limit: multipleOptions.limit as number || 50,
+												outputFormat: multipleOptions.outputFormat as string || 'array',
+												separator: multipleOptions.separator as string || ',',
+												attributeName: multipleOptions.attributeName as string || ''
+											};
 											break;
 										}
 										case 'table': {
 											// Get table options
 											const tableOptions = group.tableOptions as IDataObject || {};
-											const includeHeaders = tableOptions.includeHeaders as boolean ?? true;
-											const tableRow = tableOptions.rowSelector as string || 'tr';
-											const tableCell = tableOptions.cellSelector as string || 'td,th';
-											const outputFormat = tableOptions.outputFormat as string || 'array';
 
-											extractedData = await extractTableData(
-												puppeteerPage,
-												actionSelector,
-												{
-													includeHeaders,
-													rowSelector: tableRow,
-													cellSelector: tableCell,
-													outputFormat,
-												},
-												this.logger,
-												nodeName,
-												nodeId
-											);
+											extractionParams = {
+												...extractionParams,
+												includeHeaders: tableOptions.includeHeaders as boolean ?? true,
+												rowSelector: tableOptions.rowSelector as string || 'tr',
+												cellSelector: tableOptions.cellSelector as string || 'td,th',
+												outputFormat: tableOptions.outputFormat as string || 'array'
+											};
 											break;
 										}
 									}
 
-									// Store the extracted data
-									if (!resultData.extractedData) {
-										resultData.extractedData = {};
-									}
-									resultData.extractedData.primary = extractedData;
-
-									// Log the extraction result (truncated for readability)
-									const truncatedData = formatExtractedDataForLog(extractedData, extractionType);
 									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-										`Extracted ${extractionType} data: ${truncatedData}`));
+										`Executing extraction action from "${actionSelector}" using action utility`));
 
-									// After successful extraction, exit immediately
-									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-										`Decision point "${groupName}": Extraction completed successfully - exiting decision node`));
-									resultData.success = true;
-									resultData.routeTaken = groupName;
-									resultData.actionPerformed = actionType;
-									resultData.currentUrl = await puppeteerPage.url();
-									resultData.pageTitle = await puppeteerPage.title();
-									resultData.executionDuration = Date.now() - startTime;
+									try {
+										// Create options for the action
+										const actionOptions: IActionOptions = {
+											waitForSelector: waitForSelectors,
+											selectorTimeout,
+											detectionMethod,
+											earlyExitDelay,
+											nodeName,
+											nodeId,
+											index,
+											useHumanDelays
+										};
 
-									// Take screenshot if requested
-									if (takeScreenshot) {
-										const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
-										if (screenshotResult !== null) {
-											resultData.screenshot = screenshotResult;
+										// Execute the extract action using the utility
+										const actionResult = await executeAction(
+											puppeteerPage,
+											'extract' as ActionType,
+											extractionParams,
+											actionOptions,
+											this.logger
+										);
+
+										// Handle action failures
+										if (!actionResult.success) {
+											throw new Error(`Decision action failed: ${actionResult.error}`);
 										}
-									}
 
-									// Return the result immediately after successful action
-									return [this.helpers.returnJsonArray([resultData])];
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Extraction action completed successfully using action utility`));
+
+										// Store the extracted data
+										if (!resultData.extractedData) {
+											resultData.extractedData = {};
+										}
+										resultData.extractedData.primary = actionResult.details.data;
+
+										// Log the extraction result (truncated for readability)
+										const truncatedData = formatExtractedDataForLog(actionResult.details.data, extractionType);
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Extracted ${extractionType} data: ${truncatedData}`));
+
+										// After successful extraction, exit immediately
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Decision point "${groupName}": Extraction completed successfully - exiting decision node`));
+										resultData.success = true;
+										resultData.routeTaken = groupName;
+										resultData.actionPerformed = actionType;
+										resultData.currentUrl = await puppeteerPage.url();
+										resultData.pageTitle = await puppeteerPage.title();
+										resultData.executionDuration = Date.now() - startTime;
+
+										// Take screenshot if requested
+										if (takeScreenshot) {
+											const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
+											if (screenshotResult !== null) {
+												resultData.screenshot = screenshotResult;
+											}
+										}
+
+										// Return the result immediately after successful action
+										return [this.helpers.returnJsonArray([resultData])];
+									} catch (error) {
+										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Error during extraction action: ${(error as Error).message}`));
+										throw error;
+									}
 								}
 								case 'navigate': {
 									const url = group.url as string;
@@ -3155,35 +2984,69 @@ export const description: INodeProperties[] = [
 									const waitTime = group.waitTime as number;
 
 									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-										`Navigating to URL: ${url} (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`));
+										`Executing navigation action to "${url}" using action utility`));
 
 									try {
-										// Use navigationWithRetry utility for more robust navigation
-										const navigationResult = await navigateWithRetry(
-											puppeteerPage,
+										// Create options and parameters for the action
+										const actionOptions: IActionOptions = {
+											waitForSelector: waitForSelectors,
+											selectorTimeout,
+											detectionMethod,
+											earlyExitDelay,
+											nodeName,
+											nodeId,
+											index,
+											useHumanDelays
+										};
+
+										const actionParameters: IActionParameters = {
 											url,
-											{
-												waitUntil: waitAfterAction as 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2',
-												timeout: waitTime,
-												maxRetries: 2,
-												retryDelay: 1000,
-											},
+											waitUntil: waitAfterAction,
+											waitTime
+										};
+
+										// Execute the navigation action using the utility
+										const actionResult = await executeAction(
+											puppeteerPage,
+											'navigate' as ActionType,
+											actionParameters,
+											actionOptions,
 											this.logger
 										);
 
-										if (!navigationResult) {
-											this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-												`Navigation may have encountered issues, but continuing execution`));
-										} else {
-											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-												`Navigation completed successfully to ${url}`));
+										// Handle action failures
+										if (!actionResult.success) {
+											throw new Error(`Decision action failed: ${actionResult.error}`);
 										}
+
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Navigation action completed successfully using action utility`));
+
+										// After successful action, exit immediately
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Decision point "${groupName}": Action completed successfully - exiting decision node`));
+										resultData.success = true;
+										resultData.routeTaken = groupName;
+										resultData.actionPerformed = actionType;
+										resultData.currentUrl = await puppeteerPage.url();
+										resultData.pageTitle = await puppeteerPage.title();
+										resultData.executionDuration = Date.now() - startTime;
+
+										// Take screenshot if requested
+										if (takeScreenshot) {
+											const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
+											if (screenshotResult !== null) {
+												resultData.screenshot = screenshotResult;
+											}
+										}
+
+										// Return the result immediately after successful action
+										return [this.helpers.returnJsonArray([resultData])];
 									} catch (error) {
 										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Navigation error: ${(error as Error).message}`));
+											`Error during navigation action: ${(error as Error).message}`));
 										throw error;
 									}
-									break;
 								}
 							}
 						}
