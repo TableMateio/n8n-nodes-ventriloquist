@@ -1,21 +1,11 @@
 import type { IDataObject, IExecuteFunctions } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
-import { formatOperationLog } from './resultUtils';
-import { waitAndClick } from './clickOperations';
-import { navigateWithRetry } from './navigationUtils';
-import { takeScreenshot } from './navigationUtils';
-import { executeAction, ActionType, IActionOptions, IActionParameters } from './actionUtils';
-
-export interface IFallbackOptions {
-	enableFallback: boolean;
-	fallbackAction: string;
-	fallbackSelector?: string;
-	fallbackUrl?: string;
-	fallbackTimeout?: number;
-}
+import type { IFallbackOptions as IFallbackOptionsInternal, IFallbackResult } from './middlewares/fallback/fallbackMiddleware';
+import { executeFallbackAction } from './middlewares/fallback/fallbackMiddleware';
 
 /**
  * Execute fallback actions if primary action fails
+ * This is a wrapper around the fallback middleware for backward compatibility
  */
 export async function executeFallback(
 	page: puppeteer.Page,
@@ -27,241 +17,56 @@ export async function executeFallback(
 	const nodeName = thisNode.getNode().name;
 	const nodeId = thisNode.getNode().id;
 
-	// Quick return if fallback is disabled
-	if (!fallbackOptions.enableFallback) {
-		return false;
-	}
+	// Prepare context for the fallback middleware
+	const context = {
+		nodeName,
+		nodeId,
+		index,
+		resultData
+	};
 
-	try {
-		const fallbackAction = fallbackOptions.fallbackAction || 'none';
-
-		// If fallback action is none, then nothing to do
-		if (fallbackAction === 'none') {
-			thisNode.logger.debug(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-				'No fallback action specified, skipping fallback'));
-			return false;
+	// Add additional parameters from the node if not already in options
+	if (fallbackOptions.fallbackAction === 'fill') {
+		// Only extract these parameters if they're not already provided
+		if (fallbackOptions.fallbackInputType === undefined) {
+			fallbackOptions.fallbackInputType = thisNode.getNodeParameter('fallbackInputType', index, 'text') as string;
 		}
 
-		// Default timeout for fallback operations
-		const fallbackTimeout = fallbackOptions.fallbackTimeout || 30000;
-
-		thisNode.logger.info(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-			`Executing fallback action: ${fallbackAction}`));
-
-		// Execute the appropriate fallback action
-		switch (fallbackAction) {
-			case 'click': {
-				// Validate required parameters
-				if (!fallbackOptions.fallbackSelector) {
-					thisNode.logger.error(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-						'Missing required parameter: fallbackSelector'));
-					throw new Error('Missing required parameter: fallbackSelector');
-				}
-
-				const fallbackSelector = fallbackOptions.fallbackSelector;
-
-				thisNode.logger.info(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-					`Attempting fallback click on selector: ${fallbackSelector}`));
-
-				// Perform click - using the correct signature
-				await waitAndClick(
-					page,
-					fallbackSelector,
-					{ waitTimeout: fallbackTimeout }
-				);
-
-				thisNode.logger.info(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-					'Fallback click action completed successfully'));
-
-				// Store the fallback action in the result data
-				resultData.fallbackAction = {
-					type: 'click',
-					selector: fallbackSelector,
-					success: true,
-				};
-
-				// Take a screenshot after the fallback action
-				try {
-					const screenshot = await takeScreenshot(page, thisNode.logger);
-					if (screenshot) {
-						resultData.fallbackActionScreenshot = screenshot;
-					}
-				} catch (screenshotError) {
-					thisNode.logger.warn(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-						`Failed to take screenshot after fallback action: ${(screenshotError as Error).message}`));
-				}
-
-				return true;
-			}
-
-			case 'navigate': {
-				// Validate required parameters
-				if (!fallbackOptions.fallbackUrl) {
-					thisNode.logger.error(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-						'Missing required parameter: fallbackUrl'));
-					throw new Error('Missing required parameter: fallbackUrl');
-				}
-
-				const fallbackUrl = fallbackOptions.fallbackUrl;
-
-				thisNode.logger.info(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-					`Attempting fallback navigation to: ${fallbackUrl}`));
-
-				// Perform navigation with correct signature
-				const navigationResult = await navigateWithRetry(
-					page,
-					fallbackUrl,
-					{
-						waitUntil: 'domcontentloaded',
-						timeout: fallbackTimeout,
-						maxRetries: 2,
-					},
-					thisNode.logger
-				);
-
-				if (!navigationResult) {
-					thisNode.logger.warn(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-						'Fallback navigation may have encountered issues, but continuing execution'));
-				} else {
-					thisNode.logger.info(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-						`Fallback navigation completed successfully to ${fallbackUrl}`));
-				}
-
-				// Store the fallback action in the result data
-				resultData.fallbackAction = {
-					type: 'navigate',
-					url: fallbackUrl,
-					success: !!navigationResult,
-				};
-
-				// Take a screenshot after the fallback action
-				try {
-					const screenshot = await takeScreenshot(page, thisNode.logger);
-					if (screenshot) {
-						resultData.fallbackActionScreenshot = screenshot;
-					}
-				} catch (screenshotError) {
-					thisNode.logger.warn(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-						`Failed to take screenshot after fallback action: ${(screenshotError as Error).message}`));
-				}
-
-				return true;
-			}
-
-			case 'fill': {
-				// Validate required parameters
-				if (!fallbackOptions.fallbackSelector) {
-					thisNode.logger.error(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-						'Missing required parameter: fallbackSelector'));
-					throw new Error('Missing required parameter: fallbackSelector');
-				}
-
-				const fallbackSelector = fallbackOptions.fallbackSelector;
-				const fallbackInputType = thisNode.getNodeParameter('fallbackInputType', index, 'text') as string;
-				const fallbackText = thisNode.getNodeParameter('fallbackText', index, '') as string;
-
-				// Get parameters specific to input types
-				let checked = true;
-				let fallbackCheckState = '';
-				let fallbackClearField = false;
-				let fallbackPressEnter = false;
-				let fallbackFilePath = '';
-
-				// Extract the appropriate parameters based on input type
-				if (fallbackInputType === 'checkbox' || fallbackInputType === 'radio') {
-					fallbackCheckState = thisNode.getNodeParameter('fallbackCheckState', index, 'check') as string;
-					checked = fallbackCheckState === 'check';
-				} else if (fallbackInputType === 'text') {
-					fallbackClearField = thisNode.getNodeParameter('fallbackClearField', index, false) as boolean;
-					fallbackPressEnter = thisNode.getNodeParameter('fallbackPressEnter', index, false) as boolean;
-				} else if (fallbackInputType === 'file') {
-					fallbackFilePath = thisNode.getNodeParameter('fallbackFilePath', index, '') as string;
-				}
-
-				thisNode.logger.info(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-					`Attempting fallback fill on selector: ${fallbackSelector} with type: ${fallbackInputType}`));
-
-				// Create action parameters
-				const actionParameters: IActionParameters = {
-					selector: fallbackSelector,
-					fieldType: fallbackInputType,
-					value: fallbackText,
-					clearField: fallbackClearField,
-					pressEnter: fallbackPressEnter,
-					checked: checked,
-					checkState: fallbackCheckState,
-					filePath: fallbackFilePath
-				};
-
-				// Create action options
-				const actionOptions: IActionOptions = {
-					waitForSelector: true,
-					selectorTimeout: fallbackTimeout,
-					detectionMethod: 'standard',
-					earlyExitDelay: 500,
-					nodeName,
-					nodeId,
-					index,
-					useHumanDelays: false
-				};
-
-				// Execute the fill action
-				const actionResult = await executeAction(
-					page,
-					'fill' as ActionType,
-					actionParameters,
-					actionOptions,
-					thisNode.logger
-				);
-
-				// Handle result
-				if (!actionResult.success) {
-					thisNode.logger.warn(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-						`Fallback fill action failed: ${actionResult.error}`));
-				} else {
-					thisNode.logger.info(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-						'Fallback fill action completed successfully'));
-				}
-
-				// Store the fallback action in the result data
-				resultData.fallbackAction = {
-					type: 'fill',
-					selector: fallbackSelector,
-					inputType: fallbackInputType,
-					success: actionResult.success,
-					details: actionResult.details
-				};
-
-				// Take a screenshot after the fallback action
-				try {
-					const screenshot = await takeScreenshot(page, thisNode.logger);
-					if (screenshot) {
-						resultData.fallbackActionScreenshot = screenshot;
-					}
-				} catch (screenshotError) {
-					thisNode.logger.warn(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-						`Failed to take screenshot after fallback action: ${(screenshotError as Error).message}`));
-				}
-
-				return actionResult.success;
-			}
-
-			default:
-				thisNode.logger.warn(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-					`Unknown fallback action: ${fallbackAction}`));
-				return false;
+		if (fallbackOptions.fallbackText === undefined) {
+			fallbackOptions.fallbackText = thisNode.getNodeParameter('fallbackText', index, '') as string;
 		}
-	} catch (error) {
-		// If we encounter an error in the fallback action, log it but don't throw
-		thisNode.logger.error(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
-			`Error executing fallback action: ${(error as Error).message}`));
 
-		// Store the fallback action error in the result data
-		resultData.fallbackActionError = {
-			message: (error as Error).message,
-			stack: (error as Error).stack,
-		};
+		// Extract parameters specific to input types
+		if (fallbackOptions.fallbackInputType === 'checkbox' || fallbackOptions.fallbackInputType === 'radio') {
+			if (fallbackOptions.fallbackCheckState === undefined) {
+				fallbackOptions.fallbackCheckState = thisNode.getNodeParameter('fallbackCheckState', index, 'check') as string;
+			}
+		} else if (fallbackOptions.fallbackInputType === 'text') {
+			if (fallbackOptions.fallbackClearField === undefined) {
+				fallbackOptions.fallbackClearField = thisNode.getNodeParameter('fallbackClearField', index, false) as boolean;
+			}
 
-		return false;
+			if (fallbackOptions.fallbackPressEnter === undefined) {
+				fallbackOptions.fallbackPressEnter = thisNode.getNodeParameter('fallbackPressEnter', index, false) as boolean;
+			}
+		} else if (fallbackOptions.fallbackInputType === 'file') {
+			if (fallbackOptions.fallbackFilePath === undefined) {
+				fallbackOptions.fallbackFilePath = thisNode.getNodeParameter('fallbackFilePath', index, '') as string;
+			}
+		}
 	}
+
+	// Execute the fallback action using the middleware
+	const fallbackResult: IFallbackResult = await executeFallbackAction(
+		page,
+		fallbackOptions,
+		context,
+		thisNode.logger
+	);
+
+	// Return success status (for backward compatibility)
+	return fallbackResult.success;
 }
+
+// Re-export the interface for backward compatibility
+export type IFallbackOptions = IFallbackOptionsInternal;
