@@ -521,20 +521,6 @@ export class Ventriloquist implements INodeType {
 			// Properties for 'open' operation
 			...openOperation.description,
 
-			// Properties for 'click' operation
-			{
-				displayName: 'Session ID',
-				name: 'explicitSessionId',
-				type: 'string',
-				default: '',
-				description: 'Session ID to use for this operation. Leave blank to use the most recent session ID from input',
-				displayOptions: {
-					show: {
-						operation: ['click', 'extract'],
-					},
-				},
-			},
-
 			// Properties for 'form' operation
 			...formOperation.description,
 
