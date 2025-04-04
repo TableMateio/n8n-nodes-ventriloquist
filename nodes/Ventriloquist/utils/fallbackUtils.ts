@@ -4,6 +4,7 @@ import { formatOperationLog } from './resultUtils';
 import { waitAndClick } from './clickOperations';
 import { navigateWithRetry } from './navigationUtils';
 import { takeScreenshot } from './navigationUtils';
+import { executeAction, ActionType, IActionOptions, IActionParameters } from './actionUtils';
 
 export interface IFallbackOptions {
 	enableFallback: boolean;
@@ -145,6 +146,104 @@ export async function executeFallback(
 				}
 
 				return true;
+			}
+
+			case 'fill': {
+				// Validate required parameters
+				if (!fallbackOptions.fallbackSelector) {
+					thisNode.logger.error(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
+						'Missing required parameter: fallbackSelector'));
+					throw new Error('Missing required parameter: fallbackSelector');
+				}
+
+				const fallbackSelector = fallbackOptions.fallbackSelector;
+				const fallbackInputType = thisNode.getNodeParameter('fallbackInputType', index, 'text') as string;
+				const fallbackText = thisNode.getNodeParameter('fallbackText', index, '') as string;
+
+				// Get parameters specific to input types
+				let checked = true;
+				let fallbackCheckState = '';
+				let fallbackClearField = false;
+				let fallbackPressEnter = false;
+				let fallbackFilePath = '';
+
+				// Extract the appropriate parameters based on input type
+				if (fallbackInputType === 'checkbox' || fallbackInputType === 'radio') {
+					fallbackCheckState = thisNode.getNodeParameter('fallbackCheckState', index, 'check') as string;
+					checked = fallbackCheckState === 'check';
+				} else if (fallbackInputType === 'text') {
+					fallbackClearField = thisNode.getNodeParameter('fallbackClearField', index, false) as boolean;
+					fallbackPressEnter = thisNode.getNodeParameter('fallbackPressEnter', index, false) as boolean;
+				} else if (fallbackInputType === 'file') {
+					fallbackFilePath = thisNode.getNodeParameter('fallbackFilePath', index, '') as string;
+				}
+
+				thisNode.logger.info(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
+					`Attempting fallback fill on selector: ${fallbackSelector} with type: ${fallbackInputType}`));
+
+				// Create action parameters
+				const actionParameters: IActionParameters = {
+					selector: fallbackSelector,
+					fieldType: fallbackInputType,
+					value: fallbackText,
+					clearField: fallbackClearField,
+					pressEnter: fallbackPressEnter,
+					checked: checked,
+					checkState: fallbackCheckState,
+					filePath: fallbackFilePath
+				};
+
+				// Create action options
+				const actionOptions: IActionOptions = {
+					waitForSelector: true,
+					selectorTimeout: fallbackTimeout,
+					detectionMethod: 'standard',
+					earlyExitDelay: 500,
+					nodeName,
+					nodeId,
+					index,
+					useHumanDelays: false
+				};
+
+				// Execute the fill action
+				const actionResult = await executeAction(
+					page,
+					'fill' as ActionType,
+					actionParameters,
+					actionOptions,
+					thisNode.logger
+				);
+
+				// Handle result
+				if (!actionResult.success) {
+					thisNode.logger.warn(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
+						`Fallback fill action failed: ${actionResult.error}`));
+				} else {
+					thisNode.logger.info(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
+						'Fallback fill action completed successfully'));
+				}
+
+				// Store the fallback action in the result data
+				resultData.fallbackAction = {
+					type: 'fill',
+					selector: fallbackSelector,
+					inputType: fallbackInputType,
+					success: actionResult.success,
+					details: actionResult.details
+				};
+
+				// Take a screenshot after the fallback action
+				try {
+					const screenshot = await takeScreenshot(page, thisNode.logger);
+					if (screenshot) {
+						resultData.fallbackActionScreenshot = screenshot;
+					}
+				} catch (screenshotError) {
+					thisNode.logger.warn(formatOperationLog('FallbackUtils', nodeName, nodeId, index,
+						`Failed to take screenshot after fallback action: ${(screenshotError as Error).message}`));
+				}
+
+				return actionResult.success;
 			}
 
 			default:
