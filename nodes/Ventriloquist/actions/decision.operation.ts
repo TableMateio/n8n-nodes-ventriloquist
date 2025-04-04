@@ -2778,82 +2778,239 @@ export const description: INodeProperties[] = [
 											}
 
 											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-												`Executing form fill on "${actionSelector}" using action utility`));
+												`Executing simple form fill on "${actionSelector}" (type: ${fieldType})`));
 
-											// Create options and parameters for the action
-											const actionOptions: IActionOptions = {
-												waitForSelector: waitForSelectors,
-												selectorTimeout,
-												detectionMethod,
-												earlyExitDelay,
-												nodeName,
-												nodeId,
-												index,
-												useHumanDelays
-											};
+											// For actions, we always need to ensure the element exists
+											if (waitForSelectors) {
+												if (detectionMethod === 'smart') {
+													const elementExists = await smartWaitForSelector(
+														puppeteerPage,
+														actionSelector,
+														selectorTimeout,
+														earlyExitDelay,
+														this.logger,
+													);
 
-											// Build field parameters
-											const actionParameters: IActionParameters = {
+													if (!elementExists) {
+														throw new Error(`Decision action: Element "${actionSelector}" required for this path is not present or visible`);
+													}
+												} else {
+													await puppeteerPage.waitForSelector(actionSelector, { timeout: selectorTimeout });
+												}
+											}
+
+											// Process the form field using our utility function
+											const field: IDataObject = {
+												fieldType,
 												selector: actionSelector,
 												value: actionValue,
-												fieldType,
-												waitAfterAction,
-												waitTime,
-												waitSelector: group.waitSelector as string,
-												clearField: true,
-												// Add specific options based on field type
-												...(fieldType === 'password' ? { clearField: true } : {})
+												// Add options based on field type
+												...(fieldType === 'text' ? {
+													clearField: true,
+													humanLike: useHumanDelays
+												} : {}),
+												...(fieldType === 'password' ? {
+													clearField: true
+												} : {})
 											};
 
-											// Execute the fill action using the utility
-											const actionResult = await executeAction(
+											const { success, fieldResult } = await processFormField(
 												puppeteerPage,
-												'fill' as ActionType,
-												actionParameters,
-												actionOptions,
+												field,
 												this.logger
 											);
 
-											// Handle action failures
-											if (!actionResult.success) {
-												throw new Error(`Decision action failed: ${actionResult.error}`);
+											if (!success) {
+												throw new Error(`Failed to fill form field: ${actionSelector} (type: ${fieldType})`);
 											}
-
-											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-												`Form fill action completed successfully using action utility`));
 
 											// Store field result for response
 											if (!resultData.formFields) {
 												resultData.formFields = [];
 											}
-											(resultData.formFields as IDataObject[]).push(actionResult.details);
+											(resultData.formFields as IDataObject[]).push(fieldResult);
 
-											// After successful action, exit immediately
+											// Handle post-fill waiting
+											if (waitAfterAction === 'fixedTime') {
+												await new Promise(resolve => setTimeout(resolve, waitTime));
+											} else if (waitAfterAction === 'urlChanged') {
+												await puppeteerPage.waitForNavigation({ timeout: waitTime });
+											} else if (waitAfterAction === 'selector') {
+												const waitSelector = group.waitSelector as string;
+												await puppeteerPage.waitForSelector(waitSelector, { timeout: waitTime });
+											}
+										}
+										// Handle complex form fields approach
+										else if (hasFormFields) {
+											// Get form parameters
+											const formFields = (group.formFields as IDataObject).fields as IDataObject[] || [];
+											const submitForm = group.submitForm as boolean || false;
+											const submitSelector = group.submitSelector as string || '';
+											const waitAfterSubmit = group.waitAfterSubmit as string || 'domContentLoaded';
+											const waitSubmitTime = group.waitSubmitTime as number || 2000;
+
 											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-												`Decision point "${groupName}": Action completed successfully - exiting decision node`));
-											resultData.success = true;
-											resultData.routeTaken = groupName;
-											resultData.actionPerformed = actionType;
-											resultData.currentUrl = await puppeteerPage.url();
-											resultData.pageTitle = await puppeteerPage.title();
-											resultData.executionDuration = Date.now() - startTime;
+												`Using complex form fill with ${formFields.length} fields`));
 
-											// Take screenshot if requested
-											if (takeScreenshot) {
-												const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
-												if (screenshotResult !== null) {
-													resultData.screenshot = screenshotResult;
+											// Process each form field
+											const results: IDataObject[] = [];
+											for (const field of formFields) {
+												const selector = field.selector as string;
+												const fieldType = field.fieldType as string || 'text';
+
+												// Wait for the element if needed
+												if (waitForSelectors) {
+													if (detectionMethod === 'smart') {
+														const elementExists = await smartWaitForSelector(
+															puppeteerPage,
+															selector,
+															selectorTimeout,
+															earlyExitDelay,
+															this.logger,
+														);
+
+														if (!elementExists) {
+															throw new Error(`Form field element with selector "${selector}" not found`);
+														}
+													} else {
+														await puppeteerPage.waitForSelector(selector, { timeout: selectorTimeout });
+													}
+												}
+
+												// Add a human-like delay if enabled
+												if (useHumanDelays) {
+													await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
+												}
+
+												// Process the form field using the utility function
+												const { success, fieldResult } = await processFormField(
+													puppeteerPage,
+													field,
+													this.logger
+												);
+
+												// Add context to the field result
+												fieldResult.nodeId = nodeId;
+												fieldResult.nodeName = nodeName;
+
+												// Add the field result to our results collection
+												results.push(fieldResult);
+
+												// If the field failed and we're not continuing on failure, throw an error
+												if (!success && !continueOnFail) {
+													throw new Error(`Failed to fill form field: ${selector} (type: ${fieldType})`);
 												}
 											}
 
-											// Return the result immediately after successful action
-											return [this.helpers.returnJsonArray([resultData])];
-										} catch (error) {
-											this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-												`Error during form fill action: ${(error as Error).message}`));
-											throw error;
+											// Add form results to response data
+											if (!resultData.formFields) {
+												resultData.formFields = [];
+											}
+											(resultData.formFields as IDataObject[]).push(...results);
+
+											// Submit the form if requested
+											if (submitForm && submitSelector) {
+												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+													`Submitting form using selector: ${submitSelector}`));
+
+												// Wait a short time before submitting (feels more human)
+												if (useHumanDelays) {
+													await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
+												}
+
+												try {
+													// Create a promise that will resolve when the next navigation happens
+													const navigationPromise = waitAfterSubmit !== 'noWait' ?
+														puppeteerPage.waitForNavigation({
+															waitUntil: waitAfterSubmit === 'multiple' ? ['domcontentloaded', 'networkidle0'] :
+																(waitAfterSubmit as puppeteer.PuppeteerLifeCycleEvent || 'domcontentloaded'),
+															timeout: waitSubmitTime
+														}) :
+														Promise.resolve();
+
+													// Click the submit button
+													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+														`Clicking submit button: ${submitSelector}`));
+													await puppeteerPage.click(submitSelector);
+													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+														`Submit button clicked successfully`));
+
+													// Wait for navigation to complete
+													if (waitAfterSubmit !== 'noWait') {
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Waiting for navigation to complete (timeout: ${waitSubmitTime}ms)`));
+														await navigationPromise;
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Navigation completed successfully after form submission`));
+													}
+
+													// Store form submission result
+													resultData.formSubmission = {
+														success: true,
+														submitSelector,
+														waitAfterSubmit,
+														waitSubmitTime
+													};
+												} catch (navError) {
+													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+														`Navigation error after form submission: ${(navError as Error).message}`));
+													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+														`This is often normal with redirects - attempting to continue`));
+
+													// Store form submission result with error
+													resultData.formSubmission = {
+														success: false,
+														error: (navError as Error).message,
+														submitSelector,
+														waitAfterSubmit,
+														waitSubmitTime
+													};
+												}
+											}
 										}
-										break;
+
+										// After successful action, exit with result
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Decision point "${groupName}": Form action completed successfully - exiting decision node`));
+										resultData.success = true;
+										resultData.routeTaken = groupName;
+										resultData.actionPerformed = actionType;
+										resultData.currentUrl = await puppeteerPage.url();
+										resultData.pageTitle = await puppeteerPage.title();
+										resultData.executionDuration = Date.now() - startTime;
+
+										// Take screenshot if requested
+										if (takeScreenshot) {
+											const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
+											if (screenshotResult !== null) {
+												resultData.screenshot = screenshotResult;
+											}
+										}
+
+										// Return the result immediately after successful action
+										return [this.helpers.returnJsonArray([resultData])];
+									} catch (error) {
+										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Error during fill action: ${(error as Error).message}`));
+										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Action execution error in group "${groupName}": ${(error as Error).message}`));
+
+										if (continueOnFail) {
+											// If continueOnFail is enabled, update result and move on
+											resultData.success = false;
+											resultData.routeTaken = 'none';
+											resultData.actionPerformed = 'error';
+											resultData.currentUrl = await puppeteerPage.url();
+											resultData.pageTitle = await puppeteerPage.title();
+											resultData.error = (error as Error).message;
+											resultData.executionDuration = Date.now() - startTime;
+
+											// Exit the decision node with the error result
+											return [this.helpers.returnJsonArray([resultData])];
+										}
+
+										// If continueOnFail is not enabled, rethrow the error
+										throw error;
 									}
 								}
 								case 'extract': {
