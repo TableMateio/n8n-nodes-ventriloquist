@@ -8,32 +8,15 @@ import type * as puppeteer from 'puppeteer-core';
 import { SessionManager } from '../utils/sessionManager';
 import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
 import { createErrorResponse } from '../utils/errorUtils';
-import { waitAndClick } from '../utils/clickOperations';
-import {
-	processFormField
-} from '../utils/formOperations';
+import { processFormField, getHumanDelay } from '../utils/formOperations';
 import { takeScreenshot as captureScreenshot } from '../utils/navigationUtils';
-import {
-	extractTextContent,
-	extractHtmlContent,
-	extractInputValue,
-	extractAttributeValue,
-	formatExtractedDataForLog
-} from '../utils/extractionUtils';
-import {
-	navigateWithRetry,
-} from '../utils/navigationUtils';
-import {
-	executeAction,
-	ActionType,
-	IActionParameters,
-	IActionOptions
-} from '../utils/actionUtils';
+import { executeAction, ActionType, IActionParameters, IActionOptions } from '../utils/actionUtils';
 // Add import for conditionUtils module
-import {
-	evaluateConditionGroup,
-	IConditionGroup
-} from '../utils/conditionUtils';
+import { evaluateConditionGroup, IConditionGroup } from '../utils/conditionUtils';
+// Add import for fallbackUtils module
+import { executeFallback, IFallbackOptions } from '../utils/fallbackUtils';
+// Add formatExtractedDataForLog back to the imports
+import { formatExtractedDataForLog } from '../utils/extractionUtils';
 
 /**
  * Decision operation description
@@ -1955,49 +1938,6 @@ export const description: INodeProperties[] = [
 	];
 
 	/**
-	 * Get a realistic human delay
-	 */
-	function getHumanDelay(): number {
-		return Math.floor(Math.random() * (300 - 100 + 1) + 100);
-	}
-
-	/**
-	 * Wait for navigation based on the specified wait type
-	 */
-	async function waitForNavigation(page: puppeteer.Page, waitUntil: string, timeout: number): Promise<void> {
-		// Default waitUntil option based on input string
-		let waitUntilOption: puppeteer.PuppeteerLifeCycleEvent | puppeteer.PuppeteerLifeCycleEvent[] = 'domcontentloaded';
-
-		// Parse waitUntil string into appropriate option
-		switch (waitUntil) {
-			case 'load':
-				waitUntilOption = 'load';
-				break;
-			case 'domcontentloaded':
-				waitUntilOption = 'domcontentloaded';
-				break;
-			case 'networkidle0':
-				waitUntilOption = 'networkidle0';
-				break;
-			case 'networkidle2':
-				waitUntilOption = 'networkidle2';
-				break;
-			case 'multiple':
-				waitUntilOption = ['domcontentloaded', 'networkidle0'];
-				break;
-			default:
-				waitUntilOption = 'domcontentloaded';
-				break;
-		}
-
-		// Wait for navigation with the specified options
-		await page.waitForNavigation({
-			waitUntil: waitUntilOption,
-			timeout,
-		});
-	}
-
-	/**
 	 * Smart wait for element with DOM-aware early exit strategy
 	 */
 	async function smartWaitForSelector(
@@ -2938,299 +2878,38 @@ export const description: INodeProperties[] = [
 					routeTaken = 'fallback';
 						actionPerformed = fallbackAction;
 
+					this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+						`Executing fallback action: ${fallbackAction}`));
+
+					// Create fallback options object
+					const fallbackOptions: IFallbackOptions = {
+						enableFallback: true,
+						fallbackAction,
+						fallbackSelector: this.getNodeParameter('fallbackSelector', index, '') as string,
+						fallbackUrl: this.getNodeParameter('fallbackUrl', index, '') as string,
+						fallbackTimeout: this.getNodeParameter('fallbackWaitTime', index, 30000) as number
+					};
+
 					try {
-						// Add human-like delay if enabled
-						if (useHumanDelays) {
-							await new Promise(resolve => setTimeout(resolve, getHumanDelay()));
-						}
+						// Execute the fallback using our utility function
+						const fallbackResult = await executeFallback(
+							puppeteerPage,
+							fallbackOptions,
+							resultData,
+							index,
+							this
+						);
 
-						switch (fallbackAction) {
-							case 'click': {
-								try {
-									// Retrieve parameters one by one with detailed error handling
-									let fallbackSelector: string;
-									let waitAfterFallback: string;
-									let fallbackWaitTime: number;
-
-									try {
-										fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
-										if (!fallbackSelector) {
-											throw new Error('Fallback selector is empty');
-										}
-									} catch (error) {
-										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Missing required parameter: fallbackSelector`));
-										throw new Error('Missing required parameter: fallbackSelector');
-									}
-
-									try {
-										waitAfterFallback = this.getNodeParameter('waitAfterFallback', index, 'domcontentloaded') as string;
-									} catch (error) {
-										waitAfterFallback = 'domcontentloaded';
-										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Using default value for waitAfterFallback: ${waitAfterFallback}`));
-									}
-
-									try {
-										fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index, 5000) as number;
-									} catch (error) {
-										fallbackWaitTime = 5000;
-										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Using default value for fallbackWaitTime: ${fallbackWaitTime}`));
-									}
-
-									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-										`Executing fallback click on "${fallbackSelector}"`));
-
-									// Use waitAndClick utility for consistent click behavior
-									const clickResult = await waitAndClick(
-										puppeteerPage,
-										fallbackSelector,
-										{
-											waitTimeout: selectorTimeout,
-											retries: 2,
-											waitBetweenRetries: 1000,
-											logger: this.logger
-										}
-									);
-
-									// Handle click failures
-									if (!clickResult.success) {
-										throw new Error(`Fallback action: Failed to click element "${fallbackSelector}": ${clickResult.error?.message || 'Unknown error'}`);
-									}
-
-									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-										`Fallback click successful on "${fallbackSelector}"`));
-
-									// Wait according to specified wait type
-									await waitForNavigation(puppeteerPage, waitAfterFallback, fallbackWaitTime);
-								} catch (paramError) {
-									this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-										`Error in fallback click action: ${(paramError as Error).message}`));
-									throw paramError;
-								}
-								break;
-							}
-
-							case 'extract': {
-								const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
-								const fallbackExtractionType = this.getNodeParameter('fallbackExtractionType', index) as string;
-
-								if (waitForSelectors) {
-									// For actions, we always need to ensure the element exists
-									if (detectionMethod === 'smart') {
-										const elementExists = await smartWaitForSelector(
-											puppeteerPage,
-											fallbackSelector,
-											selectorTimeout,
-											earlyExitDelay,
-											this.logger
-										);
-
-										if (!elementExists) {
-											throw new Error(`Element with selector "${fallbackSelector}" not found for fallback extraction`);
-										}
-									} else {
-										await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
-									}
-								}
-
-								// Extract data based on extraction type
-								let extractedData: string | null | IDataObject = null;
-								try {
-									switch (fallbackExtractionType) {
-										case 'text':
-											extractedData = await extractTextContent(
-												puppeteerPage,
-												fallbackSelector,
-												this.logger,
-												nodeName,
-												nodeId
-											);
-											break;
-
-										case 'html': {
-											// Get HTML options
-											const fallbackHtmlOptions = this.getNodeParameter('fallbackHtmlOptions', index, {}) as IDataObject;
-											const outputFormat = (fallbackHtmlOptions.outputFormat as string) || 'html';
-											const includeMetadata = fallbackHtmlOptions.includeMetadata as boolean || false;
-
-											extractedData = await extractHtmlContent(
-												puppeteerPage,
-												fallbackSelector,
-												{
-													outputFormat,
-													includeMetadata,
-												},
-												this.logger,
-												nodeName,
-												nodeId
-											);
-											break;
-										}
-
-										case 'value':
-											extractedData = await extractInputValue(
-												puppeteerPage,
-												fallbackSelector,
-												this.logger,
-												nodeName,
-												nodeId
-											);
-											break;
-
-										case 'attribute': {
-											const attributeName = this.getNodeParameter('fallbackAttributeName', index) as string;
-											extractedData = await extractAttributeValue(
-												puppeteerPage,
-												fallbackSelector,
-												attributeName,
-												this.logger,
-												nodeName,
-												nodeId
-											);
-											break;
-										}
-
-										default:
-											extractedData = await extractTextContent(
-												puppeteerPage,
-												fallbackSelector,
-												this.logger,
-												nodeName,
-												nodeId
-											);
-									}
-								} catch (error) {
-									this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Fallback extraction error: ${(error as Error).message}`));
-									throw error;
-								}
-
-								// Store the extracted data in the result
-								if (!resultData.extractedData) {
-									resultData.extractedData = {};
-								}
-								resultData.extractedData.fallback = extractedData;
-
-								const truncatedData = formatExtractedDataForLog(extractedData, fallbackExtractionType);
-								this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-									`Fallback: Extracted ${fallbackExtractionType} data from: ${fallbackSelector} - Value: ${truncatedData}`));
-								break;
-							}
-
-							case 'fill': {
-								const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
-								const fallbackText = this.getNodeParameter('fallbackText', index) as string;
-								const fallbackInputType = this.getNodeParameter('fallbackInputType', index, 'text') as string;
-
-								if (waitForSelectors) {
-									// For actions, we always need to ensure the element exists
-									if (detectionMethod === 'smart') {
-										const elementExists = await smartWaitForSelector(
-											puppeteerPage,
-											fallbackSelector,
-											selectorTimeout,
-											earlyExitDelay,
-											this.logger
-										);
-
-										if (!elementExists) {
-											throw new Error(`Fallback element with selector "${fallbackSelector}" not found`);
-										}
-									} else {
-										await puppeteerPage.waitForSelector(fallbackSelector, { timeout: selectorTimeout });
-									}
-								}
-
-								// Process the form field using the utility function
-								const field: IDataObject = {
-									fieldType: fallbackInputType,
-									selector: fallbackSelector,
-									value: fallbackText
-								};
-
-								// Add specific options based on input type
-								if (fallbackInputType === 'text') {
-									field.clearField = this.getNodeParameter('fallbackClearField', index, false) as boolean;
-									field.pressEnter = this.getNodeParameter('fallbackPressEnter', index, false) as boolean;
-									field.humanLike = useHumanDelays;
-								} else if (fallbackInputType === 'checkbox' || fallbackInputType === 'radio') {
-									field.checkState = this.getNodeParameter('fallbackCheckState', index, 'check') as string;
-								} else if (fallbackInputType === 'file') {
-									field.filePath = this.getNodeParameter('fallbackFilePath', index, '') as string;
-								}
-
-								this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-									`Processing fallback form field: ${fallbackSelector} (type: ${fallbackInputType})`));
-
-								try {
-									const { success, fieldResult } = await processFormField(
-										puppeteerPage,
-										field,
-										this.logger
-									);
-
-									if (!success) {
-										throw new Error(`Failed to fill form field: ${fallbackSelector} (type: ${fallbackInputType})`);
-									}
-
-									// Store field result for response
-									if (!resultData.formFields) {
-										resultData.formFields = [];
-									}
-									(resultData.formFields as IDataObject[]).push(fieldResult);
-
-									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-										`Fallback form field processed successfully: ${fallbackSelector}`));
-								} catch (error) {
-									this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-										`Fallback form field error: ${(error as Error).message}`));
-									throw error;
-								}
-								break;
-							}
-
-							case 'navigate': {
-								const fallbackUrl = this.getNodeParameter('fallbackUrl', index) as string;
-								const waitAfterFallback = this.getNodeParameter('waitAfterFallback', index) as string;
-								const fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index) as number;
-
-								this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-									`Executing fallback navigation to "${fallbackUrl}"`));
-
-								try {
-									// Use navigationWithRetry utility for more robust navigation
-									const navigationResult = await navigateWithRetry(
-										puppeteerPage,
-										fallbackUrl,
-										{
-											waitUntil: waitAfterFallback as 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2',
-											timeout: fallbackWaitTime,
-											maxRetries: 2,
-											retryDelay: 1000,
-										},
-										this.logger
-									);
-
-									if (!navigationResult) {
-										this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Fallback navigation may have encountered issues, but continuing execution`));
-									} else {
-										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Fallback navigation completed successfully to ${fallbackUrl}`));
-									}
-								} catch (error) {
-									this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-										`Fallback navigation error: ${(error as Error).message}`));
-									throw error;
-								}
-								break;
-							}
+						if (fallbackResult) {
+							this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+								`Fallback action ${fallbackAction} executed successfully`));
+						} else {
+							this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+								`Fallback action did not execute successfully`));
 						}
 					} catch (error) {
 						this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
-							`Error in fallback action: ${(error as Error).message}`));
+								`Error in fallback action: ${(error as Error).message}`));
 
 						if (!continueOnFail) {
 							throw error;
