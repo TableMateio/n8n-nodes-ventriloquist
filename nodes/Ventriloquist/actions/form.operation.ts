@@ -582,99 +582,144 @@ export async function execute(
 	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
 
 	// Get or create browser session
-	let page: Page | undefined;
+	let page: Page | null = null;
 	let sessionId = '';
 
 	try {
 		// Log session state for debugging
-		const sessionsInfo = SessionManager.getSessionsDebugInfo();
+		const sessionsInfo = SessionManager.getAllSessions();
 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Available sessions: ${JSON.stringify(sessionsInfo)}`);
 
 		// If using an explicit session ID, try to get that page first
 		if (explicitSessionId) {
 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Looking for explicitly provided session ID: ${explicitSessionId}`);
 
-			// Try to find the page across all workflow IDs
-			const foundPage = SessionManager.findPageBySessionId(explicitSessionId);
+			// Get the session with the provided ID
+			const existingSession = SessionManager.getSession(explicitSessionId);
 
-			if (foundPage) {
-				page = foundPage.page;
-				// Store the session info
-				const pageWorkflowId = foundPage.workflowId;
-				sessionId = explicitSessionId;
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found existing page with explicit session ID: ${sessionId} in workflow ${pageWorkflowId}`);
-			} else {
-				// Fall back to direct lookup in the current workflow
-				page = SessionManager.getPage(workflowId, explicitSessionId);
-
-				if (page) {
+			if (existingSession) {
+				// Get the page from the session
+				const existingPage = SessionManager.getPage(explicitSessionId);
+				if (existingPage) {
+					page = existingPage;
 					sessionId = explicitSessionId;
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found existing page with explicit session ID: ${sessionId} in current workflow`);
-				} else {
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Provided session ID ${explicitSessionId} not found, will check for existing sessions`);
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found existing session with ID: ${sessionId}`);
+				} else if (existingSession.browser) {
+					// No page found in session, create a new one
+					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No page found in session, creating a new one`);
+					page = await existingSession.browser.newPage();
+
+					// Generate a page ID and store it
+					const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+					SessionManager.storePage(explicitSessionId, pageId, page);
+					sessionId = explicitSessionId;
+				}
+			} else {
+				// Try to connect to the session
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Session not found locally, attempting to connect to: ${explicitSessionId}`);
+
+				try {
+					// Try to connect to the session
+					const result = await SessionManager.connectToSession(
+						this.logger,
+						explicitSessionId,
+						websocketEndpoint
+					);
+
+					sessionId = explicitSessionId;
+
+					// If we got a browser but no page, create one
+					if (result.browser) {
+						if (result.page) {
+							page = result.page;
+						} else {
+							page = await result.browser.newPage();
+							// Store the page in the session
+							const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+							SessionManager.storePage(sessionId, pageId, page);
+						}
+
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Successfully connected to session: ${sessionId}`);
+					}
+				} catch (connectError) {
+					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Could not connect to session: ${(connectError as Error).message}`);
 				}
 			}
 		}
 
-		// If we don't have a page yet, check if there's an existing session
+		// If we don't have a page yet, check for existing sessions or create a new one
 		if (!page) {
-			// First, look for sessions across all workflow IDs that might contain pages
-			const sessions = Array.from(SessionManager.getSessions().entries());
+			// Get all active sessions
+			const allSessions = SessionManager.getAllSessions();
 
-			if (sessions.length > 0) {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found ${sessions.length} existing browser sessions`);
+			if (allSessions.length > 0) {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Found ${allSessions.length} existing sessions`);
 
-				// Try to find a session with pages
-				for (const [sessionWorkflowId, sessionData] of sessions) {
-					if (sessionData.pages.size > 0) {
-						// Use the first page from the first session that has pages
-						const pageEntries = Array.from(sessionData.pages.entries());
-						page = pageEntries[0][1];
-						sessionId = pageEntries[0][0];
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Using existing page with session ID: ${sessionId} from workflow ${sessionWorkflowId}`);
-						break;
+				// Try to get a page from any session
+				for (const sessionInfo of allSessions) {
+					// Try to get the session
+					const session = SessionManager.getSession(sessionInfo.sessionId);
+					if (session && session.pages.size > 0) {
+						// Use the first page from this session
+						const existingPage = SessionManager.getPage(sessionInfo.sessionId);
+						if (existingPage) {
+							page = existingPage;
+							sessionId = sessionInfo.sessionId;
+							this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Using existing page from session: ${sessionId}`);
+							break;
+						}
 					}
 				}
 
-				// If we still don't have a page, try to create one in the first available session
+				// If still no page, try to create one in the first available session
 				if (!page) {
-					const [sessionWorkflowId, sessionData] = sessions[0];
-					try {
-						page = await sessionData.browser.newPage();
-						sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Created new page with session ID: ${sessionId} in existing session for workflow ${sessionWorkflowId}`);
+					const firstSessionId = allSessions[0].sessionId;
+					const firstSession = SessionManager.getSession(firstSessionId);
 
-						// Store the new page
-						SessionManager.storePage(sessionWorkflowId, sessionId, page);
-					} catch (pageError) {
-						this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Failed to create new page: ${(pageError as Error).message}`);
-						throw new Error(`Failed to create new page: ${(pageError as Error).message}`);
+					if (firstSession && firstSession.browser) {
+						try {
+							page = await firstSession.browser.newPage();
+							// Store the page in the session
+							const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+							SessionManager.storePage(firstSessionId, pageId, page);
+							sessionId = firstSessionId;
+
+							this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Created new page in existing session: ${sessionId}`);
+						} catch (pageError) {
+							this.logger.error(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Failed to create new page: ${(pageError as Error).message}`);
+						}
 					}
 				}
-			} else if (websocketEndpoint) {
-				// Only try to create a new session if we have a valid websocket endpoint
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No existing sessions found, creating a new one with endpoint: ${websocketEndpoint}`);
+			}
 
-				// Create a new browser session
-				const { browser, sessionId: newSessionId } = await SessionManager.getOrCreateSession(
-					workflowId,
-					websocketEndpoint,
-					this.logger,
-					undefined,
-					false, // Don't force a new session
-				);
+			// If we still don't have a page, create a new session
+			if (!page && websocketEndpoint) {
+				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Creating new browser session`);
 
-				// Create a new page
-				page = await browser.newPage();
-				sessionId = newSessionId;
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Created new page with session ID: ${sessionId}`);
+				try {
+					// Create a new session
+					const result = await SessionManager.createSession(this.logger, websocketEndpoint, {
+						workflowId, // Store workflowId for backwards compatibility
+					});
 
-				// Store the new page for future operations
-				SessionManager.storePage(workflowId, sessionId, page);
+					sessionId = result.sessionId;
 
-				// Navigate to a blank page to initialize it
-				await page.goto('about:blank');
-			} else {
+					// Create a new page
+					if (result.browser) {
+						page = await result.browser.newPage();
+						// Store the page in the session
+						const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+						SessionManager.storePage(sessionId, pageId, page);
+
+						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Created new session with ID: ${sessionId}`);
+
+						// Navigate to a blank page to initialize it
+						await page.goto('about:blank');
+					}
+				} catch (sessionError) {
+					throw new Error(`Failed to create browser session: ${(sessionError as Error).message}`);
+				}
+			} else if (!page) {
 				// No existing session and no websocket endpoint
 				throw new Error('Cannot create a new session without a valid websocket endpoint. Please connect this node to an Open node or provide an explicit session ID.');
 			}
@@ -684,11 +729,7 @@ export async function execute(
 		if (!page) {
 			throw new Error('Failed to get or create a page');
 		}
-	} catch (error) {
-		throw new Error(`Failed to get or create a page: ${(error as Error).message}`);
-	}
 
-	try {
 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Starting form fill operation`);
 		const results: IDataObject[] = [];
 
@@ -741,7 +782,9 @@ export async function execute(
 					// Try to take a screenshot if possible for debugging
 					let errorScreenshot = '';
 					try {
-						errorScreenshot = await takeScreenshot(page, this.logger) || '';
+						if (page) {
+							errorScreenshot = await takeScreenshot(page, this.logger) || '';
+						}
 					} catch {
 						// Ignore screenshot errors
 					}

@@ -1,257 +1,141 @@
 import { URL } from 'node:url';
 import * as puppeteerRuntime from 'puppeteer-core';
 import type { Browser, Page, ConnectOptions } from 'puppeteer-core';
-import type { ILogger } from './formOperations';
 
 /**
- * Interface for browser session storage
+ * Interface for logger
+ */
+export interface ILogger {
+  info(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
+}
+
+/**
+ * Interface for browser session
  */
 export interface IBrowserSession {
   browser: Browser;
-  lastUsed: Date;
   pages: Map<string, Page>;
-  timeout?: number;
+  lastUsed: Date;
+  workflowId?: string; // Optional for backwards compatibility
   credentialType?: string;
+}
+
+/**
+ * Options for creating a session
+ */
+export interface CreateSessionOptions {
+  apiToken?: string;
+  forceNew?: boolean;
+  credentialType?: string;
+  workflowId?: string; // Optional for backwards compatibility
+}
+
+/**
+ * Options for closing sessions
+ */
+export interface CloseSessionOptions {
+  sessionId?: string; // Close a specific session
+  olderThan?: number; // Close sessions older than X milliseconds
+  workflowId?: string; // Close sessions for a specific workflow
+  all?: boolean; // Close all sessions
 }
 
 /**
  * Namespace to manage browser sessions
  */
 export namespace SessionManager {
-  // Private storage for sessions
+  // Store sessions by sessionId
   const sessions = new Map<string, IBrowserSession>();
 
-  /**
-   * Get all active sessions with additional debug information
-   */
-  export function getSessions(): Map<string, IBrowserSession> {
-    return sessions;
-  }
+  // Helper for logging connection operations
+  const logConnection = (logger: ILogger, message: string, wsUrl: string) => {
+    // Mask any tokens in the URL for security
+    const maskedUrl = wsUrl.replace(/token=([^&]+)/, 'token=***');
+    logger.info(`${message}: ${maskedUrl}`);
+  };
 
   /**
-   * Get debug information about all sessions
+   * Format websocket URL for browser connection
    */
-  export function getSessionsDebugInfo(): { workflowId: string; pagesCount: number; lastUsed: Date }[] {
-    const info = [];
-    for (const [workflowId, session] of sessions.entries()) {
-      info.push({
-        workflowId,
-        pagesCount: session.pages.size,
-        lastUsed: session.lastUsed,
-      });
-    }
-    return info;
-  }
-
-  /**
-   * Get a specific session by ID
-   */
-  export function getSession(workflowId: string): IBrowserSession | undefined {
-    return sessions.get(workflowId);
-  }
-
-  /**
-   * Get a page by session ID and page ID
-   */
-  export function getPage(workflowId: string, sessionId: string): Page | undefined {
-    const session = sessions.get(workflowId);
-    if (session) {
-      return session.pages.get(sessionId);
-    }
-    return undefined;
-  }
-
-  /**
-   * Store a page reference
-   */
-  export function storePage(workflowId: string, sessionId: string, page: Page): void {
-    let session = sessions.get(workflowId);
-
-    if (!session) {
-      // Create a new session if it doesn't exist
-      session = {
-        browser: page.browser(),
-        lastUsed: new Date(),
-        pages: new Map<string, Page>(),
-      };
-      sessions.set(workflowId, session);
-    }
-
-    // Store the page in the session
-    session.pages.set(sessionId, page);
-    session.lastUsed = new Date();
-  }
-
-  /**
-   * Create or reconnect to a WebSocket session
-   * This is a generic method that works with both Browserless and BrightData
-   */
-  export async function getOrCreateSession(
-    workflowId: string,
+  function formatWebsocketUrl(
     websocketEndpoint: string,
-    logger: ILogger,
-    apiToken?: string,
-    forceNewSession = false,
-    credentialType = 'browserlessApi'
-  ): Promise<{ browser: Browser; sessionId: string }> {
-    // Check if we already have a session for this workflow
-    let session = sessions.get(workflowId);
-    let browser: Browser;
+    options?: {
+      apiToken?: string,
+      sessionId?: string
+    }
+  ): string {
+    let wsUrl = websocketEndpoint;
 
-    // Generate a unique session ID
-    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-
-    if (session && !forceNewSession) {
-      logger.info(`Using existing browser session for workflow ${workflowId}`);
-      session.lastUsed = new Date();
-      browser = session.browser;
-
-      try {
-        // Verify the browser connection is still active
-        await browser.version();
-        logger.info('Browser connection is active.');
-      } catch (error) {
-        logger.warn(`Browser connection is no longer active: ${(error as Error).message}`);
-        logger.info('Creating a new browser session...');
-
-        // Remove the old session
-        sessions.delete(workflowId);
-        session = undefined;
-      }
+    // Add protocol if missing
+    if (!wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://') &&
+        !wsUrl.startsWith('http://') && !wsUrl.startsWith('https://')) {
+      wsUrl = `wss://${wsUrl}`;
     }
 
-    if (!session || forceNewSession) {
-      // Create a new browser connection
-      logger.info(`Creating new browser session with endpoint: ${websocketEndpoint}`);
-
-      try {
-        // Process the WebSocket endpoint URL
-        let wsUrl = websocketEndpoint;
-
-        // Add protocol if missing
-        if (!wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://') &&
-            !wsUrl.startsWith('http://') && !wsUrl.startsWith('https://')) {
-          wsUrl = `wss://${wsUrl}`;
-          logger.info(`Added WSS protocol to WebSocket URL: ${wsUrl}`);
-        }
-
-        // Convert http protocols to ws if needed
-        if (wsUrl.startsWith('http://')) {
-          wsUrl = wsUrl.replace('http://', 'ws://');
-        } else if (wsUrl.startsWith('https://')) {
-          wsUrl = wsUrl.replace('https://', 'wss://');
-        }
-
-        // Add token if provided and not already present
-        if (apiToken && !wsUrl.includes('token=')) {
-          try {
-            const wsUrlObj = new URL(wsUrl);
-            wsUrlObj.searchParams.set('token', apiToken);
-            wsUrl = wsUrlObj.toString();
-          } catch (urlError) {
-            logger.warn(`Could not parse WebSocket URL: ${wsUrl}. Adding token directly.`);
-            wsUrl += `${wsUrl.includes('?') ? '&' : '?'}token=${apiToken}`;
-          }
-        }
-
-        // Create connection options
-        const connectionOptions: ConnectOptions = {
-          browserWSEndpoint: wsUrl,
-          defaultViewport: {
-            width: 1280,
-            height: 720,
-          },
-        };
-
-        // Connect to browser
-        browser = await puppeteerRuntime.connect(connectionOptions);
-        logger.info('Successfully connected to browser service');
-
-        // Create new session object
-        session = {
-          browser,
-          lastUsed: new Date(),
-          pages: new Map<string, Page>(),
-          credentialType,
-        };
-
-        // Store the session
-        sessions.set(workflowId, session);
-      } catch (error) {
-        logger.error(`Error connecting to browser: ${(error as Error).message}`);
-        throw new Error(`Could not connect to browser: ${(error as Error).message}`);
-      }
-    } else {
-      browser = session.browser;
+    // Convert http protocols to ws if needed
+    if (wsUrl.startsWith('http://')) {
+      wsUrl = wsUrl.replace('http://', 'ws://');
+    } else if (wsUrl.startsWith('https://')) {
+      wsUrl = wsUrl.replace('https://', 'wss://');
     }
 
-    return { browser, sessionId };
-  }
-
-  /**
-   * Reconnect to an existing browser session
-   */
-  export async function reconnectSession(
-    workflowId: string,
-    sessionId: string,
-    websocketEndpoint: string,
-    logger: ILogger,
-    apiToken?: string,
-    credentialType = 'browserlessApi'
-  ): Promise<Browser> {
-    logger.info(`Attempting to reconnect to browser session: ${sessionId}`);
-
-    try {
-      // Process the WebSocket endpoint URL
-      let wsUrl = websocketEndpoint;
-
-      // Add protocol if missing
-      if (!wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://') &&
-          !wsUrl.startsWith('http://') && !wsUrl.startsWith('https://')) {
-        wsUrl = `wss://${wsUrl}`;
-        logger.info(`Added WSS protocol to WebSocket URL: ${wsUrl}`);
-      }
-
-      // Convert http protocols to ws if needed
-      if (wsUrl.startsWith('http://')) {
-        wsUrl = wsUrl.replace('http://', 'ws://');
-      } else if (wsUrl.startsWith('https://')) {
-        wsUrl = wsUrl.replace('https://', 'wss://');
-      }
-
-      // Add token if provided and not already present
-      if (apiToken && !wsUrl.includes('token=')) {
-        try {
-          const wsUrlObj = new URL(wsUrl);
-          wsUrlObj.searchParams.set('token', apiToken);
-          wsUrl = wsUrlObj.toString();
-        } catch (urlError) {
-          logger.warn(`Could not parse WebSocket URL: ${wsUrl}. Adding token directly.`);
-          wsUrl += `${wsUrl.includes('?') ? '&' : '?'}token=${apiToken}`;
-        }
-      }
-
-      // Add session ID to URL
+    // Add token if provided and not already present
+    if (options?.apiToken && !wsUrl.includes('token=')) {
       try {
         const wsUrlObj = new URL(wsUrl);
-
-        // Set both sessionId and session parameters for compatibility with different implementations
-        wsUrlObj.searchParams.set('sessionId', sessionId);
-        wsUrlObj.searchParams.set('session', sessionId);
-
-        // Get final URL with session parameters
+        wsUrlObj.searchParams.set('token', options.apiToken);
         wsUrl = wsUrlObj.toString();
-
-        // Mask token for security in logs
-        const maskedUrl = wsUrl.replace(/token=([^&]+)/, 'token=***');
-        logger.info(`Added session parameters to WebSocket URL: ${maskedUrl}`);
       } catch (urlError) {
-        logger.warn(`Could not parse WebSocket URL: ${wsUrl}. Adding session ID directly.`);
-        wsUrl += `${wsUrl.includes('?') ? '&' : '?'}sessionId=${sessionId}&session=${sessionId}`;
+        // Fall back to direct string concatenation
+        wsUrl += `${wsUrl.includes('?') ? '&' : '?'}token=${options.apiToken}`;
       }
+    }
+
+    // Add sessionId if provided
+    if (options?.sessionId) {
+      try {
+        const wsUrlObj = new URL(wsUrl);
+        // Set both sessionId and session parameters for compatibility with different implementations
+        wsUrlObj.searchParams.set('sessionId', options.sessionId);
+        wsUrlObj.searchParams.set('session', options.sessionId);
+        wsUrl = wsUrlObj.toString();
+      } catch (urlError) {
+        // Fall back to direct string concatenation
+        wsUrl += `${wsUrl.includes('?') ? '&' : '?'}sessionId=${options.sessionId}&session=${options.sessionId}`;
+      }
+    }
+
+    return wsUrl;
+  }
+
+  /**
+   * Create a new browser session
+   */
+  export async function createSession(
+    logger: ILogger,
+    websocketEndpoint: string,
+    options: CreateSessionOptions = {}
+  ): Promise<{ sessionId: string; browser: Browser; page?: Page }> {
+    const {
+      apiToken,
+      credentialType = 'browserlessApi',
+      workflowId
+    } = options;
+
+    // Generate a unique session ID
+    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+
+    logger.info(`Creating new browser session with endpoint: ${websocketEndpoint}`);
+
+    try {
+      // Format the WebSocket URL
+      const wsUrl = formatWebsocketUrl(websocketEndpoint, { apiToken });
+      logConnection(logger, "Connecting with formatted WebSocket URL", wsUrl);
 
       // Create connection options
-      const connectOptions: ConnectOptions = {
+      const connectionOptions: ConnectOptions = {
         browserWSEndpoint: wsUrl,
         defaultViewport: {
           width: 1280,
@@ -260,119 +144,250 @@ export namespace SessionManager {
       };
 
       // Connect to browser
-      const browser = await puppeteerRuntime.connect(connectOptions);
+      const browser = await puppeteerRuntime.connect(connectionOptions);
+      logger.info('Successfully connected to browser service');
+
+      // Store the session
+      const session: IBrowserSession = {
+        browser,
+        lastUsed: new Date(),
+        pages: new Map<string, Page>(),
+        credentialType,
+        workflowId // Store workflowId for backwards compatibility
+      };
+
+      sessions.set(sessionId, session);
+      logger.info(`Session created and stored with ID: ${sessionId}`);
+
+      return { browser, sessionId };
+    } catch (error) {
+      logger.error(`Error creating browser session: ${(error as Error).message}`);
+      throw new Error(`Could not create browser session: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Get a session by its ID
+   */
+  export function getSession(sessionId: string): IBrowserSession | undefined {
+    const session = sessions.get(sessionId);
+    if (session) {
+      // Update last used timestamp
+      session.lastUsed = new Date();
+    }
+    return session;
+  }
+
+  /**
+   * Get a page from a session
+   */
+  export function getPage(sessionId: string, pageId?: string): Page | undefined {
+    const session = getSession(sessionId);
+    if (!session) return undefined;
+
+    // If pageId is provided, try to get that specific page
+    if (pageId && session.pages.has(pageId)) {
+      return session.pages.get(pageId);
+    }
+
+    // Otherwise, return the first available page if any exist
+    if (session.pages.size > 0) {
+      return session.pages.values().next().value;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Store a page in a session
+   */
+  export function storePage(sessionId: string, pageId: string, page: Page): void {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Cannot store page: session ${sessionId} not found`);
+    }
+
+    session.pages.set(pageId, page);
+    session.lastUsed = new Date();
+  }
+
+  /**
+   * Connect to an existing session by its ID
+   */
+  export async function connectToSession(
+    logger: ILogger,
+    sessionId: string,
+    websocketEndpoint: string,
+    options: { apiToken?: string, credentialType?: string } = {}
+  ): Promise<{ browser: Browser; page?: Page }> {
+    logger.info(`Connecting to existing browser session: ${sessionId}`);
+
+    // Check if session exists locally first
+    const existingSession = sessions.get(sessionId);
+    if (existingSession) {
+      logger.info(`Session ${sessionId} found in local cache`);
+      existingSession.lastUsed = new Date();
+
+      try {
+        // Verify the browser connection is still active
+        await existingSession.browser.version();
+        logger.info(`Connection to session ${sessionId} is active`);
+        return {
+          browser: existingSession.browser,
+          page: existingSession.pages.size > 0 ? existingSession.pages.values().next().value : undefined
+        };
+      } catch (error) {
+        logger.warn(`Connection to session ${sessionId} is no longer active: ${(error as Error).message}`);
+        // We'll try to reconnect below
+      }
+    }
+
+    // Session not found locally or not active - try to reconnect remotely
+    try {
+      // Format the WebSocket URL with session ID
+      const wsUrl = formatWebsocketUrl(websocketEndpoint, {
+        apiToken: options.apiToken,
+        sessionId
+      });
+
+      logConnection(logger, "Reconnecting with formatted WebSocket URL", wsUrl);
+
+      // Create connection options
+      const connectionOptions: ConnectOptions = {
+        browserWSEndpoint: wsUrl,
+        defaultViewport: {
+          width: 1280,
+          height: 720,
+        },
+      };
+
+      // Connect to browser
+      const browser = await puppeteerRuntime.connect(connectionOptions);
       logger.info(`Successfully reconnected to browser session: ${sessionId}`);
 
-      // Update session
-      const session = sessions.get(workflowId);
-      if (session) {
-        session.browser = browser;
-        session.lastUsed = new Date();
-        session.credentialType = credentialType;
-      } else {
-        // Create a new session if it doesn't exist
-        sessions.set(workflowId, {
-          browser,
-          lastUsed: new Date(),
-          pages: new Map<string, Page>(),
-          credentialType,
-        });
-      }
+      // Update or create session
+      const updatedSession: IBrowserSession = {
+        browser,
+        lastUsed: new Date(),
+        pages: new Map<string, Page>(),
+        credentialType: options.credentialType || existingSession?.credentialType || 'browserlessApi',
+        workflowId: existingSession?.workflowId
+      };
 
-      return browser;
+      // Store the updated session
+      sessions.set(sessionId, updatedSession);
+
+      return { browser };
     } catch (error) {
-      logger.error(`Error reconnecting to browser session: ${(error as Error).message}`);
-      throw new Error(`Could not reconnect to browser session: ${(error as Error).message}`);
+      logger.error(`Error connecting to session ${sessionId}: ${(error as Error).message}`);
+      throw new Error(`Could not connect to session ${sessionId}: ${(error as Error).message}`);
     }
   }
 
   /**
-   * Close a specific browser session
+   * Close one or more sessions
    */
-  export async function closeSession(workflowId: string, logger: ILogger): Promise<boolean> {
-    const session = sessions.get(workflowId);
+  export async function closeSessions(
+    logger: ILogger,
+    options: CloseSessionOptions = {}
+  ): Promise<{ closed: number; total: number }> {
+    const { sessionId, olderThan, workflowId, all } = options;
+    let closedCount = 0;
+    const totalSessions = sessions.size;
 
-    if (session) {
+    // Helper function to close a single session
+    const closeSessionById = async (id: string): Promise<boolean> => {
+      const session = sessions.get(id);
+      if (!session) return false;
+
       try {
-        logger.info(`Closing browser session for workflow ${workflowId}`);
+        logger.info(`Closing browser session ${id}`);
         await session.browser.close();
-        sessions.delete(workflowId);
+        sessions.delete(id);
         return true;
       } catch (error) {
-        logger.error(`Error closing browser session: ${(error as Error).message}`);
-        // Still remove the session from tracking since we can't use it
-        sessions.delete(workflowId);
+        logger.error(`Error closing session ${id}: ${(error as Error).message}`);
+        // Still remove from our tracking as we can't use it
+        sessions.delete(id);
         return false;
       }
+    };
+
+    // Close a specific session if sessionId provided
+    if (sessionId) {
+      const success = await closeSessionById(sessionId);
+      if (success) closedCount++;
+      return { closed: closedCount, total: totalSessions };
     }
 
-    return false;
-  }
+    // Close sessions for a specific workflow
+    if (workflowId) {
+      for (const [id, session] of sessions.entries()) {
+        if (session.workflowId === workflowId) {
+          const success = await closeSessionById(id);
+          if (success) closedCount++;
+        }
+      }
+      return { closed: closedCount, total: totalSessions };
+    }
 
-  /**
-   * Clean up old sessions that haven't been used for a while
-   */
-  export async function cleanupSessions(maxAgeMs: number, logger: ILogger): Promise<void> {
-    const now = new Date();
+    // Close sessions older than specified age
+    if (olderThan) {
+      const now = new Date().getTime();
+      for (const [id, session] of sessions.entries()) {
+        const sessionAge = now - session.lastUsed.getTime();
+        if (sessionAge > olderThan) {
+          const success = await closeSessionById(id);
+          if (success) closedCount++;
+        }
+      }
+      return { closed: closedCount, total: totalSessions };
+    }
 
-    for (const [workflowId, session] of sessions.entries()) {
-      const sessionAge = now.getTime() - session.lastUsed.getTime();
-
-      if (sessionAge > maxAgeMs) {
-        logger.info(`Cleaning up stale session for workflow ${workflowId} (age: ${sessionAge}ms)`);
-        await closeSession(workflowId, logger);
+    // Close all sessions if specified
+    if (all) {
+      for (const id of sessions.keys()) {
+        const success = await closeSessionById(id);
+        if (success) closedCount++;
       }
     }
+
+    return { closed: closedCount, total: totalSessions };
   }
 
   /**
-   * Detect if a session is disconnected
+   * Get all active sessions (for debugging/monitoring)
    */
-  export async function isSessionDisconnected(workflowId: string, sessionId: string, logger: ILogger): Promise<boolean> {
-    const session = sessions.get(workflowId);
+  export function getAllSessions(): { sessionId: string, info: { pages: number, lastUsed: Date, workflowId?: string } }[] {
+    const result = [];
 
-    if (!session) {
-      return true;
+    for (const [sessionId, session] of sessions.entries()) {
+      result.push({
+        sessionId,
+        info: {
+          pages: session.pages.size,
+          lastUsed: session.lastUsed,
+          workflowId: session.workflowId
+        }
+      });
     }
 
-    const page = session.pages.get(sessionId);
+    return result;
+  }
 
-    if (!page) {
-      return true;
-    }
+  /**
+   * Check if a session is still connected and valid
+   */
+  export async function isSessionActive(sessionId: string): Promise<boolean> {
+    const session = sessions.get(sessionId);
+    if (!session) return false;
 
     try {
       // Try to execute a simple command to check if the connection is still active
-      await page.evaluate(() => document.title);
-      return false; // Connection is active
+      await session.browser.version();
+      return true; // Connection is active
     } catch (error) {
-      logger.warn(`Session appears to be disconnected: ${(error as Error).message}`);
-      return true; // Connection is lost
+      return false; // Connection is lost
     }
-  }
-
-  /**
-   * Find a page by its sessionId across all workflows
-   */
-  export function findPageBySessionId(sessionId: string): { page: Page; workflowId: string } | undefined {
-    for (const [workflowId, session] of sessions.entries()) {
-      const page = session.pages.get(sessionId);
-      if (page) {
-        return { page, workflowId };
-      }
-    }
-    return undefined;
-  }
-
-  /**
-   * Find a session containing a page with the given sessionId
-   */
-  export function findSessionBySessionId(sessionId: string): { session: IBrowserSession; workflowId: string } | undefined {
-    for (const [workflowId, session] of sessions.entries()) {
-      if (session.pages.has(sessionId)) {
-        return { session, workflowId };
-      }
-    }
-    return undefined;
   }
 }

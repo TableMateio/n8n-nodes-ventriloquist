@@ -267,18 +267,26 @@ export async function waitForUrlChange(
 }
 
 /**
- * Take a screenshot with proper error handling
+ * Take a screenshot of the page
+ * @param page - Puppeteer Page
+ * @param logger - Logger instance
  */
-export async function takeScreenshot(
-  page: Page,
-  logger: ILogger,
-): Promise<string | null> {
+export async function takeScreenshot(page: Page | null, logger: ILogger): Promise<string | null> {
+  if (!page) {
+    logger.warn('Cannot take screenshot: page is null');
+    return null;
+  }
+
   try {
-    logger.info('Taking screenshot');
-    const screenshot = await page.screenshot({ encoding: 'base64' });
-    return screenshot;
+    const screenshot = await page.screenshot({
+      encoding: 'base64',
+      fullPage: true,
+      type: 'jpeg',
+      quality: 70
+    });
+    return `data:image/jpeg;base64,${screenshot}`;
   } catch (error) {
-    logger.error(`Failed to take screenshot: ${(error as Error).message}`);
+    logger.warn(`Error taking screenshot: ${(error as Error).message}`);
     return null;
   }
 }
