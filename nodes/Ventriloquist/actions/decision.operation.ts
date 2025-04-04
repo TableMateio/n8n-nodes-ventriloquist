@@ -2575,7 +2575,7 @@ export const description: INodeProperties[] = [
 						`Using SessionManager to get or create page session`));
 
 					const sessionResult = await SessionManager.getOrCreatePageSession(this.logger, {
-						explicitSessionId,
+						explicitSessionId: explicitSessionId, // Use the provided session ID
 						websocketEndpoint: actualWebsocketEndpoint,
 						workflowId,
 						operationName: 'Decision',
