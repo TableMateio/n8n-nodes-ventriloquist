@@ -5,8 +5,11 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
-import { BrowserTransportFactory } from '../transport/BrowserTransportFactory';
 import { Ventriloquist } from '../Ventriloquist.node';
+import { SessionManager } from '../utils/sessionManager';
+import { formatOperationLog } from '../utils/resultUtils';
+import { createErrorResponse } from '../utils/errorUtils';
+import { createSuccessResponse } from '../utils/resultUtils';
 
 /**
  * Decision operation description
@@ -2442,6 +2445,8 @@ export const description: INodeProperties[] = [
 		this: IExecuteFunctions,
 		index: number,
 		initialPage: puppeteer.Page,
+		websocketEndpoint?: string,
+		workflowId?: string,
 	): Promise<INodeExecutionData[][] | INodeExecutionData[]> {
 		const startTime = Date.now();
 
@@ -2456,6 +2461,10 @@ export const description: INodeProperties[] = [
 		const nodeName = this.getNode().name;
 		const nodeId = this.getNode().id;
 
+		// Get existing session ID parameter if available - moved outside try block to make available in catch
+		const explicitSessionId = this.getNodeParameter('sessionId', index, '') as string;
+		let sessionId = explicitSessionId;
+
 		// Get the current URL (this might fail if the page is disconnected)
 		let currentUrl = '';
 		try {
@@ -2467,7 +2476,7 @@ export const description: INodeProperties[] = [
 
 		// Visual marker to clearly indicate a new node is starting
 		this.logger.info("============ STARTING NODE EXECUTION ============");
-		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Starting execution on URL: ${currentUrl}`);
+		this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index, `Starting execution on URL: ${currentUrl}`));
 
 		try {
 			// Get operation parameters
@@ -2480,20 +2489,26 @@ export const description: INodeProperties[] = [
 			const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
 			const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 
-			// Get existing session ID parameter if available
-			const inputSessionId = this.getNodeParameter('sessionId', index, '') as string;
+			// These were moved outside the try block
+			// const explicitSessionId = this.getNodeParameter('sessionId', index, '') as string;
+			// let sessionId = explicitSessionId;
 
 			// Log parameters for debugging
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Parameters: waitForSelectors=${waitForSelectors}, selectorTimeout=${selectorTimeout}, detectionMethod=${detectionMethod}`);
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Evaluating ${conditionGroups.length} condition groups with fallbackAction=${fallbackAction}`);
+			this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+				`Parameters: waitForSelectors=${waitForSelectors}, selectorTimeout=${selectorTimeout}, detectionMethod=${detectionMethod}`));
+			this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+				`Evaluating ${conditionGroups.length} condition groups with fallbackAction=${fallbackAction}`));
 
 			// Validate session ID - add extra logging to help debug issues
-			if (!inputSessionId) {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] WARNING: No session ID provided in the 'Session ID' field`);
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Will attempt to use the existing session for this workflow - this may work but is not reliable`);
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] For best results, you should provide the session ID from a previous Open operation in the 'Session ID' field`);
+			if (!explicitSessionId) {
+				this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+					"WARNING: No session ID provided in the 'Session ID' field"));
+				this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+					"Will attempt to use the existing session for this workflow - this may work but is not reliable"));
+				this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+					"For best results, you should provide the session ID from a previous Open operation in the 'Session ID' field"));
 			} else {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using session ID: ${inputSessionId}`);
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index, `Using session ID: ${explicitSessionId}`));
 			}
 
 			// Check if the page is still connected by trying a simple operation
@@ -2501,116 +2516,109 @@ export const description: INodeProperties[] = [
 			try {
 				// Simple operation to check if page is still connected
 				await puppeteerPage.evaluate(() => document.readyState);
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Page connection verified`);
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index, "Page connection verified"));
 			} catch (error) {
 				pageConnected = false;
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Page appears to be disconnected: ${(error as Error).message}`);
+				this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+					`Page appears to be disconnected: ${(error as Error).message}`));
 			}
 
-			// If page is disconnected and we have a session ID, try to reconnect
-			if (!pageConnected && inputSessionId) {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Attempting to reconnect to session: ${inputSessionId}`);
+			// If page is disconnected or we have an explicit session ID, use the SessionManager
+			if (!pageConnected || explicitSessionId) {
+				// Get the actual websocket endpoint from credentials if not provided
+				let actualWebsocketEndpoint = websocketEndpoint || '';
 
-				try {
-					// Get the browser session info
-					const workflowId = this.getWorkflow().id || '';
-					if (!workflowId) {
-						throw new Error('Could not get workflow ID for reconnection');
-					}
-
-					// Get current browser session
-					type BrowserSession = {
-						browser: puppeteer.Browser;
-						lastUsed: Date;
-						pages: Map<string, puppeteer.Page>;
-						timeout?: number;
-						credentialType?: string;
-					};
-
-					const session = Ventriloquist.getSessions().get(workflowId) as BrowserSession | undefined;
-					if (!session) {
-						throw new Error(`No browser session found for workflow ID: ${workflowId}`);
-					}
-
-					// Get credentials based on type
-					let credentialType = 'browserlessApi';
-					if (session && typeof (session as any).credentialType === 'string') {
-						credentialType = (session as any).credentialType;
-					}
-
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using credential type: ${credentialType} for reconnection`);
+				if (!actualWebsocketEndpoint) {
+					// Try to determine the credential type
+					let credentialType = 'browserlessApi'; // Default
 
 					try {
-						const credentials = await this.getCredentials(credentialType);
+						// Try to get credentials based on a guessed type
+						try {
+							const browserlessCredentials = await this.getCredentials('browserlessApi');
+							credentialType = 'browserlessApi';
 
-						// Create transport to handle reconnection
-						const transportFactory = new BrowserTransportFactory();
-						const browserTransport = transportFactory.createTransport(
-							credentialType,
-							this.logger,
-							credentials,
-						);
-
-						// Check if the transport has reconnect capability
-						if (browserTransport.reconnect) {
-							this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to ${credentialType} session: ${inputSessionId}`);
+							// Extract WebSocket endpoint from credentials using utility
+							actualWebsocketEndpoint = SessionManager.getWebSocketUrlFromCredentials(
+								this.logger,
+								credentialType,
+								browserlessCredentials
+							);
+						} catch (browserlessError) {
+							this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+								`No browserlessApi credentials found: ${(browserlessError as Error).message}`));
 
 							try {
-								// Reconnect to the browser - this uses the existing session, not creating a new one
-								const browser = await browserTransport.reconnect(inputSessionId);
+								const brightDataCredentials = await this.getCredentials('brightDataApi');
+								credentialType = 'brightDataApi';
 
-								// Update the session with the reconnected browser
-								session.browser = browser;
-								session.lastUsed = new Date();
-
-								// Get or create a new page
-								const pages = await browser.pages();
-								if (pages.length > 0) {
-									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using existing page from reconnected browser`);
-									puppeteerPage = pages[0];
-								} else {
-									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Creating new page in reconnected browser`);
-									puppeteerPage = await browser.newPage();
-								}
-
-								// Store the updated page reference
-								Ventriloquist.storePage(workflowId, inputSessionId, puppeteerPage);
-
-								this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Successfully reconnected to session: ${inputSessionId}`);
-								pageConnected = true;
-
-								// Update current URL after reconnection
-								try {
-									currentUrl = await puppeteerPage.url();
-									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] After reconnection, page URL is: ${currentUrl}`);
-								} catch (urlError) {
-									this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Could not get URL after reconnection: ${(urlError as Error).message}`);
-									currentUrl = 'unknown (connection issues)';
-								}
-							} catch (reconnectOpError) {
-								this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Browser reconnection operation failed: ${(reconnectOpError as Error).message}`);
-								throw reconnectOpError;
+								// Extract WebSocket endpoint from credentials using utility
+								actualWebsocketEndpoint = SessionManager.getWebSocketUrlFromCredentials(
+									this.logger,
+									credentialType,
+									brightDataCredentials
+								);
+							} catch (brightDataError) {
+								this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+									`No brightDataApi credentials found: ${(brightDataError as Error).message}`));
 							}
-						} else {
-							this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Transport doesn't support reconnection for provider: ${credentialType}`);
-							throw new Error(`Transport type ${credentialType} doesn't support reconnection`);
 						}
 					} catch (credentialError) {
-						this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error getting credentials for reconnection: ${(credentialError as Error).message}`);
-						throw new Error(`Could not get credentials for reconnection: ${(credentialError as Error).message}`);
+						this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Could not determine credentials: ${(credentialError as Error).message}`));
 					}
-				} catch (reconnectError) {
-					this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnection failed: ${(reconnectError as Error).message}`);
-					throw new Error(`Could not reconnect to session ${inputSessionId}: ${(reconnectError as Error).message}`);
+				}
+
+				// Use the centralized session management
+				if (actualWebsocketEndpoint) {
+					this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+						`Using SessionManager to get or create page session`));
+
+					const sessionResult = await SessionManager.getOrCreatePageSession(this.logger, {
+						explicitSessionId,
+						websocketEndpoint: actualWebsocketEndpoint,
+						workflowId,
+						operationName: 'Decision',
+						nodeId,
+						nodeName,
+						index,
+					});
+
+					puppeteerPage = sessionResult.page || puppeteerPage;
+					sessionId = sessionResult.sessionId;
+
+					if (sessionResult.isNewSession) {
+						this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Created new session with ID: ${sessionId}`));
+					} else {
+						this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Using existing session with ID: ${sessionId}`));
+					}
+
+					// Update current URL after getting page
+					try {
+						currentUrl = await puppeteerPage.url();
+						this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Current page URL is: ${currentUrl}`));
+					} catch (urlError) {
+						this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Could not get URL after session management: ${(urlError as Error).message}`));
+						currentUrl = 'unknown (connection issues)';
+					}
+				} else {
+					this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+						`No websocket endpoint available - cannot reconnect session`));
 				}
 			}
 
 			// Verify the document content to ensure we have a valid page
 			try {
 				const docHtml = await puppeteerPage.evaluate(() => document.documentElement.outerHTML.length);
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Document verified - contains ${docHtml} characters of HTML`);
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+					`Document verified - contains ${docHtml} characters of HTML`));
 			} catch (docError) {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Cannot access document: ${(docError as Error).message}`);
+				this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+					`Cannot access document: ${(docError as Error).message}`));
 				if (!continueOnFail) {
 					throw new Error(`Cannot access page document: ${(docError as Error).message}`);
 				}
@@ -2628,7 +2636,8 @@ export const description: INodeProperties[] = [
 			try {
 				pageUrl = await puppeteerPage.url();
 			} catch (urlError) {
-				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error getting page URL: ${(urlError as Error).message}`);
+				this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+					`Error getting page URL: ${(urlError as Error).message}`));
 				pageUrl = 'unknown';
 			}
 
@@ -2653,17 +2662,20 @@ export const description: INodeProperties[] = [
 				pageTitle: await puppeteerPage.title(),
 				screenshot,
 				executionDuration: 0, // Will be updated at the end
-				sessionId: inputSessionId, // Use the parameter instead of trying to get it from the page
+				sessionId: sessionId, // Use the parameter instead of trying to get it from the page
 			};
 
 			// If there's an inputSessionId, use it and log it
-			if (inputSessionId) {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using provided session ID: ${inputSessionId}`);
+			if (explicitSessionId) {
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+					`Using provided session ID: ${explicitSessionId}`));
 
 				// Check if the page URL is blank or about:blank, which might indicate a problem
 				if (pageUrl === 'about:blank' || pageUrl === '') {
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] WARNING: Page URL is ${pageUrl} - this may indicate the session was not properly loaded`);
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Verify that you're using the correct session ID from the Open operation`);
+					this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+						`WARNING: Page URL is ${pageUrl} - this may indicate the session was not properly loaded`));
+					this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+						`Verify that you're using the correct session ID from the Open operation`));
 				}
 			} else {
 				// As a fallback, still try to get the session ID from the page
@@ -2677,12 +2689,15 @@ export const description: INodeProperties[] = [
 
 					if (pageSessionId) {
 						resultData.sessionId = pageSessionId;
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Found session ID in page: ${pageSessionId}`);
+						this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Found session ID in page: ${pageSessionId}`));
 					} else {
-						this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] No session ID provided or found in page`);
+						this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+							`No session ID provided or found in page`));
 					}
 				} catch (error) {
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error retrieving session ID from page: ${(error as Error).message}`);
+					this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+						`Error retrieving session ID from page: ${(error as Error).message}`));
 				}
 			}
 
@@ -2703,7 +2718,8 @@ export const description: INodeProperties[] = [
 					}
 				}
 
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Checking group: "${groupName}" (type: ${conditionType}, invert: ${invertCondition})`);
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+					`Checking group: "${groupName}" (type: ${conditionType}, invert: ${invertCondition})`));
 
 				// Initialize the overall condition result
 				let groupConditionMet = false;
@@ -2779,7 +2795,8 @@ export const description: INodeProperties[] = [
 							groupConditionMet = !groupConditionMet;
 						}
 
-						this.logger.debug(`Single condition (${singleConditionType}) result: ${groupConditionMet}`);
+						this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Single condition (${singleConditionType}) result: ${groupConditionMet}`));
 					} else {
 						// Handle multiple conditions with AND/OR logic
 						// Get conditions and ensure type safety
@@ -2791,11 +2808,13 @@ export const description: INodeProperties[] = [
 							conditions = (group.conditions as IDataObject).condition as IDataObject[];
 						}
 
-						this.logger.debug(`Checking ${conditions.length} conditions with ${conditionType} logic`);
+						this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Checking ${conditions.length} conditions with ${conditionType} logic`));
 
 						// Handle the case of no conditions - default to false
 						if (conditions.length === 0) {
-							this.logger.debug(`No conditions in group ${groupName}, skipping`);
+							this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+								`No conditions in group ${groupName}, skipping`));
 							groupConditionMet = false;
 						} else if (conditions.length === 1) {
 							// Single condition in multiple conditions case
@@ -2822,7 +2841,8 @@ export const description: INodeProperties[] = [
 								groupConditionMet = !groupConditionMet;
 							}
 
-							this.logger.debug(`Single condition in collection (${singleConditionType}) result: ${groupConditionMet}`);
+							this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+								`Single condition in collection (${singleConditionType}) result: ${groupConditionMet}`));
 						} else {
 							// Multiple conditions case - apply logical operator based on conditionType
 							if (conditionType === 'and') {
@@ -2855,7 +2875,8 @@ export const description: INodeProperties[] = [
 									// Short circuit if any condition is false
 									if (!conditionMet) {
 										groupConditionMet = false;
-										this.logger.debug(`Condition (${singleConditionType}) is false, short-circuiting AND logic`);
+										this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Condition (${singleConditionType}) is false, short-circuiting AND logic`));
 										break;
 									}
 								}
@@ -2889,24 +2910,28 @@ export const description: INodeProperties[] = [
 									// Short circuit if any condition is true
 									if (conditionMet) {
 										groupConditionMet = true;
-										this.logger.debug(`Condition (${singleConditionType}) is true, short-circuiting OR logic`);
+										this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Condition (${singleConditionType}) is true, short-circuiting OR logic`));
 										break;
 									}
 								}
 							}
 
-							this.logger.debug(`Multiple conditions with ${conditionType} logic result: ${groupConditionMet}`);
+							this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+								`Multiple conditions with ${conditionType} logic result: ${groupConditionMet}`));
 						}
 					}
 
-					this.logger.debug(`Decision group ${groupName} final result: ${groupConditionMet}`);
+					this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+						`Decision group ${groupName} final result: ${groupConditionMet}`));
 
 					// If condition is met
 					if (groupConditionMet) {
 						routeTaken = groupName;
 						const actionType = group.actionType as string;
 
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Condition met for group "${groupName}", taking this route`);
+						this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Condition met for group "${groupName}", taking this route`));
 
 						// For routing capability, store route information
 						if (enableRouting) {
@@ -2914,13 +2939,15 @@ export const description: INodeProperties[] = [
 							if (groupRoute) {
 								// Route numbers are 1-based, but indexes are 0-based
 								routeIndex = groupRoute - 1;
-								this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using route: ${groupRoute} (index: ${routeIndex})`);
+								this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+									`Using route: ${groupRoute} (index: ${routeIndex})`));
 							}
 						}
 
 						if (actionType !== 'none') {
 							actionPerformed = actionType;
-							this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Performing action: "${actionType}"`);
+							this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+								`Performing action: "${actionType}"`));
 
 							// Add human-like delay if enabled
 							if (useHumanDelays) {
@@ -2938,7 +2965,8 @@ export const description: INodeProperties[] = [
 												  waitAfterAction === 'urlChanged' ? 6000 : 30000;
 									}
 
-									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Executing click on "${actionSelector}" (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`);
+									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+										`Executing click on "${actionSelector}" (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`));
 
 									try {
 										// For actions, we always need to ensure the element exists
@@ -2964,7 +2992,8 @@ export const description: INodeProperties[] = [
 										// Perform the click
 										this.logger.debug(`Clicking element: ${actionSelector}`);
 										await puppeteerPage.click(actionSelector);
-										this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Click successful on "${actionSelector}"`);
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Click successful on "${actionSelector}"`));
 
 										// Handle post-click waiting
 										if (waitAfterAction === 'fixedTime') {
@@ -2977,7 +3006,8 @@ export const description: INodeProperties[] = [
 										}
 
 										// After successful action, exit immediately
-										this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Decision point "${groupName}": Action completed successfully - exiting decision node`);
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Decision point "${groupName}": Action completed successfully - exiting decision node`));
 										resultData.success = true;
 										resultData.routeTaken = groupName;
 										resultData.actionPerformed = actionType;
@@ -2994,7 +3024,8 @@ export const description: INodeProperties[] = [
 										// Return the result immediately after successful action
 										return [this.helpers.returnJsonArray([resultData])];
 									} catch (error) {
-										this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error during click action: ${(error as Error).message}`);
+										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Error during click action: ${(error as Error).message}`));
 										throw error;
 									}
 								}
@@ -3010,16 +3041,19 @@ export const description: INodeProperties[] = [
 
 									if (session && typeof (session as any).credentialType === 'string') {
 										credentialType = (session as any).credentialType;
-										this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using credential type from session: ${credentialType}`);
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Using credential type from session: ${credentialType}`));
 									} else {
-										this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] No credential type found in session, defaulting to: ${credentialType}`);
+										this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+											`No credential type found in session, defaulting to: ${credentialType}`));
 									}
 
 									// Store credential type for field handling
 									group._credentialType = credentialType;
 
 									// Log what approach we're using for debugging
-									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Form fill approach: ${hasActionSelector ? 'Simple' : hasFormFields ? 'Complex' : 'Unknown'} with provider: ${credentialType}`);
+									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+										`Form fill approach: ${hasActionSelector ? 'Simple' : hasFormFields ? 'Complex' : 'Unknown'} with provider: ${credentialType}`));
 
 									try {
 										// Handle simple action selector approach
@@ -3033,7 +3067,8 @@ export const description: INodeProperties[] = [
 														  waitAfterAction === 'urlChanged' ? 6000 : 30000;
 											}
 
-											this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Executing simple fill on "${actionSelector}" (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`);
+											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+												`Executing simple fill on "${actionSelector}" (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`));
 
 											// For actions, we always need to ensure the element exists
 											if (waitForSelectors) {
@@ -3055,16 +3090,18 @@ export const description: INodeProperties[] = [
 											}
 
 											// Clear the field first
-											this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Clearing field: ${actionSelector}`);
+											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+												`Clearing field: ${actionSelector}`));
 											await puppeteerPage.evaluate((selector: string) => {
 												const element = document.querySelector(selector) as HTMLInputElement;
 												if (element) {
-													element.value = '';
+														element.value = '';
 												}
 											}, actionSelector);
 
 											// Fill the field
-											this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Filling field: ${actionSelector} (value masked)`);
+											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+												`Filling field: ${actionSelector} (value masked)`));
 											await puppeteerPage.type(actionSelector, actionValue);
 
 											// Handle post-fill waiting
@@ -3086,7 +3123,8 @@ export const description: INodeProperties[] = [
 											const waitAfterSubmit = group.waitAfterSubmit as string || 'domContentLoaded';
 											const waitSubmitTime = group.waitSubmitTime as number || 2000;
 
-											this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using complex form fill with ${formFields.length} fields`);
+											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+												`Using complex form fill with ${formFields.length} fields`));
 
 											// Process each form field
 											for (const field of formFields) {
@@ -3127,7 +3165,8 @@ export const description: INodeProperties[] = [
 
 														// Enhanced debugging for form typing
 														const credentialType = group._credentialType || 'unknown';
-														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Filling form field: ${selector} with value: ${value} (human-like: ${humanLike}, credential type: ${credentialType})`);
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Filling form field: ${selector} with value: ${value} (human-like: ${humanLike}, credential type: ${credentialType})`));
 
 														// Clear field if requested
 														if (clearField) {
@@ -3150,30 +3189,38 @@ export const description: INodeProperties[] = [
 																	type: element instanceof HTMLInputElement ? element.type : 'not-input'
 																};
 															}, selector);
-															this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Field status: ${JSON.stringify(isVisible)}`);
+															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																`Field status: ${JSON.stringify(isVisible)}`));
 														} catch (fieldCheckError) {
-															this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Could not check field visibility: ${(fieldCheckError as Error).message}`);
+															this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+																`Could not check field visibility: ${(fieldCheckError as Error).message}`));
 														}
 
 														// Use human-like typing with random delays between keystrokes
 														try {
 															if (humanLike) {
-																this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using human-like typing for ${value.length} characters`);
+																this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																	`Using human-like typing for ${value.length} characters`));
 																for (const char of value) {
-																	this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Typing character: ${char}`);
+																	this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+																		`Typing character: ${char}`));
 																	await puppeteerPage.type(selector, char, { delay: Math.floor(Math.random() * 150) + 25 });
 																}
 															} else {
 																// Fast direct typing without delays for non-human-like mode
-																this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using fast typing for "${value}"`);
+																this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																	`Using fast typing for "${value}"`));
 																await puppeteerPage.type(selector, value, { delay: 0 });
 															}
-															this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Typing completed for selector: ${selector}`);
+															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																`Typing completed for selector: ${selector}`));
 														} catch (typeError) {
-															this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error during typing: ${(typeError as Error).message}`);
+															this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+																`Error during typing: ${(typeError as Error).message}`));
 
 															// Try alternative input method as fallback
-															this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Trying alternative input method`);
+															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																`Trying alternative input method`));
 															try {
 																await puppeteerPage.evaluate((sel, val) => {
 																	const element = document.querySelector(sel);
@@ -3192,7 +3239,7 @@ export const description: INodeProperties[] = [
 														await puppeteerPage.evaluate((sel) => {
 															const element = document.querySelector(sel);
 															if (element) {
-																(element as HTMLElement).blur();
+																	(element as HTMLElement).blur();
 															}
 														}, selector);
 
@@ -3207,7 +3254,8 @@ export const description: INodeProperties[] = [
 														const clearField = field.clearField as boolean ?? true;
 														const credentialType = group._credentialType || 'unknown';
 
-														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Filling password field: ${selector} (value masked) using ${credentialType}`);
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Filling password field: ${selector} (value masked) using ${credentialType}`));
 
 														// Clear field if needed
 														if (clearField) {
@@ -3220,11 +3268,13 @@ export const description: INodeProperties[] = [
 															// For Browserless, we need a multi-layered approach
 															try {
 																// First try the direct type method (most reliable for Browserless)
-																this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using direct type for password with Browserless`);
+																this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+																	`Using direct type for password with Browserless`));
 																await puppeteerPage.click(selector);
 																await puppeteerPage.type(selector, value, { delay: 10 });
 															} catch (typeError) {
-																this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Direct typing failed for password: ${(typeError as Error).message}`);
+																this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+																	`Direct typing failed for password: ${(typeError as Error).message}`));
 
 																// Fall back to JS method
 																try {
@@ -3237,7 +3287,8 @@ export const description: INodeProperties[] = [
 																		}
 																	}, selector, value);
 																} catch (evalError) {
-																	this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Both password input methods failed: ${(evalError as Error).message}`);
+																	this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+																		`Both password input methods failed: ${(evalError as Error).message}`));
 																	throw new Error(`Failed to input password using both methods`);
 																}
 															}
@@ -3270,10 +3321,12 @@ export const description: INodeProperties[] = [
 																	}
 																}, selector, value);
 															} catch (evalError) {
-																this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] JS eval password input failed: ${(evalError as Error).message}`);
+																this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+																	`JS eval password input failed: ${(evalError as Error).message}`));
 
 																// Last resort: try direct typing
-																this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Falling back to direct typing for password`);
+																this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+																	`Falling back to direct typing for password`));
 																await puppeteerPage.click(selector);
 																await puppeteerPage.type(selector, value);
 															}
@@ -3285,7 +3338,8 @@ export const description: INodeProperties[] = [
 
 											// Submit the form if requested
 											if (submitForm && submitSelector) {
-												this.logger.debug(`Submitting form using selector: ${submitSelector}`);
+												this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+													`Submitting form using selector: ${submitSelector}`));
 
 												// Wait a short time before submitting (feels more human)
 												if (useHumanDelays) {
@@ -3293,7 +3347,8 @@ export const description: INodeProperties[] = [
 												}
 
 												// Log before clicking submit
-												this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] About to click submit button: ${submitSelector}`);
+												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+													`About to click submit button: ${submitSelector}`));
 
 												try {
 													// Capture navigation events that might occur from the form submission
@@ -3326,20 +3381,26 @@ export const description: INodeProperties[] = [
 															this.logger.warn(`${logPrefix} This may indicate the page context was destroyed during navigation`);
 														});
 												} catch (navError) {
-													this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation error after form submission: ${(navError as Error).message}`);
-													this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] This is often normal with redirects - attempting to continue`);
+													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+														`Navigation error after form submission: ${(navError as Error).message}`));
+													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+														`This is often normal with redirects - attempting to continue`));
 
 													// Try to verify the page is still usable
 													try {
 														const currentUrl = await puppeteerPage.url();
-														this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Current URL after navigation error: ${currentUrl}`);
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Current URL after navigation error: ${currentUrl}`));
 													} catch (urlError) {
-														this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error getting URL after navigation: ${(urlError as Error).message}`);
-														this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Page context might be destroyed - attempting to reconnect`);
+														this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Error getting URL after navigation: ${(urlError as Error).message}`));
+														this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Page context might be destroyed - attempting to reconnect`));
 
 														// If we have a session ID, try to reconnect
-														if (inputSessionId) {
-															this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Attempting to reconnect session after navigation error`);
+														if (sessionId) {
+															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																`Attempting to reconnect session after navigation error`));
 
 															try {
 																// Get browser session information
@@ -3356,30 +3417,36 @@ export const description: INodeProperties[] = [
 
 																// Use the existing browser from the session
 																if (session.browser) {
-																	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to existing browser session`);
+																	this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																		`Reconnecting to existing browser session`));
 
 																	// Get a new page from the existing browser
 																	const pages = await session.browser.pages();
 																	if (pages.length === 0) {
 																		// Create a new page if none exist
 																		puppeteerPage = await session.browser.newPage();
-																		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Created new page after reconnection`);
+																		this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																			`Created new page after reconnection`));
 																	} else {
 																		// Use the first available page
 																		puppeteerPage = pages[0];
-																		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using existing page after reconnection`);
+																		this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																			`Using existing page after reconnection`));
 																	}
 
 																	// Update the session's page reference
-																	Ventriloquist.storePage(workflowId, inputSessionId, puppeteerPage);
-																	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Successfully reconnected and updated page reference`);
+																	Ventriloquist.storePage(workflowId, sessionId, puppeteerPage);
+																	this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																		`Successfully reconnected and updated page reference`));
 																} else {
-																	this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] No browser instance in session - cannot reconnect`);
+																	this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+																		`No browser instance in session - cannot reconnect`));
 																	throw new Error(`Cannot reconnect after form submission - no browser instance available`);
 																}
 															} catch (reconnectError) {
-																this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnection failed: ${(reconnectError as Error).message}`);
-																throw new Error(`Could not reconnect to session ${inputSessionId} after form submission: ${(reconnectError as Error).message}`);
+																this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+																	`Reconnection failed: ${(reconnectError as Error).message}`));
+																throw new Error(`Could not reconnect to session ${sessionId} after form submission: ${(reconnectError as Error).message}`);
 															}
 														}
 													}
@@ -3388,7 +3455,7 @@ export const description: INodeProperties[] = [
 													// 	this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Page context might be destroyed - attempting to reconnect`);
 
 													// 	// If we have a session ID, try to reconnect
-													// 	if (inputSessionId) {
+													// 	if (sessionId) {
 													// 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Attempting to reconnect session after navigation error`);
 
 													// 		try {
@@ -3422,8 +3489,8 @@ export const description: INodeProperties[] = [
 													// 			// Check if the transport has reconnect capability
 													// 			if (browserTransport.reconnect) {
 													// 				// Reconnect to the session
-													// 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to session: ${inputSessionId}`);
-													// 				const reconnectedBrowser = await browserTransport.reconnect(inputSessionId);
+													// 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to session: ${sessionId}`);
+													// 				const reconnectedBrowser = await browserTransport.reconnect(sessionId);
 
 													// 				// Get a new page from the reconnected browser
 													// 				const pages = await reconnectedBrowser.pages();
@@ -3438,7 +3505,7 @@ export const description: INodeProperties[] = [
 													// 				}
 
 													// 				// Update the session's page reference
-													// 				Ventriloquist.storePage(workflowId, inputSessionId, puppeteerPage);
+													// 				Ventriloquist.storePage(workflowId, sessionId, puppeteerPage);
 													// 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Successfully reconnected and updated page reference`);
 
 													// 				// Form submission was likely successful, continue execution
@@ -3448,7 +3515,7 @@ export const description: INodeProperties[] = [
 													// 			}
 													// 		} catch (reconnectError) {
 													// 			this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnection failed: ${(reconnectError as Error).message}`);
-													// 			throw new Error(`Could not reconnect to session ${inputSessionId} after form submission: ${(reconnectError as Error).message}`);
+													// 			throw new Error(`Could not reconnect to session ${sessionId} after form submission: ${(reconnectError as Error).message}`);
 													// 		}
 													// 	}
 													// }
@@ -3461,7 +3528,8 @@ export const description: INodeProperties[] = [
 										}
 
 										// After successful form fill, exit immediately
-										this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Decision point "${groupName}": Form fill completed successfully - exiting decision node`);
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Decision point "${groupName}": Form fill completed successfully - exiting decision node`));
 										resultData.success = true;
 										resultData.routeTaken = groupName;
 										resultData.actionPerformed = actionType;
@@ -3478,8 +3546,10 @@ export const description: INodeProperties[] = [
 										// Return the result immediately after successful action
 										return [this.helpers.returnJsonArray([resultData])];
 									} catch (error) {
-										this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error during fill action: ${(error as Error).message}`);
-										this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Action execution error in group "${groupName}": ${(error as Error).message}`);
+										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Error during fill action: ${(error as Error).message}`));
+										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Action execution error in group "${groupName}": ${(error as Error).message}`));
 
 										if (continueOnFail) {
 											// If continueOnFail is enabled, update result and move on
@@ -3708,10 +3778,12 @@ export const description: INodeProperties[] = [
 
 									// Log the extraction result (truncated for readability)
 									const truncatedData = formatExtractedDataForLog(extractedData, extractionType);
-									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Extracted ${extractionType} data: ${truncatedData}`);
+									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+										`Extracted ${extractionType} data: ${truncatedData}`));
 
 									// After successful extraction, exit immediately
-									this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Decision point "${groupName}": Extraction completed successfully - exiting decision node`);
+									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+										`Decision point "${groupName}": Extraction completed successfully - exiting decision node`));
 									resultData.success = true;
 									resultData.routeTaken = groupName;
 									resultData.actionPerformed = actionType;
@@ -3747,23 +3819,28 @@ export const description: INodeProperties[] = [
 						break;
 					} else {
 						// Important change: This is NOT an error, just a normal condition not being met
-						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Condition not met for group "${groupName}", continuing to next condition`);
+						this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Condition not met for group "${groupName}", continuing to next condition`));
 					}
 				} catch (error) {
 					// Check if this is a navigation timeout, which might be expected behavior
 					const errorMessage = (error as Error).message;
 					if (errorMessage.includes('Navigation timeout')) {
 						// This is likely just a timeout during navigation, which might be expected
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Navigation timeout in group "${groupName}": ${errorMessage} - this may be expected behavior`);
+						this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Navigation timeout in group "${groupName}": ${errorMessage} - this may be expected behavior`));
 					} else if (errorMessage.includes('not found') || errorMessage.includes('not clickable or visible')) {
 						// Not an error - decision point didn't match selected element
-						this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Decision point "${groupName}": Element not available - continuing to next decision`);
+						this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Decision point "${groupName}": Element not available - continuing to next decision`));
 
 						// Add additional details at debug level
-						this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Details: ${errorMessage}`);
+						this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Details: ${errorMessage}`));
 					} else {
 						// This is a genuine error in execution, not just a condition failing
-						this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Action execution error in group "${groupName}": ${errorMessage}`);
+						this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Action execution error in group "${groupName}": ${errorMessage}`));
 					}
 					// No need for continue statement as it's the last statement in the loop
 				}
@@ -3930,7 +4007,8 @@ export const description: INodeProperties[] = [
 								resultData.extractedData.fallback = extractedData;
 
 								const truncatedData = formatExtractedDataForLog(extractedData, fallbackExtractionType);
-								this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Fallback: Extracted ${fallbackExtractionType} data from: ${fallbackSelector} - Value: ${truncatedData}`);
+								this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+									`Fallback: Extracted ${fallbackExtractionType} data from: ${fallbackSelector} - Value: ${truncatedData}`));
 								break;
 							}
 
@@ -4052,7 +4130,8 @@ export const description: INodeProperties[] = [
 							}
 						}
 					} catch (error) {
-						this.logger.error(`Error in fallback action: ${(error as Error).message}`);
+						this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+							`Error in fallback action: ${(error as Error).message}`));
 
 						if (!continueOnFail) {
 							throw error;
@@ -4069,7 +4148,8 @@ export const description: INodeProperties[] = [
 					quality: 80,
 				}) as string;
 				resultData.screenshot = screenshot;
-				this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Screenshot captured (${screenshot.length} bytes)`);
+				this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
+					`Screenshot captured (${screenshot.length} bytes)`));
 			}
 
 			// Update result data
@@ -4080,28 +4160,50 @@ export const description: INodeProperties[] = [
 			resultData.actionPerformed = actionPerformed;
 
 			// Log completion with execution metrics
-			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Completed execution: route="${routeTaken}", action="${actionPerformed}", duration=${resultData.executionDuration}ms`);
+			this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+				`Completed execution: route="${routeTaken}", action="${actionPerformed}", duration=${resultData.executionDuration}ms`));
 
 			// Add more specific completion information based on action performed
 			if (actionPerformed === 'click') {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] CLICK ACTION SUCCESSFUL: Node has finished processing and is ready for the next node`);
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+					`CLICK ACTION SUCCESSFUL: Node has finished processing and is ready for the next node`));
 			} else if (actionPerformed === 'fill') {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] FORM FILL SUCCESSFUL: Node has finished processing and is ready for the next node`);
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+					`FORM FILL SUCCESSFUL: Node has finished processing and is ready for the next node`));
 			} else if (actionPerformed === 'extract') {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] EXTRACTION SUCCESSFUL: Node has finished processing and is ready for the next node`);
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+					`EXTRACTION SUCCESSFUL: Node has finished processing and is ready for the next node`));
 			} else if (actionPerformed === 'navigate') {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] NAVIGATION SUCCESSFUL: Node has finished processing and is ready for the next node`);
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+					`NAVIGATION SUCCESSFUL: Node has finished processing and is ready for the next node`));
 			} else {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] NODE SUCCESSFUL: Processing complete and ready for next node`);
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+					`NODE SUCCESSFUL: Processing complete and ready for next node`));
 			}
 
 			// Add a visual end marker
 			this.logger.info("============ NODE EXECUTION COMPLETE ============");
 
+			// Create standardized success response
+			const successResponse = await createSuccessResponse({
+				operation: 'Decision',
+				sessionId: explicitSessionId,
+				page: puppeteerPage,
+				logger: this.logger,
+				startTime,
+				takeScreenshot: this.getNodeParameter('takeScreenshot', index, false) as boolean,
+				additionalData: {
+					routeTaken,
+					actionPerformed,
+					currentUrl: resultData.currentUrl,
+					pageTitle: resultData.pageTitle,
+				},
+			});
+
 			// Build the output item in accordance with n8n standards
 			const returnItem: INodeExecutionData = {
-				json: resultData,
-					pairedItem: { item: index },
+				json: successResponse,
+				pairedItem: { item: index },
 			};
 
 			// Output the results
@@ -4113,11 +4215,13 @@ export const description: INodeProperties[] = [
 				// Put the item in the correct route
 				if (routeIndex >= 0 && routeIndex < routeCount) {
 					routes[routeIndex].push(returnItem);
-					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Sending output to route ${routeIndex + 1}`);
+					this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+						`Sending output to route ${routeIndex + 1}`));
 				} else {
 					// Default to route 0 if routeIndex is out of bounds
 						routes[0].push(returnItem);
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Route index ${routeIndex} out of bounds, defaulting to route 1`);
+					this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+						`Route index ${routeIndex} out of bounds, defaulting to route 1`));
 				}
 
 				return routes;
@@ -4126,58 +4230,34 @@ export const description: INodeProperties[] = [
 			// Single output case - no else needed as the if block returns
 			return [returnItem];
 		} catch (error) {
-			const errorMessage = (error as Error).message;
-			this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error during execution: ${errorMessage}`);
-
-			// Try to get a screenshot on error for debugging
-			let errorScreenshot: string | undefined;
+			// Use standardized error response utility
 			const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
+			const errorResponse = await createErrorResponse({
+				error,
+				operation: 'Decision',
+				sessionId: explicitSessionId,
+				nodeId,
+				nodeName,
+				page: puppeteerPage,
+				logger: this.logger,
+				takeScreenshot,
+				startTime,
+				continueOnFail,
+				additionalData: {
+					routeTaken: 'error',
+					actionPerformed: 'none',
+				},
+			});
 
-			if (takeScreenshot) {
-				try {
-					errorScreenshot = await puppeteerPage.screenshot({
-						encoding: 'base64',
-						type: 'jpeg',
-						quality: 80,
-					}) as string;
-					this.logger.debug(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error screenshot captured (${errorScreenshot.length} bytes)`);
-				} catch (screenshotError) {
-					this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Failed to capture error screenshot: ${(screenshotError as Error).message}`);
-				}
-			}
-
+			// If continueOnFail is true, return error data instead of throwing
 			if (continueOnFail) {
-				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Continuing despite error (continueOnFail=true)`);
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+					`Continuing despite error (continueOnFail=true)`));
 
-				let errorCurrentUrl = 'unknown';
-				let errorPageTitle = 'unknown';
-
-				try {
-					errorCurrentUrl = await puppeteerPage.url();
-					errorPageTitle = await puppeteerPage.title();
-				} catch (pageError) {
-					// Ignore errors when trying to get page info
-				}
-
-				// Get session ID parameter if available
-				const inputSessionId = this.getNodeParameter('sessionId', index, '') as string;
-
-				// Return error information in the output but preserve the session ID
-				const executionDuration = Date.now() - startTime;
 				const returnItem: INodeExecutionData = {
-						json: {
-							success: false,
-							error: errorMessage,
-							routeTaken: 'error',
-							actionPerformed: 'none',
-							currentUrl: errorCurrentUrl,
-								pageTitle: errorPageTitle,
-								screenshot: errorScreenshot,
-								executionDuration,
-								sessionId: inputSessionId, // Ensure session ID is preserved on error
-						},
-						pairedItem: { item: index },
-					};
+					json: errorResponse,
+					pairedItem: { item: index },
+				};
 
 				// Route to the first output or return as single output
 				const enableRouting = this.getNodeParameter('enableRouting', index, false) as boolean;
