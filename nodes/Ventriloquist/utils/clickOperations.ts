@@ -3,7 +3,7 @@ import type { ILogger } from './formOperations';
 
 /**
  * Enhanced click function with multiple fallback methods
- * Combines the best of both existing click implementations
+ * Uses direct DOM manipulation first, then falls back to other methods
  */
 export async function robustClick(
   page: Page,
@@ -40,105 +40,68 @@ export async function robustClick(
 
   while (!success && attempt <= retries) {
     try {
-      // First try to check if the element exists
-      const selectorExists = await page.evaluate((sel) => {
+      // First try direct DOM manipulation (similar to how checkbox handling works)
+      logInfo(`Attempt ${attempt + 1}: Using direct DOM manipulation on "${selector}"`);
+
+      // Add small delay before click operations (helps with timing issues)
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const directSuccess = await page.evaluate((sel) => {
         const element = document.querySelector(sel);
-        return element !== null;
+        if (!element) return { success: false, error: 'Element not found' };
+
+        try {
+          // Handle checkbox/radio special case
+          if (element instanceof HTMLInputElement &&
+              (element.type === 'checkbox' || element.type === 'radio')) {
+            // Toggle the checked state for checkboxes or set to true for radio
+            if (element.type === 'checkbox') {
+              element.checked = !element.checked;
+            } else {
+              element.checked = true;
+            }
+
+            // Dispatch events
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            return { success: true };
+          }
+
+          // For other elements, try standard click
+          if (element instanceof HTMLElement) {
+            element.click();
+            return { success: true };
+          }
+
+          return { success: false, error: 'Not clickable element' };
+        } catch (err) {
+          return {
+            success: false,
+            error: err instanceof Error ? err.message : String(err)
+          };
+        }
       }, selector);
 
-      if (!selectorExists) {
-        throw new Error(`Element with selector "${selector}" not found on page`);
+      if (directSuccess?.success) {
+        logInfo('Direct DOM manipulation was successful');
+        success = true;
+        break;
       }
 
-      // Method 1: Standard click
-      logInfo(`Attempt ${attempt + 1}: Standard click on "${selector}"`);
+      // Fallback to standard click
+      logInfo(`Direct manipulation failed, trying standard click on "${selector}"`);
       await page.click(selector);
       logInfo('Standard click was successful');
       success = true;
-    } catch (error1) {
-      logWarn(`Standard click failed: ${(error1 as Error).message}, trying alternative methods...`);
+    } catch (error) {
+      lastError = error as Error;
+      logWarn(`Click attempt ${attempt + 1} failed: ${(error as Error).message}`);
+      attempt++;
 
-      try {
-        // Method 2: JavaScript click via evaluate
-        logInfo(`Attempt ${attempt + 1}: JavaScript click method on "${selector}"`);
-        const jsClickSuccess = await page.evaluate((sel) => {
-          const element = document.querySelector(sel);
-          if (!element) return false;
-
-          // Try different approaches
-          try {
-            // 1. Use click() method
-            (element as HTMLElement).click();
-            return true;
-          } catch (e) {
-            try {
-              // 2. Create and dispatch mouse events
-              const event = new MouseEvent('click', {
-                view: window,
-                bubbles: true,
-                cancelable: true,
-                buttons: 1
-              });
-              element.dispatchEvent(event);
-              return true;
-            } catch (e2) {
-              return false;
-            }
-          }
-        }, selector);
-
-        if (jsClickSuccess) {
-          logInfo('JavaScript click was successful');
-          success = true;
-        } else {
-          // Method 3: Try mousedown + mouseup events sequence
-          logInfo(`Attempt ${attempt + 1}: MouseEvent sequence on "${selector}"`);
-          const mouseEventsSuccess = await page.evaluate((sel) => {
-            const element = document.querySelector(sel);
-            if (!element) return false;
-
-            try {
-              const events = ['mousedown', 'mouseup', 'click'];
-              for (const eventType of events) {
-                const event = new MouseEvent(eventType, {
-                  view: window,
-                  bubbles: true,
-                  cancelable: true,
-                  buttons: 1
-                });
-                element.dispatchEvent(event);
-              }
-              return true;
-            } catch (e) {
-              return false;
-            }
-          }, selector);
-
-          if (mouseEventsSuccess) {
-            logInfo('MouseEvent sequence was successful');
-            success = true;
-          } else {
-            lastError = new Error('All click methods failed');
-            logWarn(`Click attempt ${attempt + 1} failed: All methods failed`);
-            attempt++;
-
-            // If there are more retries, wait a bit before retrying
-            if (attempt <= retries) {
-              logInfo(`Waiting ${waitBetweenRetries}ms before next attempt`);
-              await new Promise((resolve) => setTimeout(resolve, waitBetweenRetries));
-            }
-          }
-        }
-      } catch (error2) {
-        lastError = error2 as Error;
-        logError(`Error during alternative click methods: ${(error2 as Error).message}`);
-        attempt++;
-
-        // If there are more retries, wait a bit before retrying
-        if (attempt <= retries) {
-          logInfo(`Waiting ${waitBetweenRetries}ms before next attempt`);
-          await new Promise((resolve) => setTimeout(resolve, waitBetweenRetries));
-        }
+      // If there are more retries, wait before retrying
+      if (attempt <= retries) {
+        logInfo(`Waiting ${waitBetweenRetries}ms before next attempt`);
+        await new Promise((resolve) => setTimeout(resolve, waitBetweenRetries));
       }
     }
   }

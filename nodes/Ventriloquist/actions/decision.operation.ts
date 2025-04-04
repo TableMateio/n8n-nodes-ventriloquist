@@ -2532,13 +2532,12 @@ export const description: INodeProperties[] = [
 						throw new Error(`No browser session found for workflow ID: ${workflowId}`);
 					}
 
-					// Try to get credential type from session if available
-					if (session && 'credentialType' in session) {
+					// Get credentials based on type
+					let credentialType = 'browserlessApi';
+					if (session && typeof (session as any).credentialType === 'string') {
 						credentialType = (session as any).credentialType;
 					}
 
-					// Get credentials based on type
-					const credentialType = session.credentialType || 'browserlessApi';
 					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using credential type: ${credentialType} for reconnection`);
 
 					try {
@@ -3009,8 +3008,8 @@ export const description: INodeProperties[] = [
 									const session = Ventriloquist.getSessions().get(workflowId);
 									let credentialType = 'brightDataApi'; // Default
 
-									if (session?.credentialType) {
-										credentialType = session.credentialType;
+									if (session && typeof (session as any).credentialType === 'string') {
+										credentialType = (session as any).credentialType;
 										this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using credential type from session: ${credentialType}`);
 									} else {
 										this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] No credential type found in session, defaulting to: ${credentialType}`);
