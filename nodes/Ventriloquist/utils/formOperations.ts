@@ -1,5 +1,6 @@
 import type { Page, ElementHandle } from 'puppeteer-core';
 import type { IDataObject } from 'n8n-workflow';
+import { robustClick } from './clickOperations';
 
 /**
  * Interface for logger that both IExecuteFunctions and custom loggers can implement
@@ -50,63 +51,9 @@ export async function ensureElementInViewport(page: Page, selector: string): Pro
  * Click a button robustly with multiple fallback methods
  */
 export async function robustButtonClick(page: Page, selector: string, logger: ILogger): Promise<boolean> {
-	try {
-		// Method 1: Standard click
-		logger.info('Attempting standard click method');
-		await page.click(selector);
-		logger.info('Standard click succeeded');
-		return true;
-	} catch (error1) {
-		logger.warn(`Standard click failed: ${(error1 as Error).message}, trying alternate methods`);
-
-		try {
-			// Method 2: JavaScript click via evaluate
-			logger.info('Attempting JavaScript click method');
-			const clickResult = await page.evaluate((sel) => {
-				const button = document.querySelector(sel);
-				if (button) {
-					// Cast to HTMLElement to access click method
-					(button as HTMLElement).click();
-					return { success: true, elementExists: true };
-				}
-				return { success: false, elementExists: false };
-			}, selector);
-
-			if (clickResult.success) {
-				logger.info('JavaScript click succeeded');
-				return true;
-			}
-
-			if (!clickResult.elementExists) {
-				logger.error('Button no longer exists in DOM');
-				return false;
-			}
-
-			// Method 3: Try mousedown + mouseup events
-			logger.info('Attempting mousedown/mouseup events method');
-			await page.evaluate((sel) => {
-				const button = document.querySelector(sel);
-				if (button) {
-					const events = ['mousedown', 'mouseup', 'click'];
-					for (const eventType of events) {
-						const event = new MouseEvent(eventType, {
-							view: window,
-							bubbles: true,
-							cancelable: true,
-							buttons: 1
-						});
-						button.dispatchEvent(event);
-					}
-				}
-			}, selector);
-
-			logger.info('Direct event dispatch attempted');
-			return true;
-		} catch (error2) {
-			logger.error(`All click methods failed: ${(error2 as Error).message}`);
-			return false;
-		}
-	}
+	// Use the more robust robustClick utility
+	const result = await robustClick(page, selector, { logger });
+	return result.success;
 }
 
 /**
@@ -360,7 +307,14 @@ export async function handleCheckboxField(
 
 		// Only click if the current state doesn't match desired state
 		if (currentChecked !== checked) {
-			await page.click(selector);
+			// Import and use the robustClick utility instead of direct page.click
+			const clickResult = await robustClick(page, selector, { logger });
+			if (!clickResult.success) {
+				if (clickResult.error) {
+					throw clickResult.error;
+				}
+				throw new Error(`Failed to click checkbox: ${selector}`);
+			}
 		}
 
 		return true;
@@ -436,11 +390,13 @@ export async function handleMultiSelectField(
 				try {
 					const exists = await page.$(possibleSelector) !== null;
 					if (exists) {
-						await page.click(possibleSelector);
-						logger.info(`Clicked multi-select option: ${value} with selector: ${possibleSelector}`);
-						clicked = true;
-						successCount++;
-						break;
+						const clickResult = await robustClick(page, possibleSelector, { logger });
+						if (clickResult.success) {
+							logger.info(`Clicked multi-select option: ${value} with selector: ${possibleSelector}`);
+							clicked = true;
+							successCount++;
+							break;
+						}
 					}
 				} catch {
 					// Try next selector
