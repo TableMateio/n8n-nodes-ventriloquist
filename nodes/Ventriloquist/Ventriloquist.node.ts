@@ -792,151 +792,87 @@ export class Ventriloquist implements INodeType {
 
 					returnData[0].push(result);
 				} else if (operation === 'decision') {
-					// Find the session we need to use
-					let page: puppeteer.Page | undefined;
+					// Execute the decision operation
+					const result = await decisionOperation.execute.call(
+						this,
+						i,
+						websocketEndpoint,
+						workflowId
+					);
 
-					// Get session ID if provided
-					try {
-						// Get existing session ID if provided
-						const existingSessionId = this.getNodeParameter('sessionId', i, '') as string;
+					// Check if we need to route to different outputs
+					const enableRouting = this.getNodeParameter('enableRouting', i, false) as boolean;
 
-						// Get the page to use
-						if (existingSessionId) {
-							// Try to get an existing page from the session
-							const existingPage = Ventriloquist.getPage(workflowId, existingSessionId);
-							if (!existingPage) {
-								throw new Error(`Session ID ${existingSessionId} not found. The session may have expired or been closed.`);
-							}
-							page = existingPage;
-						} else {
-							// Use latest page from the browser (fall back to creating a new one if needed)
-							// IMPORTANT: Don't create a new session, just get the existing one for this workflow
-							this.logger.info(`No session ID provided, trying to use the existing session for workflow ID: ${workflowId}`);
+					if (enableRouting) {
+						// Handle different return types from decision operation
+						if (Array.isArray(result)) {
+							// Check if result is already a multi-dimensional array (INodeExecutionData[][])
+							if (result.length > 0 && Array.isArray(result[0])) {
+								// Result is already in the format INodeExecutionData[][]
+								// Multi-route format: create arrays for each output
+								const routeCount = this.getNodeParameter('routeCount', i, 2) as number;
 
-							// Get the existing session without creating a new one
-							const existingSession = Ventriloquist.browserSessions.get(workflowId);
+								// Initialize arrays for each output if they don't exist
+								while (returnData.length < routeCount) {
+									returnData.push([]);
+								}
 
-							if (!existingSession) {
-								throw new Error(`No existing browser session found for this workflow. Please run the Open operation first.`);
-							}
-
-							this.logger.info(`Found existing browser session for workflow: ${workflowId}`);
-							const browser = existingSession.browser;
-							const pages = await browser.pages();
-
-							if (pages.length > 0) {
-								page = pages[pages.length - 1]; // Use the most recently created page
-								this.logger.info(`Using the most recent page from the existing session`);
-							} else {
-								// Create a new page in the existing session
-								page = await browser.newPage();
-								this.logger.info(`Created new page in existing browser session`);
-							}
-						}
-
-						if (!page) {
-							throw new Error('No browser page found or could be created');
-						}
-
-						// Execute the decision operation
-						const result = await decisionOperation.execute.call(
-							this,
-							i,
-							page,
-							websocketEndpoint,
-							workflowId
-						);
-
-						// Check if we need to route to different outputs
-						const enableRouting = this.getNodeParameter('enableRouting', i, false) as boolean;
-
-						if (enableRouting) {
-							// Handle different return types from decision operation
-							if (Array.isArray(result)) {
-								// Check if result is already a multi-dimensional array (INodeExecutionData[][])
-								if (result.length > 0 && Array.isArray(result[0])) {
-									// Result is already in the format INodeExecutionData[][]
-									// Multi-route format: create arrays for each output
-									const routeCount = this.getNodeParameter('routeCount', i, 2) as number;
-
-									// Initialize arrays for each output if they don't exist
-									while (returnData.length < routeCount) {
-										returnData.push([]);
-									}
-
-									// Add results to each output route
-									for (let routeIndex = 0; routeIndex < result.length && routeIndex < routeCount; routeIndex++) {
-										const routeData = result[routeIndex];
-										if (Array.isArray(routeData) && routeData.length > 0) {
-											returnData[routeIndex].push(...routeData);
-										}
-									}
-								} else {
-									// Result is in the format INodeExecutionData[]
-									// Create arrays for each output if they don't exist
-									const routeCount = this.getNodeParameter('routeCount', i, 2) as number;
-
-									// Initialize arrays for each output if they don't exist
-									while (returnData.length < routeCount) {
-										returnData.push([]);
-									}
-
-									// Default to first output
-									if (returnData.length === 0) {
-										returnData.push([]);
-									}
-
-									// Add all items to first output
-									const items = result as INodeExecutionData[];
-									if (items.length > 0) {
-										returnData[0].push(...items);
+								// Add results to each output route
+								for (let routeIndex = 0; routeIndex < result.length && routeIndex < routeCount; routeIndex++) {
+									const routeData = result[routeIndex];
+									if (Array.isArray(routeData) && routeData.length > 0) {
+										returnData[routeIndex].push(...routeData);
 									}
 								}
 							} else {
-								// Empty result or invalid format, create empty first output if needed
+								// Result is in the format INodeExecutionData[]
+								// Create arrays for each output if they don't exist
+								const routeCount = this.getNodeParameter('routeCount', i, 2) as number;
+
+								// Initialize arrays for each output if they don't exist
+								while (returnData.length < routeCount) {
+									returnData.push([]);
+								}
+
+								// Default to first output
 								if (returnData.length === 0) {
 									returnData.push([]);
 								}
+
+								// Add all items to first output
+								const items = result as INodeExecutionData[];
+								if (items.length > 0) {
+									returnData[0].push(...items);
+								}
 							}
 						} else {
-							// If routing not enabled, simply add to first output
+							// Empty result or invalid format, create empty first output if needed
 							if (returnData.length === 0) {
 								returnData.push([]);
 							}
-
-							// Check if result is INodeExecutionData[] or INodeExecutionData[][]
-							if (Array.isArray(result)) {
-								if (result.length > 0 && Array.isArray(result[0])) {
-									// It's INodeExecutionData[][], take the first array
-									const firstRoute = result[0] as INodeExecutionData[];
-									if (firstRoute.length > 0) {
-										returnData[0].push(...firstRoute);
-									}
-								} else {
-									// It's INodeExecutionData[]
-									const items = result as INodeExecutionData[];
-									if (items.length > 0) {
-										returnData[0].push(...items);
-									}
-								}
-							}
 						}
-					} catch (error) {
-						// ... existing error handling ...
-						// Handle error and add to first output
+					} else {
+						// If routing not enabled, simply add to first output
 						if (returnData.length === 0) {
 							returnData.push([]);
 						}
 
-						returnData[0].push({
-							json: {
-								...items[i].json, // Pass through input data
-								success: false,
-								error: (error as Error).message,
-								executionDuration: Date.now() - startTime,
-							},
-							pairedItem: { item: i },
-						});
+						// Check if result is INodeExecutionData[] or INodeExecutionData[][]
+						if (Array.isArray(result)) {
+							if (result.length > 0 && Array.isArray(result[0])) {
+								// It's INodeExecutionData[][], take the first array
+								const firstRoute = result[0] as INodeExecutionData[];
+								if (firstRoute.length > 0) {
+									returnData[0].push(...firstRoute);
+								}
+							} else {
+								// It's INodeExecutionData[]
+								const items = result as INodeExecutionData[];
+								if (items.length > 0) {
+									returnData[0].push(...items);
+								}
+							}
+						}
 					}
 				} else if (operation === 'extract') {
 					// Execute extract operation

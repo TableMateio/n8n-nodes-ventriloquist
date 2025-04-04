@@ -7,8 +7,9 @@ import type {
 import type * as puppeteer from 'puppeteer-core';
 import { SessionManager } from '../utils/sessionManager';
 import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
-import { createErrorResponse, safeExecute } from '../utils/errorUtils';
+import { createErrorResponse } from '../utils/errorUtils';
 import { waitAndClick } from '../utils/clickOperations';
+import { matchStrings, compareCount } from '../utils/detectionUtils';
 
 /**
  * Decision operation description
@@ -1931,118 +1932,16 @@ export const description: INodeProperties[] = [
 	];
 
 	/**
-	 * Get a random human-like delay between 100-300ms
+	 * Get a realistic human delay
 	 */
 	function getHumanDelay(): number {
 		return Math.floor(Math.random() * (300 - 100 + 1) + 100);
 	}
 
 	/**
-	 * Enhanced navigation waiting with better logging
+	 * Wait for navigation based on the specified wait type
 	 */
-	async function enhancedWaitForNavigation(
-		page: puppeteer.Page,
-		options: puppeteer.WaitForOptions,
-		logger: IExecuteFunctions['logger'],
-		logPrefix: string
-	): Promise<void> {
-		logger.info(`${logPrefix} Waiting for navigation with options: ${JSON.stringify(options)}`);
-
-		try {
-			// Create a promise for navigation
-			const navigationPromise = page.waitForNavigation(options);
-
-			// Create a promise for navigation events
-			const eventLogsPromise = new Promise<void>(resolve => {
-				// Listen for events that might indicate navigation
-				page.on('load', () => logger.info(`${logPrefix} Page load event fired`));
-				page.on('domcontentloaded', () => logger.info(`${logPrefix} DOMContentLoaded event fired`));
-				page.on('framenavigated', (frame) => {
-					if (frame === page.mainFrame()) {
-						logger.info(`${logPrefix} Main frame navigated to: ${frame.url()}`);
-					}
-				});
-				page.on('request', request => {
-					if (request.isNavigationRequest()) {
-						logger.info(`${logPrefix} Navigation request to: ${request.url()}`);
-					}
-				});
-				page.on('response', response => {
-					if (response.request().isNavigationRequest()) {
-						logger.info(`${logPrefix} Navigation response from: ${response.url()} (status: ${response.status()})`);
-					}
-				});
-
-				// Resolve after 500ms to allow events to be captured but not block
-				setTimeout(resolve, 500);
-			});
-
-			// Wait for both promises - the navigation promise is the "real" one
-			await Promise.all([navigationPromise, eventLogsPromise]);
-			logger.info(`${logPrefix} Navigation completed successfully`);
-		} catch (error) {
-			logger.warn(`${logPrefix} Navigation error: ${(error as Error).message}`);
-			throw error;
-		}
-	}
-
-	/**
-	 * Safely matches strings according to the specified match type
-	 */
-	function matchStrings(value: string, targetValue: string, matchType: string, caseSensitive: boolean): boolean {
-		// Apply case sensitivity
-		let compareValue = value;
-		let compareTarget = targetValue;
-
-		if (!caseSensitive) {
-			compareValue = value.toLowerCase();
-			compareTarget = targetValue.toLowerCase();
-		}
-
-		// Apply match type
-		switch (matchType) {
-			case 'exact':
-				return compareValue === compareTarget;
-			case 'contains':
-				return compareValue.includes(compareTarget);
-			case 'startsWith':
-				return compareValue.startsWith(compareTarget);
-			case 'endsWith':
-				return compareValue.endsWith(compareTarget);
-			case 'regex':
-				try {
-					const regex = new RegExp(targetValue, caseSensitive ? '' : 'i');
-					return regex.test(value);
-				} catch (error) {
-					return false;
-				}
-			default:
-				return compareValue.includes(compareTarget);
-		}
-	}
-
-	/**
-	 * Compare element counts based on the comparison operator
-	 */
-	function compareCount(actualCount: number, expectedCount: number, operator: string): boolean {
-		switch (operator) {
-			case 'equal':
-				return actualCount === expectedCount;
-			case 'greater':
-				return actualCount > expectedCount;
-			case 'less':
-				return actualCount < expectedCount;
-			case 'greaterEqual':
-				return actualCount >= expectedCount;
-			case 'lessEqual':
-				return actualCount <= expectedCount;
-			default:
-				return actualCount === expectedCount;
-		}
-	}
-
-	// Find the existing waitForNavigation function and replace it
-	async function waitForNavigation(page: puppeteer.Page, waitUntil: string, timeout: number, logger: IExecuteFunctions['logger'] = console as any): Promise<void> {
+	async function waitForNavigation(page: puppeteer.Page, waitUntil: string, timeout: number): Promise<void> {
 		// Default waitUntil option based on input string
 		let waitUntilOption: puppeteer.PuppeteerLifeCycleEvent | puppeteer.PuppeteerLifeCycleEvent[] = 'domcontentloaded';
 
@@ -2068,11 +1967,11 @@ export const description: INodeProperties[] = [
 				break;
 		}
 
-		// Call the enhanced function
-		await enhancedWaitForNavigation(page, {
+		// Wait for navigation with the specified options
+		await page.waitForNavigation({
 			waitUntil: waitUntilOption,
 			timeout,
-		}, logger, '[Navigation]');
+		});
 	}
 
 	/**
@@ -2159,150 +2058,139 @@ export const description: INodeProperties[] = [
 		index: number,
 		thisNode: IExecuteFunctions
 	): Promise<boolean> {
-		// Use safeExecute to handle errors in a standardized way
-		const result = await safeExecute(
-			async () => {
-				let conditionMet = false;
+		try {
+			let conditionMet = false;
 
-				switch (conditionType) {
-					case 'elementExists': {
-						const selector = condition.selector as string;
+			switch (conditionType) {
+				case 'elementExists': {
+					const selector = condition.selector as string;
 
-						if (waitForSelectors) {
-							if (detectionMethod === 'smart') {
-								// Use smart DOM-aware detection
-								conditionMet = await smartWaitForSelector(
-									page,
-									selector,
-									selectorTimeout,
-									earlyExitDelay,
-									thisNode.logger,
-								);
-							} else {
-								// Use traditional fixed timeout waiting
-								try {
-									await page.waitForSelector(selector, { timeout: selectorTimeout });
-									conditionMet = true;
-								} catch (error) {
-									conditionMet = false;
-								}
-							}
+					if (waitForSelectors) {
+						if (detectionMethod === 'smart') {
+							// Use smart DOM-aware detection
+							conditionMet = await smartWaitForSelector(
+								page,
+								selector,
+								selectorTimeout,
+								earlyExitDelay,
+								thisNode.logger,
+							);
 						} else {
-							// Just check without waiting
-							const elementExists = await page.$(selector) !== null;
-							conditionMet = elementExists;
-						}
-						break;
-					}
-
-					case 'textContains': {
-						const selector = condition.selector as string;
-						const textToCheck = condition.textToCheck as string;
-						const matchType = condition.matchType as string;
-						const caseSensitive = condition.caseSensitive as boolean;
-
-						if (waitForSelectors) {
-							let elementExists = false;
-							if (detectionMethod === 'smart') {
-								// Use smart DOM-aware detection
-								elementExists = await smartWaitForSelector(
-									page,
-									selector,
-									selectorTimeout,
-									earlyExitDelay,
-									thisNode.logger,
-								);
-							} else {
-								// Use traditional fixed timeout waiting
-								try {
-									await page.waitForSelector(selector, { timeout: selectorTimeout });
-									elementExists = true;
-								} catch (error) {
-									elementExists = false;
-								}
-							}
-
-							if (!elementExists) {
+							// Use traditional fixed timeout waiting
+							try {
+								await page.waitForSelector(selector, { timeout: selectorTimeout });
+								conditionMet = true;
+							} catch (error) {
 								conditionMet = false;
-								break;
+							}
+						}
+					} else {
+						// Just check without waiting
+						const elementExists = await page.$(selector) !== null;
+						conditionMet = elementExists;
+					}
+					break;
+				}
+
+				case 'textContains': {
+					const selector = condition.selector as string;
+					const textToCheck = condition.textToCheck as string;
+					const matchType = condition.matchType as string;
+					const caseSensitive = condition.caseSensitive as boolean;
+
+					if (waitForSelectors) {
+						let elementExists = false;
+						if (detectionMethod === 'smart') {
+							// Use smart DOM-aware detection
+							elementExists = await smartWaitForSelector(
+								page,
+								selector,
+								selectorTimeout,
+								earlyExitDelay,
+								thisNode.logger,
+							);
+						} else {
+							// Use traditional fixed timeout waiting
+							try {
+								await page.waitForSelector(selector, { timeout: selectorTimeout });
+								elementExists = true;
+							} catch (error) {
+								elementExists = false;
 							}
 						}
 
-						try {
-							const elementText = await page.$eval(selector, (el) => el.textContent || '');
-							conditionMet = matchStrings(elementText, textToCheck, matchType, caseSensitive);
-						} catch (error) {
-							// Element might not exist
+						if (!elementExists) {
 							conditionMet = false;
+							break;
 						}
-						break;
 					}
 
-					case 'elementCount': {
-						const selector = condition.selector as string;
-						const expectedCount = condition.expectedCount as number;
-						const countComparison = condition.countComparison as string;
-
-						// For element count, we just check without waiting as we expect some elements might not exist
-						const elements = await page.$$(selector);
-						const actualCount = elements.length;
-
-						conditionMet = compareCount(actualCount, expectedCount, countComparison);
-						break;
-					}
-
-					case 'urlContains': {
-						const urlSubstring = condition.urlSubstring as string;
-						const matchType = condition.matchType as string || 'contains';
-						const caseSensitive = condition.caseSensitive as boolean || false;
-
-						// Check if URL matches criteria
-						conditionMet = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
-						break;
-					}
-
-					case 'jsExpression': {
-						const jsExpression = condition.jsExpression as string;
-
-						// Execute the JavaScript expression on the page
-						try {
-							const result = await page.evaluate((expr) => {
-								// eslint-disable-next-line no-eval
-								return eval(expr);
-							}, jsExpression);
-
-							conditionMet = !!result;
-						} catch (error) {
-							thisNode.logger.error(`Error evaluating JavaScript expression: ${(error as Error).message}`);
-							conditionMet = false;
-						}
-						break;
-					}
-
-					default:
-						// Unrecognized condition type
-						thisNode.logger.warn(`Unrecognized condition type: ${conditionType}`);
+					try {
+						const elementText = await page.$eval(selector, (el) => el.textContent || '');
+						conditionMet = matchStrings(elementText, textToCheck, matchType, caseSensitive);
+					} catch (error) {
+						// Element might not exist
 						conditionMet = false;
-				}
-
-				return conditionMet;
-			},
-			{
-				operation: `Decision-Evaluate-${conditionType}`,
-				continueOnFail: true, // Always continue with condition evaluation
-				logger: thisNode.logger,
-				errorContext: {
-					operation: `Decision-Evaluate-${conditionType}`,
-					selector: condition.selector as string,
-					additionalData: {
-						conditionType,
 					}
+					break;
 				}
-			}
-		);
 
-		// Return false if there was an error, otherwise return the result
-		return result.success ? result.result || false : false;
+				case 'elementCount': {
+					const selector = condition.selector as string;
+					const expectedCount = condition.expectedCount as number;
+					const countComparison = condition.countComparison as string;
+
+					// For element count, we just check without waiting as we expect some elements might not exist
+					const elements = await page.$$(selector);
+					const actualCount = elements.length;
+
+					conditionMet = compareCount(actualCount, expectedCount, countComparison);
+					break;
+				}
+
+				case 'urlContains': {
+					const urlSubstring = condition.urlSubstring as string;
+					const matchType = condition.matchType as string || 'contains';
+					const caseSensitive = condition.caseSensitive as boolean || false;
+
+					// Check if URL matches criteria
+					conditionMet = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
+					break;
+				}
+
+				case 'jsExpression': {
+					const jsExpression = condition.jsExpression as string;
+
+					// Execute the JavaScript expression on the page
+					try {
+						const result = await page.evaluate((expr) => {
+							// eslint-disable-next-line no-eval
+							return eval(expr);
+						}, jsExpression);
+
+						conditionMet = !!result;
+					} catch (error) {
+						thisNode.logger.error(`Error evaluating JavaScript expression: ${(error as Error).message}`);
+						conditionMet = false;
+					}
+					break;
+				}
+
+				default:
+					// Unrecognized condition type
+					thisNode.logger.warn(`Unrecognized condition type: ${conditionType}`);
+					conditionMet = false;
+			}
+
+			return conditionMet;
+		} catch (error) {
+			// Log the error but don't stop execution
+			thisNode.logger.error(formatOperationLog('Decision', thisNode.getNode().name, thisNode.getNode().id, index,
+				`Error evaluating condition type ${conditionType}: ${(error as Error).message}`));
+
+			// Return false on any error in condition evaluation
+			return false;
+		}
 	}
 
 	/**
@@ -2386,23 +2274,19 @@ export const description: INodeProperties[] = [
 	}
 
 	/**
-	 * Execute the decision operation
+	 * Execute decision operation
 	 */
 	export async function execute(
 		this: IExecuteFunctions,
 		index: number,
-		initialPage: puppeteer.Page,
-		websocketEndpoint?: string,
-		workflowId?: string,
+		websocketEndpoint: string,
+		workflowId: string,
 	): Promise<INodeExecutionData[][] | INodeExecutionData[]> {
 		const startTime = Date.now();
 
 		// Store this parameter at the top level so it's available in the catch block
 		const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 		let screenshot: string | undefined;
-
-		// Create a variable for the page that we can safely modify
-		let puppeteerPage: puppeteer.Page = initialPage;
 
 		// Added for better logging
 		const nodeName = this.getNode().name;
@@ -2411,21 +2295,43 @@ export const description: INodeProperties[] = [
 		// Get existing session ID parameter if available - moved outside try block to make available in catch
 		const explicitSessionId = this.getNodeParameter('sessionId', index, '') as string;
 		let sessionId = explicitSessionId;
-
-		// Get the current URL (this might fail if the page is disconnected)
-		let currentUrl = '';
-		try {
-			currentUrl = await puppeteerPage.url();
-		} catch (error) {
-			this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error getting current URL: ${(error as Error).message}`);
-			this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] This might indicate the page is disconnected - will attempt to reconnect`);
-		}
+		let puppeteerPage: puppeteer.Page | null = null;
 
 		// Visual marker to clearly indicate a new node is starting
 		this.logger.info("============ STARTING NODE EXECUTION ============");
-		this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index, `Starting execution on URL: ${currentUrl}`));
+		this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index, `Starting execution`));
 
 		try {
+			// Use the centralized session management
+			const sessionResult = await SessionManager.getOrCreatePageSession(this.logger, {
+				explicitSessionId,
+				websocketEndpoint,
+				workflowId,
+				operationName: 'Decision',
+				nodeId,
+				nodeName,
+				index,
+			});
+
+			puppeteerPage = sessionResult.page;
+			sessionId = sessionResult.sessionId;
+
+			if (!puppeteerPage) {
+				throw new Error('Failed to get or create a page');
+			}
+
+			// Update current URL after getting page
+			let currentUrl = '';
+			try {
+				currentUrl = await puppeteerPage.url();
+				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+					`Current page URL is: ${currentUrl}`));
+			} catch (urlError) {
+				this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+					`Could not get URL after session management: ${(urlError as Error).message}`));
+				currentUrl = 'unknown (connection issues)';
+			}
+
 			// Get operation parameters
 			const conditionGroups = this.getNodeParameter('conditionGroups.groups', index, []) as IDataObject[];
 			const fallbackAction = this.getNodeParameter('fallbackAction', index) as string;
@@ -2435,10 +2341,6 @@ export const description: INodeProperties[] = [
 			const earlyExitDelay = this.getNodeParameter('earlyExitDelay', index, 500) as number;
 			const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
 			const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
-
-			// These were moved outside the try block
-			// const explicitSessionId = this.getNodeParameter('sessionId', index, '') as string;
-			// let sessionId = explicitSessionId;
 
 			// Log parameters for debugging
 			this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
@@ -2451,111 +2353,14 @@ export const description: INodeProperties[] = [
 				this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
 					"WARNING: No session ID provided in the 'Session ID' field"));
 				this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-					"Will attempt to use the existing session for this workflow - this may work but is not reliable"));
-				this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
 					"For best results, you should provide the session ID from a previous Open operation in the 'Session ID' field"));
 			} else {
 				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index, `Using session ID: ${explicitSessionId}`));
 			}
 
-			// Check if the page is still connected by trying a simple operation
-			let pageConnected = true;
-			try {
-				// Simple operation to check if page is still connected
-				await puppeteerPage.evaluate(() => document.readyState);
-				this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index, "Page connection verified"));
-			} catch (error) {
-				pageConnected = false;
-				this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-					`Page appears to be disconnected: ${(error as Error).message}`));
-			}
-
-			// If page is disconnected or we have an explicit session ID, use the SessionManager
-			if (!pageConnected || explicitSessionId) {
-				// Get the actual websocket endpoint from credentials if not provided
-				let actualWebsocketEndpoint = websocketEndpoint || '';
-
-				if (!actualWebsocketEndpoint) {
-					// Try to determine the credential type
-					let credentialType = 'browserlessApi'; // Default
-
-					try {
-						// Try to get credentials based on a guessed type
-						try {
-							const browserlessCredentials = await this.getCredentials('browserlessApi');
-							credentialType = 'browserlessApi';
-
-							// Extract WebSocket endpoint from credentials using utility
-							actualWebsocketEndpoint = SessionManager.getWebSocketUrlFromCredentials(
-								this.logger,
-								credentialType,
-								browserlessCredentials
-							);
-						} catch (browserlessError) {
-							this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-								`No browserlessApi credentials found: ${(browserlessError as Error).message}`));
-
-							try {
-								const brightDataCredentials = await this.getCredentials('brightDataApi');
-								credentialType = 'brightDataApi';
-
-								// Extract WebSocket endpoint from credentials using utility
-								actualWebsocketEndpoint = SessionManager.getWebSocketUrlFromCredentials(
-									this.logger,
-									credentialType,
-									brightDataCredentials
-								);
-							} catch (brightDataError) {
-								this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
-									`No brightDataApi credentials found: ${(brightDataError as Error).message}`));
-							}
-						}
-					} catch (credentialError) {
-						this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-							`Could not determine credentials: ${(credentialError as Error).message}`));
-					}
-				}
-
-				// Use the centralized session management
-				if (actualWebsocketEndpoint) {
-					this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-						`Using SessionManager to get or create page session`));
-
-					const sessionResult = await SessionManager.getOrCreatePageSession(this.logger, {
-						explicitSessionId,
-						websocketEndpoint: actualWebsocketEndpoint,
-						workflowId,
-						operationName: 'Decision',
-						nodeId,
-						nodeName,
-						index,
-					});
-
-					puppeteerPage = sessionResult.page || puppeteerPage;
-					sessionId = sessionResult.sessionId;
-
-					if (sessionResult.isNewSession) {
-						this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-							`Created new session with ID: ${sessionId}`));
-					} else {
-						this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-							`Using existing session with ID: ${sessionId}`));
-					}
-
-					// Update current URL after getting page
-					try {
-						currentUrl = await puppeteerPage.url();
-						this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-							`Current page URL is: ${currentUrl}`));
-					} catch (urlError) {
-						this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-							`Could not get URL after session management: ${(urlError as Error).message}`));
-						currentUrl = 'unknown (connection issues)';
-					}
-				} else {
-					this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-						`No websocket endpoint available - cannot reconnect session`));
-				}
+			// Check if the page is valid
+			if (!puppeteerPage) {
+				throw new Error('Page is null or undefined');
 			}
 
 			// Verify the document content to ensure we have a valid page
@@ -3638,9 +3443,13 @@ export const description: INodeProperties[] = [
 											if (extractionProperty === 'attribute') {
 												const attributeName = multipleOptions.attributeName as string || '';
 												// Extract the specified attribute from each element
+												if (!puppeteerPage) {
+													throw new Error('Page is null or undefined');
+												}
+												const page = puppeteerPage; // Non-null assertion for TypeScript
 												extractedData = await Promise.all(
 													limitedElements.map(async (el) =>
-														puppeteerPage.evaluate(
+														page.evaluate(
 															(element, attr) => element.getAttribute(attr) || '',
 															el,
 															attributeName
@@ -3649,9 +3458,13 @@ export const description: INodeProperties[] = [
 												);
 											} else {
 												// Extract the specified property from each element
+												if (!puppeteerPage) {
+													throw new Error('Page is null or undefined');
+												}
+												const page = puppeteerPage; // Non-null assertion for TypeScript
 												extractedData = await Promise.all(
 													limitedElements.map(async (el) =>
-														puppeteerPage.evaluate(
+														page.evaluate(
 															(element, prop) => {
 																switch (prop) {
 																	case 'textContent':
@@ -4104,35 +3917,20 @@ export const description: INodeProperties[] = [
 
 			// Take screenshot if requested
 			if (takeScreenshot) {
-				// Use safeExecute to safely take a screenshot
-				const screenshotResult = await safeExecute(
-					async () => {
-						return await puppeteerPage.screenshot({
-							encoding: 'base64',
-							type: 'jpeg',
-							quality: 80,
-						}) as string;
-					},
-					{
-						operation: 'Decision-Screenshot',
-						continueOnFail: true, // Always continue even if screenshot fails
-						logger: this.logger,
-						errorContext: {
-							nodeId,
-							nodeName,
-							sessionId,
-						}
-					}
-				);
+				try {
+					screenshot = await puppeteerPage.screenshot({
+						encoding: 'base64',
+						type: 'jpeg',
+						quality: 80,
+					}) as string;
 
-				if (screenshotResult.success && screenshotResult.result) {
-					screenshot = screenshotResult.result;
 					resultData.screenshot = screenshot;
 					this.logger.debug(formatOperationLog('Decision', nodeName, nodeId, index,
 						`Screenshot captured (${screenshot.length} bytes)`));
-				} else {
+				} catch (screenshotError) {
 					this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-						`Failed to capture screenshot: ${screenshotResult.errorResponse?.error || 'Unknown error'}`));
+						`Failed to capture screenshot: ${(screenshotError as Error).message}`));
+					// Continue execution even if screenshot fails
 				}
 			}
 
