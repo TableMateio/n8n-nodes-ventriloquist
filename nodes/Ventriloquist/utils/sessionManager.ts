@@ -1,4 +1,3 @@
-import { URL } from 'node:url';
 import * as puppeteerRuntime from 'puppeteer-core';
 import type { Browser, Page, ConnectOptions } from 'puppeteer-core';
 
@@ -40,6 +39,14 @@ export interface CloseSessionOptions {
   olderThan?: number; // Close sessions older than X milliseconds
   workflowId?: string; // Close sessions for a specific workflow
   all?: boolean; // Close all sessions
+}
+
+/**
+ * Result of close sessions operation
+ */
+export interface CloseSessionResult {
+  total: number;
+  closed: number;
 }
 
 /**
@@ -366,7 +373,7 @@ export namespace SessionManager {
   export async function closeSessions(
     logger: ILogger,
     options: CloseSessionOptions = {}
-  ): Promise<{ closed: number; total: number }> {
+  ): Promise<CloseSessionResult> {
     const { sessionId, olderThan, workflowId, all } = options;
     let closedCount = 0;
     const totalSessions = sessions.size;
