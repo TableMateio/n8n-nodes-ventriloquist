@@ -23,6 +23,7 @@ import * as decisionOperation from './actions/decision.operation';
 import * as openOperation from './actions/open.operation';
 import * as authenticateOperation from './actions/authenticate.operation';
 import * as clickOperation from './actions/click.operation';
+import * as closeOperation from './actions/close.operation';
 
 /**
  * Configure outputs for decision operation based on routing parameters
@@ -334,82 +335,10 @@ export class Ventriloquist implements INodeType {
 			try {
 				await session.browser.close();
 			} catch (error) {
-				// Ignore errors during cleanup
-			} finally {
-				this.browserSessions.delete(workflowId);
+				// Ignore close errors
 			}
+			this.browserSessions.delete(workflowId);
 		}
-	}
-
-	// Close all locally tracked browser sessions
-	private static async closeAllSessions(logger: any) {
-		let closedCount = 0;
-		let totalSessions = 0;
-
-		// Create an array of session entries to avoid modification during iteration
-		const sessionEntries = Array.from(this.browserSessions.entries());
-
-		logger.info(`Closing locally tracked browser sessions (${sessionEntries.length} sessions found)`);
-		logger.info(`Note: This only closes sessions tracked by this N8N instance. Check Bright Data console for orphaned sessions.`);
-
-		// Close each locally tracked session
-		for (const [workflowId, session] of sessionEntries) {
-			try {
-				logger.info(`Closing browser session for workflow ID: ${workflowId}`);
-
-				// First try to close all pages in this browser
-				try {
-					// Get all pages in this browser
-					const pages = await session.browser.pages();
-					logger.info(`Found ${pages.length} pages in browser session ${workflowId}`);
-
-					// Close each page
-					for (const page of pages) {
-						try {
-							await page.close();
-							logger.info('Successfully closed a page');
-						} catch (pageError) {
-							logger.warn(`Error closing page: ${pageError}`);
-						}
-					}
-
-					// Try to close all contexts
-					const contexts = await session.browser.browserContexts();
-					logger.info(`Found ${contexts.length} browser contexts in session ${workflowId}`);
-
-					// Close each context (except default)
-					for (const context of contexts) {
-						try {
-							// Skip default context as it can't be closed
-							if (context !== session.browser.defaultBrowserContext()) {
-								await context.close();
-								logger.info('Successfully closed a browser context');
-							}
-						} catch (contextError) {
-							logger.warn(`Error closing browser context: ${contextError}`);
-						}
-					}
-				} catch (innerError) {
-					logger.warn(`Error during detailed cleanup: ${innerError}`);
-				}
-
-				// Finally close the browser itself
-				await session.browser.close();
-				closedCount++;
-				logger.info(`Successfully closed browser for workflow ${workflowId}`);
-			} catch (error) {
-				logger.warn(`Error closing session for workflow ${workflowId}: ${error}`);
-			} finally {
-				this.browserSessions.delete(workflowId);
-			}
-		}
-
-		totalSessions = sessionEntries.length;
-
-		logger.info(`Successfully closed ${closedCount} of ${totalSessions} locally tracked browser sessions`);
-		logger.info(`For any remaining sessions in Bright Data, please visit their console: https://brightdata.com/cp/zones/YOUR_ZONE/stats`);
-
-		return { totalSessions, closedSessions: closedCount };
 	}
 
 	// Enable debugger for a Bright Data session
@@ -1121,139 +1050,20 @@ export class Ventriloquist implements INodeType {
 
 					returnData[0].push(result);
 				} else if (operation === 'close') {
-					// Close browser sessions based on the selected mode
-					const closeMode = this.getNodeParameter('closeMode', i, 'session') as string;
-					const continueOnFail = this.getNodeParameter('continueOnFail', i, true) as boolean;
+					// Execute close operation using the implementation from close.operation.ts
+					const result = await closeOperation.execute.call(
+						this,
+						i,
+						websocketEndpoint,
+						workflowId,
+					);
 
-					try {
-						if (closeMode === 'session') {
-							// Close a specific session
-							let sessionId = '';
-
-							// First, check if an explicit session ID was provided
-							const explicitSessionId = this.getNodeParameter('explicitSessionId', i, '') as string;
-							if (explicitSessionId) {
-								sessionId = explicitSessionId;
-								this.logger.info(`Using explicitly provided session ID: ${sessionId}`);
-							}
-							// If not, try to get sessionId from the current item
-							else if (items[i].json?.sessionId) {
-								sessionId = items[i].json.sessionId as string;
-							}
-							// For backward compatibility, also check for pageId
-							else if (items[i].json?.pageId) {
-								sessionId = items[i].json.pageId as string;
-								this.logger.info('Using legacy pageId as sessionId for compatibility');
-							}
-
-							// If we found a sessionId, close it
-							if (sessionId) {
-								// Get existing page from session
-								const page = Ventriloquist.getPage(workflowId, sessionId);
-								if (page) {
-									await page.close();
-									this.logger.info(`Closed page with session ID: ${sessionId}`);
-								} else {
-									this.logger.warn(`No page found with session ID: ${sessionId}`);
-								}
-
-								// Return success
-								returnData[0].push({
-									json: {
-										...items[i].json, // Pass through input data
-										success: true,
-										operation,
-										closeMode,
-										sessionId,
-										message: `Browser session ${sessionId} closed successfully`,
-										timestamp: new Date().toISOString(),
-										executionDuration: Date.now() - startTime,
-									},
-								});
-							} else {
-								// No session ID found
-								throw new Error('No session ID provided or found in input');
-							}
-						} else if (closeMode === 'all') {
-							// Close all browser sessions
-							const closeResult = await Ventriloquist.closeAllSessions(this.logger);
-
-							// Return success with details
-							returnData[0].push({
-								json: {
-									...items[i].json, // Pass through input data
-									success: true,
-									operation,
-									closeMode,
-									totalSessions: closeResult.totalSessions,
-									closedSessions: closeResult.closedSessions,
-									message: `Closed ${closeResult.closedSessions} of ${closeResult.totalSessions} locally tracked browser sessions`,
-									note: "This operation only closes sessions tracked by this N8N instance. To close orphaned sessions, please visit the Bright Data console.",
-									brightDataConsoleUrl: "https://brightdata.com/cp/zones",
-									timestamp: new Date().toISOString(),
-									executionDuration: Date.now() - startTime,
-								},
-							});
-						} else if (closeMode === 'multiple') {
-							// Close a list of specific sessions
-							const sessionIds = this.getNodeParameter('sessionIds', i, []) as string[];
-							const closedSessions: string[] = [];
-							const failedSessions: string[] = [];
-
-							// Process each session ID
-							for (const sessionId of sessionIds) {
-								try {
-									// Get existing page from session
-									const page = Ventriloquist.getPage(workflowId, sessionId);
-									if (page) {
-										await page.close();
-										closedSessions.push(sessionId);
-										this.logger.info(`Closed page with session ID: ${sessionId}`);
-									} else {
-										failedSessions.push(sessionId);
-										this.logger.warn(`No page found with session ID: ${sessionId}`);
-									}
-								} catch (error) {
-									failedSessions.push(sessionId);
-									this.logger.error(`Error closing session ${sessionId}: ${error}`);
-								}
-							}
-
-							// Return result
-							returnData[0].push({
-								json: {
-									...items[i].json, // Pass through input data
-									success: true,
-									operation,
-									closeMode,
-									closedSessions,
-									failedSessions,
-									message: `Closed ${closedSessions.length} of ${sessionIds.length} sessions successfully`,
-									timestamp: new Date().toISOString(),
-									executionDuration: Date.now() - startTime,
-								},
-							});
-						}
-					} catch (error) {
-						// Handle errors based on continueOnFail setting
-						if (!continueOnFail) {
-							// If continueOnFail is false, throw the error to fail the node
-							throw new Error(`Close operation failed: ${(error as Error).message}`);
-						}
-
-						// Otherwise, return an error response and continue
-						returnData[0].push({
-							json: {
-								...items[i].json, // Pass through input data
-								success: false,
-								operation,
-								closeMode,
-								error: (error as Error).message,
-								timestamp: new Date().toISOString(),
-								executionDuration: Date.now() - startTime,
-							},
-						});
+					// Add execution duration to the result if not already added
+					if (result.json && !result.json.executionDuration) {
+						result.json.executionDuration = Date.now() - startTime;
 					}
+
+					returnData[0].push(result);
 				} else {
 					throw new Error(`The operation "${operation}" is not supported!`);
 				}
