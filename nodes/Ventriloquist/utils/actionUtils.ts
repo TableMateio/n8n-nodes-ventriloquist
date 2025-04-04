@@ -55,6 +55,7 @@ export interface IActionParameters extends IDataObject {
 	pressEnter?: boolean;
 	checkState?: string;
 	filePath?: string;
+	checked?: boolean;
 
 	// Extract parameters
 	extractionType?: string;
@@ -173,6 +174,7 @@ async function executeFillAction(
 		clearField = true,
 		pressEnter = false,
 		checkState = 'check',
+		checked = true,
 		filePath = ''
 	} = parameters;
 	const { nodeName, nodeId, index, useHumanDelays = false } = options;
@@ -201,7 +203,10 @@ async function executeFillAction(
 				humanLike: useHumanDelays,
 				pressEnter
 			} : {}),
-			...(fieldType === 'checkbox' || fieldType === 'radio' ? {
+			...(fieldType === 'checkbox' ? {
+				checked
+			} : {}),
+			...(fieldType === 'radio' ? {
 				checkState
 			} : {}),
 			...(fieldType === 'file' ? {
