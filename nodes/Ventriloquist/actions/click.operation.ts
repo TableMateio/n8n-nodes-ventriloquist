@@ -1,15 +1,12 @@
-import {
+import type {
   IExecuteFunctions,
   INodeExecutionData,
   INodeProperties,
 } from 'n8n-workflow';
 import type { Page } from 'puppeteer-core';
 import { robustClick, waitAndClick } from '../utils/clickOperations';
-import { formatUrl } from '../utils/navigationUtils';
-import { BrowserTransportFactory } from '../transport/BrowserTransportFactory';
+import { formatUrl, takeScreenshot } from '../utils/navigationUtils';
 import { SessionManager } from '../utils/sessionManager';
-
-
 
 // Define the properties for the click operation
 export const description: INodeProperties[] = [
@@ -77,11 +74,19 @@ export async function execute(
   const startTime = Date.now();
   const items = this.getInputData();
   let sessionId = '';
-  let page: Page | undefined;
+  let page: Page | null = null;
   let error: Error | undefined;
   let success = false;
   let pageTitle = '';
   let pageUrl = '';
+
+  // Added for better logging
+  const nodeName = this.getNode().name;
+  const nodeId = this.getNode().id;
+
+  // Visual marker to clearly indicate a new node is starting
+  this.logger.info("============ STARTING NODE EXECUTION ============");
+  this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Starting execution`);
 
   // Operation parameters
   const selector = this.getNodeParameter('selector', index) as string;
@@ -97,170 +102,162 @@ export async function execute(
   const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 
   try {
-    // Try to get sessionId from different sources
+    // Log session state for debugging
+    const sessionsInfo = SessionManager.getAllSessions();
+    this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Available sessions: ${JSON.stringify(sessionsInfo)}`);
+
+    // If using an explicit session ID, try to get that page first
     if (explicitSessionId) {
-      sessionId = explicitSessionId;
-      this.logger.info(`Using explicitly provided session ID: ${sessionId}`);
-    }
-    // If not explicit ID provided, try to get sessionId from the current item
-    else if (items[index].json?.sessionId) {
-      sessionId = items[index].json.sessionId as string;
-    }
-    // For backward compatibility, also check for pageId
-    else if (items[index].json?.pageId) {
-      sessionId = items[index].json.pageId as string;
-      this.logger.info('Using legacy pageId as sessionId for compatibility');
-    }
+      this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Looking for explicitly provided session ID: ${explicitSessionId}`);
 
-    // If no sessionId in current item, look at all input items for a sessionId
-    if (!sessionId) {
-      for (const item of items) {
-        if (item.json?.sessionId) {
-          sessionId = item.json.sessionId as string;
-          break;
+      // Get the session with the provided ID
+      const existingSession = SessionManager.getSession(explicitSessionId);
+
+      if (existingSession) {
+        // Get the page from the session
+        const existingPage = SessionManager.getPage(explicitSessionId);
+        if (existingPage) {
+          page = existingPage;
+          sessionId = explicitSessionId;
+          this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Found existing session with ID: ${sessionId}`);
+        } else if (existingSession.browser) {
+          // No page found in session, create a new one
+          this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] No page found in session, creating a new one`);
+          page = await existingSession.browser.newPage();
+
+          // Generate a page ID and store it
+          const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          SessionManager.storePage(explicitSessionId, pageId, page);
+          sessionId = explicitSessionId;
         }
-        // For backward compatibility
-        else if (item.json?.pageId) {
-          sessionId = item.json.pageId as string;
-          this.logger.info('Using legacy pageId as sessionId for compatibility');
-          break;
-        }
-      }
-    }
-
-    // Get credentials for the session
-    const browserService = this.getNodeParameter('browserService', 0) as string;
-    const credentialType = browserService === 'brightData' ? 'brightDataApi' : 'browserlessApi';
-    const credentials = await this.getCredentials(credentialType);
-
-    // Double timeout for Bright Data as recommended in their docs
-    const adjustedTimeout = credentialType === 'brightDataApi' ? timeout * 2 : timeout;
-
-    // Get or create a page to work with
-    if (sessionId) {
-      // Try to get the page from the sessionId
-      this.logger.info(`Attempting to get page for session ID: ${sessionId}`);
-      page = SessionManager.getPage(sessionId);
-
-      if (page) {
-        this.logger.info(`Found existing page for session ID: ${sessionId}`);
-
-        // Verify the page is still connected
-        try {
-          await page.evaluate(() => document.readyState);
-          this.logger.info('Page is still connected');
-        } catch (connectionError) {
-          this.logger.warn(`Page appears disconnected: ${(connectionError as Error).message}`);
-          page = undefined; // Reset so we try reconnection
-        }
-      }
-
-      // If page not found or disconnected, try to reconnect or create new
-      if (!page) {
-        this.logger.info(`No active page found for session ID: ${sessionId}, reconnecting or creating new`);
-
-        // Create transport to handle reconnection
-        const transportFactory = new BrowserTransportFactory();
-        const browserTransport = transportFactory.createTransport(
-          credentialType,
-          this.logger,
-          credentials
-        );
+      } else {
+        // Try to connect to the session
+        this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Session not found locally, attempting to connect to: ${explicitSessionId}`);
 
         try {
-          // Try to reconnect if the transport supports it
-          if (browserTransport.reconnect) {
-            this.logger.info(`Attempting to reconnect to session: ${sessionId}`);
-            const browser = await browserTransport.reconnect(sessionId);
-
-            // Get the existing pages or create a new one
-            const pages = await browser.pages();
-            page = pages.length > 0 ? pages[0] : await browser.newPage();
-
-            // Store the page in the session manager
-            SessionManager.storePage(sessionId, 'default', page);
-            this.logger.info(`Successfully reconnected to session: ${sessionId}`);
-          } else {
-            throw new Error('Transport does not support reconnection');
-          }
-        } catch (reconnectError) {
-          this.logger.warn(`Reconnection failed: ${(reconnectError as Error).message}`);
-          this.logger.info('Creating new session as fallback');
-
-          // Get WebSocket URL from credentials
-          const websocketUrl = SessionManager.getWebSocketUrlFromCredentials(
+          // Try to connect to the session
+          const result = await SessionManager.connectToSession(
             this.logger,
-            credentialType,
-            credentials
+            explicitSessionId,
+            websocketEndpoint
           );
 
-          // Create a new session
-          const { browser, sessionId: newSessionId } = await SessionManager.createSession(
-            this.logger,
-            websocketUrl,
-            {
-              workflowId,
-              credentialType
+          sessionId = explicitSessionId;
+
+          // If we got a browser but no page, create one
+          if (result.browser) {
+            if (result.page) {
+              page = result.page;
+            } else {
+              page = await result.browser.newPage();
+              // Store the page in the session
+              const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+              SessionManager.storePage(sessionId, pageId, page);
             }
-          );
 
-          // Get the first page or create a new one
-          const pages = await browser.pages();
-          page = pages.length > 0 ? pages[0] : await browser.newPage();
-
-          // Update session ID to new one
-          sessionId = newSessionId;
-
-          // Store the page
-          SessionManager.storePage(sessionId, 'default', page);
-          this.logger.info(`Created new session with ID: ${sessionId}`);
+            this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Successfully connected to session: ${sessionId}`);
+          }
+        } catch (connectError) {
+          this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Could not connect to session: ${(connectError as Error).message}`);
         }
       }
-    } else {
-      // No session ID provided, create a new session
-      this.logger.info('No session ID provided, creating new session');
+    }
 
-      // Get WebSocket URL from credentials
-      const websocketUrl = SessionManager.getWebSocketUrlFromCredentials(
-        this.logger,
-        credentialType,
-        credentials
-      );
+    // If we don't have a page yet, check for existing sessions or create a new one
+    if (!page) {
+      // Get all active sessions
+      const allSessions = SessionManager.getAllSessions();
 
-      // Create a new session
-      const { browser, sessionId: newSessionId } = await SessionManager.createSession(
-        this.logger,
-        websocketUrl,
-        {
-          workflowId,
-          credentialType
+      if (allSessions.length > 0) {
+        this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Found ${allSessions.length} existing sessions`);
+
+        // Try to get a page from any session
+        for (const sessionInfo of allSessions) {
+          // Try to get the session
+          const session = SessionManager.getSession(sessionInfo.sessionId);
+          if (session && session.pages.size > 0) {
+            // Use the first page from this session
+            const existingPage = SessionManager.getPage(sessionInfo.sessionId);
+            if (existingPage) {
+              page = existingPage;
+              sessionId = sessionInfo.sessionId;
+              this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Using existing page from session: ${sessionId}`);
+              break;
+            }
+          }
         }
-      );
 
-      // Get the first page or create a new one
-      const pages = await browser.pages();
-      page = pages.length > 0 ? pages[0] : await browser.newPage();
+        // If still no page, try to create one in the first available session
+        if (!page) {
+          const firstSessionId = allSessions[0].sessionId;
+          const firstSession = SessionManager.getSession(firstSessionId);
 
-      // Set the session ID
-      sessionId = newSessionId;
+          if (firstSession && firstSession.browser) {
+            try {
+              page = await firstSession.browser.newPage();
+              // Store the page in the session
+              const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+              SessionManager.storePage(firstSessionId, pageId, page);
+              sessionId = firstSessionId;
 
-      // Store the page
-      SessionManager.storePage(sessionId, 'default', page);
-      this.logger.info(`Created new session with ID: ${sessionId}`);
+              this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Created new page in existing session: ${sessionId}`);
+            } catch (pageError) {
+              this.logger.error(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Failed to create new page: ${(pageError as Error).message}`);
+            }
+          }
+        }
+      }
+
+      // If we still don't have a page, create a new session
+      if (!page && websocketEndpoint) {
+        this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Creating new browser session`);
+
+        try {
+          // Create a new session
+          const result = await SessionManager.createSession(this.logger, websocketEndpoint, {
+            workflowId, // Store workflowId for backwards compatibility
+          });
+
+          sessionId = result.sessionId;
+
+          // Create a new page
+          if (result.browser) {
+            page = await result.browser.newPage();
+            // Store the page in the session
+            const pageId = `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+            SessionManager.storePage(sessionId, pageId, page);
+
+            this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Created new session with ID: ${sessionId}`);
+
+            // Navigate to a blank page to initialize it
+            await page.goto('about:blank');
+          }
+        } catch (sessionError) {
+          throw new Error(`Failed to create browser session: ${(sessionError as Error).message}`);
+        }
+      } else if (!page) {
+        // No existing session and no websocket endpoint
+        throw new Error('Cannot create a new session without a valid websocket endpoint. Please connect this node to an Open node or provide an explicit session ID.');
+      }
+    }
+
+    // At this point we must have a valid page
+    if (!page) {
+      throw new Error('Failed to get or create a page');
     }
 
     // Get page info for debugging
     pageTitle = await page.title();
     pageUrl = page.url();
-    this.logger.info(`Current page URL: ${formatUrl(pageUrl)}, title: ${pageTitle}`);
+    this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Current page URL: ${formatUrl(pageUrl)}, title: ${pageTitle}`);
 
     // Perform the click operation
     if (waitBeforeClickSelector) {
-      this.logger.info(`Waiting for selector "${waitBeforeClickSelector}" before clicking`);
+      this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Waiting for selector "${waitBeforeClickSelector}" before clicking`);
 
       // Use the waitAndClick utility
       const clickResult = await waitAndClick(page, selector, {
-        waitTimeout: adjustedTimeout,
+        waitTimeout: timeout,
         retries,
         waitBetweenRetries: 1000,
         logger: this.logger
@@ -286,16 +283,14 @@ export async function execute(
 
     // Take screenshot if requested
     let screenshot = '';
-    if (captureScreenshot && page && success) {
+    if (captureScreenshot && page) {
       try {
-        const buffer = await page.screenshot({
-          encoding: 'base64',
-          type: 'jpeg',
-          quality: 80,
-        });
-        screenshot = `data:image/jpeg;base64,${buffer}`;
+        const screenshotResult = await takeScreenshot(page, this.logger);
+        if (screenshotResult) {
+          screenshot = screenshotResult;
+        }
       } catch (screenshotError) {
-        this.logger.warn(`Failed to take screenshot: ${(screenshotError as Error).message}`);
+        this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Failed to take screenshot: ${(screenshotError as Error).message}`);
       }
     }
 
