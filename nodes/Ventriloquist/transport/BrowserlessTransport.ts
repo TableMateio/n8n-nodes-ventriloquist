@@ -130,6 +130,10 @@ export class BrowserlessTransport implements BrowserTransport {
 			if (this.wsEndpoint) {
 				let wsUrl = this.wsEndpoint;
 
+				// Log the original WebSocket URL (with masked token if present)
+				const maskedUrl = wsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***');
+				this.logger.info(`Original WebSocket URL: ${maskedUrl}`);
+
 				// Add protocol if missing
 				if (!wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://') &&
 					!wsUrl.startsWith('http://') && !wsUrl.startsWith('https://')) {
@@ -144,19 +148,30 @@ export class BrowserlessTransport implements BrowserTransport {
 					wsUrl = wsUrl.replace('https://', 'wss://');
 				}
 
-				// Add session ID if valid
-				if (sessionId && sessionId.startsWith('session_')) {
+				// Add session ID if provided
+				if (sessionId) {
 					// Use URL object for proper parameter handling
 					try {
 						const wsUrlObj = new URL(wsUrl);
+
+						// Set both sessionId and session parameters for compatibility with different implementations
 						wsUrlObj.searchParams.set('sessionId', sessionId);
+						wsUrlObj.searchParams.set('session', sessionId);
+
+						// Get final URL with session parameters
 						wsUrl = wsUrlObj.toString();
+
+						// Mask token for security in logs
+						const maskedUrl = wsUrl.replace(/token=([^&]+)/, 'token=***');
+						this.logger.info(`Added session parameters to WebSocket URL: ${maskedUrl}`);
 					} catch (urlError) {
 						this.logger.warn(`Could not parse WebSocket URL: ${wsUrl}. Adding session ID directly.`);
-						wsUrl += `${wsUrl.includes('?') ? '&' : '?'}sessionId=${sessionId}`;
-					}
+						wsUrl += `${wsUrl.includes('?') ? '&' : '?'}sessionId=${sessionId}&session=${sessionId}`;
 
-					this.logger.info(`Added session parameter to WebSocket URL: ${wsUrl}`);
+						// Mask token for security in logs
+						const maskedUrl = wsUrl.replace(/token=([^&]+)/, 'token=***');
+						this.logger.info(`Added session parameters to WebSocket URL: ${maskedUrl}`);
+					}
 				}
 
 				// Create connection options
@@ -179,16 +194,27 @@ export class BrowserlessTransport implements BrowserTransport {
 			// Standard approach using baseUrl + path
 			let wsUrl = this.getWsEndpoint();
 
-			// Add the session ID if valid
-			if (sessionId && sessionId.startsWith('session_')) {
+			// Add the session ID if provided
+			if (sessionId) {
+				this.logger.info(`Adding session ID to standard WebSocket URL: ${sessionId}`);
+
 				// Create URL object for proper parameter handling
-				const wsUrlObj = new URL(wsUrl);
+				try {
+					const wsUrlObj = new URL(wsUrl);
 
-				// Set the sessionId parameter - the standard format for Browserless
-				wsUrlObj.searchParams.set('sessionId', sessionId);
+					// Set both sessionId and session parameters for compatibility with different implementations
+					wsUrlObj.searchParams.set('sessionId', sessionId);
+					wsUrlObj.searchParams.set('session', sessionId);
 
-				wsUrl = wsUrlObj.toString();
-				this.logger.info(`Added session parameter to WebSocket URL: ${wsUrl}`);
+					wsUrl = wsUrlObj.toString();
+					const maskedFinalUrl = wsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***');
+					this.logger.info(`Added session parameters to standard WebSocket URL: ${maskedFinalUrl}`);
+				} catch (urlError) {
+					this.logger.warn(`Could not parse WebSocket URL: ${wsUrl}. Adding session ID directly.`);
+					wsUrl += `${wsUrl.includes('?') ? '&' : '?'}sessionId=${sessionId}&session=${sessionId}`;
+					const maskedFinalUrl = wsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***');
+					this.logger.info(`Added session parameters to standard WebSocket URL: ${maskedFinalUrl}`);
+				}
 			}
 
 			// Create connection options
@@ -289,201 +315,121 @@ export class BrowserlessTransport implements BrowserTransport {
 					throw new Error(`Connection refused by ${domain}. This site may be blocking Railway IPs or datacenter access.`);
 				} else if (errorMessage.includes('net::ERR_NAME_NOT_RESOLVED')) {
 					throw new Error(`Could not resolve domain ${domain}. Please check the URL.`);
-				} else {
-					// For any other navigation errors, rethrow
-					throw navError;
 				}
 			}
 
-			this.logger.info(`Successfully navigated to ${url}`);
 			return { response, domain };
 		} catch (error) {
-			// Enhance error message for common navigation issues
-			if ((error as Error).message.includes('Navigation timeout')) {
-				throw new Error('Navigation to URL timed out. Consider increasing the Request Timeout in your credentials or checking the URL.');
-			}
-
-			if ((error as Error).message.includes('ERR_NAME_NOT_RESOLVED')) {
-				throw new Error('Could not resolve domain name. Please check the URL.');
-			}
-
-			// For any other navigation errors, rethrow
-			throw error;
+			this.logger.error(`Error navigating to ${url}: ${(error as Error).message}`);
+			throw new Error(`Error navigating to ${url}: ${(error as Error).message}`);
 		}
 	}
 
 	/**
-	 * Get information about the page
-	 * @param page - Puppeteer Page
-	 * @param response - HTTP Response
-	 */
-	async getPageInfo(
-		page: puppeteer.Page,
-		response: puppeteer.HTTPResponse | null,
-	): Promise<{
-		url: string;
-		title: string;
-		status: number | null;
-	}> {
-		const title = await page.title();
-		const currentUrl = page.url();
-		const status = response ? response.status() : null;
-
-		return {
-			url: currentUrl,
-			title,
-			status,
-		};
-	}
-
-	/**
-	 * Take a screenshot of the page
-	 * @param page - Puppeteer Page
-	 */
-	async takeScreenshot(page: puppeteer.Page): Promise<string> {
-		try {
-			this.logger.info('Taking screenshot of current page');
-
-			const screenshot = await page.screenshot({
-				encoding: 'base64',
-				type: 'jpeg',
-				quality: 80,
-				fullPage: false,
-			});
-
-			this.logger.info('Screenshot captured successfully');
-			return `data:image/jpeg;base64,${screenshot}`;
-		} catch (error) {
-			this.logger.error(`Failed to take screenshot: ${(error as Error).message}`);
-			throw new Error(`Failed to take screenshot: ${(error as Error).message}`);
-		}
-	}
-
-	/**
-	 * Configure the page for optimal scraping with evasion techniques
-	 * @param page - Puppeteer Page
-	 */
-	private async configurePageForScraping(page: puppeteer.Page): Promise<void> {
-		try {
-			// Set a realistic user agent
-			await page.setUserAgent(
-				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-			);
-
-			// Set viewport to standard desktop resolution
-			await page.setViewport({
-				width: 1920,
-				height: 1080,
-			});
-
-			// Set common language headers
-			await page.setExtraHTTPHeaders({
-				'Accept-Language': 'en-US,en;q=0.9',
-				'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-				'Accept-Encoding': 'gzip, deflate, br',
-				'Cache-Control': 'no-cache',
-				'Pragma': 'no-cache',
-			});
-
-			// Enable JavaScript
-			await page.setJavaScriptEnabled(true);
-
-			// Set timeout for all operations based on our request timeout
-			page.setDefaultTimeout(this.requestTimeout);
-
-			// Additional context management for Railway deployments
-			if (this.baseUrl.includes('railway.app') || (this.wsEndpoint && this.wsEndpoint.includes('railway.app'))) {
-				this.logger.info('Applying Railway-specific browser settings');
-
-				// Enable image loading (some railway deployments block by default)
-				await page.setRequestInterception(false);
-
-				// Set extra browser context options (will only apply to future contexts)
-				const client = await page.target().createCDPSession();
-				await client.send('Network.enable');
-				await client.send('Network.setBypassServiceWorker', { bypass: true });
-
-				// Additional network settings
-				try {
-					// Attempt to clear cache and cookies for clean state
-					await client.send('Network.clearBrowserCache');
-					await client.send('Network.clearBrowserCookies');
-				} catch (err) {
-					this.logger.warn('Could not clear browser cache/cookies, continuing anyway');
-				}
-			}
-
-			// Additional evasion if using stealth mode (already handled by Browserless, but for completeness)
-			if (this.stealthMode) {
-				this.logger.info('Using stealth mode for bot detection evasion');
-			}
-		} catch (err) {
-			// Log error but don't fail - these are optimizations, not critical functions
-			this.logger.warn(`Could not apply all page optimizations: ${(err as Error).message}`);
-		}
-	}
-
-	/**
-	 * Extract domain from URL
-	 * @param url - URL to extract domain from
+	 * Extract domain from a URL
+	 * @param url - The URL to extract the domain from
 	 */
 	private extractDomain(url: string): string {
 		try {
-			return new URL(url).hostname;
+			const urlObj = new URL(url);
+			return urlObj.hostname;
 		} catch (error) {
-			this.logger.warn(`Could not parse URL: ${url}`);
-			return url;
+			this.logger.error(`Error extracting domain from URL: ${(error as Error).message}`);
+			throw new Error(`Error extracting domain from URL: ${(error as Error).message}`);
 		}
 	}
 
-	private getWsEndpoint(baseUrl = this.baseUrl, path = ''): string {
-		try {
-			// Format the base URL properly
-			let formattedBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+	/**
+	 * Configure a Puppeteer page for optimal scraping with evasion techniques
+	 * @param page - The Puppeteer page to configure
+	 */
+	private async configurePageForScraping(page: puppeteer.Page): Promise<void> {
+		if (this.stealthMode) {
+			this.logger.info('Configuring page with stealth mode evasion techniques');
 
-			// Add protocol if missing
-			if (!formattedBaseUrl.startsWith('http://') && !formattedBaseUrl.startsWith('https://')) {
-				formattedBaseUrl = `https://${formattedBaseUrl}`;
-				this.logger.info(`Added HTTPS protocol to base URL: ${formattedBaseUrl}`);
-			}
+			// Apply common evasion techniques
+			await page.evaluateOnNewDocument(() => {
+				// Overwrite the navigator properties
+				Object.defineProperty(navigator, 'webdriver', {
+					get: () => false,
+				});
 
-			// Special handling for Railway deployments
-			const isRailwayDeployment = formattedBaseUrl.includes('railway.app');
-			if (isRailwayDeployment) {
-				this.logger.info('Detected Railway deployment - using simplified WebSocket URL structure');
-				// For Railway, the simplest format usually works best: wss://domain?token=TOKEN
-				const domain = formattedBaseUrl.replace('https://', '').replace('http://', '');
-				let railwayWsUrl = `wss://${domain}`;
-
-				// Add token if we have one
-				if (this.apiKey) {
-					railwayWsUrl += `${railwayWsUrl.includes('?') ? '&' : '?'}token=${this.apiKey}`;
+				// Override the permissions API (using Object.defineProperty since it's read-only)
+				if (window.Notification) {
+					// Mock the permissions API status while keeping it read-only
+					Object.defineProperty(window.Notification, 'permission', {
+						get: () => 'default',
+					});
 				}
 
-				this.logger.info(`Created Railway WebSocket URL: ${railwayWsUrl.replace(/token=([^&]+)/, 'token=***TOKEN***')}`);
-				return railwayWsUrl;
-			}
-
-			// Standard approach for non-Railway deployments
-			// Use URL API for reliable protocol conversion and parameter handling
-			const url = new URL(path, formattedBaseUrl);
-			const wsUrl = new URL(url.toString());
-
-			// Convert http/https to ws/wss
-			wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-
-			// Add token if not already present
-			if (!wsUrl.searchParams.has('token') && this.apiKey) {
-				wsUrl.searchParams.set('token', this.apiKey);
-				this.logger.debug('Added API key to WebSocket URL');
-			}
-
-			const finalUrl = wsUrl.toString();
-			this.logger.info(`Created WebSocket URL: ${finalUrl.replace(/token=([^&]+)/, 'token=***TOKEN***')}`);
-			return finalUrl;
-		} catch (error) {
-			this.logger.error(`Error creating WebSocket URL: ${(error as Error).message}`);
-			throw new Error(`Could not create WebSocket URL from ${baseUrl}: ${(error as Error).message}`);
+				// Overwrite languages
+				Object.defineProperty(navigator, 'languages', {
+					get: () => ['en-US', 'en'],
+				});
+			});
+		} else {
+			this.logger.info('Stealth mode disabled, skipping evasion techniques');
 		}
+	}
+
+	/**
+	 * Get the WebSocket endpoint for Browserless
+	 */
+	private getWsEndpoint(): string {
+		// Construct the WebSocket URL using the base URL and API key
+		let wsUrl = this.baseUrl;
+
+		// Convert HTTP to WebSocket protocol
+		if (wsUrl.startsWith('http://')) {
+			wsUrl = wsUrl.replace('http://', 'ws://');
+		} else if (wsUrl.startsWith('https://')) {
+			wsUrl = wsUrl.replace('https://', 'wss://');
+		}
+
+		// Ensure we have a WebSocket protocol
+		if (!wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://')) {
+			wsUrl = `wss://${wsUrl}`;
+		}
+
+		// Add standard browserless path if not already a WebSocket URL
+		if (!wsUrl.includes('/browserless')) {
+			wsUrl = `${wsUrl}/browserless`;
+		}
+
+		// Add token parameter if an API key is provided
+		if (this.apiKey) {
+			wsUrl += `${wsUrl.includes('?') ? '&' : '?'}token=${this.apiKey}`;
+		}
+
+		// Log the WebSocket URL (with masked token)
+		const maskedUrl = wsUrl.replace(/token=([^&]+)/, 'token=***');
+		this.logger.info(`Using WebSocket endpoint: ${maskedUrl}`);
+
+		return wsUrl;
+	}
+
+	/**
+	 * Get information about the current page
+	 * @param page - The Puppeteer page to get information about
+	 * @param response - The HTTP response object
+	 */
+	async getPageInfo(page: puppeteer.Page, response: puppeteer.HTTPResponse | null): Promise<{ url: string; title: string; status: number | null }> {
+		const url = await page.url();
+		const title = await page.title();
+		const status = response ? response.status() : null;
+		return { url, title, status };
+	}
+
+	/**
+	 * Take a screenshot of the current page
+	 * @param page - The Puppeteer page to screenshot
+	 */
+	async takeScreenshot(page: puppeteer.Page): Promise<string> {
+		const screenshot = await page.screenshot({
+			encoding: 'base64',
+			type: 'jpeg',
+			quality: 80
+		}) as string;
+		return screenshot;
 	}
 }

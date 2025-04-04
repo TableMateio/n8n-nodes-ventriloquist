@@ -3337,11 +3337,117 @@ export const description: INodeProperties[] = [
 														if (inputSessionId) {
 															this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Attempting to reconnect session after navigation error`);
 
-															// Try to reconnect - you need to implement this part based on your reconnection logic
-															// For now, we'll just throw an error to make the issue visible
-															throw new Error(`Page context was destroyed during form submission. This is expected during form redirects and will be handled gracefully.`);
+															try {
+																// Get browser session information
+																const workflowId = this.getWorkflow().id || '';
+																if (!workflowId) {
+																	throw new Error('Could not get workflow ID for reconnection');
+																}
+
+																// Get session info
+																const session = Ventriloquist.getSessions().get(workflowId);
+																if (!session) {
+																	throw new Error(`No browser session found for workflow ID: ${workflowId}`);
+																}
+
+																// Use the existing browser from the session
+																if (session.browser) {
+																// 	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to existing browser session`);
+
+																// 	// Get a new page from the existing browser
+																// 	const pages = await session.browser.pages();
+																// 	if (pages.length === 0) {
+																// 		// Create a new page if none exist
+																// 		puppeteerPage = await session.browser.newPage();
+																// 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Created new page after reconnection`);
+																// 	} else {
+																// 		// Use the first available page
+																// 		puppeteerPage = pages[0];
+																// 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using existing page after reconnection`);
+																// 	}
+
+																// 	// Update the session's page reference
+																// 	Ventriloquist.storePage(workflowId, inputSessionId, puppeteerPage);
+																// 	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Successfully reconnected and updated page reference`);
+																} else {
+																	this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] No browser instance in session - cannot reconnect`);
+																	throw new Error(`Cannot reconnect after form submission - no browser instance available`);
+																}
+															} catch (reconnectError) {
+																this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnection failed: ${(reconnectError as Error).message}`);
+																throw new Error(`Could not reconnect to session ${inputSessionId} after form submission: ${(reconnectError as Error).message}`);
+															}
 														}
 													}
+													// } catch (urlError) {
+													// 	this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Error getting URL after navigation: ${(urlError as Error).message}`);
+													// 	this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Page context might be destroyed - attempting to reconnect`);
+
+													// 	// If we have a session ID, try to reconnect
+													// 	if (inputSessionId) {
+													// 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Attempting to reconnect session after navigation error`);
+
+													// 		try {
+													// 			// Get browser session information
+													// 			const workflowId = this.getWorkflow().id || '';
+													// 			if (!workflowId) {
+													// 				throw new Error('Could not get workflow ID for reconnection');
+													// 			}
+
+													// 			// Get session info
+													// 			const session = Ventriloquist.getSessions().get(workflowId);
+													// 			if (!session) {
+													// 				throw new Error(`No browser session found for workflow ID: ${workflowId}`);
+													// 			}
+
+													// 			// Get credentials based on type
+													// 			const credentialType = session.credentialType || 'brightDataApi';
+													// 			this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using credential type: ${credentialType} for reconnection`);
+
+													// 			// Get credentials from workflow
+													// 			const credentials = await this.getCredentials(credentialType);
+
+													// 			// Create transport to handle reconnection
+													// 			const transportFactory = new BrowserTransportFactory();
+													// 			const browserTransport = transportFactory.createTransport(
+													// 				credentialType,
+													// 				this.logger,
+													// 				credentials,
+													// 			);
+
+													// 			// Check if the transport has reconnect capability
+													// 			if (browserTransport.reconnect) {
+													// 				// Reconnect to the session
+													// 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnecting to session: ${inputSessionId}`);
+													// 				const reconnectedBrowser = await browserTransport.reconnect(inputSessionId);
+
+													// 				// Get a new page from the reconnected browser
+													// 				const pages = await reconnectedBrowser.pages();
+													// 				if (pages.length === 0) {
+													// 					// Create a new page if none exist
+													// 					puppeteerPage = await reconnectedBrowser.newPage();
+													// 					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Created new page after reconnection`);
+													// 				} else {
+													// 					// Use the first available page
+													// 					puppeteerPage = pages[0];
+													// 					this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Using existing page after reconnection`);
+													// 				}
+
+													// 				// Update the session's page reference
+													// 				Ventriloquist.storePage(workflowId, inputSessionId, puppeteerPage);
+													// 				this.logger.info(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Successfully reconnected and updated page reference`);
+
+													// 				// Form submission was likely successful, continue execution
+													// 			} else {
+													// 				this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Transport doesn't support reconnection for provider: ${credentialType}`);
+													// 				throw new Error(`Cannot reconnect after form submission with ${credentialType}`);
+													// 			}
+													// 		} catch (reconnectError) {
+													// 			this.logger.error(`[Ventriloquist][${nodeName}#${index}][Decision][${nodeId}] Reconnection failed: ${(reconnectError as Error).message}`);
+													// 			throw new Error(`Could not reconnect to session ${inputSessionId} after form submission: ${(reconnectError as Error).message}`);
+													// 		}
+													// 	}
+													// }
 												}
 											}
 										}
