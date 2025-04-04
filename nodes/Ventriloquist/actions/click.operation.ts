@@ -13,6 +13,13 @@ import { SessionManager } from '../utils/sessionManager';
 // Define the properties for the click operation
 export const description: INodeProperties[] = [
   {
+    displayName: 'Session ID',
+    name: 'explicitSessionId',
+    type: 'string',
+    default: '',
+    description: 'Session ID to use for this operation (leave empty to use ID from input or create new)',
+  },
+  {
     displayName: 'Selector',
     name: 'selector',
     type: 'string',
@@ -26,13 +33,6 @@ export const description: INodeProperties[] = [
     type: 'string',
     default: '',
     description: 'Wait for this element to appear before attempting click (optional)',
-  },
-  {
-    displayName: 'Session ID',
-    name: 'explicitSessionId',
-    type: 'string',
-    default: '',
-    description: 'Session ID to use for this operation (leave empty to use ID from input or create new)',
   },
   {
     displayName: 'Timeout',

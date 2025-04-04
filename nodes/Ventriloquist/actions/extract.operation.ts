@@ -129,30 +129,6 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: 'Take Screenshot',
-		name: 'takeScreenshot',
-		type: 'boolean',
-		default: false,
-		description: 'Whether to capture a screenshot after extraction',
-		displayOptions: {
-			show: {
-				operation: ['extract'],
-			},
-		},
-	},
-	{
-		displayName: 'Continue On Fail',
-		name: 'continueOnFail',
-		type: 'boolean',
-		default: true,
-		description: 'Whether to continue execution even when extraction fails',
-		displayOptions: {
-			show: {
-				operation: ['extract'],
-			},
-		},
-	},
-	{
 		displayName: 'Debug Page Content',
 		name: 'debugPageContent',
 		type: 'boolean',
@@ -398,6 +374,30 @@ export const description: INodeProperties[] = [
 		type: 'boolean',
 		default: false,
 		description: 'Whether to add a random delay before extraction to simulate human behavior',
+		displayOptions: {
+			show: {
+				operation: ['extract'],
+			},
+		},
+	},
+	{
+		displayName: 'Take Screenshot',
+		name: 'takeScreenshot',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to capture a screenshot after extraction',
+		displayOptions: {
+			show: {
+				operation: ['extract'],
+			},
+		},
+	},
+	{
+		displayName: 'Continue On Fail',
+		name: 'continueOnFail',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to continue execution even when extraction fails',
 		displayOptions: {
 			show: {
 				operation: ['extract'],
@@ -681,6 +681,7 @@ export async function execute(
 		};
 	}
 }
+
 
 
 
