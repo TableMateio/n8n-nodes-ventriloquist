@@ -6,9 +6,8 @@ import type {
 } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
 import { SessionManager } from '../utils/sessionManager';
-import { formatOperationLog } from '../utils/resultUtils';
+import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
 import { createErrorResponse } from '../utils/errorUtils';
-import { createSuccessResponse } from '../utils/resultUtils';
 
 
 
@@ -4180,9 +4179,12 @@ export const description: INodeProperties[] = [
 			resultData.routeTaken = routeTaken;
 			resultData.actionPerformed = actionPerformed;
 
-			// Log completion with execution metrics
+			// Add standard timing log
+			createTimingLog('Decision', startTime, this.logger, nodeName, nodeId, index);
+
+			// Log additional information about the execution
 			this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-				`Completed execution: route="${routeTaken}", action="${actionPerformed}", duration=${resultData.executionDuration}ms`));
+				`Completed execution: route="${routeTaken}", action="${actionPerformed}"`));
 
 			// Add more specific completion information based on action performed
 			if (actionPerformed === 'click') {
