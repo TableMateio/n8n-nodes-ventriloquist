@@ -57,6 +57,46 @@ export namespace SessionManager {
   };
 
   /**
+   * Get WebSocket URL from credentials
+   * Centralizes WebSocket URL construction logic
+   */
+  export function getWebSocketUrlFromCredentials(
+    logger: ILogger,
+    credentialType: string,
+    credentials: { [key: string]: any },
+  ): string {
+    let websocketEndpoint = '';
+
+    if (credentialType === 'brightDataApi') {
+      websocketEndpoint = credentials.websocketEndpoint as string;
+    } else if (credentialType === 'browserlessApi') {
+      const connectionType = credentials.connectionType as string || 'direct';
+      if (connectionType === 'direct') {
+        websocketEndpoint = credentials.wsEndpoint as string;
+      } else {
+        // For standard connection, we'll use the baseUrl and apiKey
+        const baseUrl = (credentials.baseUrl as string) || 'https://browserless.io';
+        const apiKey = credentials.apiKey;
+        if (!apiKey) {
+          throw new Error('API token is required for Browserless standard connection');
+        }
+        // Don't add any paths to the URL, just convert protocol and add token
+        const wsBaseUrl = baseUrl.replace(/^https?:\/\//, '');
+        websocketEndpoint = `wss://${wsBaseUrl}?token=${apiKey}`;
+
+        logger.info(`Creating WebSocket URL from credentials: ${wsBaseUrl}?token=***`);
+      }
+    }
+
+    // Check if we have a valid WebSocket endpoint
+    if (!websocketEndpoint || websocketEndpoint.trim() === '') {
+      throw new Error(`WebSocket endpoint is required but not configured for ${credentialType}. Please check your credentials configuration.`);
+    }
+
+    return websocketEndpoint;
+  }
+
+  /**
    * Format websocket URL for browser connection
    */
   function formatWebsocketUrl(

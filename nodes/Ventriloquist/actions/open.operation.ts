@@ -125,33 +125,12 @@ export async function execute(
 	// Get credentials based on type
 	const credentials = await this.getCredentials(credentialType);
 
-	// Extract WebSocket endpoint from credentials based on credential type
-	let actualWebsocketEndpoint = '';
-	if (credentialType === 'brightDataApi') {
-		actualWebsocketEndpoint = credentials.websocketEndpoint as string;
-	} else if (credentialType === 'browserlessApi') {
-		const connectionType = credentials.connectionType as string || 'direct';
-		if (connectionType === 'direct') {
-			actualWebsocketEndpoint = credentials.wsEndpoint as string;
-		} else {
-			// For standard connection, we'll use the baseUrl and apiKey
-			const baseUrl = (credentials.baseUrl as string) || 'https://chrome.browserless.io';
-			const apiKey = credentials.apiKey;
-			if (!apiKey) {
-				throw new Error('API token is required for Browserless standard connection');
-			}
-			// Don't add any paths to the URL, just convert protocol and add token
-			const wsBaseUrl = baseUrl.replace(/^https?:\/\//, '');
-			actualWebsocketEndpoint = `wss://${wsBaseUrl}?token=${apiKey}`;
-
-			this.logger.info(`Creating new browser session with endpoint: ${wsBaseUrl}?token=***`);
-		}
-	}
-
-	// Check if we have a valid WebSocket endpoint
-	if (!actualWebsocketEndpoint || actualWebsocketEndpoint.trim() === '') {
-		throw new Error(`WebSocket endpoint is required but not configured for ${credentialType}. Please check your credentials configuration.`);
-	}
+	// Extract WebSocket endpoint from credentials using central utility
+	const actualWebsocketEndpoint = SessionManager.getWebSocketUrlFromCredentials(
+		this.logger,
+		credentialType,
+		credentials
+	);
 
 	// Create browser transport factory
 	const transportFactory = new BrowserTransportFactory();
