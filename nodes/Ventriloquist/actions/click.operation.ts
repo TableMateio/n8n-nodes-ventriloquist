@@ -5,7 +5,9 @@ import type {
 } from 'n8n-workflow';
 import type { Page } from 'puppeteer-core';
 import { robustClick, waitAndClick } from '../utils/clickOperations';
-import { formatUrl, takeScreenshot } from '../utils/navigationUtils';
+import { formatUrl } from '../utils/navigationUtils';
+import { createErrorResponse } from '../utils/errorUtils';
+import { createSuccessResponse, formatOperationLog, createTimingLog } from '../utils/resultUtils';
 import { SessionManager } from '../utils/sessionManager';
 
 // Define the properties for the click operation
@@ -77,8 +79,6 @@ export async function execute(
   let page: Page | null = null;
   let error: Error | undefined;
   let success = false;
-  let pageTitle = '';
-  let pageUrl = '';
 
   // Added for better logging
   const nodeName = this.getNode().name;
@@ -86,7 +86,7 @@ export async function execute(
 
   // Visual marker to clearly indicate a new node is starting
   this.logger.info("============ STARTING NODE EXECUTION ============");
-  this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Starting execution`);
+  this.logger.info(formatOperationLog('Click', nodeName, nodeId, index, 'Starting execution'));
 
   // Operation parameters
   const selector = this.getNodeParameter('selector', index) as string;
@@ -120,14 +120,18 @@ export async function execute(
       throw new Error('Failed to get or create a page');
     }
 
-    // Get page info for debugging
-    pageTitle = await page.title();
-    pageUrl = page.url();
-    this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Current page URL: ${formatUrl(pageUrl)}, title: ${pageTitle}`);
+    // Log current page info
+    const pageUrl = await page.url();
+    const pageTitle = await page.title();
+    this.logger.info(formatOperationLog('Click', nodeName, nodeId, index,
+      `Current page URL: ${formatUrl(pageUrl)}, title: ${pageTitle}`
+    ));
 
     // Perform the click operation
     if (waitBeforeClickSelector) {
-      this.logger.info(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Waiting for selector "${waitBeforeClickSelector}" before clicking`);
+      this.logger.info(formatOperationLog('Click', nodeName, nodeId, index,
+        `Waiting for selector "${waitBeforeClickSelector}" before clicking`
+      ));
 
       // Use the waitAndClick utility
       const clickResult = await waitAndClick(page, selector, {
@@ -151,68 +155,67 @@ export async function execute(
       error = clickResult.error;
     }
 
-    // Get updated page info after click
-    const updatedPageTitle = await page.title();
-    const updatedPageUrl = page.url();
-
-    // Take screenshot if requested
-    let screenshot = '';
-    if (captureScreenshot && page) {
-      try {
-        const screenshotResult = await takeScreenshot(page, this.logger);
-        if (screenshotResult) {
-          screenshot = screenshotResult;
-        }
-      } catch (screenshotError) {
-        this.logger.warn(`[Ventriloquist][${nodeName}#${index}][Click][${nodeId}] Failed to take screenshot: ${(screenshotError as Error).message}`);
-      }
-    }
+    // Log timing information
+    createTimingLog('Click', startTime, this.logger, nodeName, nodeId, index);
 
     // Prepare the result
     if (success) {
       // Click operation successful
-      return {
-        json: {
-          ...items[index].json, // Pass through input data
-          success: true,
-          operation: 'click',
-          selector,
-          sessionId,
-          url: updatedPageUrl,
-          title: updatedPageTitle,
-          timestamp: new Date().toISOString(),
-          executionDuration: Date.now() - startTime,
-          ...(screenshot ? { screenshot } : {}),
-        },
-      };
-    } else {
-      // Click operation failed
-      const errorMessage = error?.message || 'Click operation failed for an unknown reason';
+      const successResponse = await createSuccessResponse({
+        operation: 'click',
+        sessionId,
+        page,
+        logger: this.logger,
+        startTime,
+        takeScreenshot: captureScreenshot,
+        selector,
+        inputData: items[index].json,
+      });
 
-      if (!continueOnFail) {
-        // If continueOnFail is false, throw the error to fail the node
-        throw new Error(`Click operation failed: ${errorMessage}`);
-      }
-
-      // Otherwise, return an error response but continue execution
-      return {
-        json: {
-          ...items[index].json, // Pass through input data
-          success: false,
-          operation: 'click',
-          error: errorMessage,
-          selector,
-          sessionId,
-          url: updatedPageUrl,
-          title: updatedPageTitle,
-          timestamp: new Date().toISOString(),
-          executionDuration: Date.now() - startTime,
-          ...(screenshot ? { screenshot } : {}),
-        },
-      };
+      return { json: successResponse };
     }
-  } catch (catchError: any) {
-    const errorMessage = catchError.message || 'An unknown error occurred';
+
+    // Click operation failed
+    const errorMessage = error?.message || 'Click operation failed for an unknown reason';
+
+    if (!continueOnFail) {
+      // If continueOnFail is false, throw the error to fail the node
+      throw new Error(`Click operation failed: ${errorMessage}`);
+    }
+
+    // Otherwise, return an error response but continue execution
+    const errorResponse = await createErrorResponse({
+      error: errorMessage,
+      operation: 'click',
+      sessionId,
+      nodeId,
+      nodeName,
+      selector,
+      page,
+      logger: this.logger,
+      takeScreenshot: captureScreenshot,
+      startTime,
+      additionalData: items[index].json,
+    });
+
+    return { json: errorResponse };
+  } catch (catchError) {
+    // Use the standardized error response utility
+    const errorResponse = await createErrorResponse({
+      error: catchError as Error,
+      operation: 'click',
+      sessionId,
+      nodeId,
+      nodeName,
+      selector,
+      page,
+      logger: this.logger,
+      takeScreenshot: captureScreenshot,
+      startTime,
+      additionalData: {
+        ...items[index].json, // Pass through input data
+      }
+    });
 
     if (!continueOnFail) {
       throw catchError;
@@ -220,16 +223,7 @@ export async function execute(
 
     // Return error as response with continue on fail
     return {
-      json: {
-        ...items[index].json, // Pass through input data
-        success: false,
-        operation: 'click',
-        error: errorMessage,
-        selector,
-        sessionId,
-        timestamp: new Date().toISOString(),
-        executionDuration: Date.now() - startTime,
-      },
+      json: errorResponse
     };
   }
 }
