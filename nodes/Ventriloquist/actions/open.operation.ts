@@ -140,12 +140,11 @@ export async function execute(
 			if (!apiKey) {
 				throw new Error('API token is required for Browserless standard connection');
 			}
-			// Correct the WebSocket URL format
-			// Ensure we're using the correct path for the WebSocket endpoint
+			// Don't add any paths to the URL, just convert protocol and add token
 			const wsBaseUrl = baseUrl.replace(/^https?:\/\//, '');
-			actualWebsocketEndpoint = `wss://${wsBaseUrl}/chrome?token=${apiKey}`;
+			actualWebsocketEndpoint = `wss://${wsBaseUrl}?token=${apiKey}`;
 
-			this.logger.info(`Creating new browser session with endpoint: ${wsBaseUrl}/chrome?token=***`);
+			this.logger.info(`Creating new browser session with endpoint: ${wsBaseUrl}?token=***`);
 		}
 	}
 
