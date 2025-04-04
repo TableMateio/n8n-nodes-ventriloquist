@@ -261,17 +261,23 @@ async function executeExtractAction(
 		selector,
 		extractionType = 'text',
 		attributeName = '',
+		outputFormat = 'html',
 		includeMetadata = false,
-		outputFormat = 'text'
+		includeHeaders = true,
+		rowSelector = 'tr',
+		cellSelector = 'td, th',
+		extractionProperty = 'textContent',
+		limit = 0,
+		separator = ','
 	} = parameters;
-	const { nodeName, nodeId, index, waitForSelector, selectorTimeout, detectionMethod, earlyExitDelay } = options;
+	const { nodeName, nodeId, index, waitForSelector = true, selectorTimeout = 5000, detectionMethod = 'standard', earlyExitDelay = 500 } = options;
 
 	if (!selector) {
 		return {
 			success: false,
 			actionType: 'extract',
-			details: { error: 'No selector provided for extract action' },
-			error: 'No selector provided for extract action'
+			details: { error: 'No selector provided for extraction action' },
+			error: 'No selector provided for extraction action'
 		};
 	}
 
@@ -279,106 +285,37 @@ async function executeExtractAction(
 		logger.info(formatOperationLog('Action', nodeName, nodeId, index,
 			`Executing extraction from "${selector}" (type: ${extractionType})`));
 
-		// Wait for the element if needed
-		if (waitForSelector) {
-			if (detectionMethod === 'smart') {
-				const elementExists = await smartWaitForSelector(
-					page,
-					selector,
-					selectorTimeout,
-					earlyExitDelay,
-					logger,
-					nodeName,
-					nodeId
-				);
+		// Import the extraction middleware
+		const { executeExtraction } = await import('./middlewares/extractMiddleware');
 
-				if (!elementExists) {
-					throw new Error(`Element "${selector}" not found for extraction`);
-				}
-			} else {
-				await page.waitForSelector(selector, { timeout: selectorTimeout });
-			}
+		// Prepare extract options
+		const extractOptions = {
+			extractionType: extractionType as string,
+			selector: selector as string,
+			attributeName: attributeName as string,
+			outputFormat: outputFormat as string,
+			includeMetadata: includeMetadata === true,
+			includeHeaders: includeHeaders === true,
+			rowSelector: rowSelector as string,
+			cellSelector: cellSelector as string,
+			extractionProperty: extractionProperty as string,
+			limit: Number(limit) || 0,
+			separator: separator as string,
+			waitForSelector: waitForSelector === true,
+			selectorTimeout: Number(selectorTimeout) || 5000,
+			detectionMethod: detectionMethod as string,
+			earlyExitDelay: Number(earlyExitDelay) || 500,
+			nodeName: nodeName as string,
+			nodeId: nodeId as string,
+			index: Number(index) || 0
+		};
+
+		// Use the extraction middleware
+		const extractResult = await executeExtraction(page, extractOptions, logger);
+
+		if (!extractResult.success) {
+			throw extractResult.error || new Error(`Unknown error during extraction from "${selector}"`);
 		}
-
-		let extractedData: string | Record<string, unknown> | Array<unknown> | null = null;
-
-		// Extract data based on the extraction type
-		switch (extractionType) {
-			case 'text':
-				extractedData = await extractTextContent(page, selector, logger, nodeName, nodeId);
-				break;
-
-			case 'html':
-				extractedData = await extractHtmlContent(
-					page,
-					selector,
-					{
-						includeMetadata,
-						outputFormat: outputFormat as 'html' | 'json'
-					},
-					logger,
-					nodeName,
-					nodeId
-				);
-				break;
-
-			case 'value':
-				extractedData = await extractInputValue(page, selector, logger, nodeName, nodeId);
-				break;
-
-			case 'attribute':
-				if (!attributeName) {
-					throw new Error('No attribute name provided for attribute extraction');
-				}
-				extractedData = await extractAttributeValue(
-					page,
-					selector,
-					attributeName,
-					logger,
-					nodeName,
-					nodeId
-				);
-				break;
-
-			case 'table':
-				extractedData = await extractTableData(
-					page,
-					selector,
-					{
-						includeHeaders: true,
-						rowSelector: 'tr',
-						cellSelector: 'td, th',
-						outputFormat: 'array'
-					},
-					logger,
-					nodeName,
-					nodeId
-				);
-				break;
-
-			case 'multiple':
-				extractedData = await extractMultipleElements(
-					page,
-					selector,
-					{
-						attributeName: '',
-						extractionProperty: 'textContent',
-						limit: 0,
-						outputFormat: 'array',
-						separator: ','
-					},
-					logger,
-					nodeName,
-					nodeId
-				);
-				break;
-
-			default:
-				throw new Error(`Unknown extraction type: ${extractionType}`);
-		}
-
-		logger.info(formatOperationLog('Action', nodeName, nodeId, index,
-			`Extraction successful from "${selector}"`));
 
 		return {
 			success: true,
@@ -386,7 +323,8 @@ async function executeExtractAction(
 			details: {
 				selector,
 				extractionType,
-				data: extractedData
+				data: extractResult.data,
+				...extractResult.details
 			}
 		};
 	} catch (error) {

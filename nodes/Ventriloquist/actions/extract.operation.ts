@@ -19,6 +19,7 @@ import {
 } from '../utils/extractionUtils';
 import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
 import { createErrorResponse } from '../utils/errorUtils';
+import { executeExtraction } from '../utils/middlewares/extractMiddleware';
 
 /**
  * Extended PageInfo interface with bodyText
@@ -492,129 +493,76 @@ export async function execute(
 
 		// Process different extraction types
 		switch (extractionType) {
-			case 'text': {
-				// Extract text content using utility function
-				extractedData = await extractTextContent(page, selector, this.logger, nodeName, nodeId);
-				break;
-			}
+			case 'text':
+			case 'html':
+			case 'value':
+			case 'attribute':
+			case 'table':
+			case 'multiple': {
+				// Get extraction-specific parameters based on type
+				let extractionParams: IDataObject = {};
 
-			case 'html': {
-				// Get HTML options
-				const htmlOptions = this.getNodeParameter('htmlOptions', index, {}) as IDataObject;
-				const outputFormat = (htmlOptions.outputFormat as string) || 'html';
-				const includeMetadata = htmlOptions.includeMetadata === true;
-
-				// Extract HTML content using utility function
-				extractedData = await extractHtmlContent(
-					page,
-					selector,
-					{
-						outputFormat,
-						includeMetadata
-					},
-					this.logger,
-					nodeName,
-					nodeId
-				);
-
-				// Set extraction details
-				if (outputFormat === 'json') {
-					extractionDetails = {
-						format: 'json',
+				// Get extra options based on extraction type
+				if (extractionType === 'html') {
+					const htmlOptions = this.getNodeParameter('htmlOptions', index, {}) as IDataObject;
+					extractionParams = {
+						outputFormat: (htmlOptions.outputFormat as string) || 'html',
+						includeMetadata: htmlOptions.includeMetadata === true
+					};
+				} else if (extractionType === 'attribute') {
+					extractionParams = {
+						attributeName: this.getNodeParameter('attributeName', index, '') as string
+					};
+				} else if (extractionType === 'table') {
+					const tableOptions = this.getNodeParameter('tableOptions', index, {}) as IDataObject;
+					extractionParams = {
+						includeHeaders: tableOptions.includeHeaders !== false,
+						rowSelector: (tableOptions.rowSelector as string) || 'tr',
+						cellSelector: (tableOptions.cellSelector as string) || 'td, th',
+						outputFormat: (tableOptions.outputFormat as string) || 'json'
+					};
+				} else if (extractionType === 'multiple') {
+					const multipleOptions = this.getNodeParameter('multipleOptions', index, {}) as IDataObject;
+					extractionParams = {
+						attributeName: (multipleOptions.attributeName as string) || '',
+						extractionProperty: (multipleOptions.extractionProperty as string) || 'textContent',
+						limit: (multipleOptions.outputLimit as number) || 0,
+						outputFormat: multipleOptions.extractProperty === true ? 'object' : 'array',
+						separator: (multipleOptions.propertyKey as string) || 'value'
 					};
 				}
-				break;
-			}
 
-			case 'attribute': {
-				// Get attribute name
-				const attributeName = this.getNodeParameter('attributeName', index) as string;
-
-				// Extract attribute value using utility function
-				extractedData = await extractAttributeValue(page, selector, attributeName, this.logger, nodeName, nodeId);
-
-				// Set extraction details
-				extractionDetails = {
-					attributeName,
-				};
-				break;
-			}
-
-			case 'value': {
-				// Extract input value using utility function
-				extractedData = await extractInputValue(page, selector, this.logger, nodeName, nodeId);
-				break;
-			}
-
-			case 'table': {
-				// Extract data from a table
-				const tableOptions = this.getNodeParameter('tableOptions', index, {}) as IDataObject;
-				const includeHeaders = tableOptions.includeHeaders !== false;
-				const rowSelector = (tableOptions.rowSelector as string) || 'tr';
-				const cellSelector = (tableOptions.cellSelector as string) || 'td, th';
-				const outputFormat = (tableOptions.outputFormat as string) || 'json';
-
-				// Extract table data using utility function
-				extractedData = await extractTableData(
-					page,
+				// Prepare extraction options
+				const extractOptions = {
+					extractionType,
 					selector,
-					{
-						includeHeaders,
-						rowSelector,
-						cellSelector,
-						outputFormat,
-					},
-					this.logger,
+					waitForSelector,
+					selectorTimeout: timeout,
+					detectionMethod: 'standard',
+					earlyExitDelay: 500,
 					nodeName,
-					nodeId
-				) as string | IDataObject[];
-
-				// Set extraction details
-				extractionDetails = {
-					rowSelector,
-					cellSelector,
-					includeHeaders,
-					outputFormat,
+					nodeId,
+					index,
+					...extractionParams
 				};
+
+				// Use the extraction middleware
+				const extractResult = await executeExtraction(page, extractOptions, this.logger);
+
+				if (!extractResult.success) {
+					throw extractResult.error || new Error(`Extraction failed for selector "${selector}"`);
+				}
+
+				extractedData = extractResult.data ?
+					(extractResult.data as string | IDataObject | (string | IDataObject)[]) :
+					'';
+				extractionDetails = extractResult.details || {};
 				break;
 			}
 
-			case 'multiple': {
-				// Get multiple options
-				const multipleOptions = this.getNodeParameter('multipleOptions', index, {}) as IDataObject;
-				const extractionSubType = (multipleOptions.extractionSubType as string) || 'text';
-				const extractionAttribute = (multipleOptions.extractionAttribute as string) || '';
-				const outputLimit = (multipleOptions.outputLimit as number) || 0;
-				const extractProperty = multipleOptions.extractProperty as boolean;
-				const propertyKey = (multipleOptions.propertyKey as string) || 'value';
-
-				// Extract from multiple elements
-				extractedData = await extractMultipleElements(
-					page,
-					selector,
-					{
-						attributeName: extractionAttribute,
-						extractionProperty: extractionSubType,
-						limit: outputLimit,
-						outputFormat: extractProperty ? 'object' : 'array',
-						separator: propertyKey,
-					},
-					this.logger,
-					nodeName,
-					nodeId
-				);
-
-				// Set extraction details
-				extractionDetails = {
-					extractionSubType,
-					limit: outputLimit,
-					...(extractionSubType === 'attribute' ? { attributeName: extractionAttribute } : {}),
-				};
-				break;
-			}
-
-			default:
+			default: {
 				throw new Error(`Unsupported extraction type: ${extractionType}`);
+			}
 		}
 
 		// Debug page content if enabled
