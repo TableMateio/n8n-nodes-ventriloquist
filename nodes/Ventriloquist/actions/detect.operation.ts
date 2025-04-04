@@ -5,11 +5,16 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
+import type { IDetectionOptions, IDetectionResult } from '../utils/detectionUtils';
 import { SessionManager } from '../utils/sessionManager';
 import {
 	formatReturnValue,
-	processDetection,
 	takePageScreenshot,
+	detectElement,
+	detectText,
+	detectCount,
+	detectUrl,
+	detectWorkflowCondition
 } from '../utils/detectionUtils';
 import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
 import { createErrorResponse } from '../utils/errorUtils';
@@ -505,31 +510,147 @@ export async function execute(
 			this.logger.info(formatOperationLog('Detect', nodeName, nodeId, index,
 				`Evaluating detection "${detectionName}" (type: ${detectionType})`));
 
-			// Process the detection with the chosen method
-			const { success, actualValue, details: detectionDetails } = await processDetection(
-				page,
-				detection,
-				currentUrl,
+			// Create detection options
+			const detectionOptions: IDetectionOptions = {
 				waitForSelectors,
-				timeout,
+				selectorTimeout: timeout,
 				detectionMethod,
 				earlyExitDelay,
-				this.logger,
 				nodeName,
-				nodeId
-			);
+				nodeId,
+				index,
+			};
+
+			// Process the detection based on type
+			let result: IDetectionResult;
+
+			switch (detectionType) {
+				case 'elementExists': {
+					const selector = detection.selector as string;
+					result = await detectElement(page, selector, detectionOptions, this.logger);
+					break;
+				}
+				case 'textContains': {
+					const selector = detection.selector as string;
+					const textToCheck = detection.textToCheck as string;
+					const matchType = (detection.matchType as string) || 'contains';
+					const caseSensitive = detection.caseSensitive === true;
+
+					result = await detectText(
+						page,
+						selector,
+						textToCheck,
+						matchType,
+						caseSensitive,
+						detectionOptions,
+						this.logger
+					);
+					break;
+				}
+				case 'elementCount': {
+					const selector = detection.selector as string;
+					const expectedCount = (detection.expectedCount as number) || 1;
+					const countComparison = (detection.countComparison as string) || 'equal';
+
+					result = await detectCount(
+						page,
+						selector,
+						expectedCount,
+						countComparison,
+						detectionOptions,
+						this.logger
+					);
+					break;
+				}
+				case 'urlContains': {
+					const urlSubstring = detection.urlSubstring as string;
+					const matchType = (detection.matchType as string) || 'contains';
+					const caseSensitive = detection.caseSensitive === true;
+
+					result = await detectUrl(
+						page,
+						urlSubstring,
+						matchType,
+						caseSensitive,
+						detectionOptions,
+						this.logger
+					);
+					break;
+				}
+				case 'attributeValue': {
+					// Since we don't have a specific detectAttribute function yet,
+					// we need to use a similar approach to what was in processDetection
+					const selector = detection.selector as string;
+					const attributeName = detection.attributeName as string;
+					const attributeValue = detection.attributeValue as string;
+					const matchType = (detection.matchType as string) || 'contains';
+					// We pass the matchType to detectWorkflowCondition which handles the matching
+
+					// First check element exists
+					const elementResult = await detectElement(page, selector, detectionOptions, this.logger);
+					if (!elementResult.success) {
+						result = {
+							success: false,
+							actualValue: '',
+							details: {
+								selector,
+								attributeName,
+								expected: attributeValue,
+								error: 'Element not found'
+							}
+						};
+					} else {
+						try {
+							// Extract attribute from the element
+							const actualAttributeValue = await page.$eval(
+								selector,
+								(el, attr) => el.getAttribute(attr) || '',
+								attributeName
+							);
+
+							// Use the detectWorkflowCondition utility to check the match
+							result = detectWorkflowCondition(
+								'attributeValue',
+								actualAttributeValue,
+								attributeValue,
+								matchType,
+								detectionOptions,
+								this.logger
+							);
+
+							// Add additional details
+							result.details.selector = selector;
+							result.details.attributeName = attributeName;
+						} catch (error) {
+							result = {
+								success: false,
+								actualValue: '',
+								details: {
+									selector,
+									attributeName,
+									expected: attributeValue,
+									error: (error as Error).message
+								}
+							};
+						}
+					}
+					break;
+				}
+				default:
+					throw new Error(`Unknown detection type: ${detectionType}`);
+			}
 
 			// Format the return value based on user preferences
 			const formattedResult = formatReturnValue(
-				success,
-				actualValue,
+				result.success,
+				result.actualValue,
 				returnType,
 				successValue,
 				failureValue,
 				invertResult
 			);
 
-			const finalSuccess = invertResult ? !success : success;
+			const finalSuccess = invertResult ? !result.success : result.success;
 			this.logger.info(formatOperationLog('Detect', nodeName, nodeId, index,
 				`Detection "${detectionName}" result: ${finalSuccess ? 'success' : 'failure'}, value=${formattedResult}`));
 
@@ -541,9 +662,9 @@ export async function execute(
 				name: detectionName,
 				type: detectionType,
 				success: finalSuccess,
-				actualValue,
+				actualValue: result.actualValue,
 				formattedResult,
-				...detectionDetails,
+				...result.details,
 			});
 		}
 
