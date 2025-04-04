@@ -3,6 +3,29 @@ import type {
 	Logger as ILogger,
 } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
+import { formatOperationLog } from './resultUtils';
+
+/**
+ * Interface for detection options
+ */
+export interface IDetectionOptions {
+	waitForSelectors: boolean;
+	selectorTimeout: number;
+	detectionMethod: string;
+	earlyExitDelay: number;
+	nodeName: string;
+	nodeId: string;
+	index: number;
+}
+
+/**
+ * Interface for detection results
+ */
+export interface IDetectionResult {
+	success: boolean;
+	actualValue: string | number;
+	details: IDataObject;
+}
 
 /**
  * Safely matches strings according to the specified match type
@@ -98,17 +121,19 @@ export async function smartWaitForSelector(
 	timeout: number,
 	earlyExitDelay: number,
 	logger: ILogger,
-	nodeName: string,
-	nodeId: string,
+	nodeName: string = 'unknown',
+	nodeId: string = 'unknown',
 ): Promise<boolean> {
+	logger.debug(formatOperationLog('Detection', nodeName, nodeId, 0, `Smart waiting for selector: ${selector} (timeout: ${timeout}ms)`));
+
 	// Create a promise that resolves when the element is found
 	const elementPromise = page.waitForSelector(selector, { timeout })
 		.then(() => {
-			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element found: ${selector}`);
+			logger.debug(formatOperationLog('Detection', nodeName, nodeId, 0, `Element found: ${selector}`));
 			return true;
 		})
 		.catch(() => {
-			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element not found within timeout: ${selector}`);
+			logger.debug(formatOperationLog('Detection', nodeName, nodeId, 0, `Element not found within timeout: ${selector}`));
 			return false;
 		});
 
@@ -116,93 +141,327 @@ export async function smartWaitForSelector(
 	const domState = await page.evaluate(() => {
 		return {
 			readyState: document.readyState,
-			domContentLoaded: document.readyState === 'interactive' || document.readyState === 'complete',
-			loaded: document.readyState === 'complete',
+			bodyExists: !!document.body,
 		};
 	});
 
-	logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Current DOM state: ${JSON.stringify(domState)}`);
+	logger.debug(formatOperationLog('Detection', nodeName, nodeId, 0, `DOM state: readyState=${domState.readyState}, bodyExists=${domState.bodyExists}`));
 
-	// If DOM is already loaded, do a quick check first
-	if (domState.domContentLoaded) {
-		// Do an immediate check
-		const elementExists = await page.evaluate((sel) => {
-			return document.querySelector(sel) !== null;
-		}, selector);
-
-		if (elementExists) {
-			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element found immediately (DOM already loaded): ${selector}`);
-			return true;
-		}
-
-		// If DOM is fully loaded and element doesn't exist, we can exit early
-		if (domState.loaded) {
-			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] DOM fully loaded but element not found, waiting short delay: ${selector}`);
-			await new Promise(resolve => setTimeout(resolve, earlyExitDelay));
-
-			// Check one more time after the delay
-			const elementExistsAfterDelay = await page.evaluate((sel) => {
-				return document.querySelector(sel) !== null;
-			}, selector);
-
-			if (elementExistsAfterDelay) {
-				logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element found after delay: ${selector}`);
-				return true;
-			}
-
-			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element not found after DOM load and delay, exiting early: ${selector}`);
-			return false;
-		}
+	// If DOM is not loaded yet, wait for it
+	if (domState.readyState !== 'complete' && domState.readyState !== 'interactive') {
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, 0, 'DOM not ready, waiting for it to load...'));
+		await page.waitForFunction(
+			() => document.readyState === 'complete' || document.readyState === 'interactive',
+			{ timeout: Math.min(timeout, 10000) }, // Cap at 10 seconds max for DOM loading
+		);
 	}
 
-	// If we got here, either:
-	// 1. DOM is not fully loaded, so we need to wait
-	// 2. DOM is interactive but not complete, so we should wait a bit longer
-
-	// Wait for DOM content to be fully loaded first (if it isn't already)
-	if (!domState.loaded) {
-		const domLoadPromise = page.waitForFunction(
-			() => document.readyState === 'complete',
-			{ timeout: Math.min(timeout, 5000) } // Use smaller timeout for DOM wait
-		).catch(() => {
-			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Timed out waiting for DOM to be complete`);
+	// If there's no body yet (rare case), wait for it
+	if (!domState.bodyExists) {
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, 0, 'Document body not found, waiting for it...'));
+		await page.waitForFunction(() => !!document.body, {
+			timeout: Math.min(timeout, 5000), // Cap at 5 seconds max for body
 		});
-
-		// Wait for either the element to appear or the DOM to load
-		const winner = await Promise.race([
-			elementPromise,
-			domLoadPromise.then(() => 'DOM-Loaded')
-		]);
-
-		// If element was found during this race, return true
-		if (winner === true) {
-			return true;
-		}
-
-		// If DOM loaded but element wasn't found, do one quick check
-		if (winner === 'DOM-Loaded') {
-			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] DOM loaded, performing final element check`);
-
-			// Wait short additional time for any final elements to appear
-			await new Promise(resolve => setTimeout(resolve, earlyExitDelay));
-
-			// Final check
-			const elementExistsAfterDOM = await page.evaluate((sel) => {
-				return document.querySelector(sel) !== null;
-			}, selector);
-
-			if (elementExistsAfterDOM) {
-				logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] Element found after DOM loaded: ${selector}`);
-				return true;
-			}
-
-			logger.debug(`[Ventriloquist][${nodeName}][${nodeId}][Detect] DOM loaded but element still not found: ${selector}`);
-			return false;
-		}
 	}
 
-	// If we reach here, we need to just wait for the element promise
+	// Wait a small delay to allow dynamic content to load
+	if (earlyExitDelay > 0) {
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, 0, `Waiting ${earlyExitDelay}ms early exit delay...`));
+		await new Promise(resolve => setTimeout(resolve, earlyExitDelay));
+	}
+
+	// Check if element exists without waiting (quick check)
+	const elementExistsNow = await page.evaluate((sel) => {
+		return document.querySelector(sel) !== null;
+	}, selector);
+
+	if (elementExistsNow) {
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, 0, `Element found immediately after DOM ready: ${selector}`));
+		return true;
+	}
+
+	logger.debug(formatOperationLog('Detection', nodeName, nodeId, 0, `Element not found in initial check, waiting up to timeout: ${selector}`));
+	// If not found immediately, wait for the original promise with timeout
 	return elementPromise;
+}
+
+/**
+ * Detect if an element exists on the page with options for waiting
+ */
+export async function detectElement(
+	page: puppeteer.Page,
+	selector: string,
+	options: IDetectionOptions,
+	logger: ILogger,
+): Promise<IDetectionResult> {
+	const { waitForSelectors, selectorTimeout, detectionMethod, earlyExitDelay, nodeName, nodeId, index } = options;
+
+	let exists = false;
+	const detailsInfo: IDataObject = { selector };
+
+	try {
+		if (waitForSelectors) {
+			if (detectionMethod === 'smart') {
+				// Use smart detection approach
+				exists = await smartWaitForSelector(
+					page,
+					selector,
+					selectorTimeout,
+					earlyExitDelay,
+					logger,
+					nodeName,
+					nodeId
+				);
+			} else {
+				// Use traditional fixed timeout approach
+				try {
+					await page.waitForSelector(selector, { timeout: selectorTimeout });
+					exists = true;
+				} catch (error) {
+					exists = false;
+				}
+			}
+		} else {
+			// Just check if the element exists without waiting
+			exists = await page.$(selector) !== null;
+		}
+
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+			`Element exists detection result for "${selector}": ${exists ? 'FOUND' : 'NOT FOUND'}`));
+	} catch (error) {
+		// If error occurs while checking, element doesn't exist
+		exists = false;
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+			`Element exists detection error: ${(error as Error).message}`));
+	}
+
+	return {
+		success: exists,
+		actualValue: exists ? 'true' : 'false',
+		details: detailsInfo,
+	};
+}
+
+/**
+ * Detect if element text matches specified criteria
+ */
+export async function detectText(
+	page: puppeteer.Page,
+	selector: string,
+	textToMatch: string,
+	matchType: string = 'contains',
+	caseSensitive: boolean = false,
+	options: IDetectionOptions,
+	logger: ILogger,
+): Promise<IDetectionResult> {
+	const { nodeName, nodeId, index } = options;
+
+	let elementText = '';
+	let textMatches = false;
+	const detailsInfo: IDataObject = {
+		selector,
+		textToMatch,
+		matchType,
+		caseSensitive
+	};
+
+	try {
+		// First check if element exists
+		const elementExists = await detectElement(page, selector, options, logger);
+
+		if (!elementExists.success) {
+			logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+				`Text detection failed: Element not found: ${selector}`));
+			return {
+				success: false,
+				actualValue: '',
+				details: {
+					...detailsInfo,
+					error: 'Element not found'
+				},
+			};
+		}
+
+		// Extract text from the element
+		elementText = await page.$eval(selector, (el) => el.textContent || '');
+
+		// Check if the text matches
+		textMatches = matchStrings(elementText, textToMatch, matchType, caseSensitive);
+
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+			`Text detection for "${selector}": ${textMatches ? 'MATCHED' : 'NOT MATCHED'}, actual text: "${elementText.substring(0, 50)}${elementText.length > 50 ? '...' : ''}"`));
+	} catch (error) {
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+			`Text detection error: ${(error as Error).message}`));
+		textMatches = false;
+		elementText = '';
+	}
+
+	return {
+		success: textMatches,
+		actualValue: elementText,
+		details: detailsInfo,
+	};
+}
+
+/**
+ * Detect if a URL matches specified criteria
+ */
+export async function detectUrl(
+	page: puppeteer.Page,
+	urlToMatch: string,
+	matchType: string = 'contains',
+	caseSensitive: boolean = false,
+	options: IDetectionOptions,
+	logger: ILogger,
+): Promise<IDetectionResult> {
+	const { nodeName, nodeId, index } = options;
+
+	let currentUrl = '';
+	let urlMatches = false;
+	const detailsInfo: IDataObject = {
+		urlToMatch,
+		matchType,
+		caseSensitive
+	};
+
+	try {
+		// Get current URL
+		currentUrl = await page.url();
+
+		// Check if the URL matches
+		urlMatches = matchStrings(currentUrl, urlToMatch, matchType, caseSensitive);
+
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+			`URL detection: ${urlMatches ? 'MATCHED' : 'NOT MATCHED'}, current URL: "${currentUrl}"`));
+	} catch (error) {
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+			`URL detection error: ${(error as Error).message}`));
+		urlMatches = false;
+	}
+
+	return {
+		success: urlMatches,
+		actualValue: currentUrl,
+		details: detailsInfo,
+	};
+}
+
+/**
+ * Detect the count of elements matching a selector
+ */
+export async function detectCount(
+	page: puppeteer.Page,
+	selector: string,
+	expectedCount: number,
+	countComparison: string = 'equal',
+	options: IDetectionOptions,
+	logger: ILogger,
+): Promise<IDetectionResult> {
+	const { nodeName, nodeId, index } = options;
+
+	let elementCount = 0;
+	let countMatches = false;
+	const detailsInfo: IDataObject = {
+		selector,
+		expectedCount,
+		countComparison
+	};
+
+	try {
+		// Get the count of elements
+		elementCount = (await page.$$(selector)).length;
+
+		// Compare the counts
+		countMatches = compareCount(elementCount, expectedCount, countComparison);
+
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+			`Count detection for "${selector}": ${countMatches ? 'MATCHED' : 'NOT MATCHED'}, found ${elementCount} elements, expected ${countComparison} ${expectedCount}`));
+	} catch (error) {
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+			`Count detection error: ${(error as Error).message}`));
+		countMatches = false;
+	}
+
+	return {
+		success: countMatches,
+		actualValue: elementCount,
+		details: detailsInfo,
+	};
+}
+
+/**
+ * Evaluate a JavaScript expression on the page
+ */
+export async function detectExpression(
+	page: puppeteer.Page,
+	expression: string,
+	options: IDetectionOptions,
+	logger: ILogger,
+): Promise<IDetectionResult> {
+	const { nodeName, nodeId, index } = options;
+
+	let expressionResult = false;
+	let actualValue: string | number = '';
+	const detailsInfo: IDataObject = { expression };
+
+	try {
+		// Execute the JavaScript expression on the page
+		const result = await page.evaluate((expr) => {
+			try {
+				// eslint-disable-next-line no-eval
+				const evalResult = eval(expr);
+				return {
+					success: true,
+					value: evalResult,
+					valueType: typeof evalResult
+				};
+			} catch (error) {
+				return {
+					success: false,
+					error: error instanceof Error ? error.message : String(error),
+					value: null,
+					valueType: 'null'
+				};
+			}
+		}, expression);
+
+		if (result.success) {
+			expressionResult = !!result.value;
+
+			// Format actual value based on the type
+			if (result.valueType === 'object') {
+				try {
+					actualValue = JSON.stringify(result.value);
+				} catch (e) {
+					actualValue = '[Object]';
+				}
+			} else if (result.valueType === 'function') {
+				actualValue = '[Function]';
+			} else {
+				actualValue = String(result.value);
+			}
+		} else {
+			expressionResult = false;
+			actualValue = `Error: ${result.error}`;
+			detailsInfo.error = result.error;
+		}
+
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+			`Expression detection: ${expressionResult ? 'TRUTHY' : 'FALSY'}, result: ${actualValue}`));
+	} catch (error) {
+		logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+			`Expression detection error: ${(error as Error).message}`));
+		expressionResult = false;
+		actualValue = `Error: ${(error as Error).message}`;
+		detailsInfo.error = (error as Error).message;
+	}
+
+	return {
+		success: expressionResult,
+		actualValue,
+		details: detailsInfo,
+	};
 }
 
 /**

@@ -9,7 +9,6 @@ import { SessionManager } from '../utils/sessionManager';
 import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
 import { createErrorResponse } from '../utils/errorUtils';
 import { waitAndClick } from '../utils/clickOperations';
-import { matchStrings, compareCount } from '../utils/detectionUtils';
 import {
 	processFormField
 } from '../utils/formOperations';
@@ -26,6 +25,15 @@ import {
 import {
 	navigateWithRetry,
 } from '../utils/navigationUtils';
+import {
+	detectElement,
+	detectText,
+	detectCount,
+	detectUrl,
+	detectExpression,
+	IDetectionOptions,
+	IDetectionResult
+} from '../utils/detectionUtils';
 
 /**
  * Decision operation description
@@ -443,7 +451,6 @@ export const description: INodeProperties[] = [
 							displayOptions: {
 								show: {
 									'/operation': ['decision'],
-									conditionType: ['one'],
 								},
 							},
 						},
@@ -2075,36 +2082,23 @@ export const description: INodeProperties[] = [
 		thisNode: IExecuteFunctions
 	): Promise<boolean> {
 		try {
-			let conditionMet = false;
+			// Create detection options once
+			const detectionOptions: IDetectionOptions = {
+				waitForSelectors,
+				selectorTimeout,
+				detectionMethod,
+				earlyExitDelay,
+				nodeName: thisNode.getNode().name,
+				nodeId: thisNode.getNode().id,
+				index,
+			};
+
+			let result: IDetectionResult;
 
 			switch (conditionType) {
 				case 'elementExists': {
 					const selector = condition.selector as string;
-
-					if (waitForSelectors) {
-						if (detectionMethod === 'smart') {
-							// Use smart DOM-aware detection
-							conditionMet = await smartWaitForSelector(
-								page,
-								selector,
-								selectorTimeout,
-								earlyExitDelay,
-								thisNode.logger,
-							);
-						} else {
-							// Use traditional fixed timeout waiting
-							try {
-								await page.waitForSelector(selector, { timeout: selectorTimeout });
-								conditionMet = true;
-							} catch (error) {
-								conditionMet = false;
-							}
-						}
-					} else {
-						// Just check without waiting
-						const elementExists = await page.$(selector) !== null;
-						conditionMet = elementExists;
-					}
+					result = await detectElement(page, selector, detectionOptions, thisNode.logger);
 					break;
 				}
 
@@ -2114,40 +2108,15 @@ export const description: INodeProperties[] = [
 					const matchType = condition.matchType as string;
 					const caseSensitive = condition.caseSensitive as boolean;
 
-					if (waitForSelectors) {
-						let elementExists = false;
-						if (detectionMethod === 'smart') {
-							// Use smart DOM-aware detection
-							elementExists = await smartWaitForSelector(
-								page,
-								selector,
-								selectorTimeout,
-								earlyExitDelay,
-								thisNode.logger,
-							);
-						} else {
-							// Use traditional fixed timeout waiting
-							try {
-								await page.waitForSelector(selector, { timeout: selectorTimeout });
-								elementExists = true;
-							} catch (error) {
-								elementExists = false;
-							}
-						}
-
-						if (!elementExists) {
-							conditionMet = false;
-							break;
-						}
-					}
-
-					try {
-						const elementText = await page.$eval(selector, (el) => el.textContent || '');
-						conditionMet = matchStrings(elementText, textToCheck, matchType, caseSensitive);
-					} catch (error) {
-						// Element might not exist
-						conditionMet = false;
-					}
+					result = await detectText(
+						page,
+						selector,
+						textToCheck,
+						matchType,
+						caseSensitive,
+						detectionOptions,
+						thisNode.logger
+					);
 					break;
 				}
 
@@ -2156,11 +2125,14 @@ export const description: INodeProperties[] = [
 					const expectedCount = condition.expectedCount as number;
 					const countComparison = condition.countComparison as string;
 
-					// For element count, we just check without waiting as we expect some elements might not exist
-					const elements = await page.$$(selector);
-					const actualCount = elements.length;
-
-					conditionMet = compareCount(actualCount, expectedCount, countComparison);
+					result = await detectCount(
+						page,
+						selector,
+						expectedCount,
+						countComparison,
+						detectionOptions,
+						thisNode.logger
+					);
 					break;
 				}
 
@@ -2169,36 +2141,30 @@ export const description: INodeProperties[] = [
 					const matchType = condition.matchType as string || 'contains';
 					const caseSensitive = condition.caseSensitive as boolean || false;
 
-					// Check if URL matches criteria
-					conditionMet = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
+					result = await detectUrl(
+						page,
+						urlSubstring,
+						matchType,
+						caseSensitive,
+						detectionOptions,
+						thisNode.logger
+					);
 					break;
 				}
 
 				case 'jsExpression': {
 					const jsExpression = condition.jsExpression as string;
-
-					// Execute the JavaScript expression on the page
-					try {
-						const result = await page.evaluate((expr) => {
-							// eslint-disable-next-line no-eval
-							return eval(expr);
-						}, jsExpression);
-
-						conditionMet = !!result;
-					} catch (error) {
-						thisNode.logger.error(`Error evaluating JavaScript expression: ${(error as Error).message}`);
-						conditionMet = false;
-					}
+					result = await detectExpression(page, jsExpression, detectionOptions, thisNode.logger);
 					break;
 				}
 
 				default:
 					// Unrecognized condition type
 					thisNode.logger.warn(`Unrecognized condition type: ${conditionType}`);
-					conditionMet = false;
+					return false;
 			}
 
-			return conditionMet;
+			return result.success;
 		} catch (error) {
 			// Log the error but don't stop execution
 			thisNode.logger.error(formatOperationLog('Decision', thisNode.getNode().name, thisNode.getNode().id, index,
