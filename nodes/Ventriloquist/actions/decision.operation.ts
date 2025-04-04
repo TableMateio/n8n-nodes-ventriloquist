@@ -3634,12 +3634,35 @@ export const description: INodeProperties[] = [
 		} catch (error) {
 			// Use standardized error response utility
 			const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
+
+			// Get current URL and title for error context if page is available
+			let currentUrl = '';
+			let pageTitle = '';
+			try {
+				if (puppeteerPage) {
+					currentUrl = await puppeteerPage.url();
+					pageTitle = await puppeteerPage.title();
+				}
+			} catch (urlError) {
+				this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+					`Failed to get page URL/title for error context: ${(urlError as Error).message}`));
+			}
+
+			// Get node parameters for error context
+			const waitForSelectorsParam = this.getNodeParameter('waitForSelectors', index, true) as boolean;
+			const selectorTimeoutParam = this.getNodeParameter('selectorTimeout', index, 5000) as number;
+			const detectionMethodParam = this.getNodeParameter('detectionMethod', index, 'standard') as string;
+			const earlyExitDelayParam = this.getNodeParameter('earlyExitDelay', index, 500) as number;
+
+			// Create a detailed error response with additional context
 			const errorResponse = await createErrorResponse({
 				error,
 				operation: 'Decision',
 				sessionId: sessionId || '',
 				nodeId,
 				nodeName,
+				url: currentUrl,
+				title: pageTitle,
 				page: puppeteerPage,
 				logger: this.logger,
 				takeScreenshot,
@@ -3648,6 +3671,15 @@ export const description: INodeProperties[] = [
 				additionalData: {
 					routeTaken: 'error',
 					actionPerformed: 'none',
+					conditionGroups: this.getNodeParameter('conditionGroups', index, {}) as IDataObject,
+					parameters: {
+						waitForSelectors: waitForSelectorsParam,
+						selectorTimeout: selectorTimeoutParam,
+						detectionMethod: detectionMethodParam,
+						earlyExitDelay: earlyExitDelayParam,
+						takeScreenshot,
+						continueOnFail
+					}
 				},
 			});
 
