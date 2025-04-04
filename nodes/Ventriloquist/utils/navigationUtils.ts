@@ -307,3 +307,33 @@ export async function getPageDetails(page: Page): Promise<{
     bodyText: document.body?.innerText.slice(0, 500) || '',
   }));
 }
+
+/**
+ * Format a URL to mask sensitive information (like API tokens)
+ */
+export function formatUrl(url: string): string {
+  if (!url) return '';
+
+  try {
+    const urlObj = new URL(url);
+
+    // Mask tokens and API keys in query parameters
+    for (const [key, value] of urlObj.searchParams.entries()) {
+      if (key.toLowerCase().includes('token') ||
+          key.toLowerCase().includes('key') ||
+          key.toLowerCase().includes('api') ||
+          key.toLowerCase().includes('auth') ||
+          key.toLowerCase().includes('secret') ||
+          key.toLowerCase().includes('password')) {
+        if (value.length > 4) {
+          urlObj.searchParams.set(key, `${value.substring(0, 4)}***`);
+        }
+      }
+    }
+
+    return urlObj.toString();
+  } catch (error) {
+    // If URL parsing fails, do simple regex-based masking
+    return url.replace(/([?&](token|key|api|auth|secret|password)=)([^&]+)/gi, '$1***');
+  }
+}
