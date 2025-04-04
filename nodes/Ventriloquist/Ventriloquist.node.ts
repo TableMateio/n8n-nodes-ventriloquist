@@ -672,76 +672,7 @@ export class Ventriloquist implements INodeType {
 			...authenticateOperation.description,
 
 			// Properties for 'close' operation
-			{
-				displayName: 'Close Mode',
-				name: 'closeMode',
-				type: 'options',
-				options: [
-					{
-						name: 'Close Session',
-						value: 'session',
-						description: 'Close a specific browser session',
-					},
-					{
-						name: 'Close All Sessions',
-						value: 'all',
-						description: 'Close all browser sessions',
-					},
-					{
-						name: 'Close Multiple Sessions',
-						value: 'multiple',
-						description: 'Close a list of specific browser sessions',
-					},
-				],
-				default: 'session',
-				description: 'How to close browser sessions',
-				displayOptions: {
-					show: {
-						operation: ['close'],
-					},
-				},
-			},
-			{
-				displayName: 'Session ID',
-				name: 'explicitSessionId',
-				type: 'string',
-				default: '',
-				description: 'Session ID to close',
-				displayOptions: {
-					show: {
-						operation: ['close'],
-						closeMode: ['session'],
-					},
-				},
-			},
-			{
-				displayName: 'Session IDs',
-				name: 'sessionIds',
-				type: 'string',
-				typeOptions: {
-					multipleValues: true,
-				},
-				default: [],
-				description: 'List of session IDs to close',
-				displayOptions: {
-					show: {
-						operation: ['close'],
-						closeMode: ['multiple'],
-					},
-				},
-			},
-			{
-				displayName: 'Continue On Fail',
-				name: 'continueOnFail',
-				type: 'boolean',
-				default: true,
-				description: 'Whether to continue execution even when close operations fail',
-				displayOptions: {
-					show: {
-						operation: ['close'],
-					},
-				},
-			},
+			...closeOperation.description,
 		],
 	};
 
