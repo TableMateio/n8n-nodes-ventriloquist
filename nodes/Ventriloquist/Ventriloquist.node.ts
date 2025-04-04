@@ -842,7 +842,9 @@ export class Ventriloquist implements INodeType {
 						const result = await decisionOperation.execute.call(
 							this,
 							i,
-							page
+							page,
+							websocketEndpoint,
+							workflowId
 						);
 
 						// Check if we need to route to different outputs
