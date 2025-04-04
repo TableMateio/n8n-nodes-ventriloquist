@@ -3232,35 +3232,69 @@ export const description: INodeProperties[] = [
 
 						switch (fallbackAction) {
 							case 'click': {
-								const fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
-								const waitAfterFallback = this.getNodeParameter('waitAfterFallback', index) as string;
-								const fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index) as number;
+								try {
+									// Retrieve parameters one by one with detailed error handling
+									let fallbackSelector: string;
+									let waitAfterFallback: string;
+									let fallbackWaitTime: number;
 
-								this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-									`Executing fallback click on "${fallbackSelector}"`));
-
-								// Use waitAndClick utility for consistent click behavior
-								const clickResult = await waitAndClick(
-									puppeteerPage,
-									fallbackSelector,
-									{
-										waitTimeout: selectorTimeout,
-										retries: 2,
-										waitBetweenRetries: 1000,
-										logger: this.logger
+									try {
+										fallbackSelector = this.getNodeParameter('fallbackSelector', index) as string;
+										if (!fallbackSelector) {
+											throw new Error('Fallback selector is empty');
+										}
+									} catch (error) {
+										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Missing required parameter: fallbackSelector`));
+										throw new Error('Missing required parameter: fallbackSelector');
 									}
-								);
 
-								// Handle click failures
-								if (!clickResult.success) {
-									throw new Error(`Fallback action: Failed to click element "${fallbackSelector}": ${clickResult.error?.message || 'Unknown error'}`);
+									try {
+										waitAfterFallback = this.getNodeParameter('waitAfterFallback', index, 'domcontentloaded') as string;
+									} catch (error) {
+										waitAfterFallback = 'domcontentloaded';
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Using default value for waitAfterFallback: ${waitAfterFallback}`));
+									}
+
+									try {
+										fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index, 5000) as number;
+									} catch (error) {
+										fallbackWaitTime = 5000;
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Using default value for fallbackWaitTime: ${fallbackWaitTime}`));
+									}
+
+									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+										`Executing fallback click on "${fallbackSelector}"`));
+
+									// Use waitAndClick utility for consistent click behavior
+									const clickResult = await waitAndClick(
+										puppeteerPage,
+										fallbackSelector,
+										{
+											waitTimeout: selectorTimeout,
+											retries: 2,
+											waitBetweenRetries: 1000,
+											logger: this.logger
+										}
+									);
+
+									// Handle click failures
+									if (!clickResult.success) {
+										throw new Error(`Fallback action: Failed to click element "${fallbackSelector}": ${clickResult.error?.message || 'Unknown error'}`);
+									}
+
+									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+										`Fallback click successful on "${fallbackSelector}"`));
+
+									// Wait according to specified wait type
+									await waitForNavigation(puppeteerPage, waitAfterFallback, fallbackWaitTime);
+								} catch (paramError) {
+									this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+										`Error in fallback click action: ${(paramError as Error).message}`));
+									throw paramError;
 								}
-
-								this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-									`Fallback click successful on "${fallbackSelector}"`));
-
-								// Wait according to specified wait type
-								await waitForNavigation(puppeteerPage, waitAfterFallback, fallbackWaitTime);
 								break;
 							}
 
@@ -3276,7 +3310,7 @@ export const description: INodeProperties[] = [
 											fallbackSelector,
 											selectorTimeout,
 											earlyExitDelay,
-											this.logger,
+											this.logger
 										);
 
 										if (!elementExists) {
@@ -3289,75 +3323,74 @@ export const description: INodeProperties[] = [
 
 								// Extract data based on extraction type
 								let extractedData: string | null | IDataObject = null;
-								switch (fallbackExtractionType) {
-									case 'text':
-										extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => el.textContent?.trim() || '');
-										break;
-									case 'html': {
-										// Get HTML options
-										const fallbackHtmlOptions = this.getNodeParameter('fallbackHtmlOptions', index, {}) as IDataObject;
-										const outputFormat = (fallbackHtmlOptions.outputFormat as string) || 'html';
-										const includeMetadata = fallbackHtmlOptions.includeMetadata as boolean || false;
+								try {
+									switch (fallbackExtractionType) {
+										case 'text':
+											extractedData = await extractTextContent(
+												puppeteerPage,
+												fallbackSelector,
+												this.logger,
+												nodeName,
+												nodeId
+											);
+											break;
 
-										// Extract HTML content
-										const htmlContent = await puppeteerPage.$eval(fallbackSelector, (el) => el.innerHTML);
+										case 'html': {
+											// Get HTML options
+											const fallbackHtmlOptions = this.getNodeParameter('fallbackHtmlOptions', index, {}) as IDataObject;
+											const outputFormat = (fallbackHtmlOptions.outputFormat as string) || 'html';
+											const includeMetadata = fallbackHtmlOptions.includeMetadata as boolean || false;
 
-										if (outputFormat === 'html') {
-											// Return as raw HTML string
-											extractedData = htmlContent;
-										} else {
-											// Return as JSON object
-											extractedData = { html: htmlContent };
+											extractedData = await extractHtmlContent(
+												puppeteerPage,
+												fallbackSelector,
+												{
+													outputFormat,
+													includeMetadata,
+												},
+												this.logger,
+												nodeName,
+												nodeId
+											);
+											break;
 										}
 
-										// Add metadata if requested
-										if (includeMetadata) {
-											// Calculate basic metadata about the HTML
-											const elementCount = await puppeteerPage.$eval(fallbackSelector, (el) => el.querySelectorAll('*').length);
-											const imageCount = await puppeteerPage.$eval(fallbackSelector, (el) => el.querySelectorAll('img').length);
-											const linkCount = await puppeteerPage.$eval(fallbackSelector, (el) => el.querySelectorAll('a').length);
+										case 'value':
+											extractedData = await extractInputValue(
+												puppeteerPage,
+												fallbackSelector,
+												this.logger,
+												nodeName,
+												nodeId
+											);
+											break;
 
-											if (typeof extractedData === 'object') {
-												extractedData.metadata = {
-													htmlLength: htmlContent.length,
-													elementCount,
-														imageCount,
-														linkCount,
-												};
-											} else {
-												// For string output, add metadata as a separate property
-												extractedData = {
-													html: htmlContent,
-													metadata: {
-															htmlLength: htmlContent.length,
-															elementCount,
-																imageCount,
-																linkCount,
-												}
-												};
-											}
+										case 'attribute': {
+											const attributeName = this.getNodeParameter('fallbackAttributeName', index) as string;
+											extractedData = await extractAttributeValue(
+												puppeteerPage,
+												fallbackSelector,
+												attributeName,
+												this.logger,
+												nodeName,
+												nodeId
+											);
+											break;
 										}
-										break;
+
+										default:
+											extractedData = await extractTextContent(
+												puppeteerPage,
+												fallbackSelector,
+												this.logger,
+												nodeName,
+												nodeId
+											);
 									}
-									case 'value':
-										extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => {
-											if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
-												return el.value;
-											}
-											return '';
-										});
-										break;
-									case 'attribute': {
-										const attributeName = this.getNodeParameter('fallbackAttributeName', index) as string;
-										extractedData = await puppeteerPage.$eval(
-											fallbackSelector,
-											(el, attr) => el.getAttribute(attr) || '',
-											attributeName
-										);
-										break;
-									}
-									default:
-										extractedData = await puppeteerPage.$eval(fallbackSelector, (el) => el.textContent?.trim() || '');
+								} catch (error) {
+									this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Fallback extraction error: ${(error as Error).message}`));
+									throw error;
 								}
 
 								// Store the extracted data in the result
@@ -3385,7 +3418,7 @@ export const description: INodeProperties[] = [
 											fallbackSelector,
 											selectorTimeout,
 											earlyExitDelay,
-											this.logger,
+											this.logger
 										);
 
 										if (!elementExists) {
@@ -3396,82 +3429,50 @@ export const description: INodeProperties[] = [
 									}
 								}
 
-								// Handle different input types
-								switch (fallbackInputType) {
-									case 'text': {
-										const fallbackClearField = this.getNodeParameter('fallbackClearField', index, false) as boolean;
-										const fallbackPressEnter = this.getNodeParameter('fallbackPressEnter', index, false) as boolean;
+								// Process the form field using the utility function
+								const field: IDataObject = {
+									fieldType: fallbackInputType,
+									selector: fallbackSelector,
+									value: fallbackText
+								};
 
-										// Handle text inputs and textareas
-										if (fallbackClearField) {
-											// Click three times to select all text
-											await puppeteerPage.click(fallbackSelector, { clickCount: 3 });
-											// Delete selected text
-											await puppeteerPage.keyboard.press('Backspace');
-										}
+								// Add specific options based on input type
+								if (fallbackInputType === 'text') {
+									field.clearField = this.getNodeParameter('fallbackClearField', index, false) as boolean;
+									field.pressEnter = this.getNodeParameter('fallbackPressEnter', index, false) as boolean;
+									field.humanLike = useHumanDelays;
+								} else if (fallbackInputType === 'checkbox' || fallbackInputType === 'radio') {
+									field.checkState = this.getNodeParameter('fallbackCheckState', index, 'check') as string;
+								} else if (fallbackInputType === 'file') {
+									field.filePath = this.getNodeParameter('fallbackFilePath', index, '') as string;
+								}
 
-										// Type the text
-										this.logger.debug(`Fallback action: Filling form field: ${fallbackSelector} with value: ${fallbackText}`);
+								this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+									`Processing fallback form field: ${fallbackSelector} (type: ${fallbackInputType})`));
 
-										// Use human-like typing if enabled
-										if (useHumanDelays) {
-											for (const char of fallbackText) {
-												await puppeteerPage.type(fallbackSelector, char, { delay: Math.floor(Math.random() * 150) + 25 });
-											}
-										} else {
-											await puppeteerPage.type(fallbackSelector, fallbackText);
-										}
+								try {
+									const { success, fieldResult } = await processFormField(
+										puppeteerPage,
+										field,
+										this.logger
+									);
 
-										// Press Enter if requested
-										if (fallbackPressEnter) {
-											await puppeteerPage.keyboard.press('Enter');
-										}
-										break;
+									if (!success) {
+										throw new Error(`Failed to fill form field: ${fallbackSelector} (type: ${fallbackInputType})`);
 									}
 
-									case 'select': {
-										// Handle select/dropdown elements
-										this.logger.debug(`Fallback action: Setting select element: ${fallbackSelector} to value: ${fallbackText}`);
-										await puppeteerPage.select(fallbackSelector, fallbackText);
-										break;
+									// Store field result for response
+									if (!resultData.formFields) {
+										resultData.formFields = [];
 									}
+									(resultData.formFields as IDataObject[]).push(fieldResult);
 
-									case 'checkbox':
-									case 'radio': {
-										const fallbackCheckState = this.getNodeParameter('fallbackCheckState', index, 'check') as string;
-
-										// Handle checkbox and radio button inputs
-										this.logger.debug(`Fallback action: Setting ${fallbackInputType}: ${fallbackSelector} to state: ${fallbackCheckState}`);
-
-										// Get the current checked state
-										const currentChecked = await puppeteerPage.$eval(fallbackSelector, el => (el as HTMLInputElement).checked);
-
-										// Determine if we need to click based on requested state
-										let shouldClick = false;
-										if (fallbackCheckState === 'check' && !currentChecked) shouldClick = true;
-										if (fallbackCheckState === 'uncheck' && currentChecked) shouldClick = true;
-										if (fallbackCheckState === 'toggle') shouldClick = true;
-
-										if (shouldClick) {
-											await puppeteerPage.click(fallbackSelector);
-										}
-										break;
-									}
-
-									case 'file': {
-										const fallbackFilePath = this.getNodeParameter('fallbackFilePath', index, '') as string;
-
-										// Handle file upload inputs
-										this.logger.debug(`Fallback action: Setting file input: ${fallbackSelector} with file: ${fallbackFilePath}`);
-
-										const fileInput = await puppeteerPage.$(fallbackSelector) as puppeteer.ElementHandle<HTMLInputElement>;
-										if (fileInput) {
-											await fileInput.uploadFile(fallbackFilePath);
-										} else {
-											this.logger.warn(`File input element not found: ${fallbackSelector}`);
-										}
-										break;
-									}
+									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+										`Fallback form field processed successfully: ${fallbackSelector}`));
+								} catch (error) {
+									this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+										`Fallback form field error: ${(error as Error).message}`));
+									throw error;
 								}
 								break;
 							}
@@ -3481,11 +3482,35 @@ export const description: INodeProperties[] = [
 								const waitAfterFallback = this.getNodeParameter('waitAfterFallback', index) as string;
 								const fallbackWaitTime = this.getNodeParameter('fallbackWaitTime', index) as number;
 
-								this.logger.debug(`Fallback action: Navigating to URL: ${fallbackUrl}`);
-								await puppeteerPage.goto(fallbackUrl);
+								this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+									`Executing fallback navigation to "${fallbackUrl}"`));
 
-								// Wait according to specified wait type
-								await waitForNavigation(puppeteerPage, waitAfterFallback, fallbackWaitTime);
+								try {
+									// Use navigationWithRetry utility for more robust navigation
+									const navigationResult = await navigateWithRetry(
+										puppeteerPage,
+										fallbackUrl,
+										{
+											waitUntil: waitAfterFallback as 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2',
+											timeout: fallbackWaitTime,
+											maxRetries: 2,
+											retryDelay: 1000,
+										},
+										this.logger
+									);
+
+									if (!navigationResult) {
+										this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Fallback navigation may have encountered issues, but continuing execution`));
+									} else {
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`Fallback navigation completed successfully to ${fallbackUrl}`));
+									}
+								} catch (error) {
+									this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
+										`Fallback navigation error: ${(error as Error).message}`));
+									throw error;
+								}
 								break;
 							}
 						}
