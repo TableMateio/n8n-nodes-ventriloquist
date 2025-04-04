@@ -2160,202 +2160,150 @@ export const description: INodeProperties[] = [
 		index: number,
 		thisNode: IExecuteFunctions
 	): Promise<boolean> {
-		let conditionMet = false;
+		// Use safeExecute to handle errors in a standardized way
+		const result = await safeExecute(
+			async () => {
+				let conditionMet = false;
 
-		switch (conditionType) {
-			case 'elementExists': {
-				const selector = condition.selector as string;
+				switch (conditionType) {
+					case 'elementExists': {
+						const selector = condition.selector as string;
 
-				if (waitForSelectors) {
-					if (detectionMethod === 'smart') {
-						// Use smart DOM-aware detection
-						conditionMet = await smartWaitForSelector(
-							page,
-							selector,
-							selectorTimeout,
-							earlyExitDelay,
-							thisNode.logger,
-						);
-					} else {
-						// Use traditional fixed timeout waiting
-						try {
-							await page.waitForSelector(selector, { timeout: selectorTimeout });
-							conditionMet = true;
-						} catch (error) {
-							conditionMet = false;
+						if (waitForSelectors) {
+							if (detectionMethod === 'smart') {
+								// Use smart DOM-aware detection
+								conditionMet = await smartWaitForSelector(
+									page,
+									selector,
+									selectorTimeout,
+									earlyExitDelay,
+									thisNode.logger,
+								);
+							} else {
+								// Use traditional fixed timeout waiting
+								try {
+									await page.waitForSelector(selector, { timeout: selectorTimeout });
+									conditionMet = true;
+								} catch (error) {
+									conditionMet = false;
+								}
+							}
+						} else {
+							// Just check without waiting
+							const elementExists = await page.$(selector) !== null;
+							conditionMet = elementExists;
 						}
-					}
-				} else {
-					// Just check without waiting
-					const elementExists = await page.$(selector) !== null;
-					conditionMet = elementExists;
-				}
-				break;
-			}
-
-			case 'textContains': {
-				const selector = condition.selector as string;
-				const textToCheck = condition.textToCheck as string;
-				const matchType = condition.matchType as string;
-				const caseSensitive = condition.caseSensitive as boolean;
-
-				if (waitForSelectors) {
-					let elementExists = false;
-					if (detectionMethod === 'smart') {
-						// Use smart DOM-aware detection
-						elementExists = await smartWaitForSelector(
-							page,
-							selector,
-							selectorTimeout,
-							earlyExitDelay,
-							thisNode.logger,
-						);
-					} else {
-						// Use traditional fixed timeout waiting
-						try {
-							await page.waitForSelector(selector, { timeout: selectorTimeout });
-							elementExists = true;
-						} catch (error) {
-							elementExists = false;
-						}
-					}
-
-					if (!elementExists) {
-						conditionMet = false;
 						break;
 					}
-				}
 
-				try {
-					const elementText = await page.$eval(selector, (el) => el.textContent || '');
-					conditionMet = matchStrings(elementText, textToCheck, matchType, caseSensitive);
-				} catch (error) {
-					// Element might not exist
-					conditionMet = false;
-				}
-				break;
-			}
+					case 'textContains': {
+						const selector = condition.selector as string;
+						const textToCheck = condition.textToCheck as string;
+						const matchType = condition.matchType as string;
+						const caseSensitive = condition.caseSensitive as boolean;
 
-			case 'elementCount': {
-				const selector = condition.selector as string;
-				const expectedCount = condition.expectedCount as number;
-				const countComparison = condition.countComparison as string;
+						if (waitForSelectors) {
+							let elementExists = false;
+							if (detectionMethod === 'smart') {
+								// Use smart DOM-aware detection
+								elementExists = await smartWaitForSelector(
+									page,
+									selector,
+									selectorTimeout,
+									earlyExitDelay,
+									thisNode.logger,
+								);
+							} else {
+								// Use traditional fixed timeout waiting
+								try {
+									await page.waitForSelector(selector, { timeout: selectorTimeout });
+									elementExists = true;
+								} catch (error) {
+									elementExists = false;
+								}
+							}
 
-				// For element count, we just check without waiting as we expect some elements might not exist
-				const elements = await page.$$(selector);
-				const actualCount = elements.length;
-
-				conditionMet = compareCount(actualCount, expectedCount, countComparison);
-				break;
-			}
-
-			case 'urlContains': {
-				const urlSubstring = condition.urlSubstring as string;
-				const matchType = condition.matchType as string;
-				const caseSensitive = condition.caseSensitive as boolean;
-
-				conditionMet = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
-				break;
-			}
-
-			case 'expression': {
-				const jsExpression = condition.jsExpression as string;
-
-				try {
-					// Create a safe context for expression evaluation
-					const sandbox = {
-						$input: thisNode.getInputData()[index],
-						$node: thisNode.getNode(),
-					};
-
-					// Evaluate the expression in a safe manner
-					// We're using Function constructor to create an isolated scope
-					const evalFunction = new Function(
-						'$input',
-						'$node',
-						`"use strict"; return (${jsExpression});`,
-					);
-
-					// Execute the function with our safe context
-					conditionMet = Boolean(evalFunction(sandbox.$input, sandbox.$node));
-					thisNode.logger.debug(`Expression evaluation result: ${conditionMet} for: ${jsExpression}`);
-				} catch (error) {
-					thisNode.logger.error(`Error evaluating expression: ${error.message}`);
-					conditionMet = false;
-				}
-				break;
-			}
-
-			case 'inputSource': {
-				const sourceNodeName = condition.sourceNodeName as string;
-
-				try {
-					// Get the node that sent the data
-					const inputData = thisNode.getInputData()[index];
-
-					// Only access source property if it's a data object with the right structure
-					let inputNodeName: string | undefined;
-
-					if (typeof inputData === 'object' &&
-						inputData !== null &&
-						'source' in inputData &&
-						inputData.source !== null &&
-						typeof inputData.source === 'object') {
-
-						const source = inputData.source as IDataObject;
-						if ('node' in source &&
-							source.node !== null &&
-							typeof source.node === 'object') {
-
-							const node = source.node as IDataObject;
-							if ('name' in node && typeof node.name === 'string') {
-								inputNodeName = node.name;
+							if (!elementExists) {
+								conditionMet = false;
+								break;
 							}
 						}
+
+						try {
+							const elementText = await page.$eval(selector, (el) => el.textContent || '');
+							conditionMet = matchStrings(elementText, textToCheck, matchType, caseSensitive);
+						} catch (error) {
+							// Element might not exist
+							conditionMet = false;
+						}
+						break;
 					}
 
-					// Compare with the expected source node name
-					conditionMet = inputNodeName === sourceNodeName;
-					thisNode.logger.debug(`Input source check: ${inputNodeName} === ${sourceNodeName}: ${conditionMet}`);
-				} catch (error) {
-					thisNode.logger.error(`Error checking input source: ${error.message}`);
-					conditionMet = false;
-				}
-				break;
-			}
+					case 'elementCount': {
+						const selector = condition.selector as string;
+						const expectedCount = condition.expectedCount as number;
+						const countComparison = condition.countComparison as string;
 
-			case 'executionCount': {
-				const comparison = condition.executionCountComparison as string;
-				const value = condition.executionCountValue as number;
+						// For element count, we just check without waiting as we expect some elements might not exist
+						const elements = await page.$$(selector);
+						const actualCount = elements.length;
 
-				try {
-					// Get static data for this node to track execution count
-					const nodeContext = thisNode.getWorkflowStaticData('node');
-
-					// Initialize or increment the execution counter
-					if (typeof nodeContext.executionCount !== 'number') {
-						nodeContext.executionCount = 0;
+						conditionMet = compareCount(actualCount, expectedCount, countComparison);
+						break;
 					}
 
-					nodeContext.executionCount = (nodeContext.executionCount as number) + 1;
-					const currentCount = nodeContext.executionCount as number;
+					case 'urlContains': {
+						const urlSubstring = condition.urlSubstring as string;
+						const matchType = condition.matchType as string || 'contains';
+						const caseSensitive = condition.caseSensitive as boolean || false;
 
-					// Compare using the same helper function we use for element count
-					conditionMet = compareCount(currentCount, value, comparison);
-					thisNode.logger.debug(`Execution count check: ${currentCount} ${comparison} ${value}: ${conditionMet}`);
-				} catch (error) {
-					thisNode.logger.error(`Error checking execution count: ${error.message}`);
-					conditionMet = false;
+						// Check if URL matches criteria
+						conditionMet = matchStrings(currentUrl, urlSubstring, matchType, caseSensitive);
+						break;
+					}
+
+					case 'jsExpression': {
+						const jsExpression = condition.jsExpression as string;
+
+						// Execute the JavaScript expression on the page
+						try {
+							const result = await page.evaluate((expr) => {
+								// eslint-disable-next-line no-eval
+								return eval(expr);
+							}, jsExpression);
+
+							conditionMet = !!result;
+						} catch (error) {
+							thisNode.logger.error(`Error evaluating JavaScript expression: ${(error as Error).message}`);
+							conditionMet = false;
+						}
+						break;
+					}
+
+					default:
+						// Unrecognized condition type
+						thisNode.logger.warn(`Unrecognized condition type: ${conditionType}`);
+						conditionMet = false;
 				}
-				break;
+
+				return conditionMet;
+			},
+			{
+				operation: `Decision-Evaluate-${conditionType}`,
+				continueOnFail: true, // Always continue with condition evaluation
+				logger: thisNode.logger,
+				errorContext: {
+					operation: `Decision-Evaluate-${conditionType}`,
+					selector: condition.selector as string,
+					additionalData: {
+						conditionType,
+					}
+				}
 			}
+		);
 
-			default:
-				thisNode.logger.warn(`Unknown condition type: ${conditionType}`);
-				conditionMet = false;
-		}
-
-		return conditionMet;
+		// Return false if there was an error, otherwise return the result
+		return result.success ? result.result || false : false;
 	}
 
 	/**
