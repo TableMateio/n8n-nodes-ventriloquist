@@ -751,7 +751,8 @@ export async function detectInputSource(
 		sourceNodeNameActual
 	};
 
-	// Check if the source node names match (case sensitive)
+	// Check if the source node names match (case sensitive by default)
+	// This can be made case-insensitive by adding a parameter
 	const sourceMatches = sourceNodeNameActual === sourceNodeNameExpected;
 
 	logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
@@ -760,6 +761,62 @@ export async function detectInputSource(
 	return {
 		success: sourceMatches,
 		actualValue: sourceNodeNameActual,
+		details: detailsInfo,
+	};
+}
+
+/**
+ * Generic function to check a condition based on workflow context
+ * This is useful for conditions that don't rely on browser state but workflow state
+ */
+export function detectWorkflowCondition(
+	conditionKey: string,           // Type of condition (e.g., 'inputSource', 'executionCount')
+	actualValue: string | number,   // The actual value to check against
+	expectedValue: string | number, // The expected value
+	operator: string = 'equal',     // The comparison operator
+	options: IDetectionOptions,
+	logger: ILogger,
+): IDetectionResult {
+	const { nodeName, nodeId, index } = options;
+
+	const detailsInfo: IDataObject = {
+		conditionKey,
+		actualValue,
+		expectedValue,
+		operator
+	};
+
+	let conditionMet = false;
+
+	// Handle different condition types
+	switch (conditionKey) {
+		case 'inputSource':
+			// For input source, we simply check equality
+			conditionMet = String(actualValue) === String(expectedValue);
+			break;
+
+		case 'executionCount':
+		case 'runIndex':
+		case 'iterationIndex':
+			// For numerical comparisons, we use compareCount
+			conditionMet = compareCount(
+				typeof actualValue === 'number' ? actualValue : Number(actualValue),
+				typeof expectedValue === 'number' ? expectedValue : Number(expectedValue),
+				operator
+			);
+			break;
+
+		default:
+			// For any other type, default to string equality
+			conditionMet = String(actualValue) === String(expectedValue);
+	}
+
+	logger.debug(formatOperationLog('Detection', nodeName, nodeId, index,
+		`Workflow condition detection (${conditionKey}): ${conditionMet ? 'MATCHED' : 'NOT MATCHED'}, actual: "${actualValue}", expected: "${expectedValue}"`));
+
+	return {
+		success: conditionMet,
+		actualValue,
 		details: detailsInfo,
 	};
 }
