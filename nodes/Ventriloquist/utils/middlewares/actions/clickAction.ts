@@ -2,6 +2,7 @@ import type { IDataObject, Logger as ILogger } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
 import { formatOperationLog } from '../../resultUtils';
 import { waitAndClick } from '../../clickOperations';
+import { waitForUrlChange } from '../../navigationUtils';
 
 /**
  * Interface for click action parameters
@@ -85,16 +86,27 @@ export async function executeClickAction(
       await new Promise(resolve => setTimeout(resolve, waitTime));
     } else if (waitAfterAction === 'urlChanged') {
       try {
-        // Wrap in try/catch to handle possible context destruction errors gracefully
-        const navigationPromise = page.waitForNavigation({ timeout: waitTime });
+        // Get current URL to detect changes
+        const currentUrl = await page.url();
 
-        // Starting a navigation can trigger contexts to be destroyed
-        // We'll capture the result but handle errors gracefully
-        await navigationPromise;
+        // Use waitForUrlChange utility from navigationUtils instead of waitForNavigation
+        // This avoids the "Unknown value for options.waitUntil: urlChanged" error
+        const urlChanged = await waitForUrlChange(
+          page,
+          currentUrl,
+          waitTime,
+          logger
+        );
 
-        // eslint-disable-next-line @typescript-eslint/prefer-template
-        logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-          `Navigation after click completed successfully`));
+        if (urlChanged) {
+          // eslint-disable-next-line @typescript-eslint/prefer-template
+          logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+            `Navigation after click completed successfully - URL changed`));
+        } else {
+          // eslint-disable-next-line @typescript-eslint/prefer-template
+          logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
+            `Navigation after click may not have completed - URL did not change from ${currentUrl}`));
+        }
       } catch (navigationError) {
         // This is expected in many cases when URL changes - the navigation destroys the execution context
         // Don't fail the action on this type of error
