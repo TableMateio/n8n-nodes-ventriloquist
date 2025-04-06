@@ -85,31 +85,27 @@ export async function executeClickAction(
       await new Promise(resolve => setTimeout(resolve, waitTime));
     } else if (waitAfterAction === 'urlChanged') {
       try {
-        // 'urlChanged' is not a valid waitUntil value for Puppeteer
-        // Create a proper navigation options object with a valid waitUntil value
-        const navigationOptions = {
-          timeout: waitTime
-          // No waitUntil specified - we're just waiting for any navigation
-        };
-
         // Wrap in try/catch to handle possible context destruction errors gracefully
-        const navigationPromise = page.waitForNavigation(navigationOptions);
+        const navigationPromise = page.waitForNavigation({ timeout: waitTime });
 
         // Starting a navigation can trigger contexts to be destroyed
         // We'll capture the result but handle errors gracefully
         await navigationPromise;
 
+        // eslint-disable-next-line @typescript-eslint/prefer-template
         logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-          'Navigation after click completed successfully'));
+          `Navigation after click completed successfully`));
       } catch (navigationError) {
         // This is expected in many cases when URL changes - the navigation destroys the execution context
         // Don't fail the action on this type of error
         if ((navigationError as Error).message.includes('context was destroyed') ||
             (navigationError as Error).message.includes('Execution context')) {
+          // eslint-disable-next-line @typescript-eslint/prefer-template
           logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-            'Navigation context was destroyed, which likely indicates successful navigation'));
+            `Navigation context was destroyed, which likely indicates successful navigation`));
         } else {
           // For other navigation errors, log but don't fail the action
+          // eslint-disable-next-line @typescript-eslint/prefer-template
           logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
             `Navigation after click encountered an issue: ${(navigationError as Error).message}`));
         }
