@@ -2331,23 +2331,18 @@ export const description: INodeProperties[] = [
 										resultData.routeTaken = groupName;
 										resultData.actionPerformed = actionType;
 
-										// Gracefully handle possible context destruction when getting URL or title
 										try {
 											resultData.currentUrl = await puppeteerPage.url();
 											resultData.pageTitle = await puppeteerPage.title();
 										} catch (pageError) {
-											// If the page context was destroyed due to navigation, don't fail
+											// If context was destroyed because of navigation, don't worry about it
+											// Session manager will handle reconnecting
 											if ((pageError as Error).message.includes('context was destroyed') ||
-												 (pageError as Error).message.includes('Execution context')) {
-												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-													`Navigation destroyed context while getting page details - this is normal with URL navigation`));
-												// Use the last known values
+												(pageError as Error).message.includes('Execution context')) {
 												resultData.currentUrl = pageUrl;
 												resultData.pageTitle = 'Navigation in progress';
 											} else {
-												// For other errors, log but continue
-												this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-													`Error getting page details: ${(pageError as Error).message}`));
+												throw pageError;
 											}
 										}
 
@@ -2355,36 +2350,22 @@ export const description: INodeProperties[] = [
 
 										// Take screenshot if requested
 										if (takeScreenshot) {
-											try {
-												const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
-												if (screenshotResult !== null) {
-													resultData.screenshot = screenshotResult;
-												}
-											} catch (screenshotError) {
-												// If screenshot fails due to navigation, don't block the action
-												if ((screenshotError as Error).message.includes('context was destroyed') ||
-													 (screenshotError as Error).message.includes('Execution context')) {
-													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-														`Could not take screenshot due to navigation - this is normal`));
-												} else {
-													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-														`Error taking screenshot: ${(screenshotError as Error).message}`));
-												}
+											const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
+											if (screenshotResult !== null) {
+												resultData.screenshot = screenshotResult;
 											}
 										}
 
 										// Return the result immediately after successful action
 										return [this.helpers.returnJsonArray([resultData])];
 									} catch (error) {
-										// Don't treat context destruction as an error if we're navigating with url changes
+										// Don't treat context destruction as an error if we're doing URL navigation
 										if (waitAfterAction === 'urlChanged' &&
-											  ((error as Error).message.includes('context was destroyed') ||
-											   (error as Error).message.includes('Execution context'))) {
+											((error as Error).message.includes('context was destroyed') ||
+											 (error as Error).message.includes('Execution context'))) {
 
-											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-												`Navigation context was destroyed, which indicates successful navigation`));
-
-											// Same result preparation as in the success case
+											// This error is actually EXPECTED with urlChanged navigation
+											// The session manager will handle reconnection in the next node
 											resultData.success = true;
 											resultData.routeTaken = groupName;
 											resultData.actionPerformed = actionType;
@@ -2392,10 +2373,10 @@ export const description: INodeProperties[] = [
 											resultData.pageTitle = 'Navigation in progress';
 											resultData.executionDuration = Date.now() - startTime;
 
+											// Return success without error to allow flow to continue
 											return [this.helpers.returnJsonArray([resultData])];
 										}
 
-										// For other errors, log and rethrow
 										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
 											`Error during click action: ${(error as Error).message}`));
 										throw error;
