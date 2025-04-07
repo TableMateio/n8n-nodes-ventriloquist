@@ -10,7 +10,8 @@ import { formatOperationLog, createSuccessResponse, createTimingLog } from '../u
 import { createErrorResponse } from '../utils/errorUtils';
 import { getHumanDelay } from '../utils/formOperations';
 import { takeScreenshot as captureScreenshot } from '../utils/navigationUtils';
-import { executeAction, ActionType, IActionParameters, IActionOptions } from '../utils/actionUtils';
+import { executeAction, type ActionType, type IActionOptions, type IActionParameters } from '../utils/actionUtils';
+import { type IClickActionResult } from '../utils/middlewares/actions/clickAction';
 // Add import for conditionUtils module
 import { evaluateConditionGroup, IConditionGroup } from '../utils/conditionUtils';
 // Add import for fallbackUtils module
@@ -18,7 +19,6 @@ import { executeFallback, IFallbackOptions } from '../utils/fallbackUtils';
 import { formatExtractedDataForLog } from '../utils/extractionUtils';
 import { waitForUrlChange } from '../utils/navigationUtils';
 import { enhancedNavigationWait } from '../utils/navigationUtils';
-// Add import for navigation utilities
 
 /**
  * Decision operation description
@@ -2316,61 +2316,155 @@ export const description: INodeProperties[] = [
 										}
 
 										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Click action completed successfully using action utility`));
+											'Click action completed successfully using action utility'));
 
-										// Update result data
-										resultData.success = true;
-										resultData.routeTaken = groupName;
-										resultData.actionPerformed = actionType;
-										resultData.currentUrl = await puppeteerPage.url();
-										resultData.pageTitle = await puppeteerPage.title();
-										resultData.executionDuration = Date.now() - startTime;
+										// Check if the context was destroyed or navigation happened
+										// Cast to IClickActionResult to access the urlChanged property
+										const clickResult = actionResult as IClickActionResult;
+										if (clickResult.contextDestroyed || clickResult.urlChanged) {
+											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+												`Navigation detected after click: Context destroyed=${!!clickResult.contextDestroyed}, URL changed=${!!clickResult.urlChanged}`));
+
+											// Get a fresh page reference after navigation
+											const freshPage = SessionManager.getPage(sessionId);
+											if (freshPage) {
+												puppeteerPage = freshPage;
+												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+													'Using fresh page reference after navigation'));
+
+												try {
+													// Update result data
+													resultData.success = true;
+													resultData.routeTaken = groupName;
+													resultData.actionPerformed = actionType;
+													resultData.currentUrl = await puppeteerPage.url();
+													resultData.pageTitle = await puppeteerPage.title();
+													resultData.executionDuration = Date.now() - startTime;
+													return [this.helpers.returnJsonArray([resultData])];
+												} catch (pageError) {
+													// If we still can't access the page, return with limited data
+													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+														`Could not access page properties after navigation: ${(pageError as Error).message}`));
+
+													resultData.success = true;
+													resultData.routeTaken = groupName;
+													resultData.actionPerformed = actionType;
+													resultData.navigationContext = 'destroyed-but-successful';
+													resultData.executionDuration = Date.now() - startTime;
+													return [this.helpers.returnJsonArray([resultData])];
+												}
+											} else {
+												// If we don't have a page reference but navigation was successful, still return success
+												this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+													'Could not get fresh page reference after navigation, but click was successful'));
+
+												resultData.success = true;
+												resultData.routeTaken = groupName;
+												resultData.actionPerformed = actionType;
+												resultData.navigationContext = 'destroyed-no-page';
+												resultData.executionDuration = Date.now() - startTime;
+												return [this.helpers.returnJsonArray([resultData])];
+											}
+										}
+
+										// No navigation happened, continue with regular flow
+										try {
+											// Update result data
+											resultData.success = true;
+											resultData.routeTaken = groupName;
+											resultData.actionPerformed = actionType;
+											resultData.currentUrl = await puppeteerPage.url();
+											resultData.pageTitle = await puppeteerPage.title();
+											resultData.executionDuration = Date.now() - startTime;
+										} catch (pageError) {
+											// Handle late context destruction
+											this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+												`Could not access page properties after successful click: ${(pageError as Error).message}`));
+
+											resultData.success = true;
+											resultData.routeTaken = groupName;
+											resultData.actionPerformed = actionType;
+											resultData.navigationContext = 'destroyed-late';
+											resultData.executionDuration = Date.now() - startTime;
+										}
 
 										return [this.helpers.returnJsonArray([resultData])];
 									} catch (error) {
 										// Handle expected context destruction errors in a special way
 										if ((error as Error).message.includes('context was destroyed') ||
-											(error as Error).message.includes('Execution context')) {
+											(error as Error).message.includes('Execution context') ||
+											(error as Error).message.includes('Target closed')) {
 											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
 												'Navigation caused context destruction - this is expected during some navigations'));
 
-											// This is often expected with URL-changing clicks
-											// We'll consider this a success but with special handling
-											if (waitAfterAction === 'urlChanged') {
+											// Try to get a fresh page reference after context destruction
+											const freshPage = SessionManager.getPage(sessionId);
+											if (freshPage) {
+												puppeteerPage = freshPage;
 												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-													'URL change with context destruction detected, proceeding with workflow'));
+													'Reconnected to page after context destruction'));
+											}
 
-												// Set result as success with notification about context destruction
-												resultData.success = true;
-												resultData.routeTaken = groupName;
-												resultData.actionPerformed = actionType;
-												resultData.navigationContext = 'destroyed-expected';
-												resultData.error = `Expected navigation context destruction: ${(error as Error).message}`;
+											// Set result as success with notification about context destruction
+											resultData.success = true;
+											resultData.routeTaken = groupName;
+											resultData.actionPerformed = actionType;
+											resultData.navigationContext = 'destroyed-expected';
+											resultData.executionDuration = Date.now() - startTime;
 
-												// Add recovery delay
-												await new Promise(resolve => setTimeout(resolve, 5000));
+											// Add recovery delay
+											await new Promise(resolve => setTimeout(resolve, 5000));
 
-												// Try to recover page state after context destruction
-												try {
-													const finalUrl = await puppeteerPage.url();
-													const finalTitle = await puppeteerPage.title();
+											// Try to recover page state after context destruction
+											try {
+												if (freshPage) {
+													const finalUrl = await freshPage.url();
+													const finalTitle = await freshPage.title();
 
 													resultData.currentUrl = finalUrl;
 													resultData.pageTitle = finalTitle;
-												} catch (recoveryError) {
-													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-														`Could not get final page state after context destruction: ${(recoveryError as Error).message}`));
-
+												} else {
 													resultData.currentUrl = 'Context destroyed during navigation';
 													resultData.pageTitle = 'Navigation in progress';
 												}
+											} catch (recoveryError) {
+												this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+													`Could not get final page state after context destruction: ${(recoveryError as Error).message}`));
 
-												return [this.helpers.returnJsonArray([resultData])];
+												resultData.currentUrl = 'Context destroyed during navigation';
+												resultData.pageTitle = 'Navigation in progress';
 											}
+
+											return [this.helpers.returnJsonArray([resultData])];
 										}
 
 										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
 											`Error during click action: ${(error as Error).message}`));
+
+										// Try to get page details for better error context
+										try {
+											const currentUrl = await puppeteerPage.url();
+											const pageTitle = await puppeteerPage.title();
+											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+												`Current page when error occurred - URL: ${currentUrl}, Title: ${pageTitle}`));
+										} catch (pageError) {
+											this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+												`Failed to get page URL/title for error context: ${(pageError as Error).message}`));
+										}
+
+										// If continueOnFail is true, we should return a partially successful result instead of throwing
+										if (continueOnFail) {
+											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+												'Continuing despite error (continueOnFail=true)'));
+
+											resultData.success = false;
+											resultData.routeTaken = groupName;
+											resultData.actionPerformed = actionType;
+											resultData.error = (error as Error).message;
+											resultData.executionDuration = Date.now() - startTime;
+											return [this.helpers.returnJsonArray([resultData])];
+										}
+
 										throw error;
 									}
 								}
@@ -2517,7 +2611,7 @@ export const description: INodeProperties[] = [
 
 													// Use waitForUrlChange utility from navigationUtils
 													const urlChanged = await waitForUrlChange(
-														puppeteerPage,
+														sessionId,
 														currentUrl,
 														waitTime,
 														this.logger
@@ -2997,13 +3091,13 @@ export const description: INodeProperties[] = [
 										const actionOptions: IActionOptions = {
 								sessionId,
 											waitForSelector: waitForSelectors,
-											selectorTimeout,
-											detectionMethod,
-											earlyExitDelay,
-											nodeName,
-											nodeId,
-											index,
-											useHumanDelays
+												selectorTimeout,
+												detectionMethod,
+												earlyExitDelay,
+												nodeName,
+												nodeId,
+												index,
+												useHumanDelays
 										};
 
 										// Execute the extract action using the utility
