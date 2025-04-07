@@ -447,7 +447,13 @@ export async function submitForm(
 	beforeTitle?: string;
 	afterTitle?: string;
 	navigationCompleted?: boolean;
+	pageReconnected?: boolean;
 }> {
+	// Store browser reference for potential reconnection
+	const browser = page.browser();
+	let reconnectedPage: Page | null = null;
+	let contextDestroyed = false;
+
 	// Capture current URL and title before submission
 	const beforeUrl = page.url();
 	const beforeTitle = await page.title();
@@ -498,23 +504,71 @@ export async function submitForm(
 		} catch (error) {
 			logger.warn(`Navigation timeout: ${(error as Error).message} - checking page state directly`);
 
+			// Check if the error indicates context destruction
+			if ((error as Error).message.includes('context was destroyed') ||
+				(error as Error).message.includes('Execution context')) {
+				contextDestroyed = true;
+				logger.info('Context destruction detected during navigation - attempting to reconnect');
+
+				// Add recovery delay
+				const recoveryDelay = 5000;
+				logger.info(`Adding recovery delay (${recoveryDelay}ms)`);
+				await new Promise(resolve => setTimeout(resolve, recoveryDelay));
+
+				// Try to reconnect to the page
+				try {
+					const pages = await browser.pages();
+					if (pages.length > 0) {
+						// Use the last page as it's likely the one after navigation
+						reconnectedPage = pages[pages.length - 1];
+						logger.info(`Reconnected to page (${pages.length} pages found)`);
+					} else {
+						logger.warn('No pages found in browser after navigation');
+					}
+				} catch (reconnectError) {
+					logger.warn(`Failed to reconnect to page: ${(reconnectError as Error).message}`);
+				}
+			}
+
+			// Use the reconnected page if available, otherwise try the original page
+			const activePage = reconnectedPage || page;
+
 			// Check if page changed despite the timeout
-			const afterUrl = page.url();
-			const afterTitle = await page.title();
+			try {
+				const afterUrl = await activePage.url();
+				const afterTitle = await activePage.title();
 
-			if (afterUrl !== beforeUrl || afterTitle !== beforeTitle) {
-				logger.info(`Page changed despite navigation timeout: ${beforeUrl} → ${afterUrl}`);
+				if (afterUrl !== beforeUrl || afterTitle !== beforeTitle || contextDestroyed) {
+					logger.info(`Page changed despite navigation timeout: ${beforeUrl} → ${afterUrl}`);
 
-				return {
-					success: true,
-					urlChanged: afterUrl !== beforeUrl,
-					titleChanged: afterTitle !== beforeTitle,
-					beforeUrl,
-					afterUrl,
-					beforeTitle,
-					afterTitle,
-					navigationCompleted: false
-				};
+					return {
+						success: true,
+						urlChanged: afterUrl !== beforeUrl,
+						titleChanged: afterTitle !== beforeTitle,
+						beforeUrl,
+						afterUrl,
+						beforeTitle,
+						afterTitle,
+						navigationCompleted: false,
+						pageReconnected: !!reconnectedPage
+					};
+				}
+			} catch (pageStateError) {
+				logger.warn(`Error checking page state: ${(pageStateError as Error).message}`);
+				// If we can't check the page state but context was destroyed, assume navigation was successful
+				if (contextDestroyed) {
+					return {
+						success: true,
+						urlChanged: true, // Assume URL changed if context was destroyed
+						titleChanged: true, // Assume title changed if context was destroyed
+						beforeUrl,
+						afterUrl: 'Unknown - context destroyed',
+						beforeTitle,
+						afterTitle: 'Unknown - context destroyed',
+						navigationCompleted: false,
+						pageReconnected: !!reconnectedPage
+					};
+				}
 			}
 
 			logger.warn('No page change detected - form submission may have failed');
@@ -524,9 +578,9 @@ export async function submitForm(
 				urlChanged: false,
 				titleChanged: false,
 				beforeUrl,
-				afterUrl,
+				afterUrl: beforeUrl,
 				beforeTitle,
-				afterTitle
+				afterTitle: beforeTitle
 			};
 		}
 	}
@@ -555,57 +609,228 @@ export async function submitForm(
 		} catch (error) {
 			logger.warn(`Navigation timeout: ${(error as Error).message} - checking page state directly`);
 
-			// Check if page changed despite the timeout
-			const afterUrl = page.url();
-			const afterTitle = await page.title();
+			// Check if the error indicates context destruction
+			if ((error as Error).message.includes('context was destroyed') ||
+				(error as Error).message.includes('Execution context')) {
+				contextDestroyed = true;
+				logger.info('Context destruction detected during navigation - attempting to reconnect');
 
-			return {
-				success: afterUrl !== beforeUrl || afterTitle !== beforeTitle,
-				urlChanged: afterUrl !== beforeUrl,
-				titleChanged: afterTitle !== beforeTitle,
-				beforeUrl,
-				afterUrl,
-				beforeTitle,
-				afterTitle,
-				navigationCompleted: false
-			};
+				// Add recovery delay
+				const recoveryDelay = 5000;
+				logger.info(`Adding recovery delay (${recoveryDelay}ms)`);
+				await new Promise(resolve => setTimeout(resolve, recoveryDelay));
+
+				// Try to reconnect to the page
+				try {
+					const pages = await browser.pages();
+					if (pages.length > 0) {
+						// Use the last page as it's likely the one after navigation
+						reconnectedPage = pages[pages.length - 1];
+						logger.info(`Reconnected to page (${pages.length} pages found)`);
+					} else {
+						logger.warn('No pages found in browser after navigation');
+					}
+				} catch (reconnectError) {
+					logger.warn(`Failed to reconnect to page: ${(reconnectError as Error).message}`);
+				}
+			}
+
+			// Use the reconnected page if available, otherwise try the original page
+			const activePage = reconnectedPage || page;
+
+			// Check if page changed despite the timeout
+			try {
+				const afterUrl = await activePage.url();
+				const afterTitle = await activePage.title();
+
+				return {
+					success: afterUrl !== beforeUrl || afterTitle !== beforeTitle || contextDestroyed,
+					urlChanged: afterUrl !== beforeUrl,
+					titleChanged: afterTitle !== beforeTitle,
+					beforeUrl,
+					afterUrl,
+					beforeTitle,
+					afterTitle,
+					navigationCompleted: false,
+					pageReconnected: !!reconnectedPage
+				};
+			} catch (pageStateError) {
+				logger.warn(`Error checking page state: ${(pageStateError as Error).message}`);
+				// If we can't check the page state but context was destroyed, assume navigation was successful
+				if (contextDestroyed) {
+					return {
+						success: true,
+						urlChanged: true, // Assume URL changed if context was destroyed
+						titleChanged: true, // Assume title changed if context was destroyed
+						beforeUrl,
+						afterUrl: 'Unknown - context destroyed',
+						beforeTitle,
+						afterTitle: 'Unknown - context destroyed',
+						navigationCompleted: false,
+						pageReconnected: !!reconnectedPage
+					};
+				}
+
+				return {
+					success: false,
+					urlChanged: false,
+					titleChanged: false,
+					beforeUrl,
+					afterUrl: beforeUrl,
+					beforeTitle,
+					afterTitle: beforeTitle
+				};
+			}
 		}
 	}
 
 	if (options.waitAfterSubmit === 'urlChanged') {
 		try {
 			logger.info('Waiting for URL change after submission');
-			await page.waitForFunction(
-				() => window.location.href !== beforeUrl,
-				{ timeout: options.waitTime || 15000 }
-			);
 
-			const afterUrl = page.url();
-			const afterTitle = await page.title();
+			// Add initial stabilization delay
+			logger.info('Adding initial stabilization delay (1000ms)');
+			await new Promise(resolve => setTimeout(resolve, 1000));
 
-			return {
-				success: true,
-				urlChanged: true,
-				titleChanged: afterTitle !== beforeTitle,
-				beforeUrl,
-				afterUrl,
-				beforeTitle,
-				afterTitle
-			};
+			try {
+				await page.waitForFunction(
+					(url) => {
+						try {
+							return window.location.href !== url;
+						} catch (e) {
+							// If we can't access window.location, the context was likely destroyed
+							return true;
+						}
+					},
+					{ timeout: options.waitTime || 15000 },
+					beforeUrl
+				);
+
+				const afterUrl = page.url();
+				const afterTitle = await page.title();
+
+				return {
+					success: true,
+					urlChanged: true,
+					titleChanged: afterTitle !== beforeTitle,
+					beforeUrl,
+					afterUrl,
+					beforeTitle,
+					afterTitle
+				};
+			} catch (waitError) {
+				// Check if the error indicates context destruction
+				if ((waitError as Error).message.includes('context was destroyed') ||
+					(waitError as Error).message.includes('Execution context')) {
+					contextDestroyed = true;
+					logger.info('Context destruction detected during URL change wait - attempting to reconnect');
+
+					// Add recovery delay
+					const recoveryDelay = 5000;
+					logger.info(`Adding recovery delay (${recoveryDelay}ms)`);
+					await new Promise(resolve => setTimeout(resolve, recoveryDelay));
+
+					// Try to reconnect to the page
+					try {
+						const pages = await browser.pages();
+						if (pages.length > 0) {
+							// Use the last page as it's likely the one after navigation
+							reconnectedPage = pages[pages.length - 1];
+							logger.info(`Reconnected to page (${pages.length} pages found)`);
+						} else {
+							logger.warn('No pages found in browser after navigation');
+						}
+					} catch (reconnectError) {
+						logger.warn(`Failed to reconnect to page: ${(reconnectError as Error).message}`);
+					}
+
+					// Use the reconnected page if available, otherwise try the original page
+					const activePage = reconnectedPage || page;
+
+					// Check if we can get the current URL/title
+					try {
+						const afterUrl = await activePage.url();
+						const afterTitle = await activePage.title();
+
+						logger.info(`Page state after reconnection - URL: ${afterUrl}, Title: ${afterTitle}`);
+
+						return {
+							success: true, // Context destruction indicates successful navigation
+							urlChanged: afterUrl !== beforeUrl,
+							titleChanged: afterTitle !== beforeTitle,
+							beforeUrl,
+							afterUrl,
+							beforeTitle,
+							afterTitle,
+							pageReconnected: !!reconnectedPage
+						};
+					} catch (stateError) {
+						logger.warn(`Could not get page state after reconnection: ${(stateError as Error).message}`);
+
+						// Even if we can't get the state, context destruction usually means successful navigation
+						return {
+							success: true,
+							urlChanged: true, // Assume URL changed if context was destroyed
+							titleChanged: true, // Assume title changed if context was destroyed
+							beforeUrl,
+							afterUrl: 'Unknown - context destroyed',
+							beforeTitle,
+							afterTitle: 'Unknown - context destroyed',
+							pageReconnected: !!reconnectedPage
+						};
+					}
+				}
+
+				// For other errors, log the warning
+				logger.warn(`URL change timeout: ${(waitError as Error).message}`);
+			}
 		} catch (error) {
-			logger.warn(`URL change timeout: ${(error as Error).message}`);
+			logger.warn(`Error during URL change handling: ${(error as Error).message}`);
+		}
 
-			const afterUrl = page.url();
-			const afterTitle = await page.title();
+		// Try one more time to get the final state
+		try {
+			// Use the reconnected page if available, otherwise the original page
+			const activePage = reconnectedPage || page;
+
+			const afterUrl = await activePage.url();
+			const afterTitle = await activePage.title();
 
 			return {
-				success: false,
+				success: afterUrl !== beforeUrl || contextDestroyed,
 				urlChanged: afterUrl !== beforeUrl,
 				titleChanged: afterTitle !== beforeTitle,
 				beforeUrl,
 				afterUrl,
 				beforeTitle,
-				afterTitle
+				afterTitle,
+				pageReconnected: !!reconnectedPage
+			};
+		} catch (finalError) {
+			logger.error(`Could not get final page state: ${(finalError as Error).message}`);
+
+			// If context was destroyed but we couldn't get the page state, assume success
+			if (contextDestroyed) {
+				return {
+					success: true,
+					urlChanged: true, // Assume URL changed if context was destroyed
+					titleChanged: true, // Assume title changed if context was destroyed
+					beforeUrl,
+					afterUrl: 'Unknown - context destroyed',
+					beforeTitle,
+					afterTitle: 'Unknown - context destroyed',
+					pageReconnected: !!reconnectedPage
+				};
+			}
+
+			return {
+				success: false,
+				urlChanged: false,
+				titleChanged: false,
+				beforeUrl,
+				afterUrl: beforeUrl,
+				beforeTitle,
+				afterTitle: beforeTitle
 			};
 		}
 	}
@@ -614,8 +839,102 @@ export async function submitForm(
 		logger.info(`Using fixed wait time after form submission (${options.waitTime || 5000}ms)`);
 		await new Promise(resolve => setTimeout(resolve, options.waitTime || 5000));
 
-		const afterUrl = page.url();
-		const afterTitle = await page.title();
+		// Check for context destruction during the fixed wait
+		try {
+			// Use the reconnected page if available, otherwise the original page
+			const activePage = reconnectedPage || page;
+
+			const afterUrl = await activePage.url();
+			const afterTitle = await activePage.title();
+
+			return {
+				success: true,
+				urlChanged: afterUrl !== beforeUrl,
+				titleChanged: afterTitle !== beforeTitle,
+				beforeUrl,
+				afterUrl,
+				beforeTitle,
+				afterTitle,
+				pageReconnected: !!reconnectedPage
+			};
+		} catch (stateError) {
+			// Check if the error indicates context destruction
+			if ((stateError as Error).message.includes('context was destroyed') ||
+				(stateError as Error).message.includes('Execution context')) {
+				contextDestroyed = true;
+				logger.info('Context destruction detected during fixed wait - attempting to reconnect');
+
+				// Add recovery delay
+				const recoveryDelay = 5000;
+				logger.info(`Adding recovery delay (${recoveryDelay}ms)`);
+				await new Promise(resolve => setTimeout(resolve, recoveryDelay));
+
+				// Try to reconnect to the page
+				try {
+					const pages = await browser.pages();
+					if (pages.length > 0) {
+						// Use the last page as it's likely the one after navigation
+						reconnectedPage = pages[pages.length - 1];
+						logger.info(`Reconnected to page (${pages.length} pages found)`);
+
+						// Try to get the state with the reconnected page
+						const afterUrl = await reconnectedPage.url();
+						const afterTitle = await reconnectedPage.title();
+
+						return {
+							success: true,
+							urlChanged: afterUrl !== beforeUrl,
+							titleChanged: afterTitle !== beforeTitle,
+							beforeUrl,
+							afterUrl,
+							beforeTitle,
+							afterTitle,
+							pageReconnected: true
+						};
+					} else {
+						logger.warn('No pages found in browser after navigation');
+					}
+				} catch (reconnectError) {
+					logger.warn(`Failed to reconnect to page: ${(reconnectError as Error).message}`);
+				}
+
+				// Even if all reconnection attempts fail, assume success if context was destroyed
+				return {
+					success: true,
+					urlChanged: true, // Assume URL changed if context was destroyed
+					titleChanged: true, // Assume title changed if context was destroyed
+					beforeUrl,
+					afterUrl: 'Unknown - context destroyed',
+					beforeTitle,
+					afterTitle: 'Unknown - context destroyed',
+					pageReconnected: !!reconnectedPage
+				};
+			}
+
+			// If it's not a context destruction error, log and return failure
+			logger.error(`Error checking page state: ${(stateError as Error).message}`);
+			return {
+				success: false,
+				urlChanged: false,
+				titleChanged: false,
+				beforeUrl,
+				afterUrl: beforeUrl,
+				beforeTitle,
+				afterTitle: beforeTitle
+			};
+		}
+	}
+
+	// For noWait, just do a minimal stabilization
+	await new Promise(resolve => setTimeout(resolve, 500));
+
+	// Final check - use whichever page is available
+	try {
+		// Use the reconnected page if available, otherwise the original page
+		const activePage = reconnectedPage || page;
+
+		const afterUrl = await activePage.url();
+		const afterTitle = await activePage.title();
 
 		return {
 			success: true,
@@ -624,25 +943,37 @@ export async function submitForm(
 			beforeUrl,
 			afterUrl,
 			beforeTitle,
-			afterTitle
+			afterTitle,
+			pageReconnected: !!reconnectedPage
+		};
+	} catch (finalError) {
+		// If we get an error at this point, log and return failure
+		logger.error(`Final error checking page state: ${(finalError as Error).message}`);
+
+		// If context was destroyed but we couldn't get the page state, assume success
+		if (contextDestroyed) {
+			return {
+				success: true,
+				urlChanged: true, // Assume URL changed if context was destroyed
+				titleChanged: true, // Assume title changed if context was destroyed
+				beforeUrl,
+				afterUrl: 'Unknown - context destroyed',
+				beforeTitle,
+				afterTitle: 'Unknown - context destroyed',
+				pageReconnected: !!reconnectedPage
+			};
+		}
+
+		return {
+			success: false,
+			urlChanged: false,
+			titleChanged: false,
+			beforeUrl,
+			afterUrl: beforeUrl,
+			beforeTitle,
+			afterTitle: beforeTitle
 		};
 	}
-
-	// For noWait, just do a minimal stabilization
-	await new Promise(resolve => setTimeout(resolve, 500));
-
-	const afterUrl = page.url();
-	const afterTitle = await page.title();
-
-	return {
-		success: true,
-		urlChanged: afterUrl !== beforeUrl,
-		titleChanged: afterTitle !== beforeTitle,
-		beforeUrl,
-		afterUrl,
-		beforeTitle,
-		afterTitle
-	};
 }
 
 /**

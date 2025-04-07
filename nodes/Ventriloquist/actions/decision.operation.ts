@@ -17,6 +17,12 @@ import { evaluateConditionGroup, IConditionGroup } from '../utils/conditionUtils
 import { executeFallback, IFallbackOptions } from '../utils/fallbackUtils';
 // Add formatExtractedDataForLog back to the imports
 import { formatExtractedDataForLog } from '../utils/extractionUtils';
+// Add import for waitForUrlChange utility
+import { waitForUrlChange } from '../utils/navigationUtils';
+// Add import for enhancedNavigationWait utility
+import { enhancedNavigationWait } from '../utils/navigationUtils';
+// Add import for navigation utilities
+import { clickAndWaitForNavigation, submitFormAndWaitForNavigation } from '../utils/navigationUtils';
 
 /**
  * Decision operation description
@@ -1426,29 +1432,29 @@ export const description: INodeProperties[] = [
 							type: 'options',
 							options: [
 								{
-									name: 'DOM Content Loaded',
-									value: 'domContentLoaded',
-									description: 'Wait until the DOM content is loaded (faster)',
+									name: 'No Wait',
+									value: 'noWait',
+									description: 'Continue immediately after action without waiting',
 								},
 								{
 									name: 'Fixed Time',
 									value: 'fixedTime',
-									description: 'Wait for a specific amount of time',
-								},
-								{
-									name: 'Navigation Complete',
-									value: 'navigationComplete',
-									description: 'Wait until navigation is complete (slower but more thorough)',
-								},
-								{
-									name: 'No Wait',
-									value: 'noWait',
-									description: 'Do not wait after the action',
+									description: 'Wait for a fixed amount of time after the action',
 								},
 								{
 									name: 'URL Changed',
 									value: 'urlChanged',
-									description: 'Wait only until the URL changes to confirm navigation started',
+									description: 'Wait for the URL to change after the action (hard navigation)',
+								},
+								{
+									name: 'Any URL Change',
+									value: 'anyUrlChange',
+									description: 'Detect any URL change (hard navigation or client-side routing)',
+								},
+								{
+									name: 'Navigation Complete',
+									value: 'navigationComplete',
+									description: 'Wait for navigation to complete after the action',
 								},
 							],
 							default: 'domContentLoaded',
@@ -2126,31 +2132,21 @@ export const description: INodeProperties[] = [
 				pageUrl = 'unknown';
 			}
 
-			// Prepare the result data structure
-			const resultData: {
-				success: boolean;
-				routeTaken: string;
-				actionPerformed: string;
-				currentUrl: string;
-				pageTitle: string;
-				screenshot: string | undefined;
-				executionDuration: number;
-				routeName?: string;
-				extractedData?: Record<string, unknown>;
-				sessionId: string;
-				error?: string; // Add error property for error handling
-				formFields?: IDataObject[];
-				formSubmission?: IDataObject;
-				formSubmissionRetries?: IDataObject[];
-			} = {
+			// Initialize result data for the operation
+			const resultData: IDataObject = {
 				success: true,
-				routeTaken,
-				actionPerformed,
-				currentUrl: pageUrl,
-				pageTitle: await puppeteerPage.title(),
-				screenshot,
-				executionDuration: 0, // Will be updated at the end
-				sessionId: sessionId, // Use the parameter instead of trying to get it from the page
+				routeTaken: 'none',
+				actionPerformed: 'none',
+				currentUrl: '',
+				pageTitle: '',
+				executionDuration: 0,
+				// Navigation related properties
+				navigationCompleted: false,
+				urlChangeDetected: false,
+				contextDestroyed: false,
+				beforeUrl: '',
+				afterUrl: '',
+				navigationError: ''
 			};
 
 			// If there's an inputSessionId, use it and log it
@@ -2276,19 +2272,20 @@ export const description: INodeProperties[] = [
 							switch (actionType) {
 								case 'click': {
 									const actionSelector = group.actionSelector as string;
-									const waitAfterAction = group.waitAfterAction as string;
-									// Fix: Ensure waitTime has a default value based on the waitAfterAction type
+									const waitAfterAction = group.waitAfterAction as string || 'domContentLoaded';
+
+									// Ensure we have ample wait time, especially for URL changes
 									let waitTime = group.waitTime as number;
 									if (waitTime === undefined) {
 										waitTime = waitAfterAction === 'fixedTime' ? 2000 :
-												  waitAfterAction === 'urlChanged' ? 6000 : 30000;
+												waitAfterAction === 'urlChanged' ? 30000 : 7000;
 									}
 
 									this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-										`Executing click action on "${actionSelector}" using action utility`));
+										`Executing click action on "${actionSelector}" using action utility with ${waitTime}ms timeout`));
 
 									try {
-										// Create options and parameters for the action
+										// Create options for the action
 										const actionOptions: IActionOptions = {
 											waitForSelector: waitForSelectors,
 											selectorTimeout,
@@ -2300,18 +2297,16 @@ export const description: INodeProperties[] = [
 											useHumanDelays
 										};
 
-										const actionParameters: IActionParameters = {
-											selector: actionSelector,
-											waitAfterAction,
-											waitTime,
-											waitSelector: group.waitSelector as string
-										};
-
 										// Execute the click action using the utility
 										const actionResult = await executeAction(
 											puppeteerPage,
 											'click' as ActionType,
-											actionParameters,
+											{
+												selector: actionSelector,
+												waitAfterAction,
+												waitTime,
+												waitSelector: group.waitSelector as string
+											},
 											actionOptions,
 											this.logger
 										);
@@ -2324,57 +2319,55 @@ export const description: INodeProperties[] = [
 										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
 											`Click action completed successfully using action utility`));
 
-										// After successful action, exit immediately
-										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-											`Decision point "${groupName}": Action completed successfully - exiting decision node`));
+										// Update result data
 										resultData.success = true;
 										resultData.routeTaken = groupName;
 										resultData.actionPerformed = actionType;
-
-										try {
-											resultData.currentUrl = await puppeteerPage.url();
-											resultData.pageTitle = await puppeteerPage.title();
-										} catch (pageError) {
-											// If context was destroyed because of navigation, don't worry about it
-											// Session manager will handle reconnecting
-											if ((pageError as Error).message.includes('context was destroyed') ||
-												(pageError as Error).message.includes('Execution context')) {
-												resultData.currentUrl = pageUrl;
-												resultData.pageTitle = 'Navigation in progress';
-											} else {
-												throw pageError;
-											}
-										}
-
+										resultData.currentUrl = await puppeteerPage.url();
+										resultData.pageTitle = await puppeteerPage.title();
 										resultData.executionDuration = Date.now() - startTime;
 
-										// Take screenshot if requested
-										if (takeScreenshot) {
-											const screenshotResult = await captureScreenshot(puppeteerPage, this.logger);
-											if (screenshotResult !== null) {
-												resultData.screenshot = screenshotResult;
-											}
-										}
-
-										// Return the result immediately after successful action
 										return [this.helpers.returnJsonArray([resultData])];
 									} catch (error) {
-										// Don't treat context destruction as an error if we're doing URL navigation
-										if (waitAfterAction === 'urlChanged' &&
-											((error as Error).message.includes('context was destroyed') ||
-											 (error as Error).message.includes('Execution context'))) {
+										// Handle expected context destruction errors in a special way
+										if ((error as Error).message.includes('context was destroyed') ||
+											(error as Error).message.includes('Execution context')) {
+											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+												'Navigation caused context destruction - this is expected during some navigations'));
 
-											// This error is actually EXPECTED with urlChanged navigation
-											// The session manager will handle reconnection in the next node
-											resultData.success = true;
-											resultData.routeTaken = groupName;
-											resultData.actionPerformed = actionType;
-											resultData.currentUrl = pageUrl; // Use the last known URL
-											resultData.pageTitle = 'Navigation in progress';
-											resultData.executionDuration = Date.now() - startTime;
+											// This is often expected with URL-changing clicks
+											// We'll consider this a success but with special handling
+											if (waitAfterAction === 'urlChanged') {
+												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+													'URL change with context destruction detected, proceeding with workflow'));
 
-											// Return success without error to allow flow to continue
-											return [this.helpers.returnJsonArray([resultData])];
+												// Set result as success with notification about context destruction
+												resultData.success = true;
+												resultData.routeTaken = groupName;
+												resultData.actionPerformed = actionType;
+												resultData.navigationContext = 'destroyed-expected';
+												resultData.error = `Expected navigation context destruction: ${(error as Error).message}`;
+
+												// Add recovery delay
+												await new Promise(resolve => setTimeout(resolve, 5000));
+
+												// Try to recover page state after context destruction
+												try {
+													const finalUrl = await puppeteerPage.url();
+													const finalTitle = await puppeteerPage.title();
+
+													resultData.currentUrl = finalUrl;
+													resultData.pageTitle = finalTitle;
+												} catch (recoveryError) {
+													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+														`Could not get final page state after context destruction: ${(recoveryError as Error).message}`));
+
+													resultData.currentUrl = 'Context destroyed during navigation';
+													resultData.pageTitle = 'Navigation in progress';
+												}
+
+												return [this.helpers.returnJsonArray([resultData])];
+											}
 										}
 
 										this.logger.error(formatOperationLog('Decision', nodeName, nodeId, index,
@@ -2487,8 +2480,23 @@ export const description: INodeProperties[] = [
 												this.logger
 											);
 
+											// Check if we need to use a reconnected page
+											if (actionResult.pageReconnected && actionResult.reconnectedPage) {
+												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+													'Using reconnected page after fill action'));
+												puppeteerPage = actionResult.reconnectedPage;
+
+												// Update the page in the session manager to ensure future operations use this page
+												if (sessionId) {
+													SessionManager.storePage(sessionId, `page_${Date.now()}`, puppeteerPage);
+													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+														`Updated session page reference with session ID: ${sessionId}`));
+												}
+											}
+
+											// Handle action failures
 											if (!actionResult.success) {
-												throw new Error(`Failed to fill form field: ${actionSelector} (type: ${fieldType}) - ${actionResult.error || 'Unknown error'}`);
+												throw new Error(`Failed to fill form field: ${field.selector as string} (type: ${field.fieldType as string}) - ${actionResult.error || 'Unknown error'}`);
 											}
 
 											// Store field result for response
@@ -2500,8 +2508,128 @@ export const description: INodeProperties[] = [
 											// Handle post-fill waiting
 											if (waitAfterAction === 'fixedTime') {
 												await new Promise(resolve => setTimeout(resolve, waitTime));
-											} else if (waitAfterAction === 'urlChanged') {
-												await puppeteerPage.waitForNavigation({ timeout: waitTime });
+											} else if (waitAfterAction === 'urlChanged' || waitAfterAction === 'anyUrlChange') {
+												try {
+													// Get current URL to detect changes
+													const currentUrl = await puppeteerPage.url();
+													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+														`Waiting for ${waitAfterAction === 'anyUrlChange' ? 'any URL change' : 'URL to change'} from: ${currentUrl}`));
+
+													// Use waitForUrlChange utility from navigationUtils
+													const urlChanged = await waitForUrlChange(
+														puppeteerPage,
+														currentUrl,
+														waitTime,
+														this.logger
+													);
+
+													if (urlChanged) {
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															'Navigation after action completed successfully - URL changed'));
+
+														// Mark the navigation as successful
+														resultData.navigationCompleted = true;
+														resultData.urlChangeDetected = true;
+													} else {
+														this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Navigation after action may not have completed - URL did not change from ${currentUrl}`));
+
+														// Don't mark the navigation as failed - we're being conservative here
+														// It's possible the action was successful but didn't result in a URL change
+														resultData.navigationCompleted = false;
+														resultData.urlChangeDetected = false;
+													}
+												} catch (navigationError) {
+													// This is expected in many cases when URL changes - the navigation destroys the execution context
+													// Don't fail the action on this type of error
+													if ((navigationError as Error).message.includes('context was destroyed') ||
+														(navigationError as Error).message.includes('Execution context')) {
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															'Navigation context was destroyed, which likely indicates successful navigation'));
+
+														// Mark the navigation as successful despite the error
+														resultData.navigationCompleted = true;
+														resultData.contextDestroyed = true;
+													} else {
+														// For other navigation errors, log but don't fail the action
+														this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Navigation after action encountered an issue: ${(navigationError as Error).message}`));
+
+														// We're being conservative and not marking this as a failure
+														resultData.navigationCompleted = false;
+														resultData.navigationError = (navigationError as Error).message;
+													}
+												}
+											} else if (waitAfterAction === 'navigationComplete') {
+												try {
+													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+														'Waiting for navigation to complete'));
+
+													// Store the current URL for reference
+													const beforeUrl = await puppeteerPage.url();
+
+													// Use enhanced navigation wait for better reliability
+													await enhancedNavigationWait(
+														puppeteerPage,
+														'networkidle0',
+														waitTime,
+														this.logger,
+														formatOperationLog('Decision', nodeName, nodeId, index, '')
+													);
+
+													// Try to capture the final URL after navigation
+													try {
+														const afterUrl = await puppeteerPage.url();
+														const urlChanged = afterUrl !== beforeUrl;
+
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Navigation completed. URL changed: ${urlChanged} (${beforeUrl} → ${afterUrl})`));
+
+														// Mark the navigation as successful
+														resultData.navigationCompleted = true;
+														resultData.urlChangeDetected = urlChanged;
+														resultData.beforeUrl = beforeUrl;
+														resultData.afterUrl = afterUrl;
+													} catch (urlError) {
+														// This might happen if the context was destroyed during navigation
+														if ((urlError as Error).message.includes('context was destroyed') ||
+															(urlError as Error).message.includes('Execution context')) {
+															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																'Context destroyed while getting URL after navigation - this indicates successful navigation'));
+
+															// Mark as successful despite the error
+															resultData.navigationCompleted = true;
+															resultData.contextDestroyed = true;
+															resultData.beforeUrl = beforeUrl;
+														} else {
+															this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+																`Could not get URL after navigation: ${(urlError as Error).message}`));
+
+															// Still mark as successful since the navigation wait itself succeeded
+															resultData.navigationCompleted = true;
+															resultData.beforeUrl = beforeUrl;
+														}
+													}
+												} catch (navigationError) {
+													// Handle context destruction during navigation
+													if ((navigationError as Error).message.includes('context was destroyed') ||
+														(navigationError as Error).message.includes('Execution context')) {
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															'Context destroyed during navigation wait - this is expected and indicates navigation'));
+
+														// Mark as successful despite the error
+														resultData.navigationCompleted = true;
+														resultData.contextDestroyed = true;
+													} else {
+														// For other errors, log warning but still don't fail the action
+														this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Navigation error: ${(navigationError as Error).message}`));
+
+														// Don't mark as complete failure
+														resultData.navigationCompleted = false;
+														resultData.navigationError = (navigationError as Error).message;
+													}
+												}
 											} else if (waitAfterAction === 'selector') {
 												const waitSelector = group.waitSelector as string;
 												await puppeteerPage.waitForSelector(waitSelector, { timeout: waitTime });
@@ -2542,6 +2670,20 @@ export const description: INodeProperties[] = [
 													this.logger
 												);
 
+												// Check if we need to use a reconnected page
+												if (actionResult.pageReconnected && actionResult.reconnectedPage) {
+													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+														'Using reconnected page after fill action'));
+													puppeteerPage = actionResult.reconnectedPage;
+
+													// Update the page in the session manager to ensure future operations use this page
+													if (sessionId) {
+														SessionManager.storePage(sessionId, `page_${Date.now()}`, puppeteerPage);
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Updated session page reference with session ID: ${sessionId}`));
+													}
+												}
+
 												// Handle action failures
 												if (!actionResult.success) {
 													throw new Error(`Failed to fill form field: ${field.selector as string} (type: ${field.fieldType as string}) - ${actionResult.error || 'Unknown error'}`);
@@ -2565,52 +2707,186 @@ export const description: INodeProperties[] = [
 												}
 
 												try {
-													// Create a promise that will resolve when the next navigation happens
-													const navigationPromise = waitAfterSubmit !== 'noWait' ?
-														puppeteerPage.waitForNavigation({
-															waitUntil: waitAfterSubmit === 'multiple' ? ['domcontentloaded', 'networkidle0'] :
-																(waitAfterSubmit as puppeteer.PuppeteerLifeCycleEvent || 'domcontentloaded'),
-															timeout: waitSubmitTime
-														}) :
-														Promise.resolve();
-
-													// Click the submit button
-													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-														`Clicking submit button: ${submitSelector}`));
-													await puppeteerPage.click(submitSelector);
-													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-														`Submit button clicked successfully`));
-
-													// Wait for navigation to complete
-													if (waitAfterSubmit !== 'noWait') {
+													// For URL changed form submission, we'll use our improved click action middleware
+													if (waitAfterSubmit === 'urlChanged') {
 														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-															`Waiting for navigation to complete (timeout: ${waitSubmitTime}ms)`));
-														await navigationPromise;
+															'Using click action middleware for form submission with URL change detection'));
+
+														// We'll use the click action with URL change detection
+														const actionOptions: IActionOptions = {
+															waitForSelector: waitForSelectors,
+																selectorTimeout,
+																detectionMethod,
+																earlyExitDelay,
+																nodeName,
+																nodeId,
+																index,
+																useHumanDelays
+														};
+
+														// Use at least 20 seconds for timeout
+														const effectiveWaitTime = Math.max(waitSubmitTime, 20000);
+
+														const clickResult = await executeAction(
+															puppeteerPage,
+															'click' as ActionType,
+															{
+																selector: submitSelector,
+																waitAfterAction: 'urlChanged',
+																waitTime: effectiveWaitTime
+															},
+															actionOptions,
+															this.logger
+														);
+
+														// Check if we need to use a reconnected page
+														if (clickResult.pageReconnected && clickResult.reconnectedPage) {
+															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																'Using reconnected page after form submission with URL change'));
+															puppeteerPage = clickResult.reconnectedPage;
+
+                              // Update the page in the session manager to ensure future operations use this page
+                              if (sessionId) {
+                                SessionManager.storePage(sessionId, `page_${Date.now()}`, puppeteerPage);
+                                this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+                                  `Updated session page reference with session ID: ${sessionId}`));
+                              }
+														}
+
+														// After successful submission, add an additional stabilization delay
+														if (clickResult.success) {
+															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																'Form submission successful with URL change using click middleware'));
+
+															// Add additional stabilization delay after form submission
+															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																'Adding post-submission stabilization delay (5000ms)'));
+															await new Promise(resolve => setTimeout(resolve, 5000));
+
+															resultData.formSubmission = {
+																success: true,
+																submitSelector,
+																waitAfterSubmit,
+																waitSubmitTime: effectiveWaitTime,
+																details: clickResult.details
+															};
+														} else {
+															this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+																`Form submission failed: ${clickResult.error instanceof Error ? clickResult.error.message : String(clickResult.error || 'Unknown error')}`));
+
+															resultData.formSubmission = {
+																success: false,
+																error: clickResult.error instanceof Error ? clickResult.error.message : String(clickResult.error || 'Unknown error'),
+																submitSelector,
+																waitAfterSubmit,
+																waitSubmitTime
+															};
+														}
+													} else {
+														// For non-URL change submissions, use the original approach
+														// We don't need to get the URL since we don't use it
+														// Remove the unused currentUrl variable
+
+														// Create a navigation promise based on wait type
+														let navigationPromise;
+
+														if (waitAfterSubmit === 'noWait') {
+															navigationPromise = Promise.resolve();
+														} else {
+															// For standard navigation events, use waitForNavigation
+															navigationPromise = puppeteerPage.waitForNavigation({
+																waitUntil: waitAfterSubmit === 'multiple' ?
+																	['domcontentloaded', 'networkidle0'] :
+																	(waitAfterSubmit === 'domContentLoaded' ? 'domcontentloaded' :
+																	waitAfterSubmit === 'navigationComplete' ? 'networkidle0' : 'domcontentloaded'),
+																timeout: waitSubmitTime
+															});
+														}
+
+														// Click the submit button
 														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-															`Navigation completed successfully after form submission`));
+															`Clicking submit button: ${submitSelector}`));
+														await puppeteerPage.click(submitSelector);
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Submit button clicked successfully`));
+
+														// Wait for navigation to complete
+														if (waitAfterSubmit !== 'noWait') {
+															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																	`Waiting for navigation to complete (timeout: ${waitSubmitTime}ms)`));
+															await navigationPromise;
+															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																	`Navigation completed successfully after form submission`));
+														}
+
+														// Store form submission result
+														resultData.formSubmission = {
+															success: true,
+															submitSelector,
+															waitAfterSubmit,
+															waitSubmitTime
+														};
 													}
-
-													// Store form submission result
-													resultData.formSubmission = {
-														success: true,
-														submitSelector,
-														waitAfterSubmit,
-														waitSubmitTime
-													};
 												} catch (navError) {
-													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-														`Navigation error after form submission: ${(navError as Error).message}`));
-													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-														`This is often normal with redirects - attempting to continue`));
+													// Don't treat context destruction as an error if we're doing URL navigation
+													if (waitAfterSubmit === 'urlChanged' &&
+														((navError as Error).message.includes('context was destroyed') ||
+														(navError as Error).message.includes('Execution context'))) {
 
-													// Store form submission result with error
-													resultData.formSubmission = {
-														success: false,
-														error: (navError as Error).message,
-														submitSelector,
-														waitAfterSubmit,
-														waitSubmitTime
-													};
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															'Navigation context was destroyed, which likely indicates successful navigation'));
+
+														// Add recovery delay to ensure page has completed loading
+														this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+															'Adding extended recovery delay after context destruction (5000ms)'));
+														await new Promise(resolve => setTimeout(resolve, 5000));
+
+														// Try to recover page state
+														try {
+															const finalUrl = await puppeteerPage.url();
+															const finalTitle = await puppeteerPage.title();
+
+															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																`Final page state after recovery - URL: ${finalUrl}, Title: ${finalTitle}`));
+
+															// Store form submission result as success
+															resultData.formSubmission = {
+																success: true,
+																submitSelector,
+																waitAfterSubmit,
+																waitSubmitTime,
+																contextDestroyed: true,
+																finalUrl
+															};
+														} catch (finalError) {
+															this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+																`Could not get final page state: ${(finalError as Error).message}`));
+
+															// Store form submission result as success even without final state
+															resultData.formSubmission = {
+																success: true,
+																submitSelector,
+																waitAfterSubmit,
+																waitSubmitTime,
+																contextDestroyed: true,
+																recoveryFailed: true
+															};
+														}
+													} else {
+														this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+															`Navigation error after form submission: ${(navError as Error).message}`));
+														this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
+															`This is often normal with redirects - attempting to continue`));
+
+														// Store form submission result with error
+														resultData.formSubmission = {
+															success: false,
+															error: (navError as Error).message,
+															submitSelector,
+															waitAfterSubmit,
+															waitSubmitTime
+														};
+													}
 												}
 											}
 										}
@@ -2744,11 +3020,18 @@ export const description: INodeProperties[] = [
 										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
 											`Extraction action completed successfully using action utility`));
 
-										// Store the extracted data
-										if (!resultData.extractedData) {
-											resultData.extractedData = {};
+										// Store the extracted data if available
+										if (actionResult.details.data) {
+											// Make sure extractedData object exists
+											if (!resultData.extractedData) {
+												resultData.extractedData = {};
+											}
+
+											// Check if extractedData is an object before accessing its properties
+											if (typeof resultData.extractedData === 'object') {
+												(resultData.extractedData as IDataObject).primary = actionResult.details.data;
+											}
 										}
-										resultData.extractedData.primary = actionResult.details.data;
 
 										// Log the extraction result (truncated for readability)
 										const truncatedData = formatExtractedDataForLog(actionResult.details.data, extractionType);

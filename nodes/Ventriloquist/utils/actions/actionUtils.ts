@@ -44,6 +44,9 @@ export interface IActionResult {
   actionType: ActionType;
   details: IDataObject;
   error?: Error | string;
+  contextDestroyed?: boolean;
+  pageReconnected?: boolean;
+  reconnectedPage?: puppeteer.Page;
 }
 
 /**
@@ -84,12 +87,26 @@ export async function executeAction(
         // Execute the click action
         const result = await executeClickAction(page, clickParams, clickOptions, logger);
 
+        // Check if we need to handle page reconnection
+        const contextDestroyed = result.details.contextDestroyed === true;
+        const pageReconnected = result.details.pageReconnected === true;
+        let reconnectedPage: puppeteer.Page | undefined = undefined;
+
+        if (pageReconnected && 'reconnectedPage' in result.details && result.details.reconnectedPage) {
+          reconnectedPage = result.details.reconnectedPage as puppeteer.Page;
+          logger.info(formatOperationLog('ActionUtils', options.nodeName, options.nodeId, options.index,
+            'Using reconnected page from click action'));
+        }
+
         // Convert to generic action result
         return {
           success: result.success,
           actionType: 'click',
           details: result.details,
-          error: result.error
+          error: result.error,
+          contextDestroyed,
+          pageReconnected,
+          reconnectedPage
         };
       }
 
@@ -117,12 +134,26 @@ export async function executeAction(
         // Execute the fill action
         const result = await executeFillAction(page, fillParams, fillOptions, logger);
 
+        // Check if we need to handle page reconnection
+        const contextDestroyed = result.contextDestroyed === true;
+        const pageReconnected = result.pageReconnected === true;
+        let reconnectedPage: puppeteer.Page | undefined = undefined;
+
+        if (pageReconnected && 'reconnectedPage' in result.details && result.details.reconnectedPage) {
+          reconnectedPage = result.details.reconnectedPage as puppeteer.Page;
+          logger.info(formatOperationLog('ActionUtils', options.nodeName, options.nodeId, options.index,
+            'Using reconnected page from fill action'));
+        }
+
         // Convert to generic action result
         return {
           success: result.success,
           actionType: 'fill',
           details: result.details,
-          error: result.error
+          error: result.error,
+          contextDestroyed,
+          pageReconnected,
+          reconnectedPage
         };
       }
 

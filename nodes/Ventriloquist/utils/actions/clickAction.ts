@@ -2,6 +2,7 @@ import type { IDataObject, Logger as ILogger } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
 import { formatOperationLog } from '../resultUtils';
 import { waitAndClick } from '../clickOperations';
+import { waitForUrlChange } from '../navigationUtils';
 
 /**
  * Interface for click action parameters
@@ -44,6 +45,10 @@ export async function executeClickAction(
   const { selector, waitAfterAction = 'domContentLoaded', waitTime = 5000, waitSelector } = parameters;
   const { nodeName, nodeId, index, selectorTimeout = 10000 } = options;
 
+  // Variables to track navigation state
+  let contextDestroyed = false;
+  let reconnectedPage: puppeteer.Page | null = null;
+
   if (!selector) {
     return {
       success: false,
@@ -80,7 +85,122 @@ export async function executeClickAction(
     if (waitAfterAction === 'fixedTime') {
       await new Promise(resolve => setTimeout(resolve, waitTime));
     } else if (waitAfterAction === 'urlChanged') {
-      await page.waitForNavigation({ timeout: waitTime });
+      try {
+        // Store browser reference for potential reconnection
+        const browser = page.browser();
+
+        // Get current URL to detect changes
+        const currentUrl = await page.url();
+
+        // Add initial stabilization delay
+        logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+          'Adding initial stabilization delay (1000ms)'));
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Track if context gets destroyed
+        contextDestroyed = false;
+        reconnectedPage = null;
+
+        try {
+          // Use waitForUrlChange utility from navigationUtils instead of waitForNavigation
+          const urlChanged = await waitForUrlChange(
+            page,
+            currentUrl,
+            waitTime,
+            logger
+          );
+
+          if (urlChanged) {
+            logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+              'Navigation after click completed successfully - URL changed'));
+          } else {
+            logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
+              `Navigation after click may not have completed - URL did not change from ${currentUrl}`));
+          }
+        } catch (navigationError) {
+          // This is expected in many cases when URL changes - the navigation destroys the execution context
+          if ((navigationError as Error).message.includes('context was destroyed') ||
+              (navigationError as Error).message.includes('Execution context')) {
+            contextDestroyed = true;
+            logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+              'Navigation context was destroyed, which likely indicates successful navigation'));
+
+            // When context is destroyed, try to reconnect to the page
+            try {
+              logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+                'Context destroyed - attempting to reconnect to the active page'));
+
+              // Add a recovery delay
+              const recoveryDelay = 3000;
+              logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+                `Adding recovery delay (${recoveryDelay}ms)`));
+              await new Promise(resolve => setTimeout(resolve, recoveryDelay));
+
+              // Get all browser pages and find the active one
+              const pages = await browser.pages();
+
+              if (pages.length > 0) {
+                // Use the last page as it's likely the one after navigation
+                reconnectedPage = pages[pages.length - 1];
+                logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+                  `Reconnected to page (${pages.length} pages found)`));
+              } else {
+                logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
+                  'No pages found in browser after navigation'));
+              }
+            } catch (reconnectError) {
+              logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
+                `Failed to reconnect to page: ${(reconnectError as Error).message}`));
+            }
+          } else {
+            // For other navigation errors, log but don't fail the action
+            logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
+              `Navigation after click encountered an issue: ${(navigationError as Error).message}`));
+          }
+        }
+
+        // Try to get new page info for diagnostics
+        try {
+          // Use the reconnected page if available, otherwise the original page
+          const activePage = reconnectedPage || page;
+
+          const newUrl = await activePage.url();
+          const pageTitle = await activePage.title();
+          logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+            `Page after navigation - URL: ${newUrl}, Title: ${pageTitle}`));
+
+          return {
+            success: true,
+            details: {
+              selector,
+              waitAfterAction,
+              waitTime,
+              contextDestroyed,
+              pageReconnected: !!reconnectedPage,
+              reconnectedPage: reconnectedPage  // Include the actual reconnected page object
+            }
+          };
+        } catch (pageInfoError) {
+          logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
+            `Could not get page info after navigation: ${(pageInfoError as Error).message}`));
+
+          return {
+            success: true,
+            details: {
+              selector,
+              waitAfterAction,
+              waitTime,
+              contextDestroyed,
+              pageReconnected: !!reconnectedPage,
+              reconnectedPage: reconnectedPage  // Include even in error case
+            }
+          };
+        }
+      } catch (error) {
+        // Log but don't fail the action for URL change errors
+        logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
+          `Error during URL change handling: ${(error as Error).message}`));
+      }
     } else if (waitAfterAction === 'selector' && waitSelector) {
       await page.waitForSelector(waitSelector, { timeout: waitTime });
     }
@@ -90,7 +210,8 @@ export async function executeClickAction(
       details: {
         selector,
         waitAfterAction,
-        waitTime
+        waitTime,
+        contextDestroyed: contextDestroyed ?? false
       }
     };
   } catch (error) {

@@ -1,8 +1,17 @@
 import type { IDataObject, Logger as ILogger } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
 import { formatOperationLog } from '../../resultUtils';
-import { waitAndClick } from '../../clickOperations';
-import { waitForUrlChange } from '../../navigationUtils';
+import { clickAndWaitForNavigation, type INavigationWaitResult } from '../../navigationUtils';
+
+// Add interface for the navigation result to match what clickAndWaitForNavigation returns
+interface INavigationResult {
+  success: boolean;
+  finalUrl?: string;
+  finalTitle?: string;
+  newPage?: puppeteer.Page;
+  contextDestroyed?: boolean;
+  error?: string;
+}
 
 /**
  * Interface for click action parameters
@@ -31,6 +40,11 @@ export interface IClickActionResult {
   success: boolean;
   details: IDataObject;
   error?: Error;
+  contextDestroyed?: boolean;
+  urlChanged?: boolean;
+  navigationSuccessful?: boolean;
+  pageReconnected?: boolean;
+  reconnectedPage?: puppeteer.Page;
 }
 
 /**
@@ -43,99 +57,204 @@ export async function executeClickAction(
   options: IClickActionOptions,
   logger: ILogger
 ): Promise<IClickActionResult> {
-  const { selector, waitAfterAction = 'domContentLoaded', waitTime = 5000, waitSelector } = parameters;
-  const { nodeName, nodeId, index, selectorTimeout = 10000 } = options;
+  const { selector, waitAfterAction = 'noWait', waitTime = 5000, waitSelector } = parameters;
+  const { nodeName, nodeId, index } = options;
 
-  if (!selector) {
-    return {
-      success: false,
-      details: { error: 'No selector provided for click action' },
-      error: new Error('No selector provided for click action')
-    };
-  }
+  // Get browser reference for potential reconnection
+  const browser = page.browser();
+
+  // Start executing the click action
+  logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+    `Executing click action on selector: "${selector}"`));
 
   try {
-    // eslint-disable-next-line @typescript-eslint/prefer-template
+    // Store the initial URL and title before clicking
+    const beforeUrl = await page.url();
+    const beforeTitle = await page.title();
+
     logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-      `Executing click on "${selector}" (wait: ${waitAfterAction}, timeout: ${waitTime}ms)`));
+      `Current page before click - URL: ${beforeUrl}, Title: ${beforeTitle}`));
 
-    // Use the waitAndClick utility which handles both waiting for the selector and clicking it
-    const clickResult = await waitAndClick(
-      page,
-      selector,
-      {
-        waitTimeout: selectorTimeout,
-        retries: 2,
-        waitBetweenRetries: 1000,
-        logger: logger
+    // Determine if we need to wait for navigation
+    const shouldWaitForNav =
+      waitAfterAction === 'urlChanged' ||
+      waitAfterAction === 'anyUrlChange' ||
+      waitAfterAction === 'navigationComplete';
+
+    if (shouldWaitForNav) {
+      // Use the simple navigation approach with Promise.all
+      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+        `Using navigation handling for click with waitAfterAction: ${waitAfterAction}`));
+
+      // Map the waitAfterAction to appropriate waitUntil option
+      let waitUntil: puppeteer.PuppeteerLifeCycleEvent = 'domcontentloaded';
+      if (waitAfterAction === 'navigationComplete') {
+        waitUntil = 'networkidle0';
       }
-    );
 
-    // Handle click failures
-    if (!clickResult.success) {
-      // eslint-disable-next-line @typescript-eslint/prefer-template
-      throw new Error(`Action failed: Could not click element "${selector}": ${clickResult.error?.message || 'Unknown error'}`);
-    }
-
-    // eslint-disable-next-line @typescript-eslint/prefer-template
-    logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-      `Click successful on "${selector}"`));
-
-    // Handle post-click waiting
-    if (waitAfterAction === 'fixedTime') {
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-    } else if (waitAfterAction === 'urlChanged') {
-      try {
-        // Get current URL to detect changes
-        const currentUrl = await page.url();
-
-        // Use waitForUrlChange utility from navigationUtils instead of waitForNavigation
-        // This avoids the "Unknown value for options.waitUntil: urlChanged" error
-        const urlChanged = await waitForUrlChange(
-          page,
-          currentUrl,
-          waitTime,
-          logger
-        );
-
-        if (urlChanged) {
-          // eslint-disable-next-line @typescript-eslint/prefer-template
-          logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-            `Navigation after click completed successfully - URL changed`));
-        } else {
-          // eslint-disable-next-line @typescript-eslint/prefer-template
-          logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
-            `Navigation after click may not have completed - URL did not change from ${currentUrl}`));
-        }
-      } catch (navigationError) {
-        // This is expected in many cases when URL changes - the navigation destroys the execution context
-        // Don't fail the action on this type of error
-        if ((navigationError as Error).message.includes('context was destroyed') ||
-            (navigationError as Error).message.includes('Execution context')) {
-          // eslint-disable-next-line @typescript-eslint/prefer-template
-          logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-            `Navigation context was destroyed, which likely indicates successful navigation`));
-        } else {
-          // For other navigation errors, log but don't fail the action
-          // eslint-disable-next-line @typescript-eslint/prefer-template
-          logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
-            `Navigation after click encountered an issue: ${(navigationError as Error).message}`));
-        }
-      }
-    } else if (waitAfterAction === 'selector' && waitSelector) {
-      await page.waitForSelector(waitSelector, { timeout: waitTime });
-    }
-
-    return {
-      success: true,
-      details: {
+      // Use our simplified navigation utility
+      const navigationResult = await clickAndWaitForNavigation(
+        page,
         selector,
-        waitAfterAction,
-        waitTime
+        {
+          timeout: waitTime,
+          waitUntil,
+          stabilizationDelay: 2000,
+          logger
+        }
+      );
+
+      if (navigationResult.success) {
+        // Navigation was successful
+        const finalUrl = navigationResult.finalUrl || '';
+        logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+          `Click with navigation successful - Final URL: ${finalUrl}`));
+
+        // If we got a new page reference, track it
+        let pageReconnected = false;
+        const newPage = navigationResult.newPage;
+        if (newPage) {
+          pageReconnected = true;
+          logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+            'Using reconnected page after navigation'));
+        }
+
+        return {
+          success: true,
+          urlChanged: beforeUrl !== finalUrl,
+          navigationSuccessful: true,
+          contextDestroyed: navigationResult.contextDestroyed || false,
+          pageReconnected,
+          details: {
+            selector,
+            waitAfterAction,
+            waitTime,
+            beforeUrl,
+            finalUrl,
+            beforeTitle,
+            finalTitle: navigationResult.finalTitle || '',
+            urlChanged: beforeUrl !== finalUrl,
+            navigationSuccessful: true,
+            contextDestroyed: navigationResult.contextDestroyed || false,
+            pageReconnected,
+            reconnectedPage: newPage
+          }
+        };
+      } else {
+        // Navigation failed, but click might have succeeded
+        logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
+          `Click succeeded but navigation may not have occurred: ${navigationResult.error || 'Unknown error'}`));
+
+        return {
+          success: true, // The click itself was successful
+          urlChanged: false,
+          navigationSuccessful: false,
+          details: {
+            selector,
+            waitAfterAction,
+            waitTime,
+            beforeUrl,
+            beforeTitle,
+            error: navigationResult.error || 'Navigation failed with no specific error',
+            navigationSuccessful: false
+          }
+        };
       }
-    };
+    }
+    else if (waitAfterAction === 'fixedTime') {
+      // Simple click with fixed time wait
+      await page.click(selector);
+
+      // Wait for the specified time
+      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+        `Waiting fixed time after click: ${waitTime}ms`));
+
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+
+      // Get the final URL and title
+      const finalUrl = await page.url();
+      const finalTitle = await page.title();
+
+      // Log the action result
+      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+        `Click with fixed wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
+
+      return {
+        success: true,
+        urlChanged: beforeUrl !== finalUrl,
+        details: {
+          selector,
+          waitAfterAction,
+          waitTime,
+          beforeUrl,
+          finalUrl,
+          beforeTitle,
+          finalTitle,
+          urlChanged: beforeUrl !== finalUrl
+        }
+      };
+    }
+    else if (waitAfterAction === 'selector' && waitSelector) {
+      // Click and wait for a selector to appear
+      await page.click(selector);
+
+      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+        `Waiting for selector after click: ${waitSelector}, timeout: ${waitTime}ms`));
+
+      await page.waitForSelector(waitSelector, { timeout: waitTime });
+
+      // Get the final URL and title
+      const finalUrl = await page.url();
+      const finalTitle = await page.title();
+
+      // Log the action result
+      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+        `Click with selector wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
+
+      return {
+        success: true,
+        urlChanged: beforeUrl !== finalUrl,
+        details: {
+          selector,
+          waitAfterAction,
+          waitSelector,
+          waitTime,
+          beforeUrl,
+          finalUrl,
+          beforeTitle,
+          finalTitle,
+          urlChanged: beforeUrl !== finalUrl
+        }
+      };
+    }
+    else {
+      // Simple click with no wait
+      await page.click(selector);
+
+      // Get the final URL and title
+      const finalUrl = await page.url();
+      const finalTitle = await page.title();
+
+      // Log the action result
+      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+        `Click with no wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
+
+      return {
+        success: true,
+        urlChanged: beforeUrl !== finalUrl,
+        details: {
+          selector,
+          waitAfterAction,
+          beforeUrl,
+          finalUrl,
+          beforeTitle,
+          finalTitle,
+          urlChanged: beforeUrl !== finalUrl
+        }
+      };
+    }
   } catch (error) {
-    // eslint-disable-next-line @typescript-eslint/prefer-template
+    // Handle click action errors
     logger.error(formatOperationLog('ClickAction', nodeName, nodeId, index,
       `Error during click action: ${(error as Error).message}`));
 
@@ -144,9 +263,11 @@ export async function executeClickAction(
       details: {
         selector,
         waitAfterAction,
-        waitTime
+        waitTime,
+        error: (error as Error).message
       },
       error: error as Error
     };
   }
 }
+
