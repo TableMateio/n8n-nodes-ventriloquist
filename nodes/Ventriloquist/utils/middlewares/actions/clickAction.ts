@@ -104,7 +104,7 @@ export async function executeClickAction(
         waitUntil = 'networkidle0';
       }
 
-      // Use our simplified navigation utility
+      // Use our simplified navigation utility with proper timeout
       const navigationResult = await clickAndWaitForNavigation(
         sessionId,
         selector,
@@ -150,26 +150,26 @@ export async function executeClickAction(
             contextDestroyed: navigationResult.contextDestroyed || false
           }
         };
-      } else {
-        // Navigation failed, but click might have succeeded
-        logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
-          `Click succeeded but navigation may not have occurred: ${navigationResult.error || 'Unknown error'}`));
-
-        return {
-          success: true, // The click itself was successful
-          urlChanged: false,
-          navigationSuccessful: false,
-          details: {
-            selector,
-            waitAfterAction,
-            waitTime,
-            beforeUrl,
-            beforeTitle,
-            error: navigationResult.error || 'Navigation failed with no specific error',
-            navigationSuccessful: false
-          }
-        };
       }
+
+      // Navigation failed, but click might have succeeded
+      logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
+        `Click succeeded but navigation may not have occurred: ${navigationResult.error || 'Unknown error'}`));
+
+      return {
+        success: true, // The click itself was successful
+        urlChanged: false,
+        navigationSuccessful: false,
+        details: {
+          selector,
+          waitAfterAction,
+          waitTime,
+          beforeUrl,
+          beforeTitle,
+          error: navigationResult.error || 'Navigation failed with no specific error',
+          navigationSuccessful: false
+        }
+      };
     }
 
     if (waitAfterAction === 'fixedTime') {
