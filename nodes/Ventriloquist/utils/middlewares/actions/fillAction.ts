@@ -2,7 +2,7 @@ import type { IDataObject, Logger as ILogger } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
 import { formatOperationLog } from '../../resultUtils';
 import { processFormField } from '../../formOperations';
-import { waitForUrlChange, submitFormAndWaitForNavigation } from '../../navigationUtils';
+import { submitFormAndWaitForNavigation } from '../../navigationUtils';
 
 /**
  * Interface for fill action parameters
@@ -30,6 +30,7 @@ export interface IFillActionOptions {
   index: number;
   useHumanDelays?: boolean;
   selectorTimeout?: number;
+  sessionId: string;
 }
 
 /**
@@ -80,6 +81,7 @@ export async function executeFillAction(
     nodeId,
     index,
     useHumanDelays = false,
+    sessionId
   } = options;
 
   if (!selector) {
@@ -160,8 +162,10 @@ export async function executeFillAction(
             const initialUrl = await page.url();
 
             // Use the simpler navigation approach
-            const navigationResult = await submitFormAndWaitForNavigation(page, {
-              timeout: waitTime,
+            logger.info(`Using submitFormAndWaitForNavigation utility with ${pressEnter ? 'Enter key' : 'direct action'}`);
+
+            const navigationResult = await submitFormAndWaitForNavigation(sessionId, {
+              timeout: 30000,
               waitUntil: 'networkidle0',
               stabilizationDelay: 2000,
               logger

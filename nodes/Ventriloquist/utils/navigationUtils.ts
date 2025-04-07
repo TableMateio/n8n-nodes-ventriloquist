@@ -2,6 +2,7 @@
 import type { Page } from 'puppeteer-core';
 import type { Logger as ILogger } from 'n8n-workflow';
 // import { reconnectAfterNavigation } from './sessionUtils';
+import { SessionManager } from './sessionManager';
 
 /**
  * Wait for an element to be visible/active on page with smart detection
@@ -243,15 +244,23 @@ export async function isElementVisible(page: Page, selector: string): Promise<bo
 
 /**
  * Wait for a URL change with improved detection of both hard and soft URL changes
+ * Modified to use sessionId instead of page directly
  */
 export async function waitForUrlChange(
-  page: Page,
+  sessionId: string,
   currentUrl: string,
   timeout: number,
   logger: ILogger,
 ): Promise<boolean> {
   try {
     logger.info(`Waiting for URL to change from: ${currentUrl} (timeout: ${timeout}ms)`);
+
+    // Get the current page from SessionManager
+    let page = SessionManager.getPage(sessionId);
+    if (!page) {
+      logger.error(`No page found for session ${sessionId}`);
+      return false;
+    }
 
     // Store browser reference for potential reconnection after context destruction
     const browser = page.browser();
@@ -272,6 +281,13 @@ export async function waitForUrlChange(
 
       while (Date.now() - startPollTime < timeout) {
         try {
+          // Get fresh page reference before each check
+          page = SessionManager.getPage(sessionId);
+          if (!page) {
+            logger.warn(`No page found for session ${sessionId} during URL polling`);
+            return false;
+          }
+
           // Wait for polling interval
           await new Promise(resolve => setTimeout(resolve, pollInterval));
 
@@ -307,8 +323,11 @@ export async function waitForUrlChange(
 
     // Use multiple detection strategies in parallel
 
+    // Always get a fresh page reference before setting up detection
+    page = SessionManager.getPage(sessionId) || page;
+
     // 1. Traditional waitForFunction approach
-    const waitFunctionPromise = page.waitForFunction(
+    const waitFunctionPromise = page ? page.waitForFunction(
       (url) => window.location.href !== url,
       { timeout },
       currentUrl
@@ -322,21 +341,23 @@ export async function waitForUrlChange(
 
       logger.warn(`waitForFunction error: ${(error as Error).message}`);
       return false;
-    });
+    }) : Promise.resolve(false);
 
     // 2. Polling approach
     const pollingPromise = pollForUrlChanges();
 
     // 3. Context destroyed error handler
     const contextPromise = new Promise<boolean>((resolve) => {
-      page.once('error', (error) => {
-        if (error.message.includes('context was destroyed') ||
-            error.message.includes('Execution context')) {
-          contextDestroyed = true;
-          logger.info('Context destruction event detected - this indicates navigation');
-          resolve(true);
-        }
-      });
+      if (page) {
+        page.once('error', (error) => {
+          if (error.message.includes('context was destroyed') ||
+              error.message.includes('Execution context')) {
+            contextDestroyed = true;
+            logger.info('Context destruction event detected - this indicates navigation');
+            resolve(true);
+          }
+        });
+      }
 
       // Ensure promise is resolved if context is never destroyed
       setTimeout(() => resolve(false), timeout);
@@ -344,10 +365,12 @@ export async function waitForUrlChange(
 
     // 4. Navigation listener for hard navigations
     const navigationPromise = new Promise<boolean>((resolve) => {
-      page.once('navigation', () => {
-        logger.info('Navigation event detected');
-        resolve(true);
-      });
+      if (page) {
+        page.once('navigation', () => {
+          logger.info('Navigation event detected');
+          resolve(true);
+        });
+      }
 
       // Ensure promise is resolved if navigation event never fires
       setTimeout(() => resolve(false), timeout);
@@ -373,6 +396,9 @@ export async function waitForUrlChange(
 
       // Use our centralized session/page reconnection logic to get a valid page
       try {
+        // Get a fresh page reference
+        page = SessionManager.getPage(sessionId);
+
         // Check if context was destroyed or page needs reconnection
         if (contextDestroyed) {
           logger.info('Context was destroyed during URL change - checking browser state');
@@ -388,6 +414,11 @@ export async function waitForUrlChange(
               try {
                 const newUrl = await newPage.url();
                 logger.info(`Page after navigation: ${newUrl}`);
+
+                // Important: Store the new page in SessionManager
+                const pageId = `page_${Date.now()}`;
+                SessionManager.storePage(sessionId, pageId, newPage);
+                logger.info(`Updated SessionManager with new page after URL change`);
 
                 // Verify URL has changed
                 if (newUrl !== currentUrl) {
@@ -412,6 +443,13 @@ export async function waitForUrlChange(
         } else {
           // Context wasn't destroyed, verify URL changed
           try {
+            // Get fresh page reference
+            page = SessionManager.getPage(sessionId);
+            if (!page) {
+              logger.warn(`No page found for session ${sessionId} after URL change check`);
+              return false;
+            }
+
             const newUrl = await page.url();
             const urlChanged = newUrl !== currentUrl;
 
@@ -435,6 +473,13 @@ export async function waitForUrlChange(
 
     // Check once more to see if the URL has changed despite not detecting it earlier
     try {
+      // Get fresh page reference for final check
+      page = SessionManager.getPage(sessionId);
+      if (!page) {
+        logger.warn(`No page found for session ${sessionId} at final URL check`);
+        return false;
+      }
+
       const finalUrl = await page.url();
       const finalChanged = finalUrl !== currentUrl;
 
@@ -553,8 +598,12 @@ export interface INavigationWaitResult {
   error?: string;
 }
 
+/**
+ * Improved function to click an element and wait for navigation
+ * Modified to use sessionId instead of direct page references
+ */
 export async function clickAndWaitForNavigation(
-  page: Page,
+  sessionId: string,
   selector: string,
   options: {
     timeout?: number;
@@ -579,18 +628,25 @@ export async function clickAndWaitForNavigation(
   };
 
   try {
+    // Get the current page from SessionManager
+    const page = SessionManager.getPage(sessionId);
+    if (!page) {
+      log.warn(`No page found for session ${sessionId}`);
+      return { success: false, error: `No page found for session ${sessionId}` };
+    }
+
     // Try to find the element to click
     log.info(`Attempting to click ${selector} and wait for navigation`);
 
     const element = await page.$(selector);
     if (!element) {
-      log.warn('Element not found: ' + selector);
-      return { success: false, error: 'Element not found: ' + selector };
+      log.warn(`Element not found: ${selector}`);
+      return { success: false, error: `Element not found: ${selector}` };
     }
 
     // Store initial URL for comparison
     const initialUrl = await page.url();
-    log.info('Current URL before navigation: ' + initialUrl);
+    log.info(`Current URL before navigation: ${initialUrl}`);
 
     // Use Promise.all to wait for navigation while clicking
     log.info('Starting navigation...');
@@ -601,15 +657,15 @@ export async function clickAndWaitForNavigation(
     ]);
 
     // Add stabilization delay after navigation
-    log.info('Adding stabilization delay: ' + stabilizationDelay + 'ms');
+    log.info(`Adding stabilization delay: ${stabilizationDelay}ms`);
     await new Promise(resolve => setTimeout(resolve, stabilizationDelay));
 
-    // Get the final URL and title
+    // Get the final URL and title - Using the same page reference since navigation was successful
     const finalUrl = await page.url();
     const finalTitle = await page.title();
 
     // Log success
-    log.info('Navigation completed successfully after clicking ' + selector);
+    log.info(`Navigation completed successfully after clicking ${selector}`);
     return {
       success: true,
       finalUrl,
@@ -622,16 +678,34 @@ export async function clickAndWaitForNavigation(
       log.info('Navigation context was destroyed, which is normal during page transitions');
 
       try {
-        // Try to get a new page - often the last page in the browser
-        const browser = page.browser();
+        // Try to get a new page reference from the browser
+        const existingSession = SessionManager.getSession(sessionId);
+        if (!existingSession) {
+          log.warn(`Session ${sessionId} no longer exists`);
+          return {
+            success: true,
+            contextDestroyed: true,
+            error: `Session ${sessionId} no longer exists, but navigation likely succeeded`
+          };
+        }
+
+        const browser = existingSession.browser;
         const pages = await browser.pages();
 
         if (pages.length > 0) {
+          // Use the last page as it's likely the active one after navigation
           const newPage = pages[pages.length - 1];
+
+          // Store this new page in the session manager
+          const pageId = `page_${Date.now()}`;
+          SessionManager.storePage(sessionId, pageId, newPage);
+          log.info(`Updated session ${sessionId} with new page after navigation`);
+
+          // Get URL and title from the new page
           const finalUrl = await newPage.url();
           const finalTitle = await newPage.title();
 
-          log.info('Reconnected to new page after context destruction');
+          log.info(`Reconnected to new page after context destruction: ${finalUrl}`);
 
           return {
             success: true,
@@ -642,7 +716,7 @@ export async function clickAndWaitForNavigation(
           };
         }
       } catch (reconnectError) {
-        log.warn('Failed to reconnect after context destruction: ' + (reconnectError as Error).message);
+        log.warn(`Failed to reconnect after context destruction: ${(reconnectError as Error).message}`);
       }
 
       // Add recovery delay
@@ -653,7 +727,7 @@ export async function clickAndWaitForNavigation(
       };
     }
 
-    log.warn('Navigation error: ' + (error as Error).message);
+    log.warn(`Navigation error: ${(error as Error).message}`);
     return {
       success: false,
       error: (error as Error).message
@@ -664,9 +738,10 @@ export async function clickAndWaitForNavigation(
 /**
  * Simple function to handle form submission and navigation
  * Uses the press Enter approach with navigation wait
+ * Modified to use sessionId instead of direct page references
  */
 export async function submitFormAndWaitForNavigation(
-  page: Page,
+  sessionId: string,
   options: {
     timeout?: number;
     waitUntil?: 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2';
@@ -685,6 +760,13 @@ export async function submitFormAndWaitForNavigation(
   } = options;
 
   try {
+    // Get the current page from SessionManager
+    const page = SessionManager.getPage(sessionId);
+    if (!page) {
+      logger.error(`No page found for session ${sessionId}`);
+      return { success: false };
+    }
+
     logger.info(`Pressing Enter and waiting for navigation (waitUntil: ${waitUntil}, timeout: ${timeout}ms)`);
 
     // Use Promise.all to wait for navigation while pressing Enter
@@ -716,10 +798,23 @@ export async function submitFormAndWaitForNavigation(
 
       // Try to get a new page reference
       try {
-        const browser = page.browser();
+        // Get the session and browser reference
+        const session = SessionManager.getSession(sessionId);
+        if (!session) {
+          logger.warn(`Session ${sessionId} no longer exists`);
+          return { success: true }; // Assume navigation succeeded even without session
+        }
+
+        const browser = session.browser;
         const pages = await browser.pages();
+
         if (pages.length > 0) {
           const newPage = pages[pages.length - 1];
+
+          // Store the new page in SessionManager
+          const pageId = `page_${Date.now()}`;
+          SessionManager.storePage(sessionId, pageId, newPage);
+
           logger.info('Successfully acquired new page reference after context destruction');
           return { success: true, newPage };
         }

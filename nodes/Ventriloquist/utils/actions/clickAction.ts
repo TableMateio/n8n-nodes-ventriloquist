@@ -22,6 +22,7 @@ export interface IClickActionOptions {
   nodeId: string;
   index: number;
   selectorTimeout?: number;
+  sessionId: string;
 }
 
 /**
@@ -43,7 +44,7 @@ export async function executeClickAction(
   logger: ILogger
 ): Promise<IClickActionResult> {
   const { selector, waitAfterAction = 'domContentLoaded', waitTime = 5000, waitSelector } = parameters;
-  const { nodeName, nodeId, index, selectorTimeout = 10000 } = options;
+  const { nodeName, nodeId, index, sessionId, selectorTimeout = 10000 } = options;
 
   // Variables to track navigation state
   let contextDestroyed = false;
@@ -104,7 +105,7 @@ export async function executeClickAction(
         try {
           // Use waitForUrlChange utility from navigationUtils instead of waitForNavigation
           const urlChanged = await waitForUrlChange(
-            page,
+            sessionId,
             currentUrl,
             waitTime,
             logger

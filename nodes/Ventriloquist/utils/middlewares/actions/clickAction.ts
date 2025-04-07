@@ -1,17 +1,8 @@
 import type { IDataObject, Logger as ILogger } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
 import { formatOperationLog } from '../../resultUtils';
-import { clickAndWaitForNavigation, type INavigationWaitResult } from '../../navigationUtils';
-
-// Add interface for the navigation result to match what clickAndWaitForNavigation returns
-interface INavigationResult {
-  success: boolean;
-  finalUrl?: string;
-  finalTitle?: string;
-  newPage?: puppeteer.Page;
-  contextDestroyed?: boolean;
-  error?: string;
-}
+import { clickAndWaitForNavigation } from '../../navigationUtils';
+import { SessionManager } from '../../sessionManager';
 
 /**
  * Interface for click action parameters
@@ -27,6 +18,7 @@ export interface IClickActionParameters {
  * Interface for click action options
  */
 export interface IClickActionOptions {
+  sessionId: string;
   nodeName: string;
   nodeId: string;
   index: number;
@@ -43,31 +35,51 @@ export interface IClickActionResult {
   contextDestroyed?: boolean;
   urlChanged?: boolean;
   navigationSuccessful?: boolean;
-  pageReconnected?: boolean;
-  reconnectedPage?: puppeteer.Page;
 }
 
 /**
- * Execute a click action on the page
- * Extracted as a middleware to be reused across different operations
+ * Execute a click action using SessionManager
+ * This version is page-agnostic and relies on SessionManager for page references
  */
 export async function executeClickAction(
-  page: puppeteer.Page,
   parameters: IClickActionParameters,
   options: IClickActionOptions,
   logger: ILogger
 ): Promise<IClickActionResult> {
   const { selector, waitAfterAction = 'noWait', waitTime = 5000, waitSelector } = parameters;
-  const { nodeName, nodeId, index } = options;
+  const { sessionId, nodeName, nodeId, index } = options;
 
-  // Get browser reference for potential reconnection
-  const browser = page.browser();
-
-  // Start executing the click action
+  // Log action start
   logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-    `Executing click action on selector: "${selector}"`));
+    `Executing click action on selector: "${selector}" using session: ${sessionId}`));
+
+  // First, verify the session exists and get the current page
+  if (!await SessionManager.isSessionActive(sessionId)) {
+    return {
+      success: false,
+      details: {
+        error: `Session ${sessionId} is not active or has expired`,
+        selector
+      },
+      error: new Error(`Session ${sessionId} is not active or has expired`)
+    };
+  }
 
   try {
+    // Get the current page from session manager
+    const page = SessionManager.getPage(sessionId);
+
+    if (!page) {
+      return {
+        success: false,
+        details: {
+          error: `No page found for session ${sessionId}`,
+          selector
+        },
+        error: new Error(`No page found for session ${sessionId}`)
+      };
+    }
+
     // Store the initial URL and title before clicking
     const beforeUrl = await page.url();
     const beforeTitle = await page.title();
@@ -94,7 +106,7 @@ export async function executeClickAction(
 
       // Use our simplified navigation utility
       const navigationResult = await clickAndWaitForNavigation(
-        page,
+        sessionId,
         selector,
         {
           timeout: waitTime,
@@ -110,13 +122,14 @@ export async function executeClickAction(
         logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
           `Click with navigation successful - Final URL: ${finalUrl}`));
 
-        // If we got a new page reference, track it
-        let pageReconnected = false;
-        const newPage = navigationResult.newPage;
-        if (newPage) {
-          pageReconnected = true;
+        // If we got a new page reference, update the session manager
+        if (navigationResult.newPage) {
           logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-            'Using reconnected page after navigation'));
+            'Updating session manager with new page reference after navigation'));
+
+          // Store the new page in the session manager with a timestamp-based ID
+          const pageId = `page_${Date.now()}`;
+          SessionManager.storePage(sessionId, pageId, navigationResult.newPage);
         }
 
         return {
@@ -124,7 +137,6 @@ export async function executeClickAction(
           urlChanged: beforeUrl !== finalUrl,
           navigationSuccessful: true,
           contextDestroyed: navigationResult.contextDestroyed || false,
-          pageReconnected,
           details: {
             selector,
             waitAfterAction,
@@ -135,9 +147,7 @@ export async function executeClickAction(
             finalTitle: navigationResult.finalTitle || '',
             urlChanged: beforeUrl !== finalUrl,
             navigationSuccessful: true,
-            contextDestroyed: navigationResult.contextDestroyed || false,
-            pageReconnected,
-            reconnectedPage: newPage
+            contextDestroyed: navigationResult.contextDestroyed || false
           }
         };
       } else {
@@ -161,7 +171,8 @@ export async function executeClickAction(
         };
       }
     }
-    else if (waitAfterAction === 'fixedTime') {
+
+    if (waitAfterAction === 'fixedTime') {
       // Simple click with fixed time wait
       await page.click(selector);
 
@@ -171,9 +182,26 @@ export async function executeClickAction(
 
       await new Promise(resolve => setTimeout(resolve, waitTime));
 
-      // Get the final URL and title
-      const finalUrl = await page.url();
-      const finalTitle = await page.title();
+      // Get the final URL and title - using the session to get the current page
+      const currentPage = SessionManager.getPage(sessionId);
+
+      if (!currentPage) {
+        return {
+          success: true, // Click succeeded but we lost the page reference
+          details: {
+            selector,
+            waitAfterAction,
+            waitTime,
+            beforeUrl,
+            beforeTitle,
+            error: 'Could not get current page after click with fixed wait',
+            sessionId
+          }
+        };
+      }
+
+      const finalUrl = await currentPage.url();
+      const finalTitle = await currentPage.title();
 
       // Log the action result
       logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
@@ -190,11 +218,13 @@ export async function executeClickAction(
           finalUrl,
           beforeTitle,
           finalTitle,
-          urlChanged: beforeUrl !== finalUrl
+          urlChanged: beforeUrl !== finalUrl,
+          sessionId
         }
       };
     }
-    else if (waitAfterAction === 'selector' && waitSelector) {
+
+    if (waitAfterAction === 'selector' && waitSelector) {
       // Click and wait for a selector to appear
       await page.click(selector);
 
@@ -203,9 +233,27 @@ export async function executeClickAction(
 
       await page.waitForSelector(waitSelector, { timeout: waitTime });
 
-      // Get the final URL and title
-      const finalUrl = await page.url();
-      const finalTitle = await page.title();
+      // Get the final URL and title - using the session to get the current page
+      const currentPage = SessionManager.getPage(sessionId);
+
+      if (!currentPage) {
+        return {
+          success: true, // Click succeeded but we lost the page reference
+          details: {
+            selector,
+            waitAfterAction,
+            waitSelector,
+            waitTime,
+            beforeUrl,
+            beforeTitle,
+            error: 'Could not get current page after click with selector wait',
+            sessionId
+          }
+        };
+      }
+
+      const finalUrl = await currentPage.url();
+      const finalTitle = await currentPage.title();
 
       // Log the action result
       logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
@@ -223,36 +271,53 @@ export async function executeClickAction(
           finalUrl,
           beforeTitle,
           finalTitle,
-          urlChanged: beforeUrl !== finalUrl
+          urlChanged: beforeUrl !== finalUrl,
+          sessionId
         }
       };
     }
-    else {
-      // Simple click with no wait
-      await page.click(selector);
 
-      // Get the final URL and title
-      const finalUrl = await page.url();
-      const finalTitle = await page.title();
+    // Simple click with no wait (default case)
+    await page.click(selector);
 
-      // Log the action result
-      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `Click with no wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
+    // Get the final URL and title - using the session to get the current page
+    const currentPage = SessionManager.getPage(sessionId);
 
+    if (!currentPage) {
       return {
-        success: true,
-        urlChanged: beforeUrl !== finalUrl,
+        success: true, // Click succeeded but we lost the page reference
         details: {
           selector,
           waitAfterAction,
           beforeUrl,
-          finalUrl,
           beforeTitle,
-          finalTitle,
-          urlChanged: beforeUrl !== finalUrl
+          error: 'Could not get current page after click with no wait',
+          sessionId
         }
       };
     }
+
+    const finalUrl = await currentPage.url();
+    const finalTitle = await currentPage.title();
+
+    // Log the action result
+    logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+      `Click with no wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
+
+    return {
+      success: true,
+      urlChanged: beforeUrl !== finalUrl,
+      details: {
+        selector,
+        waitAfterAction,
+        beforeUrl,
+        finalUrl,
+        beforeTitle,
+        finalTitle,
+        urlChanged: beforeUrl !== finalUrl,
+        sessionId
+      }
+    };
   } catch (error) {
     // Handle click action errors
     logger.error(formatOperationLog('ClickAction', nodeName, nodeId, index,
@@ -264,7 +329,8 @@ export async function executeClickAction(
         selector,
         waitAfterAction,
         waitTime,
-        error: (error as Error).message
+        error: (error as Error).message,
+        sessionId
       },
       error: error as Error
     };
