@@ -252,21 +252,25 @@ export async function waitForUrlChange(
   timeout: number,
   logger: ILogger,
 ): Promise<boolean> {
+  const logPrefix = '[NavigationUtils][waitForUrlChange]';
+  logger.info(`${logPrefix} Called with sessionId: ${sessionId}, currentUrl: ${currentUrl}, timeout: ${timeout}ms`);
+
   try {
-    logger.info(`Waiting for URL to change from: ${currentUrl} (timeout: ${timeout}ms)`);
+    logger.info(`${logPrefix} Starting URL change detection from: ${currentUrl}`);
 
     // Get the current page from SessionManager
     let page = SessionManager.getPage(sessionId);
     if (!page) {
-      logger.error(`No page found for session ${sessionId}`);
+      logger.error(`${logPrefix} No page found for session ${sessionId}`);
       return false;
     }
 
     // Store browser reference for potential reconnection after context destruction
     const browser = page.browser();
+    logger.info(`${logPrefix} Retrieved browser reference for potential reconnection`);
 
     // Add diagnostic logging for session state before URL change
-    logger.info(`Session state before URL change - Connection status: ${page.isClosed() ? 'Closed' : 'Open'}`);
+    logger.info(`${logPrefix} Session state before URL change - Connection status: ${page.isClosed() ? 'Closed' : 'Open'}`);
 
     // Add timestamp for timing analysis
     const startTime = Date.now();
@@ -278,13 +282,14 @@ export async function waitForUrlChange(
     const pollForUrlChanges = async (pollInterval = 500): Promise<boolean> => {
       const startPollTime = Date.now();
       let currentPolledUrl = currentUrl;
+      logger.info(`${logPrefix} Starting URL polling with interval: ${pollInterval}ms`);
 
       while (Date.now() - startPollTime < timeout) {
         try {
           // Get fresh page reference before each check
           page = SessionManager.getPage(sessionId);
           if (!page) {
-            logger.warn(`No page found for session ${sessionId} during URL polling`);
+            logger.warn(`${logPrefix} No page found for session ${sessionId} during URL polling`);
             return false;
           }
 
@@ -296,7 +301,7 @@ export async function waitForUrlChange(
 
           // If URL has changed, we're done
           if (newUrl !== currentUrl) {
-            logger.info(`URL change detected via polling after ${Date.now() - startPollTime}ms: ${currentUrl} → ${newUrl}`);
+            logger.info(`${logPrefix} URL change detected via polling after ${Date.now() - startPollTime}ms: ${currentUrl} → ${newUrl}`);
             return true;
           }
 
@@ -307,53 +312,60 @@ export async function waitForUrlChange(
           if ((error as Error).message.includes('context was destroyed') ||
               (error as Error).message.includes('Execution context')) {
             contextDestroyed = true;
-            logger.info('Context destroyed during URL polling - this indicates navigation');
+            logger.info(`${logPrefix} Context destroyed during URL polling - this indicates navigation`);
             return true;
           }
 
           // For other errors, log and continue polling
-          logger.warn(`Error during URL polling: ${(error as Error).message}`);
+          logger.warn(`${logPrefix} Error during URL polling: ${(error as Error).message}`);
         }
       }
 
       // If we get here, polling timed out
-      logger.warn(`URL polling timed out after ${timeout}ms, last URL: ${currentPolledUrl}`);
+      logger.warn(`${logPrefix} URL polling timed out after ${timeout}ms, last URL: ${currentPolledUrl}`);
       return false;
     };
 
     // Use multiple detection strategies in parallel
+    logger.info(`${logPrefix} Setting up multiple URL change detection strategies`);
 
     // Always get a fresh page reference before setting up detection
     page = SessionManager.getPage(sessionId) || page;
 
     // 1. Traditional waitForFunction approach
+    logger.info(`${logPrefix} Setting up waitForFunction detection`);
     const waitFunctionPromise = page ? page.waitForFunction(
       (url) => window.location.href !== url,
       { timeout },
       currentUrl
-    ).then(() => true).catch(error => {
+    ).then(() => {
+      logger.info(`${logPrefix} URL change detected via waitForFunction`);
+      return true;
+    }).catch(error => {
       if ((error as Error).message.includes('context was destroyed') ||
           (error as Error).message.includes('Execution context')) {
         contextDestroyed = true;
-        logger.info('Context destruction detected during URL change wait - this indicates navigation');
+        logger.info(`${logPrefix} Context destruction detected during waitForFunction - this indicates navigation`);
         return true;
       }
 
-      logger.warn(`waitForFunction error: ${(error as Error).message}`);
+      logger.warn(`${logPrefix} waitForFunction error: ${(error as Error).message}`);
       return false;
     }) : Promise.resolve(false);
 
     // 2. Polling approach
+    logger.info(`${logPrefix} Setting up polling detection`);
     const pollingPromise = pollForUrlChanges();
 
     // 3. Context destroyed error handler
+    logger.info(`${logPrefix} Setting up context destruction event listener`);
     const contextPromise = new Promise<boolean>((resolve) => {
       if (page) {
         page.once('error', (error) => {
           if (error.message.includes('context was destroyed') ||
               error.message.includes('Execution context')) {
             contextDestroyed = true;
-            logger.info('Context destruction event detected - this indicates navigation');
+            logger.info(`${logPrefix} Context destruction event detected - this indicates navigation`);
             resolve(true);
           }
         });
@@ -364,10 +376,11 @@ export async function waitForUrlChange(
     });
 
     // 4. Navigation listener for hard navigations
+    logger.info(`${logPrefix} Setting up navigation event listener`);
     const navigationPromise = new Promise<boolean>((resolve) => {
       if (page) {
         page.once('navigation', () => {
-          logger.info('Navigation event detected');
+          logger.info(`${logPrefix} Navigation event detected`);
           resolve(true);
         });
       }
@@ -377,6 +390,7 @@ export async function waitForUrlChange(
     });
 
     // Race all detection methods
+    logger.info(`${logPrefix} Starting race between all URL change detection methods`);
     const urlChanged = await Promise.race([
       waitFunctionPromise,
       pollingPromise,
@@ -387,96 +401,103 @@ export async function waitForUrlChange(
     // If any method detected a change, consider it successful
     if (urlChanged) {
       const waitDuration = Date.now() - startTime;
-      logger.info(`URL change detected after ${waitDuration}ms`);
+      logger.info(`${logPrefix} URL change detected after ${waitDuration}ms`);
 
       // Add stabilization delay after URL change detected
       const stabilizationDelay = 2000;
-      logger.info(`Adding stabilization delay after URL change (${stabilizationDelay}ms)`);
+      logger.info(`${logPrefix} Adding stabilization delay after URL change (${stabilizationDelay}ms)`);
       await new Promise(resolve => setTimeout(resolve, stabilizationDelay));
 
       // Use our centralized session/page reconnection logic to get a valid page
       try {
         // Get a fresh page reference
+        logger.info(`${logPrefix} Getting fresh page reference after URL change`);
         page = SessionManager.getPage(sessionId);
 
         // Check if context was destroyed or page needs reconnection
         if (contextDestroyed) {
-          logger.info('Context was destroyed during URL change - checking browser state');
+          logger.info(`${logPrefix} Context was destroyed during URL change - checking browser state`);
 
           try {
             // Try to get all pages from browser to find the active one
+            logger.info(`${logPrefix} Getting all pages from browser after context destruction`);
             const pages = await browser.pages();
+            logger.info(`${logPrefix} Found ${pages.length} pages in browser after context destruction`);
 
             if (pages.length > 0) {
               // Use the last page as it's likely the active one
               const newPage = pages[pages.length - 1];
+              logger.info(`${logPrefix} Using most recent page (index: ${pages.length - 1})`);
 
               try {
                 const newUrl = await newPage.url();
-                logger.info(`Page after navigation: ${newUrl}`);
+                logger.info(`${logPrefix} Page after navigation - URL: ${newUrl}`);
 
                 // Important: Store the new page in SessionManager
                 const pageId = `page_${Date.now()}`;
+                logger.info(`${logPrefix} Storing new page with ID: ${pageId}`);
                 SessionManager.storePage(sessionId, pageId, newPage);
-                logger.info(`Updated SessionManager with new page after URL change`);
+                logger.info(`${logPrefix} Updated SessionManager with new page after URL change`);
 
                 // Verify URL has changed
                 if (newUrl !== currentUrl) {
-                  logger.info(`URL changed confirmed: ${currentUrl} → ${newUrl}`);
+                  logger.info(`${logPrefix} URL change confirmed: ${currentUrl} → ${newUrl}`);
                   return true;
                 }
 
-                logger.warn(`Page reconnected but URL didn't change: ${newUrl}`);
+                logger.warn(`${logPrefix} Page reconnected but URL didn't change: ${newUrl}`);
                 return true; // Still return true since context was destroyed, which indicates navigation
               } catch (urlError) {
-                logger.warn(`Could not get URL from new page: ${(urlError as Error).message}`);
+                logger.warn(`${logPrefix} Could not get URL from new page: ${(urlError as Error).message}`);
                 return true; // Still return true as context destruction indicates navigation
               }
             } else {
-              logger.warn('No pages found in browser after context destruction');
+              logger.warn(`${logPrefix} No pages found in browser after context destruction`);
               return true; // Still assume navigation happened since context was destroyed
             }
           } catch (reconnectError) {
-            logger.warn(`Failed to reconnect after context destruction: ${(reconnectError as Error).message}`);
+            logger.warn(`${logPrefix} Failed to reconnect after context destruction: ${(reconnectError as Error).message}`);
             return true; // Still assume navigation happened
           }
         } else {
           // Context wasn't destroyed, verify URL changed
           try {
             // Get fresh page reference
+            logger.info(`${logPrefix} Getting fresh page reference for final URL check`);
             page = SessionManager.getPage(sessionId);
             if (!page) {
-              logger.warn(`No page found for session ${sessionId} after URL change check`);
+              logger.warn(`${logPrefix} No page found for session ${sessionId} after URL change check`);
               return false;
             }
 
             const newUrl = await page.url();
             const urlChanged = newUrl !== currentUrl;
 
-            logger.info(`Current page URL: ${newUrl}, URL changed: ${urlChanged}`);
+            logger.info(`${logPrefix} Current page URL: ${newUrl}, URL changed: ${urlChanged}`);
             return urlChanged;
           } catch (urlError) {
             // If we can't get the URL, assume something changed with the page
-            logger.warn(`Could not get current URL: ${(urlError as Error).message}`);
+            logger.warn(`${logPrefix} Could not get current URL: ${(urlError as Error).message}`);
             return true;
           }
         }
       } catch (finalError) {
-        logger.warn(`Error during final URL verification: ${(finalError as Error).message}`);
+        logger.warn(`${logPrefix} Error during final URL verification: ${(finalError as Error).message}`);
         // If context was destroyed, assume navigation was successful
         return contextDestroyed;
       }
     }
 
     // If we reach here, no URL change was detected
-    logger.warn(`No URL change detected after ${timeout}ms`);
+    logger.warn(`${logPrefix} No URL change detected after ${timeout}ms`);
 
     // Check once more to see if the URL has changed despite not detecting it earlier
     try {
       // Get fresh page reference for final check
+      logger.info(`${logPrefix} Performing final URL check`);
       page = SessionManager.getPage(sessionId);
       if (!page) {
-        logger.warn(`No page found for session ${sessionId} at final URL check`);
+        logger.warn(`${logPrefix} No page found for session ${sessionId} at final URL check`);
         return false;
       }
 
@@ -484,31 +505,31 @@ export async function waitForUrlChange(
       const finalChanged = finalUrl !== currentUrl;
 
       if (finalChanged) {
-        logger.info(`URL change found at final check: ${currentUrl} → ${finalUrl}`);
+        logger.info(`${logPrefix} URL change found at final check: ${currentUrl} → ${finalUrl}`);
         return true;
       }
 
-      logger.info(`URL still unchanged at final check: ${finalUrl}`);
+      logger.info(`${logPrefix} URL still unchanged at final check: ${finalUrl}`);
       return false;
     } catch (finalError) {
       // If we can't get the final URL, check if it's due to context destruction
       if ((finalError as Error).message.includes('context was destroyed') ||
           (finalError as Error).message.includes('Execution context')) {
-        logger.info('Context destruction detected at final check - navigation likely successful');
+        logger.info(`${logPrefix} Context destruction detected at final check - navigation likely successful`);
         return true;
       }
 
-      logger.warn(`Error getting final URL: ${(finalError as Error).message}`);
+      logger.warn(`${logPrefix} Error getting final URL: ${(finalError as Error).message}`);
       return false;
     }
   } catch (error) {
     // This handles errors from the primary try block
-    logger.warn(`URL change wait failed: ${(error as Error).message}`);
+    logger.warn(`${logPrefix} URL change wait failed: ${(error as Error).message}`);
 
     // Handle context destruction
     if ((error as Error).message.includes('context was destroyed') ||
         (error as Error).message.includes('Execution context')) {
-      logger.info('Context was destroyed during URL change wait - this is expected during hard navigations');
+      logger.info(`${logPrefix} Context was destroyed during URL change wait - this is expected during hard navigations`);
       return true; // Context destruction usually indicates navigation
     }
 
@@ -628,47 +649,55 @@ export async function clickAndWaitForNavigation(
     error: () => {}
   };
 
+  const logPrefix = '[NavigationUtils][clickAndWaitForNavigation]';
+  log.info(`${logPrefix} Called with selector: "${selector}", sessionId: ${sessionId}`);
+
   try {
     // Get the current page from SessionManager
     const page = SessionManager.getPage(sessionId);
     if (!page) {
-      log.warn(`No page found for session ${sessionId}`);
+      log.warn(`${logPrefix} No page found for session ${sessionId}`);
       return { success: false, error: `No page found for session ${sessionId}` };
     }
 
     // Try to find the element to click
-    log.info(`Attempting to click ${selector} and wait for navigation`);
+    log.info(`${logPrefix} Attempting to click "${selector}" and wait for navigation`);
 
     const element = await page.$(selector);
     if (!element) {
-      log.warn(`Element not found: ${selector}`);
+      log.warn(`${logPrefix} Element not found: "${selector}"`);
       return { success: false, error: `Element not found: ${selector}` };
     }
 
     // Store initial URL for comparison
     const initialUrl = await page.url();
-    log.info(`Current URL before navigation: ${initialUrl}`);
+    log.info(`${logPrefix} Current URL before navigation: ${initialUrl}`);
 
     // SIMPLIFIED APPROACH: Separate click and navigation
     try {
       // 1. First, perform the click action independently
-      log.info('Performing click action...');
+      log.info(`${logPrefix} Step 1: Performing click action on "${selector}"...`);
       await element.click();
+      log.info(`${logPrefix} Click action completed successfully`);
 
       // 2. Separately wait for navigation to complete
-      log.info(`Waiting for navigation after click (timeout: ${timeout}ms, waitUntil: ${waitUntil})...`);
+      log.info(`${logPrefix} Step 2: Waiting for navigation after click (timeout: ${timeout}ms, waitUntil: ${waitUntil})...`);
       await page.waitForNavigation({ waitUntil, timeout });
+      log.info(`${logPrefix} Navigation wait completed successfully`);
 
       // 3. Add stabilization delay after navigation
-      log.info(`Adding stabilization delay: ${stabilizationDelay}ms`);
+      log.info(`${logPrefix} Step 3: Adding stabilization delay: ${stabilizationDelay}ms`);
       await new Promise(resolve => setTimeout(resolve, stabilizationDelay));
+      log.info(`${logPrefix} Stabilization delay completed`);
 
       // 4. Get the final URL and title - Using the same page reference since navigation was successful
+      log.info(`${logPrefix} Step 4: Getting final URL and title`);
       const finalUrl = await page.url();
       const finalTitle = await page.title();
+      log.info(`${logPrefix} Final URL: ${finalUrl}, Title: ${finalTitle}`);
 
       // 5. Log success
-      log.info(`Navigation completed successfully after clicking ${selector}`);
+      log.info(`${logPrefix} Navigation completed successfully after clicking "${selector}"`);
       return {
         success: true,
         finalUrl,
@@ -677,16 +706,19 @@ export async function clickAndWaitForNavigation(
       };
     } catch (navigationError) {
       // Handle context destruction - this is normal during navigation
+      log.warn(`${logPrefix} Navigation error: ${(navigationError as Error).message}`);
+
       if ((navigationError as Error).message.includes('context was destroyed') ||
           (navigationError as Error).message.includes('Execution context') ||
           (navigationError as Error).message.includes('Target closed')) {
-        log.info('Navigation context was destroyed, which is normal during page transitions');
+        log.info(`${logPrefix} Context destruction detected during navigation - this is normal during page transitions`);
 
         try {
           // Get a fresh browser reference to find the active page
+          log.info(`${logPrefix} Attempting to reconnect after context destruction`);
           const session = SessionManager.getSession(sessionId);
           if (!session || !session.browser) {
-            log.warn(`Could not find browser for session ${sessionId}`);
+            log.warn(`${logPrefix} Could not find browser for session ${sessionId}`);
             return {
               success: true,
               contextDestroyed: true,
@@ -695,11 +727,15 @@ export async function clickAndWaitForNavigation(
           }
 
           const browser = session.browser;
+          log.info(`${logPrefix} Successfully retrieved browser from session`);
 
           // Get all pages and use the most recently active one
+          log.info(`${logPrefix} Getting all browser pages`);
           const pages = await browser.pages();
+          log.info(`${logPrefix} Found ${pages.length} pages in browser`);
+
           if (pages.length === 0) {
-            log.warn('No pages found in browser after context destruction');
+            log.warn(`${logPrefix} No pages found in browser after context destruction`);
             return {
               success: true,
               contextDestroyed: true,
@@ -709,17 +745,21 @@ export async function clickAndWaitForNavigation(
 
           // Use the last page (most likely the active one)
           const newPage = pages[pages.length - 1];
+          log.info(`${logPrefix} Using most recent page (index: ${pages.length - 1})`);
 
           // Store the new page in SessionManager
           const pageId = `page_${Date.now()}`;
+          log.info(`${logPrefix} Storing new page with ID: ${pageId}`);
           SessionManager.storePage(sessionId, pageId, newPage);
-          log.info(`Updated session with new page after context destruction: ${pageId}`);
+          log.info(`${logPrefix} Successfully updated session with new page after context destruction`);
 
           // Get URL and title from the new page
+          log.info(`${logPrefix} Getting URL and title from reconnected page`);
           const finalUrl = await newPage.url();
           const finalTitle = await newPage.title();
+          log.info(`${logPrefix} Reconnected page URL: ${finalUrl}, Title: ${finalTitle}`);
 
-          log.info(`Successfully reconnected after context destruction. New URL: ${finalUrl}`);
+          log.info(`${logPrefix} Successfully reconnected after context destruction`);
           return {
             success: true,
             finalUrl,
@@ -729,7 +769,7 @@ export async function clickAndWaitForNavigation(
             urlChanged: true // We assume URL changed since context was destroyed
           };
         } catch (reconnectError) {
-          log.warn(`Failed to reconnect after context destruction: ${(reconnectError as Error).message}`);
+          log.warn(`${logPrefix} Failed to reconnect after context destruction: ${(reconnectError as Error).message}`);
 
           // Still consider it successful since context destruction usually means navigation happened
           return {
@@ -743,15 +783,17 @@ export async function clickAndWaitForNavigation(
 
       // Handle navigation timeout
       if ((navigationError as Error).message.includes('timeout')) {
-        log.warn(`Navigation timed out after ${timeout}ms - checking if URL changed anyway`);
+        log.warn(`${logPrefix} Navigation timed out after ${timeout}ms - checking if URL changed anyway`);
 
         try {
           // Even with a timeout, the page might have navigated
           // Get current URL to compare with initial
+          log.info(`${logPrefix} Checking if URL changed despite timeout`);
           const currentUrl = await page.url();
+          log.info(`${logPrefix} Current URL after timeout: ${currentUrl}, Initial URL: ${initialUrl}`);
 
           if (currentUrl !== initialUrl) {
-            log.info(`URL changed despite timeout: ${initialUrl} -> ${currentUrl}`);
+            log.info(`${logPrefix} URL changed despite timeout: ${initialUrl} -> ${currentUrl}`);
 
             // URL changed, consider navigation successful
             return {
@@ -762,69 +804,80 @@ export async function clickAndWaitForNavigation(
           }
 
           // URL didn't change - likely a genuine timeout
-          log.warn('Navigation timed out and URL did not change');
+          log.warn(`${logPrefix} Navigation timed out and URL did not change`);
           return {
             success: false,
             error: 'Navigation timed out',
             urlChanged: false
           };
         } catch (urlCheckError) {
+          log.warn(`${logPrefix} Error checking URL after timeout: ${(urlCheckError as Error).message}`);
+
           // If we can't check the URL, context might have been destroyed
           if ((urlCheckError as Error).message.includes('context was destroyed') ||
               (urlCheckError as Error).message.includes('Target closed')) {
 
-            log.info('Context destroyed while checking URL after timeout - attempting reconnection');
+            log.info(`${logPrefix} Context destroyed while checking URL after timeout - attempting reconnection`);
 
             try {
               // Try to reconnect using the same approach as above
+              log.info(`${logPrefix} Attempting reconnection after context destruction during timeout check`);
               const session = SessionManager.getSession(sessionId);
               if (!session || !session.browser) {
+                log.warn(`${logPrefix} No session or browser available for reconnection`);
                 return {
                   success: true,
                   contextDestroyed: true,
-                  error: 'Context destroyed but could not reconnect to browser',
-                  urlChanged: true // We assume URL changed since context was destroyed
+                  urlChanged: true,
+                  error: 'Context destroyed but session unavailable'
                 };
               }
 
               const browser = session.browser;
+              log.info(`${logPrefix} Getting pages from browser after context destruction`);
               const pages = await browser.pages();
-              if (pages.length === 0) {
+              log.info(`${logPrefix} Found ${pages.length} pages after context destruction`);
+
+              if (pages.length > 0) {
+                const newPage = pages[pages.length - 1];
+                log.info(`${logPrefix} Using most recent page (index: ${pages.length - 1})`);
+
+                const pageId = `page_${Date.now()}`;
+                log.info(`${logPrefix} Storing new page with ID: ${pageId}`);
+                SessionManager.storePage(sessionId, pageId, newPage);
+
+                const finalUrl = await newPage.url();
+                log.info(`${logPrefix} Reconnected page URL: ${finalUrl}`);
+
                 return {
                   success: true,
                   contextDestroyed: true,
-                  error: 'Context destroyed but no pages found',
-                  urlChanged: true // We assume URL changed since context was destroyed
+                  urlChanged: true,
+                  newPage,
+                  finalUrl
                 };
               }
 
-              const newPage = pages[pages.length - 1];
-              const pageId = `page_${Date.now()}`;
-              SessionManager.storePage(sessionId, pageId, newPage);
-
-              const finalUrl = await newPage.url();
-              log.info(`Reconnected after timeout and context destruction. New URL: ${finalUrl}`);
-
+              log.warn(`${logPrefix} No pages found during reconnection attempt`);
               return {
                 success: true,
-                finalUrl,
                 contextDestroyed: true,
-                newPage,
-                urlChanged: true // We assume URL changed since context was destroyed
+                urlChanged: true,
+                error: 'Context destroyed but no pages found'
               };
             } catch (reconnectError) {
-              log.warn(`Failed to reconnect after timeout: ${(reconnectError as Error).message}`);
+              log.warn(`${logPrefix} Failed to reconnect after timeout and context destruction: ${(reconnectError as Error).message}`);
               return {
                 success: true,
                 contextDestroyed: true,
-                error: `Failed to reconnect after timeout: ${(reconnectError as Error).message}`,
-                urlChanged: true // We assume URL changed since context was destroyed
+                urlChanged: true,
+                error: `Reconnection error: ${(reconnectError as Error).message}`
               };
             }
           }
 
           // Some other error occurred while checking URL
-          log.error(`Error checking URL after timeout: ${(urlCheckError as Error).message}`);
+          log.error(`${logPrefix} Error checking URL after timeout: ${(urlCheckError as Error).message}`);
           return {
             success: false,
             error: `Navigation timed out and error checking URL: ${(urlCheckError as Error).message}`,
@@ -834,7 +887,7 @@ export async function clickAndWaitForNavigation(
       }
 
       // Other navigation errors
-      log.warn(`Navigation error: ${(navigationError as Error).message}`);
+      log.warn(`${logPrefix} Unhandled navigation error: ${(navigationError as Error).message}`);
       return {
         success: false,
         error: (navigationError as Error).message,
@@ -842,7 +895,7 @@ export async function clickAndWaitForNavigation(
       };
     }
   } catch (error) {
-    log.warn(`Navigation error: ${(error as Error).message}`);
+    log.warn(`${logPrefix} Outer navigation error: ${(error as Error).message}`);
     return {
       success: false,
       error: (error as Error).message,
@@ -880,46 +933,62 @@ export async function submitFormAndWaitForNavigation(
     logger
   } = options;
 
+  // Create a no-op logger if none provided
+  const log = logger || {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {}
+  };
+
+  const logPrefix = '[NavigationUtils][submitFormAndWaitForNavigation]';
+  log.info(`${logPrefix} Called with sessionId: ${sessionId}`);
+
   try {
     // Get the current page from SessionManager
     const page = SessionManager.getPage(sessionId);
     if (!page) {
-      logger.error(`No page found for session ${sessionId}`);
+      log.error(`${logPrefix} No page found for session ${sessionId}`);
       return { success: false, error: `No page found for session ${sessionId}` };
     }
 
     // Store initial URL for comparison
     const initialUrl = await page.url();
-    logger.info(`Current URL before form submission: ${initialUrl}`);
+    log.info(`${logPrefix} Current URL before form submission: ${initialUrl}`);
 
-    logger.info(`Pressing Enter and waiting for navigation (waitUntil: ${waitUntil}, timeout: ${timeout}ms)`);
+    log.info(`${logPrefix} Preparing to press Enter and wait for navigation (waitUntil: ${waitUntil}, timeout: ${timeout}ms)`);
 
     // SIMPLIFIED APPROACH: Separate keyboard press and navigation
     try {
       // 1. First, perform the keyboard press independently
-      logger.info('Pressing Enter to submit form...');
+      log.info(`${logPrefix} Step 1: Pressing Enter to submit form...`);
       await page.keyboard.press('Enter');
+      log.info(`${logPrefix} Enter key pressed successfully`);
 
       // 2. Separately wait for navigation to complete
-      logger.info(`Waiting for navigation after form submission (timeout: ${timeout}ms)...`);
+      log.info(`${logPrefix} Step 2: Waiting for navigation after form submission (timeout: ${timeout}ms)...`);
       await page.waitForNavigation({
         waitUntil: [waitUntil],
         timeout
       });
+      log.info(`${logPrefix} Navigation wait completed successfully`);
 
       // 3. Add stabilization delay
       if (stabilizationDelay > 0) {
-        logger.info(`Adding stabilization delay after navigation: ${stabilizationDelay}ms`);
+        log.info(`${logPrefix} Step 3: Adding stabilization delay: ${stabilizationDelay}ms`);
         await new Promise(resolve => setTimeout(resolve, stabilizationDelay));
+        log.info(`${logPrefix} Stabilization delay completed`);
       }
 
       // 4. Get final URL to check if it changed
+      log.info(`${logPrefix} Step 4: Getting final URL and title`);
       const finalUrl = await page.url();
       const urlChanged = finalUrl !== initialUrl;
       const finalTitle = await page.title();
+      log.info(`${logPrefix} Final URL: ${finalUrl}, Title: ${finalTitle}, URL changed: ${urlChanged}`);
 
       // 5. Log success
-      logger.info('Navigation completed successfully after pressing Enter');
+      log.info(`${logPrefix} Navigation completed successfully after pressing Enter`);
       return {
         success: true,
         urlChanged,
@@ -927,17 +996,20 @@ export async function submitFormAndWaitForNavigation(
         finalTitle
       };
     } catch (navigationError) {
+      log.warn(`${logPrefix} Navigation error: ${(navigationError as Error).message}`);
+
       // Handle context destruction - this is normal during navigation
       if ((navigationError as Error).message.includes('context was destroyed') ||
           (navigationError as Error).message.includes('Execution context') ||
           (navigationError as Error).message.includes('Target closed')) {
-        logger.info('Context destroyed during navigation - this is expected behavior');
+        log.info(`${logPrefix} Context destruction detected during navigation - this is expected behavior`);
 
         try {
           // Get the session and browser reference
+          log.info(`${logPrefix} Attempting to reconnect after context destruction`);
           const session = SessionManager.getSession(sessionId);
           if (!session || !session.browser) {
-            logger.warn(`Session ${sessionId} no longer exists or has no browser`);
+            log.warn(`${logPrefix} Session ${sessionId} no longer exists or has no browser`);
             return {
               success: true,
               contextDestroyed: true,
@@ -946,21 +1018,28 @@ export async function submitFormAndWaitForNavigation(
           }
 
           const browser = session.browser;
+          log.info(`${logPrefix} Successfully retrieved browser from session`);
+
+          log.info(`${logPrefix} Getting all browser pages`);
           const pages = await browser.pages();
+          log.info(`${logPrefix} Found ${pages.length} pages in browser`);
 
           if (pages.length > 0) {
             // Use the most recently active page (usually the last one)
             const newPage = pages[pages.length - 1];
+            log.info(`${logPrefix} Using most recent page (index: ${pages.length - 1})`);
 
             // Store the new page in SessionManager
             const pageId = `page_${Date.now()}`;
+            log.info(`${logPrefix} Storing new page with ID: ${pageId}`);
             SessionManager.storePage(sessionId, pageId, newPage);
-
-            logger.info('Successfully acquired new page reference after context destruction');
+            log.info(`${logPrefix} Successfully updated session with new page after context destruction`);
 
             // Get the new URL to confirm it changed
+            log.info(`${logPrefix} Getting URL from reconnected page`);
             const newUrl = await newPage.url();
             const urlChanged = newUrl !== initialUrl;
+            log.info(`${logPrefix} Reconnected page URL: ${newUrl}, URL changed: ${urlChanged}`);
 
             return {
               success: true,
@@ -972,14 +1051,14 @@ export async function submitFormAndWaitForNavigation(
           }
 
           // No pages found, but still consider it successful since context was destroyed
-          logger.warn('No pages found after context destruction, but navigation likely succeeded');
+          log.warn(`${logPrefix} No pages found after context destruction, but navigation likely succeeded`);
           return {
             success: true,
             contextDestroyed: true,
             urlChanged: true  // Assume URL changed
           };
         } catch (browserError) {
-          logger.warn(`Error getting browser pages: ${(browserError as Error).message}`);
+          log.warn(`${logPrefix} Error getting browser pages: ${(browserError as Error).message}`);
 
           // Even without a new page reference, navigation likely succeeded
           return {
@@ -993,13 +1072,14 @@ export async function submitFormAndWaitForNavigation(
 
       // Handle navigation timeout
       if ((navigationError as Error).message.includes('timeout')) {
-        logger.warn(`Navigation timed out after ${timeout}ms - checking if URL changed anyway`);
+        log.warn(`${logPrefix} Navigation timed out after ${timeout}ms - checking if URL changed anyway`);
 
         try {
           // Check if the page URL changed despite the timeout
+          log.info(`${logPrefix} Checking if URL changed despite timeout`);
           const currentPage = SessionManager.getPage(sessionId);
           if (!currentPage) {
-            logger.warn('Could not get page after timeout - session may be invalid');
+            log.warn(`${logPrefix} Could not get page after timeout - session may be invalid`);
             return {
               success: false,
               error: 'Navigation timed out and session is invalid',
@@ -1009,9 +1089,10 @@ export async function submitFormAndWaitForNavigation(
 
           const currentUrl = await currentPage.url();
           const urlChanged = currentUrl !== initialUrl;
+          log.info(`${logPrefix} Current URL after timeout: ${currentUrl}, Initial URL: ${initialUrl}, URL changed: ${urlChanged}`);
 
           if (urlChanged) {
-            logger.info(`URL changed despite timeout: ${initialUrl} -> ${currentUrl}`);
+            log.info(`${logPrefix} URL changed despite timeout: ${initialUrl} -> ${currentUrl}`);
             return {
               success: true,
               urlChanged: true,
@@ -1019,22 +1100,26 @@ export async function submitFormAndWaitForNavigation(
             };
           }
 
-          logger.warn('Navigation timed out and URL did not change');
+          log.warn(`${logPrefix} Navigation timed out and URL did not change`);
           return {
             success: false,
             urlChanged: false,
             error: 'Navigation timed out and URL did not change'
           };
         } catch (urlError) {
+          log.warn(`${logPrefix} Error checking URL after timeout: ${(urlError as Error).message}`);
+
           // If the error is context destroyed, handle it specially
           if ((urlError as Error).message.includes('context was destroyed') ||
               (urlError as Error).message.includes('Target closed')) {
-            logger.info('Context destruction detected when checking URL - attempting reconnection');
+            log.info(`${logPrefix} Context destruction detected when checking URL - attempting reconnection`);
 
             try {
               // Get a fresh browser reference
+              log.info(`${logPrefix} Attempting reconnection after context destruction during timeout check`);
               const session = SessionManager.getSession(sessionId);
               if (!session || !session.browser) {
+                log.warn(`${logPrefix} No session or browser available for reconnection`);
                 return {
                   success: true,
                   contextDestroyed: true,
@@ -1044,15 +1129,20 @@ export async function submitFormAndWaitForNavigation(
               }
 
               const browser = session.browser;
+              log.info(`${logPrefix} Getting pages from browser after context destruction`);
               const pages = await browser.pages();
+              log.info(`${logPrefix} Found ${pages.length} pages after context destruction`);
 
               if (pages.length > 0) {
                 const newPage = pages[pages.length - 1];
+                log.info(`${logPrefix} Using most recent page (index: ${pages.length - 1})`);
+
                 const pageId = `page_${Date.now()}`;
+                log.info(`${logPrefix} Storing new page with ID: ${pageId}`);
                 SessionManager.storePage(sessionId, pageId, newPage);
 
                 const finalUrl = await newPage.url();
-                logger.info(`Successfully reconnected after context destruction. New URL: ${finalUrl}`);
+                log.info(`${logPrefix} Reconnected page URL: ${finalUrl}`);
 
                 return {
                   success: true,
@@ -1063,6 +1153,7 @@ export async function submitFormAndWaitForNavigation(
                 };
               }
 
+              log.warn(`${logPrefix} No pages found during reconnection attempt`);
               return {
                 success: true,
                 contextDestroyed: true,
@@ -1070,7 +1161,7 @@ export async function submitFormAndWaitForNavigation(
                 error: 'Context destroyed but no pages found'
               };
             } catch (reconnectError) {
-              logger.warn(`Failed to reconnect: ${(reconnectError as Error).message}`);
+              log.warn(`${logPrefix} Failed to reconnect: ${(reconnectError as Error).message}`);
               return {
                 success: true,
                 contextDestroyed: true,
@@ -1080,7 +1171,7 @@ export async function submitFormAndWaitForNavigation(
             }
           }
 
-          logger.warn(`Error checking URL after timeout: ${(urlError as Error).message}`);
+          log.error(`${logPrefix} Error checking URL after timeout: ${(urlError as Error).message}`);
           return {
             success: false,
             error: `Navigation timed out and error checking URL: ${(urlError as Error).message}`,
@@ -1089,7 +1180,7 @@ export async function submitFormAndWaitForNavigation(
         }
       }
 
-      logger.warn(`Navigation error: ${(navigationError as Error).message}`);
+      log.error(`${logPrefix} Unhandled navigation error: ${(navigationError as Error).message}`);
       return {
         success: false,
         error: (navigationError as Error).message,
@@ -1097,7 +1188,7 @@ export async function submitFormAndWaitForNavigation(
       };
     }
   } catch (error) {
-    logger.warn(`Form submission navigation error: ${(error as Error).message}`);
+    log.error(`${logPrefix} Outer form submission error: ${(error as Error).message}`);
     return {
       success: false,
       error: (error as Error).message,

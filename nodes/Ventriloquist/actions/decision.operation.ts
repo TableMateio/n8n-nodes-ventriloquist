@@ -2270,7 +2270,7 @@ export const description: INodeProperties[] = [
 							switch (actionType) {
 								case 'click': {
 									const actionSelector = group.actionSelector as string;
-									const waitAfterAction = group.waitAfterAction as string || 'domContentLoaded';
+									const waitAfterAction = group.waitAfterAction as string || 'urlChanged';
 
 									// Ensure we have ample wait time, especially for URL changes
 									let waitTime = group.waitTime as number;
@@ -2285,7 +2285,7 @@ export const description: INodeProperties[] = [
 									try {
 										// Create options for the action
 										const actionOptions: IActionOptions = {
-														sessionId,
+											sessionId,
 											waitForSelector: waitForSelectors,
 											selectorTimeout,
 											detectionMethod,
@@ -2296,7 +2296,14 @@ export const description: INodeProperties[] = [
 											useHumanDelays
 										};
 
+										// Log what action we're executing with details
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`[Decision][clickAction] Executing click action on "${actionSelector}" using action utility with ${waitTime}ms timeout`));
+
 										// Execute the click action using the utility
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`[Decision][clickAction] Calling executeAction with type: click, selector: "${actionSelector}", waitAfterAction: ${waitAfterAction}`));
+
 										const actionResult = await executeAction(
 											sessionId,
 											'click' as ActionType,
@@ -2310,27 +2317,38 @@ export const description: INodeProperties[] = [
 											this.logger
 										);
 
+										// Log the action result with detail
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`[Decision][clickAction] Action result received - success: ${actionResult.success}, error: ${actionResult.error || 'none'}`));
+
 										// Handle action failures
 										if (!actionResult.success) {
 											throw new Error(`Decision action failed: ${actionResult.error}`);
 										}
 
 										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-											'Click action completed successfully using action utility'));
+											`[Decision][clickAction] Click action completed successfully using action utility`));
 
 										// Check if the context was destroyed or navigation happened
 										// Cast to IClickActionResult to access the urlChanged property
 										const clickResult = actionResult as IClickActionResult;
+
+										this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+											`[Decision][clickAction] Navigation status - contextDestroyed: ${!!clickResult.contextDestroyed}, urlChanged: ${!!clickResult.urlChanged}, navigationSuccessful: ${!!clickResult.navigationSuccessful}`));
+
 										if (clickResult.contextDestroyed || clickResult.urlChanged) {
 											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-												`Navigation detected after click: Context destroyed=${!!clickResult.contextDestroyed}, URL changed=${!!clickResult.urlChanged}`));
+												`[Decision][clickAction] Navigation detected after click: Context destroyed=${!!clickResult.contextDestroyed}, URL changed=${!!clickResult.urlChanged}`));
 
 											// Get a fresh page reference after navigation
+											this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+												`[Decision][clickAction] Getting fresh page reference after navigation`));
+
 											const freshPage = SessionManager.getPage(sessionId);
 											if (freshPage) {
 												puppeteerPage = freshPage;
 												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-													'Using fresh page reference after navigation'));
+													`[Decision][clickAction] Using fresh page reference after navigation`));
 
 												try {
 													// Update result data
@@ -2340,29 +2358,41 @@ export const description: INodeProperties[] = [
 													resultData.currentUrl = await puppeteerPage.url();
 													resultData.pageTitle = await puppeteerPage.title();
 													resultData.executionDuration = Date.now() - startTime;
+
+													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+														`[Decision][clickAction] Returning successful result after navigation - Group: ${groupName}, URL: ${resultData.currentUrl}`));
+
 													return [this.helpers.returnJsonArray([resultData])];
 												} catch (pageError) {
 													// If we still can't access the page, return with limited data
 													this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-														`Could not access page properties after navigation: ${(pageError as Error).message}`));
+														`[Decision][clickAction] Could not access page properties after navigation: ${(pageError as Error).message}`));
 
 													resultData.success = true;
 													resultData.routeTaken = groupName;
 													resultData.actionPerformed = actionType;
 													resultData.navigationContext = 'destroyed-but-successful';
 													resultData.executionDuration = Date.now() - startTime;
+
+													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+														`[Decision][clickAction] Returning success with limited data after navigation failure`));
+
 													return [this.helpers.returnJsonArray([resultData])];
 												}
 											} else {
 												// If we don't have a page reference but navigation was successful, still return success
 												this.logger.warn(formatOperationLog('Decision', nodeName, nodeId, index,
-													'Could not get fresh page reference after navigation, but click was successful'));
+													`[Decision][clickAction] Could not get fresh page reference after navigation, but click was successful`));
 
 												resultData.success = true;
 												resultData.routeTaken = groupName;
 												resultData.actionPerformed = actionType;
 												resultData.navigationContext = 'destroyed-no-page';
 												resultData.executionDuration = Date.now() - startTime;
+
+												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+													`[Decision][clickAction] Returning success with context destruction noted`));
+
 												return [this.helpers.returnJsonArray([resultData])];
 											}
 										}

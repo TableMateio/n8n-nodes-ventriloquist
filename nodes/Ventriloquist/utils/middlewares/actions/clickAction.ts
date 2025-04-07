@@ -49,9 +49,12 @@ export async function executeClickAction(
   const { selector, waitAfterAction = 'noWait', waitTime = 5000, waitSelector } = parameters;
   const { sessionId, nodeName, nodeId, index } = options;
 
+  // Add logging prefix to clearly identify source
+  const logPrefix = '[ClickAction][executeClickAction]';
+
   // Log action start
   logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-    `Executing click action on selector: "${selector}" using session: ${sessionId}`));
+    `${logPrefix} Executing click action on selector: "${selector}" using session: ${sessionId}`));
 
   // First, verify the session exists and get the current page
   if (!await SessionManager.isSessionActive(sessionId)) {
@@ -85,7 +88,7 @@ export async function executeClickAction(
     const beforeTitle = await page.title();
 
     logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-      `Current page before click - URL: ${beforeUrl}, Title: ${beforeTitle}`));
+      `${logPrefix} Current page before click - URL: ${beforeUrl}, Title: ${beforeTitle}`));
 
     // Determine if we need to wait for navigation
     const shouldWaitForNav =
@@ -96,7 +99,7 @@ export async function executeClickAction(
     if (shouldWaitForNav) {
       // Use the simple navigation approach with Promise.all
       logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `Using navigation handling for click with waitAfterAction: ${waitAfterAction}`));
+        `${logPrefix} Using navigation handling for click with waitAfterAction: ${waitAfterAction}`));
 
       // Map the waitAfterAction to appropriate waitUntil option
       let waitUntil: puppeteer.PuppeteerLifeCycleEvent = 'domcontentloaded';
@@ -105,6 +108,9 @@ export async function executeClickAction(
       }
 
       // Use our simplified navigation utility with proper timeout
+      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+        `${logPrefix} Calling clickAndWaitForNavigation with selector: "${selector}", timeout: ${waitTime}ms, waitUntil: ${waitUntil}`));
+
       const navigationResult = await clickAndWaitForNavigation(
         sessionId,
         selector,
@@ -116,20 +122,25 @@ export async function executeClickAction(
         }
       );
 
+      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+        `${logPrefix} clickAndWaitForNavigation returned - success: ${navigationResult.success}, contextDestroyed: ${!!navigationResult.contextDestroyed}, urlChanged: ${!!navigationResult.urlChanged}`));
+
       if (navigationResult.success) {
         // Navigation was successful
         const finalUrl = navigationResult.finalUrl || '';
         logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-          `Click with navigation successful - Final URL: ${finalUrl}`));
+          `${logPrefix} Click with navigation successful - Final URL: ${finalUrl}`));
 
         // If we got a new page reference, update the session manager
         if (navigationResult.newPage) {
           logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-            'Updating session manager with new page reference after navigation'));
+            `${logPrefix} Updating session manager with new page reference after navigation`));
 
           // Store the new page in the session manager with a timestamp-based ID
           const pageId = `page_${Date.now()}`;
           SessionManager.storePage(sessionId, pageId, navigationResult.newPage);
+          logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
+            `${logPrefix} New page stored in SessionManager with ID: ${pageId}`));
         }
 
         return {
@@ -154,7 +165,7 @@ export async function executeClickAction(
 
       // Navigation failed, but click might have succeeded
       logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `Click succeeded but navigation may not have occurred: ${navigationResult.error || 'Unknown error'}`));
+        `${logPrefix} Click succeeded but navigation may not have occurred: ${navigationResult.error || 'Unknown error'}`));
 
       return {
         success: true, // The click itself was successful
@@ -178,7 +189,7 @@ export async function executeClickAction(
 
       // Wait for the specified time
       logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `Waiting fixed time after click: ${waitTime}ms`));
+        `${logPrefix} Waiting fixed time after click: ${waitTime}ms`));
 
       await new Promise(resolve => setTimeout(resolve, waitTime));
 
@@ -205,7 +216,7 @@ export async function executeClickAction(
 
       // Log the action result
       logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `Click with fixed wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
+        `${logPrefix} Click with fixed wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
 
       return {
         success: true,
@@ -229,7 +240,7 @@ export async function executeClickAction(
       await page.click(selector);
 
       logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `Waiting for selector after click: ${waitSelector}, timeout: ${waitTime}ms`));
+        `${logPrefix} Waiting for selector after click: ${waitSelector}, timeout: ${waitTime}ms`));
 
       await page.waitForSelector(waitSelector, { timeout: waitTime });
 
@@ -257,7 +268,7 @@ export async function executeClickAction(
 
       // Log the action result
       logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `Click with selector wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
+        `${logPrefix} Click with selector wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
 
       return {
         success: true,
@@ -302,7 +313,7 @@ export async function executeClickAction(
 
     // Log the action result
     logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-      `Click with no wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
+      `${logPrefix} Click with no wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
 
     return {
       success: true,
@@ -321,7 +332,7 @@ export async function executeClickAction(
   } catch (error) {
     // Handle click action errors
     logger.error(formatOperationLog('ClickAction', nodeName, nodeId, index,
-      `Error during click action: ${(error as Error).message}`));
+      `${logPrefix} Error during click action: ${(error as Error).message}`));
 
     return {
       success: false,
