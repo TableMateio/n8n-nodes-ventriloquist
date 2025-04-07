@@ -2136,6 +2136,8 @@ export const description: INodeProperties[] = [
 				currentUrl: '',
 				pageTitle: '',
 				executionDuration: 0,
+				// Include the sessionId in the output
+				sessionId: sessionId || '',
 				// Navigation related properties
 				navigationCompleted: false,
 				urlChangeDetected: false,
@@ -3296,6 +3298,7 @@ export const description: INodeProperties[] = [
 					actionPerformed,
 					currentUrl: resultData.currentUrl,
 					pageTitle: resultData.pageTitle,
+					sessionId: sessionId || '',
 				},
 			});
 
