@@ -15,14 +15,10 @@ import { executeAction, ActionType, IActionParameters, IActionOptions } from '..
 import { evaluateConditionGroup, IConditionGroup } from '../utils/conditionUtils';
 // Add import for fallbackUtils module
 import { executeFallback, IFallbackOptions } from '../utils/fallbackUtils';
-// Add formatExtractedDataForLog back to the imports
 import { formatExtractedDataForLog } from '../utils/extractionUtils';
-// Add import for waitForUrlChange utility
 import { waitForUrlChange } from '../utils/navigationUtils';
-// Add import for enhancedNavigationWait utility
 import { enhancedNavigationWait } from '../utils/navigationUtils';
 // Add import for navigation utilities
-import { clickAndWaitForNavigation, submitFormAndWaitForNavigation } from '../utils/navigationUtils';
 
 /**
  * Decision operation description
@@ -2287,6 +2283,7 @@ export const description: INodeProperties[] = [
 									try {
 										// Create options for the action
 										const actionOptions: IActionOptions = {
+														sessionId,
 											waitForSelector: waitForSelectors,
 											selectorTimeout,
 											detectionMethod,
@@ -2299,7 +2296,7 @@ export const description: INodeProperties[] = [
 
 										// Execute the click action using the utility
 										const actionResult = await executeAction(
-											puppeteerPage,
+											sessionId,
 											'click' as ActionType,
 											{
 												selector: actionSelector,
@@ -2461,6 +2458,7 @@ export const description: INodeProperties[] = [
 
 											// Create options for the action
 											const actionOptions: IActionOptions = {
+														sessionId,
 												waitForSelector: waitForSelectors,
 												selectorTimeout,
 												detectionMethod,
@@ -2473,7 +2471,7 @@ export const description: INodeProperties[] = [
 
 											// Execute the fill action using the utility
 											const actionResult = await executeAction(
-												puppeteerPage,
+												sessionId,
 												'fill' as ActionType,
 												field,
 												actionOptions,
@@ -2481,10 +2479,10 @@ export const description: INodeProperties[] = [
 											);
 
 											// Check if we need to use a reconnected page
-											if (actionResult.pageReconnected && actionResult.reconnectedPage) {
+											if (actionResult.details.pageReconnected === true && actionResult.details.reconnectedPage) {
 												this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-													'Using reconnected page after fill action'));
-												puppeteerPage = actionResult.reconnectedPage;
+													'Using reconnected page after fill action from details'));
+												puppeteerPage = actionResult.details.reconnectedPage as puppeteer.Page;
 
 												// Update the page in the session manager to ensure future operations use this page
 												if (sessionId) {
@@ -2649,6 +2647,7 @@ export const description: INodeProperties[] = [
 
 											// Create action options once
 											const actionOptions: IActionOptions = {
+												sessionId,
 												waitForSelector: waitForSelectors,
 												selectorTimeout,
 												detectionMethod,
@@ -2663,7 +2662,7 @@ export const description: INodeProperties[] = [
 											for (const field of formFields) {
 												// Execute the fill action using the utility
 												const actionResult = await executeAction(
-													puppeteerPage,
+													sessionId,
 													'fill' as ActionType,
 													field,
 													actionOptions,
@@ -2671,10 +2670,10 @@ export const description: INodeProperties[] = [
 												);
 
 												// Check if we need to use a reconnected page
-												if (actionResult.pageReconnected && actionResult.reconnectedPage) {
+												if (actionResult.details.pageReconnected === true && actionResult.details.reconnectedPage) {
 													this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
 														'Using reconnected page after fill action'));
-													puppeteerPage = actionResult.reconnectedPage;
+													puppeteerPage = actionResult.details.reconnectedPage as puppeteer.Page;
 
 													// Update the page in the session manager to ensure future operations use this page
 													if (sessionId) {
@@ -2714,6 +2713,7 @@ export const description: INodeProperties[] = [
 
 														// We'll use the click action with URL change detection
 														const actionOptions: IActionOptions = {
+														sessionId,
 															waitForSelector: waitForSelectors,
 																selectorTimeout,
 																detectionMethod,
@@ -2728,7 +2728,7 @@ export const description: INodeProperties[] = [
 														const effectiveWaitTime = Math.max(waitSubmitTime, 20000);
 
 														const clickResult = await executeAction(
-															puppeteerPage,
+															sessionId,
 															'click' as ActionType,
 															{
 																selector: submitSelector,
@@ -2740,17 +2740,17 @@ export const description: INodeProperties[] = [
 														);
 
 														// Check if we need to use a reconnected page
-														if (clickResult.pageReconnected && clickResult.reconnectedPage) {
+														if (clickResult.details.pageReconnected === true && clickResult.details.reconnectedPage) {
 															this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
 																'Using reconnected page after form submission with URL change'));
-															puppeteerPage = clickResult.reconnectedPage;
+															puppeteerPage = clickResult.details.reconnectedPage as puppeteer.Page;
 
-                              // Update the page in the session manager to ensure future operations use this page
-                              if (sessionId) {
-                                SessionManager.storePage(sessionId, `page_${Date.now()}`, puppeteerPage);
-                                this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
-                                  `Updated session page reference with session ID: ${sessionId}`));
-                              }
+															// Update the page in the session manager to ensure future operations use this page
+															if (sessionId) {
+																SessionManager.storePage(sessionId, `page_${Date.now()}`, puppeteerPage);
+																this.logger.info(formatOperationLog('Decision', nodeName, nodeId, index,
+																	`Updated session page reference with session ID: ${sessionId}`));
+															}
 														}
 
 														// After successful submission, add an additional stabilization delay
@@ -2993,6 +2993,7 @@ export const description: INodeProperties[] = [
 									try {
 										// Create options for the action
 										const actionOptions: IActionOptions = {
+								sessionId,
 											waitForSelector: waitForSelectors,
 											selectorTimeout,
 											detectionMethod,
@@ -3005,7 +3006,7 @@ export const description: INodeProperties[] = [
 
 										// Execute the extract action using the utility
 										const actionResult = await executeAction(
-											puppeteerPage,
+											sessionId,
 											'extract' as ActionType,
 											extractionParams,
 											actionOptions,
@@ -3075,6 +3076,7 @@ export const description: INodeProperties[] = [
 									try {
 										// Create options and parameters for the action
 										const actionOptions: IActionOptions = {
+								sessionId,
 											waitForSelector: waitForSelectors,
 											selectorTimeout,
 											detectionMethod,
@@ -3093,7 +3095,7 @@ export const description: INodeProperties[] = [
 
 										// Execute the navigation action using the utility
 										const actionResult = await executeAction(
-											puppeteerPage,
+											sessionId,
 											'navigate' as ActionType,
 											actionParameters,
 											actionOptions,
