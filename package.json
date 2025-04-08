@@ -60,6 +60,7 @@
   },
   "dependencies": {
     "luxon": "^3.4.4",
+    "puppeteer": "^24.6.0",
     "puppeteer-core": "^24.4.0",
     "speakeasy": "^2.0.0",
     "ws": "^8.18.1"

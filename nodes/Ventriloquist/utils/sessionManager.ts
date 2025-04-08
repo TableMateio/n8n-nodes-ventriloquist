@@ -92,34 +92,30 @@ export namespace SessionManager {
   export function getWebSocketUrlFromCredentials(
     logger: ILogger,
     credentialType: string,
-    credentials: { [key: string]: any },
+    credentials: { [key: string]: unknown },
   ): string {
     let websocketEndpoint = '';
 
     if (credentialType === 'brightDataApi') {
-      websocketEndpoint = credentials.websocketEndpoint as string;
+      websocketEndpoint = (credentials as { websocketEndpoint: string }).websocketEndpoint;
     } else if (credentialType === 'browserlessApi') {
-      const connectionType = credentials.connectionType as string || 'direct';
+      const connectionType = (credentials as { connectionType?: string }).connectionType || 'direct';
       if (connectionType === 'direct') {
-        websocketEndpoint = credentials.wsEndpoint as string;
+        websocketEndpoint = (credentials as { wsEndpoint: string }).wsEndpoint;
       } else {
-        // For standard connection, we'll use the baseUrl and apiKey
-        const baseUrl = (credentials.baseUrl as string) || 'https://browserless.io';
-        const apiKey = credentials.apiKey;
+        const baseUrl = ((credentials as { baseUrl?: string }).baseUrl) || 'https://browserless.io';
+        const apiKey = (credentials as { apiKey?: string }).apiKey;
         if (!apiKey) {
           throw new Error('API token is required for Browserless standard connection');
         }
-        // Don't add any paths to the URL, just convert protocol and add token
         const wsBaseUrl = baseUrl.replace(/^https?:\/\//, '');
         websocketEndpoint = `wss://${wsBaseUrl}?token=${apiKey}`;
-
         logger.info(`Creating WebSocket URL from credentials: ${wsBaseUrl}?token=***`);
       }
     }
 
-    // Check if we have a valid WebSocket endpoint
-    if (!websocketEndpoint || websocketEndpoint.trim() === '') {
-      throw new Error(`WebSocket endpoint is required but not configured for ${credentialType}. Please check your credentials configuration.`);
+    if (!websocketEndpoint || typeof websocketEndpoint !== 'string' || websocketEndpoint.trim() === '') {
+      throw new Error(`WebSocket endpoint is required but not configured or invalid for ${credentialType}. Please check your credentials configuration.`);
     }
 
     return websocketEndpoint;
@@ -496,16 +492,29 @@ export namespace SessionManager {
   }
 
   /**
-   * Store a page in a session
+   * Store a page in a session, replacing any existing pages for that session.
+   * Ensures only the most recent page reference is kept.
    */
   export function storePage(sessionId: string, pageId: string, page: Page): void {
     const session = sessions.get(sessionId);
     if (!session) {
+      // Consider logging a warning or throwing a more specific error if session doesn't exist
+      // For now, let's throw to make it explicit
       throw new Error(`Cannot store page: session ${sessionId} not found`);
     }
 
+    // Clear any existing pages for this session to ensure only the new one remains
+    if (session.pages.size > 0) {
+      // Optional: Add logging here if needed
+      // logger.info(`[SessionManager] Clearing ${session.pages.size} existing page(s) for session ${sessionId} before storing page ${pageId}`);
+      session.pages.clear();
+    }
+
+    // Add the new page
     session.pages.set(pageId, page);
-    session.lastUsed = new Date();
+    session.lastUsed = new Date(); // Update last used timestamp
+    // Optional: Add logging here if needed
+    // logger.info(`[SessionManager] Stored page ${pageId} for session ${sessionId}`);
   }
 
   /**
