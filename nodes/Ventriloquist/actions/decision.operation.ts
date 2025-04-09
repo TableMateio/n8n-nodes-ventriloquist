@@ -3195,6 +3195,25 @@ export async function execute(
 											actionResult.details,
 										);
 
+										// ---- Add logic to update puppeteerPage if needed ----
+										if (
+											actionResult.details.pageReconnected === true &&
+											actionResult.details.reconnectedPage
+										) {
+											this.logger.info(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`Fill action reconnected page. Updating main page reference.`,
+												),
+											);
+											puppeteerPage = actionResult.details
+												.reconnectedPage as puppeteer.Page;
+										}
+										// -------------------------------------------------------
+
 										// Handle post-fill waiting
 										if (waitAfterAction === "fixedTime") {
 											await new Promise((resolve) =>
