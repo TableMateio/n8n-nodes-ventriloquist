@@ -496,30 +496,58 @@ export async function getActivePage(
 	}
 
 	try {
-		const pages = await browser.pages();
-		logger.info(`${logPrefix} Found ${pages.length} pages in browser.`);
+		let pages = await browser.pages();
+		logger.info(`${logPrefix} Found ${pages.length} pages initially.`);
+
+		// Filter out about:blank pages unless it's the ONLY page
+		const nonBlankPages = pages.filter((p) => p.url() !== "about:blank");
+		if (nonBlankPages.length > 0) {
+			pages = nonBlankPages;
+			logger.info(`${logPrefix} Filtered to ${pages.length} non-blank pages.`);
+		} else if (pages.length > 1) {
+			// If only blank pages remain, but there was more than one, it's ambiguous
+			logger.warn(
+				`${logPrefix} Multiple about:blank pages found. Cannot reliably determine active page.`,
+			);
+			return null;
+		} // else: if only one page exists and it's about:blank, we'll use it.
 
 		if (pages.length === 0) {
-			logger.warn(`${logPrefix} No pages found in browser.`);
+			logger.warn(`${logPrefix} No suitable pages found after filtering.`);
 			return null;
 		}
 
-		const page = pages[pages.length - 1]; // Assume last page is active
+		const page = pages[pages.length - 1]; // Assume last page in the filtered list is active
+		const selectedUrl = page.url(); // Get URL for logging
+		logger.info(`${logPrefix} Selected page with URL: ${selectedUrl}`);
 
-		if (!page || page.isClosed()) {
-			logger.warn(`${logPrefix} Last page object is invalid or closed.`);
+		if (page.isClosed()) {
+			// Check if the selected page is closed
+			logger.warn(`${logPrefix} Selected page (${selectedUrl}) is closed.`);
 			return null;
 		}
 
 		// Quick responsiveness check
 		try {
-			await page.evaluate(() => true, { timeout: 1000 });
-			logger.info(`${logPrefix} Active page is responsive.`);
+			// Use a slightly longer timeout for responsiveness check
+			await page.evaluate(() => true, { timeout: 2000 });
+			logger.info(`${logPrefix} Selected page (${selectedUrl}) is responsive.`);
 			return page;
 		} catch (evalError) {
-			logger.warn(
-				`${logPrefix} Active page failed responsiveness check: ${(evalError as Error).message}`,
-			);
+			const errorMsg = (evalError as Error).message;
+			// Specifically check for context destruction errors
+			if (
+				errorMsg.includes("context was destroyed") ||
+				errorMsg.includes("Target closed")
+			) {
+				logger.warn(
+					`${logPrefix} Selected page (${selectedUrl}) context was destroyed: ${errorMsg}`,
+				);
+			} else {
+				logger.warn(
+					`${logPrefix} Selected page (${selectedUrl}) failed responsiveness check: ${errorMsg}`,
+				);
+			}
 			return null;
 		}
 	} catch (error) {
