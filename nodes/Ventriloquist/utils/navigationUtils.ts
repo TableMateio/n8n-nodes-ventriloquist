@@ -679,7 +679,7 @@ export async function clickAndWaitForNavigation(
 			);
 			return {
 				success: false,
-				error: "Could not get active browser session for ID: " + sessionId,
+				error: `Could not get active browser session for ID: ${sessionId}`,
 			};
 		}
 		browser = session.browser;
@@ -687,7 +687,7 @@ export async function clickAndWaitForNavigation(
 		const initialPage = await getActivePage(browser, log);
 		if (!initialPage) {
 			log.warn(`${logPrefix} No initial active page found`);
-			return { success: false, error: `No initial active page found` };
+			return { success: false, error: "No initial active page found" };
 		}
 		try {
 			initialUrl = await initialPage.url();
@@ -850,7 +850,7 @@ export async function submitFormAndWaitForNavigation(
 			);
 			return {
 				success: false,
-				error: "Could not get active browser session for ID: " + sessionId,
+				error: `Could not get active browser session for ID: ${sessionId}`,
 			};
 		}
 		browser = session.browser;
@@ -858,7 +858,7 @@ export async function submitFormAndWaitForNavigation(
 		const initialPage = await getActivePage(browser, log);
 		if (!initialPage) {
 			log.warn(`${logPrefix} No initial active page found`);
-			return { success: false, error: `No initial active page found` };
+			return { success: false, error: "No initial active page found" };
 		}
 
 		try {

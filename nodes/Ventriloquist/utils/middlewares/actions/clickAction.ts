@@ -129,6 +129,7 @@ export async function executeClickAction(
 					// Find the element first
 					const element = await page.$(selector);
 					if (!element) {
+						logger.warn(`${logPrefix} Element ${selector} not found.`);
 						return {
 							success: false,
 							details: {
@@ -140,10 +141,16 @@ export async function executeClickAction(
 					}
 
 					// Click the element without waiting
+					logger.info(`${logPrefix} Clicking element: ${selector}...`);
 					await element.click();
+					logger.info(`${logPrefix} Click promise for ${selector} resolved.`);
 
 					// Now explicitly wait for URL change
+					logger.info(`${logPrefix} Getting current URL after click...`);
 					const currentUrl = await page.url();
+					logger.info(
+						`${logPrefix} Got current URL: ${currentUrl}. Now calling waitForUrlChange.`,
+					);
 
 					logger.info(
 						formatOperationLog(
