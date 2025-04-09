@@ -134,7 +134,9 @@ export async function executeClickAction(
 						waitUntil: "networkidle2", // Try networkidle2
 						timeout: waitTime || 30000,
 					});
-					const clickPromise = element.click();
+					const clickPromise = page.evaluate((el) => {
+						(el as HTMLElement).click();
+					}, element);
 
 					await Promise.all([navigationPromise, clickPromise]);
 					logger.info(
@@ -286,7 +288,9 @@ export async function executeClickAction(
 					});
 
 					// Click the element
-					await element.click();
+					await page.evaluate((el) => {
+						(el as HTMLElement).click();
+					}, element);
 
 					// Wait for navigation to complete
 					await navigationPromise;
@@ -384,8 +388,13 @@ export async function executeClickAction(
 				};
 			}
 
-			// Click the element
-			await element.click();
+			// Click the element using page.evaluate with HTMLElement cast
+			logger.info(
+				`${logPrefix} Performing simple click via page.evaluate on selector: "${selector}"`,
+			);
+			await page.evaluate((el) => {
+				(el as HTMLElement).click();
+			}, element);
 
 			// Wait if specified
 			if (waitAfterAction === "fixedTime" && waitTime) {
