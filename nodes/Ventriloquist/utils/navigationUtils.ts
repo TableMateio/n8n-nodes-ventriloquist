@@ -288,6 +288,7 @@ export async function waitForUrlChange(
 	logger.info(
 		`${logPrefix} Called. Waiting for URL to change from: ${currentUrl} (Timeout: ${timeout}ms)`,
 	);
+	let initialPageCheckFailed = false; // Flag to track if initial check failed
 
 	try {
 		const session = SessionManager.getSession(sessionId);
@@ -297,12 +298,24 @@ export async function waitForUrlChange(
 		}
 		const browser = session.browser;
 
-		const initialPage = await getActivePage(browser, logger);
-		if (!initialPage) {
-			logger.error(`${logPrefix} No active page found initially: ${sessionId}`);
-			return false;
+		// Try to get initial page, but don't fail immediately if context is destroyed
+		let pageForListeners: Page | null = null;
+		try {
+			pageForListeners = await getActivePage(browser, logger);
+			if (!pageForListeners) {
+				logger.warn(
+					`${logPrefix} Initial getActivePage returned null. Will rely on polling/listeners.`,
+				);
+				initialPageCheckFailed = true; // Mark that the initial page wasn't available
+			} else {
+				logger.info(`${logPrefix} Initial active page obtained successfully.`);
+			}
+		} catch (pageError) {
+			logger.warn(
+				`${logPrefix} Error during initial getActivePage: ${(pageError as Error).message}. Will rely on polling/listeners.`,
+			);
+			initialPageCheckFailed = true; // Mark that the initial page wasn't available
 		}
-		logger.info(`${logPrefix} Initial active page obtained.`);
 
 		const startTime = Date.now();
 		let contextDestroyed = false;
@@ -357,15 +370,44 @@ export async function waitForUrlChange(
 		};
 
 		// --- Listener Setup --- //
-		const pageForListeners = await getActivePage(browser, logger);
+		// Use the page obtained earlier IF available, otherwise listeners might not attach
 		if (!pageForListeners) {
 			logger.warn(
-				`${logPrefix} No active page for listeners. Returning contextDestroyed: ${contextDestroyed}`,
+				`${logPrefix} No valid initial page for listeners. Relying solely on polling.`,
 			);
-			return contextDestroyed;
+			// If no initial page, we MUST rely on polling
+			const pollingResult = await pollForUrlChanges();
+			// Final verification after polling result
+			logger.info(
+				`${logPrefix} Polling finished (no listeners). Result: ${pollingResult}. Verifying final state.`,
+			);
+			await new Promise((resolve) => setTimeout(resolve, 1000)); // Stabilize
+			try {
+				const finalPage = await getActivePage(browser, logger);
+				if (!finalPage) {
+					logger.warn(
+						`${logPrefix} Final verification (polling only): getActivePage failed. Returning polling result: ${pollingResult || contextDestroyed}`,
+					);
+					return pollingResult || contextDestroyed;
+				}
+				const finalUrl = await finalPage.url();
+				const finalUrlChanged = finalUrl !== currentUrl;
+				logger.info(
+					`${logPrefix} Final verification (polling only): Final URL: ${finalUrl}. Changed: ${finalUrlChanged}. Overall: ${pollingResult || contextDestroyed || finalUrlChanged}`,
+				);
+				return pollingResult || contextDestroyed || finalUrlChanged;
+			} catch (finalError) {
+				logger.warn(
+					`${logPrefix} Error during final verification (polling only): ${(finalError as Error).message}. Returning polling result: ${pollingResult || contextDestroyed}`,
+				);
+				return pollingResult || contextDestroyed; // Best guess
+			}
 		}
-		logger.info(`${logPrefix} Setting up listeners on page.`);
 
+		// If we have a page, set up listeners and race
+		logger.info(
+			`${logPrefix} Initial page exists. Setting up listeners and Promise.race.`,
+		);
 		logger.info(`${logPrefix} Creating waitForFunction promise.`);
 		const waitFunctionPromise = pageForListeners
 			.waitForFunction(
