@@ -140,17 +140,32 @@ export async function executeClickAction(
 						};
 					}
 
-					// Click the element without waiting
-					logger.info(`${logPrefix} Clicking element: ${selector}...`);
-					await element.click();
-					logger.info(`${logPrefix} Click promise for ${selector} resolved.`);
-
-					// Now explicitly wait for URL change
-					logger.info(`${logPrefix} Getting current URL after click...`);
-					const currentUrl = await page.url();
+					// Initiate the click without awaiting its promise, add small delay
 					logger.info(
-						`${logPrefix} Got current URL: ${currentUrl}. Now calling waitForUrlChange.`,
+						`${logPrefix} Initiating click (no await) on element: ${selector}...`,
 					);
+					element.click({ delay: 50 }); // No await here!
+					logger.info(
+						`${logPrefix} Click initiated for ${selector}. Proceeding immediately to get URL.`,
+					);
+
+					// Now explicitly wait for URL change - this might error if context destroyed instantly
+					let currentUrl = "[Error fetching initial URL]";
+					try {
+						logger.info(
+							`${logPrefix} Getting current URL after initiating click...`,
+						);
+						currentUrl = await page.url();
+						logger.info(
+							`${logPrefix} Got current URL: ${currentUrl}. Now calling waitForUrlChange.`,
+						);
+					} catch (urlError) {
+						// If context is destroyed getting the URL, waitForUrlChange should handle it
+						logger.warn(
+							`${logPrefix} Error getting URL after click (context likely destroyed): ${(urlError as Error).message}. Proceeding to waitForUrlChange.`,
+						);
+						currentUrl = beforeUrl; // Use the URL from before the click as the base for waitForUrlChange
+					}
 
 					logger.info(
 						formatOperationLog(
@@ -162,10 +177,10 @@ export async function executeClickAction(
 						),
 					);
 
-					// Import waitForUrlChange from navigationUtils at the top of the file if not already imported
+					// Wait for the URL change
 					const urlChanged = await waitForUrlChange(
 						options.sessionId,
-						currentUrl,
+						currentUrl, // Use the URL we managed to get, or the original one if getting failed
 						waitTime || 30000,
 						logger,
 					);
