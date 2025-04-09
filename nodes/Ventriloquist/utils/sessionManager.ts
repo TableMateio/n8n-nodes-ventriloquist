@@ -144,7 +144,14 @@ export namespace SessionManager {
 			apiToken?: string;
 			sessionId?: string;
 		},
+		logger?: ILogger,
 	): string {
+		const localLogger = logger || {
+			info: () => {},
+			warn: () => {},
+			error: () => {},
+		};
+
 		// Validate the endpoint - it should not be empty
 		if (!websocketEndpoint || websocketEndpoint.trim() === "") {
 			throw new Error("WebSocket endpoint cannot be empty");
@@ -187,41 +194,46 @@ export namespace SessionManager {
 			wsUrl = wsUrl.replace("https://", "wss://");
 		}
 
-		// Add token if provided and not already present
-		if (options?.apiToken && !wsUrl.includes("token=")) {
-			try {
-				const wsUrlObj = new URL(wsUrl);
+		// Append timeout explicitly to override potential defaults
+		try {
+			const wsUrlObj = new URL(wsUrl);
+			// Add API token if provided
+			if (options?.apiToken) {
 				wsUrlObj.searchParams.set("token", options.apiToken);
-				wsUrl = wsUrlObj.toString();
-			} catch (urlError) {
-				// Check if the URL is valid before appending anything
-				if (!hasHost) {
-					throw new Error(`Cannot add token to invalid URL: ${wsUrl}`);
-				}
-				// Fall back to direct string concatenation
-				wsUrl += `${wsUrl.includes("?") ? "&" : "?"}token=${options.apiToken}`;
 			}
-		}
-
-		// Add sessionId if provided
-		if (options?.sessionId) {
-			try {
-				const wsUrlObj = new URL(wsUrl);
-				// Set both sessionId and session parameters for compatibility with different implementations
+			// Add session ID if provided
+			if (options?.sessionId) {
 				wsUrlObj.searchParams.set("sessionId", options.sessionId);
 				wsUrlObj.searchParams.set("session", options.sessionId);
-				wsUrl = wsUrlObj.toString();
-			} catch (urlError) {
-				// Check if the URL is valid before appending anything
-				if (!hasHost) {
-					throw new Error(`Cannot add session ID to invalid URL: ${wsUrl}`);
-				}
-				// Fall back to direct string concatenation
+			}
+			// Add explicit timeout
+			wsUrlObj.searchParams.set("timeout", "300000"); // 5 minutes
+
+			wsUrl = wsUrlObj.toString();
+			localLogger.info(
+				`[SessionManager] Formatted WS URL (with timeout): ${wsUrl.replace(/token=([^&]+)/, "token=***").replace(/timeout=([^&]+)/, "timeout=300000")}`,
+			);
+		} catch (urlError) {
+			localLogger.warn(
+				`[SessionManager] Failed to parse WS URL with URL object: ${(urlError as Error).message}. Falling back to string append.`,
+			);
+			// Fallback string appending (less robust)
+			if (options?.apiToken && !wsUrl.includes("token=")) {
+				wsUrl += `${wsUrl.includes("?") ? "&" : "?"}token=${options.apiToken}`;
+			}
+			if (options?.sessionId) {
 				wsUrl += `${wsUrl.includes("?") ? "&" : "?"}sessionId=${options.sessionId}&session=${options.sessionId}`;
 			}
+			// Add explicit timeout (Fallback)
+			if (!wsUrl.includes("timeout=")) {
+				wsUrl += `${wsUrl.includes("?") ? "&" : "?"}timeout=300000`;
+			}
+			localLogger.info(
+				`[SessionManager] Formatted WS URL (fallback string append): ${wsUrl.replace(/token=([^&]+)/, "token=***").replace(/timeout=([^&]+)/, "timeout=300000")}`,
+			);
 		}
 
-		// Final validation - make sure we have a valid URL
+		// Final validation
 		try {
 			new URL(wsUrl);
 		} catch (e) {
@@ -423,20 +435,24 @@ export namespace SessionManager {
 		);
 
 		try {
-			// Format the WebSocket URL
-			const wsUrl = formatWebsocketUrl(websocketEndpoint, { apiToken });
+			// Format the WebSocket URL (PASSING LOGGER)
+			const wsUrl = formatWebsocketUrl(websocketEndpoint, { apiToken }, logger);
 			logConnection(logger, "Connecting with formatted WebSocket URL", wsUrl);
 
-			// Create connection options
+			// Create connection options (REMOVED INCORRECT TIMEOUT)
 			const connectionOptions: ConnectOptions = {
 				browserWSEndpoint: wsUrl,
 				defaultViewport: {
 					width: 1280,
 					height: 720,
 				},
+				// timeout: 300000, // INCORRECT: Removed from here
 			};
 
 			// Connect to browser
+			logger.info(
+				`Attempting puppeteer.connect with options: ${JSON.stringify({ ...connectionOptions, browserWSEndpoint: "ws://...masked..." })}`,
+			);
 			const browser = await puppeteerRuntime.connect(connectionOptions);
 			logger.info("Successfully connected to browser service");
 
@@ -516,24 +532,32 @@ export namespace SessionManager {
 
 		// Session not found locally or not active - try to reconnect remotely
 		try {
-			// Format the WebSocket URL with session ID
-			const wsUrl = formatWebsocketUrl(websocketEndpoint, {
-				apiToken: options.apiToken,
-				sessionId,
-			});
+			// Format the WebSocket URL with session ID (PASSING LOGGER)
+			const wsUrl = formatWebsocketUrl(
+				websocketEndpoint,
+				{
+					apiToken: options.apiToken,
+					sessionId,
+				},
+				logger,
+			);
 
 			logConnection(logger, "Reconnecting with formatted WebSocket URL", wsUrl);
 
-			// Create connection options
+			// Create connection options (REMOVED INCORRECT TIMEOUT)
 			const connectionOptions: ConnectOptions = {
 				browserWSEndpoint: wsUrl,
 				defaultViewport: {
 					width: 1280,
 					height: 720,
 				},
+				// timeout: 300000, // INCORRECT: Removed from here
 			};
 
 			// Connect to browser
+			logger.info(
+				`Attempting puppeteer.connect (reconnect) with options: ${JSON.stringify({ ...connectionOptions, browserWSEndpoint: "ws://...masked..." })}`,
+			);
 			const browser = await puppeteerRuntime.connect(connectionOptions);
 			logger.info(`Successfully reconnected to browser session: ${sessionId}`);
 
