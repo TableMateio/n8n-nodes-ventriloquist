@@ -69,9 +69,7 @@ We are currently using the following collaborative workflow for debugging:
     *   Monitor this terminal for backend logs.
 
 2.  **Trigger Workflow Test (Manual - User):**
-    *   Open `https://localhost:5678` in a browser.
-    *   Navigate to the target workflow (e.g., `YLEey8jT0fN0ovOl`).
-    *   Click the "Test workflow" button in the UI.
+    cd /Users/scottbergman/dropbox/taxsurplus/technology/n8n && NODE_ENV=development ./packages/cli/bin/n8n execute --id=YLEey8jT0fN0ovOl
 
 3.  **Monitor & Debug (Collaborative):**
     *   Observe the workflow execution in the UI and the Browserless debugger (if attached).

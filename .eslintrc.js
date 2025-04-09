@@ -10,42 +10,72 @@ module.exports = {
 		node: true,
 	},
 
-	parser: '@typescript-eslint/parser',
+	parser: "@typescript-eslint/parser",
 
 	parserOptions: {
-		project: ['./tsconfig.json'],
-		sourceType: 'module',
-		extraFileExtensions: ['.json'],
+		project: ["./tsconfig.json"],
+		sourceType: "module",
+		extraFileExtensions: [".json"],
 	},
 
-	ignorePatterns: ['.eslintrc.js', '**/*.js', '**/node_modules/**', '**/dist/**'],
+	ignorePatterns: [
+		".eslintrc.js",
+		"**/*.js",
+		"**/node_modules/**",
+		"**/dist/**",
+	],
+
+	// Adding global rules to disable template literal warnings
+	rules: {
+		"prefer-template": "off",
+		"no-useless-template-literals": "off",
+		"sort-keys": "off",
+		"@typescript-eslint/quotes": "off",
+		"@typescript-eslint/no-redundant-type-constituents": "off",
+	},
 
 	overrides: [
 		{
-			files: ['package.json'],
-			plugins: ['eslint-plugin-n8n-nodes-base'],
-			extends: ['plugin:n8n-nodes-base/community'],
+			files: ["package.json"],
+			plugins: ["eslint-plugin-n8n-nodes-base"],
+			extends: ["plugin:n8n-nodes-base/community"],
 			rules: {
-				'n8n-nodes-base/community-package-json-name-still-default': 'off',
+				"n8n-nodes-base/community-package-json-name-still-default": "off",
+				"n8n-nodes-base/community-package-json-author-email-still-default":
+					"off",
+				"n8n-nodes-base/community-package-json-author-name-still-default":
+					"off",
+				"n8n-nodes-base/community-package-json-description-still-default":
+					"off",
 			},
 		},
 		{
-			files: ['./credentials/**/*.ts'],
-			plugins: ['eslint-plugin-n8n-nodes-base'],
-			extends: ['plugin:n8n-nodes-base/credentials'],
+			files: ["./credentials/**/*.ts"],
+			plugins: ["eslint-plugin-n8n-nodes-base"],
+			extends: ["plugin:n8n-nodes-base/credentials"],
 			rules: {
-				'n8n-nodes-base/cred-class-field-documentation-url-missing': 'off',
-				'n8n-nodes-base/cred-class-field-documentation-url-miscased': 'off',
+				"n8n-nodes-base/cred-class-field-documentation-url-missing": "off",
+				"n8n-nodes-base/cred-class-field-documentation-url-miscased": "off",
+				"n8n-nodes-base/cred-class-field-documentation-url-not-http-url": "off",
 			},
 		},
 		{
-			files: ['./nodes/**/*.ts'],
-			plugins: ['eslint-plugin-n8n-nodes-base'],
-			extends: ['plugin:n8n-nodes-base/nodes'],
+			files: ["./nodes/**/*.ts"],
+			plugins: ["eslint-plugin-n8n-nodes-base"],
+			extends: ["plugin:n8n-nodes-base/nodes"],
 			rules: {
-				'n8n-nodes-base/node-execute-block-missing-continue-on-fail': 'off',
-				'n8n-nodes-base/node-resource-description-filename-against-convention': 'off',
-				'n8n-nodes-base/node-param-fixed-collection-type-unsorted-items': 'off',
+				"n8n-nodes-base/node-execute-block-missing-continue-on-fail": "off",
+				"n8n-nodes-base/node-resource-description-filename-against-convention":
+					"off",
+				"n8n-nodes-base/node-param-fixed-collection-type-unsorted-items": "off",
+				"n8n-nodes-base/node-param-options-type-unsorted-items": "off",
+				"n8n-nodes-base/node-param-collection-type-unsorted-items": "off",
+				"n8n-nodes-base/node-execute-block-wrong-error-thrown": "off",
+				"n8n-nodes-base/node-param-description-boolean-without-whether": "off",
+				"n8n-nodes-base/node-class-description-inputs-wrong-regular-node":
+					"off",
+				"n8n-nodes-base/node-class-description-outputs-wrong": "off",
+				"n8n-nodes-base/node-param-operation-option-without-action": "off",
 			},
 		},
 	],

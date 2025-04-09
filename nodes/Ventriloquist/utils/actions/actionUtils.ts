@@ -1,262 +1,282 @@
-import type { IDataObject, Logger as ILogger } from 'n8n-workflow';
-import type * as puppeteer from 'puppeteer-core';
-import { formatOperationLog } from '../resultUtils';
-import { executeClickAction } from './clickAction';
-import type { IClickActionParameters, IClickActionOptions } from './clickAction';
-import { executeFillAction } from './fillAction';
-import type { IFillActionParameters, IFillActionOptions } from './fillAction';
-import { executeNavigateAction } from './navigateAction';
-import type { INavigateActionParameters, INavigateActionOptions } from './navigateAction';
+import type { IDataObject, Logger as ILogger } from "n8n-workflow";
+import type { Browser, Page } from "puppeteer-core";
+import { executeClickAction } from "../middlewares/actions/clickAction";
+import type {
+	IClickActionParameters,
+	IClickActionOptions,
+	IClickActionResult,
+} from "./clickAction";
+import { executeFillAction } from "../middlewares/actions/fillAction";
+import type {
+	IFillActionParameters,
+	IFillActionOptions,
+	IFillActionResult,
+} from "../middlewares/actions/fillAction";
+import { executeNavigateAction } from "../middlewares/actions/navigateAction";
+import type {
+	INavigateActionParameters,
+	INavigateActionResult,
+} from "../middlewares/actions/navigateAction";
+import { SessionManager } from "../sessionManager";
+import { getActivePage } from "../sessionUtils";
+import {
+	executeExtraction,
+	type IExtractOptions,
+} from "../middlewares/extractMiddleware";
 
 /**
  * Action types supported by the action utilities
  */
-export type ActionType = 'click' | 'fill' | 'extract' | 'navigate' | 'none';
+export type ActionType = "click" | "fill" | "extract" | "navigate" | "none";
 
 /**
  * Interface for general action parameters
  */
 export interface IActionParameters {
-  // Common parameters - each specialized action interface defines its specific parameters
-  selector?: string;
-  [key: string]: unknown;
+	// Common parameters - each specialized action interface defines its specific parameters
+	selector?: string;
+	[key: string]: unknown;
 }
 
 /**
  * Interface for general action options
  */
 export interface IActionOptions {
-  nodeName: string;
-  nodeId: string;
-  index: number;
-  waitForSelector?: boolean;
-  selectorTimeout?: number;
-  detectionMethod?: string;
-  earlyExitDelay?: number;
-  useHumanDelays?: boolean;
+	nodeName: string;
+	nodeId: string;
+	index: number;
+	waitForSelector?: boolean;
+	selectorTimeout?: number;
+	detectionMethod?: string;
+	earlyExitDelay?: number;
+	useHumanDelays?: boolean;
+	sessionId: string;
 }
 
 /**
  * Interface for action results
  */
 export interface IActionResult {
-  success: boolean;
-  actionType: ActionType;
-  details: IDataObject;
-  error?: Error | string;
-  contextDestroyed?: boolean;
-  pageReconnected?: boolean;
-  reconnectedPage?: puppeteer.Page;
+	success: boolean;
+	actionType: ActionType | "error";
+	details: IDataObject;
+	error?: Error | string;
+	contextDestroyed?: boolean;
+	pageReconnected?: boolean;
+	reconnectedPage?: Page;
 }
 
 /**
  * Execute an action based on its type
- * This is the main entry point for all action operations
+ * Refactored partially for click and fill actions
  */
 export async function executeAction(
-  page: puppeteer.Page,
-  actionType: ActionType,
-  parameters: IActionParameters,
-  options: IActionOptions,
-  logger: ILogger
+	sessionId: string,
+	action: ActionType,
+	parameters: IActionParameters,
+	options: IActionOptions,
+	logger: ILogger,
 ): Promise<IActionResult> {
-  // Log action start
-  logger.debug(formatOperationLog('ActionUtils', options.nodeName, options.nodeId, options.index,
-    `Starting action execution: ${actionType}`));
+	const logPrefix = `[ActionUtils][${options.nodeName}#${options.index}]`;
+	logger.debug(
+		`${logPrefix} Starting action: ${action} for session: ${sessionId}`,
+	);
 
-  try {
-    // Execute based on action type
-    switch (actionType) {
-      case 'click': {
-        // Create click-specific parameters
-        const clickParams: IClickActionParameters = {
-          selector: parameters.selector as string,
-          waitAfterAction: parameters.waitAfterAction as string,
-          waitTime: parameters.waitTime as number,
-          waitSelector: parameters.waitSelector as string
-        };
+	let browser: Browser | null = null;
+	let page: Page | null = null;
 
-        // Create click-specific options
-        const clickOptions: IClickActionOptions = {
-          nodeName: options.nodeName,
-          nodeId: options.nodeId,
-          index: options.index,
-          selectorTimeout: options.selectorTimeout
-        };
+	try {
+		// --- Get Session and Active Page --- //
+		const session = SessionManager.getSession(sessionId);
+		if (!session?.browser?.isConnected()) {
+			throw new Error(`Invalid or disconnected browser session: ${sessionId}`);
+		}
+		browser = session.browser;
 
-        // Execute the click action
-        const result = await executeClickAction(page, clickParams, clickOptions, logger);
+		page = await getActivePage(browser, logger);
+		if (!page) {
+			throw new Error(`No active page found for session: ${sessionId}`);
+		}
+		logger.debug(`${logPrefix} Successfully obtained active page.`);
 
-        // Check if we need to handle page reconnection
-        const contextDestroyed = result.details.contextDestroyed === true;
-        const pageReconnected = result.details.pageReconnected === true;
-        let reconnectedPage: puppeteer.Page | undefined = undefined;
+		// --- Execute Action --- //
+		switch (action) {
+			case "click": {
+				const clickParams: IClickActionParameters = {
+					selector: parameters.selector || "",
+					waitAfterAction: (parameters.waitAfterAction ?? "noWait") as string,
+					waitTime: parameters.waitTime as number | undefined,
+					waitSelector: parameters.waitSelector as string | undefined,
+				};
+				const clickOptions: IClickActionOptions = {
+					sessionId: options.sessionId,
+					nodeName: options.nodeName,
+					nodeId: options.nodeId,
+					index: options.index,
+					selectorTimeout: options.selectorTimeout,
+				};
+				const result: IClickActionResult = await executeClickAction(
+					page,
+					clickParams,
+					clickOptions,
+					logger,
+				);
+				return {
+					success: result.success,
+					actionType: "click",
+					details: result.details,
+					error: result.error,
+					contextDestroyed: result.details?.contextDestroyed === true,
+				};
+			}
 
-        if (pageReconnected && 'reconnectedPage' in result.details && result.details.reconnectedPage) {
-          reconnectedPage = result.details.reconnectedPage as puppeteer.Page;
-          logger.info(formatOperationLog('ActionUtils', options.nodeName, options.nodeId, options.index,
-            'Using reconnected page from click action'));
-        }
+			case "fill": {
+				const fillParams: IFillActionParameters = {
+					selector: parameters.selector || "",
+					value: parameters.value as string | undefined,
+					fieldType: parameters.fieldType as string | undefined,
+					clearField: parameters.clearField === true,
+					pressEnter: parameters.pressEnter === true,
+					checkState: parameters.checkState as string | undefined,
+					checked: parameters.checked !== false,
+					filePath: parameters.filePath as string | undefined,
+				};
+				const fillOptions: IFillActionOptions = {
+					nodeName: options.nodeName,
+					nodeId: options.nodeId,
+					index: options.index,
+					useHumanDelays:
+						typeof options.useHumanDelays === "boolean"
+							? options.useHumanDelays
+							: typeof parameters.humanLike === "boolean"
+								? parameters.humanLike
+								: true,
+					sessionId: options.sessionId,
+				};
+				const result: IFillActionResult = await executeFillAction(
+					page,
+					fillParams,
+					fillOptions,
+					logger,
+				);
+				return {
+					success: result.success,
+					actionType: "fill",
+					details: result.details,
+					error: result.error,
+					contextDestroyed: result.details?.contextDestroyed === true,
+				};
+			}
 
-        // Convert to generic action result
-        return {
-          success: result.success,
-          actionType: 'click',
-          details: result.details,
-          error: result.error,
-          contextDestroyed,
-          pageReconnected,
-          reconnectedPage
-        };
-      }
+			case "navigate": {
+				const navigateParams: INavigateActionParameters = {
+					page: page,
+					url: parameters.url as string,
+					waitUntil: parameters.waitUntil as
+						| "load"
+						| "domcontentloaded"
+						| "networkidle0"
+						| "networkidle2"
+						| undefined,
+					waitTime: parameters.waitTime as number | undefined,
+					detectUrlChangeType: parameters.detectUrlChangeType as
+						| string
+						| undefined,
+					referer: parameters.referer as string | undefined,
+					headers: parameters.headers as Record<string, string> | undefined,
+					nodeName: options.nodeName,
+					nodeId: options.nodeId,
+					index: options.index,
+					logger: logger,
+					timeout: parameters.timeout as number | undefined,
+				};
 
-      case 'fill': {
-        // Create fill-specific parameters
-        const fillParams: IFillActionParameters = {
-          selector: parameters.selector as string,
-          value: parameters.value as string,
-          fieldType: parameters.fieldType as string,
-          clearField: parameters.clearField as boolean,
-          pressEnter: parameters.pressEnter as boolean,
-          checkState: parameters.checkState as string,
-          checked: parameters.checked as boolean,
-          filePath: parameters.filePath as string
-        };
+				const result: INavigateActionResult =
+					await executeNavigateAction(navigateParams);
+				return {
+					success: result.success,
+					actionType: "navigate",
+					details: {
+						...result.details,
+						...(result.contextDestroyed !== undefined && {
+							contextDestroyed: result.contextDestroyed,
+						}),
+						...(result.pageReconnected !== undefined && {
+							pageReconnected: result.pageReconnected,
+						}),
+						...(result.urlChanged !== undefined && {
+							urlChanged: result.urlChanged,
+						}),
+					},
+					error: result.error,
+				};
+			}
 
-        // Create fill-specific options
-        const fillOptions: IFillActionOptions = {
-          nodeName: options.nodeName,
-          nodeId: options.nodeId,
-          index: options.index,
-          useHumanDelays: options.useHumanDelays
-        };
+			case "extract": {
+				const extractOptions: IExtractOptions = {
+					extractionType: parameters.extractionType as string,
+					selector: parameters.selector as string,
+					attributeName: parameters.attributeName as string | undefined,
+					outputFormat: parameters.outputFormat as string | undefined,
+					includeMetadata: parameters.includeMetadata as boolean | undefined,
+					includeHeaders: parameters.includeHeaders as boolean | undefined,
+					rowSelector: parameters.rowSelector as string | undefined,
+					cellSelector: parameters.cellSelector as string | undefined,
+					extractionProperty: parameters.extractionProperty as
+						| string
+						| undefined,
+					limit: parameters.limit as number | undefined,
+					separator: parameters.separator as string | undefined,
+					waitForSelector: options.waitForSelector,
+					selectorTimeout: options.selectorTimeout,
+					detectionMethod: options.detectionMethod,
+					earlyExitDelay: options.earlyExitDelay,
+					nodeName: options.nodeName,
+					nodeId: options.nodeId,
+					index: options.index,
+				};
 
-        // Execute the fill action
-        const result = await executeFillAction(page, fillParams, fillOptions, logger);
+				const result = await executeExtraction(page, extractOptions, logger);
+				return {
+					success: result.success,
+					actionType: "extract",
+					details: {
+						data: result.data,
+						...result.details,
+					},
+					error: result.error,
+				};
+			}
 
-        // Check if we need to handle page reconnection
-        const contextDestroyed = result.contextDestroyed === true;
-        const pageReconnected = result.pageReconnected === true;
-        let reconnectedPage: puppeteer.Page | undefined = undefined;
+			case "none": {
+				return {
+					success: true,
+					actionType: "none",
+					details: { info: "No action performed" },
+				};
+			}
 
-        if (pageReconnected && 'reconnectedPage' in result.details && result.details.reconnectedPage) {
-          reconnectedPage = result.details.reconnectedPage as puppeteer.Page;
-          logger.info(formatOperationLog('ActionUtils', options.nodeName, options.nodeId, options.index,
-            'Using reconnected page from fill action'));
-        }
-
-        // Convert to generic action result
-        return {
-          success: result.success,
-          actionType: 'fill',
-          details: result.details,
-          error: result.error,
-          contextDestroyed,
-          pageReconnected,
-          reconnectedPage
-        };
-      }
-
-      case 'extract': {
-        // For extraction, use a dynamic import to avoid circular dependencies
-        const { executeExtraction } = await import('../middlewares/extractMiddleware');
-
-        // Create extraction options
-        const extractOptions = {
-          extractionType: parameters.extractionType as string,
-          selector: parameters.selector as string,
-          attributeName: parameters.attributeName as string,
-          outputFormat: parameters.outputFormat as string,
-          includeMetadata: parameters.includeMetadata === true,
-          includeHeaders: parameters.includeHeaders === true,
-          rowSelector: parameters.rowSelector as string,
-          cellSelector: parameters.cellSelector as string,
-          extractionProperty: parameters.extractionProperty as string,
-          limit: Number(parameters.limit) || 0,
-          separator: parameters.separator as string,
-          waitForSelector: options.waitForSelector === true,
-          selectorTimeout: Number(options.selectorTimeout) || 5000,
-          detectionMethod: options.detectionMethod as string,
-          earlyExitDelay: Number(options.earlyExitDelay) || 500,
-          nodeName: options.nodeName,
-          nodeId: options.nodeId,
-          index: options.index
-        };
-
-        // Execute the extraction
-        const extractResult = await executeExtraction(page, extractOptions, logger);
-
-        // Convert to generic action result
-        return {
-          success: extractResult.success,
-          actionType: 'extract',
-          details: {
-            ...(extractResult.details || {}),
-            data: extractResult.data,
-            selector: extractResult.selector,
-            extractionType: extractResult.extractionType
-          },
-          error: extractResult.error
-        };
-      }
-
-      case 'navigate': {
-        // Create navigate-specific parameters
-        const navigateParams: INavigateActionParameters = {
-          url: parameters.url as string,
-          waitUntil: parameters.waitUntil as string,
-          waitTime: parameters.waitTime as number
-        };
-
-        // Create navigate-specific options
-        const navigateOptions: INavigateActionOptions = {
-          nodeName: options.nodeName,
-          nodeId: options.nodeId,
-          index: options.index
-        };
-
-        // Execute the navigate action
-        const result = await executeNavigateAction(page, navigateParams, navigateOptions, logger);
-
-        // Convert to generic action result
-        return {
-          success: result.success,
-          actionType: 'navigate',
-          details: result.details,
-          error: result.error
-        };
-      }
-
-      case 'none':
-        logger.debug(formatOperationLog('ActionUtils', options.nodeName, options.nodeId, options.index,
-          'No action requested (action type: none)'));
-
-        return {
-          success: true,
-          actionType: 'none',
-          details: { message: 'No action performed' }
-        };
-
-      default:
-        logger.error(formatOperationLog('ActionUtils', options.nodeName, options.nodeId, options.index,
-          `Unknown action type: ${actionType}`));
-
-        return {
-          success: false,
-          actionType: actionType,
-          details: { error: `Unknown action type: ${actionType}` },
-          error: `Unknown action type: ${actionType}`
-        };
-    }
-  } catch (error) {
-    logger.error(formatOperationLog('ActionUtils', options.nodeName, options.nodeId, options.index,
-      `Error during action execution: ${(error as Error).message}`));
-
-    return {
-      success: false,
-      actionType,
-      details: { error: (error as Error).message },
-      error: error as Error
-    };
-  }
+			default: {
+				const errorMsg = `Unsupported action type: ${action}`;
+				logger.error(`${logPrefix} ${errorMsg}`);
+				return {
+					success: false,
+					actionType: "error",
+					details: { error: errorMsg },
+					error: errorMsg,
+				};
+			}
+		}
+	} catch (error) {
+		const errorMessage = (error as Error).message;
+		logger.error(
+			`[ActionUtils] Unhandled error in executeAction: ${errorMessage}`,
+		);
+		return {
+			success: false,
+			actionType: "error",
+			details: { error: errorMessage },
+			error: error as Error,
+		};
+	}
 }

@@ -1,350 +1,311 @@
-import type { IDataObject, Logger as ILogger } from 'n8n-workflow';
-import type * as puppeteer from 'puppeteer-core';
-import { formatOperationLog } from '../../resultUtils';
-import { clickAndWaitForNavigation } from '../../navigationUtils';
-import { SessionManager } from '../../sessionManager';
+import type { IDataObject, Logger as ILogger } from "n8n-workflow";
+import type * as puppeteer from "puppeteer-core";
+import { formatOperationLog } from "../../resultUtils";
+import { clickAndWaitForNavigation } from "../../navigationUtils";
+import { SessionManager } from "../../sessionManager";
+import type { Page } from "puppeteer-core";
 
 /**
  * Interface for click action parameters
  */
 export interface IClickActionParameters {
-  selector: string;
-  waitAfterAction?: string;
-  waitTime?: number;
-  waitSelector?: string;
+	selector: string;
+	waitAfterAction?: string;
+	waitTime?: number;
+	waitSelector?: string;
 }
 
 /**
  * Interface for click action options
  */
 export interface IClickActionOptions {
-  sessionId: string;
-  nodeName: string;
-  nodeId: string;
-  index: number;
-  selectorTimeout?: number;
+	sessionId: string;
+	nodeName: string;
+	nodeId: string;
+	index: number;
+	selectorTimeout?: number;
 }
 
 /**
  * Interface for click action result
  */
 export interface IClickActionResult {
-  success: boolean;
-  details: IDataObject;
-  error?: Error;
-  contextDestroyed?: boolean;
-  urlChanged?: boolean;
-  navigationSuccessful?: boolean;
+	success: boolean;
+	details: IDataObject;
+	error?: Error;
+	contextDestroyed?: boolean;
+	urlChanged?: boolean;
+	navigationSuccessful?: boolean;
 }
 
 /**
- * Execute a click action using SessionManager
- * This version is page-agnostic and relies on SessionManager for page references
+ * Execute a click action using provided page
+ * This version accepts page directly and doesn't use SessionManager for page management
  */
 export async function executeClickAction(
-  parameters: IClickActionParameters,
-  options: IClickActionOptions,
-  logger: ILogger
+	page: Page,
+	parameters: IClickActionParameters,
+	options: IClickActionOptions,
+	logger: ILogger,
 ): Promise<IClickActionResult> {
-  const { selector, waitAfterAction = 'noWait', waitTime = 5000, waitSelector } = parameters;
-  const { sessionId, nodeName, nodeId, index } = options;
+	const {
+		selector,
+		waitAfterAction = "noWait",
+		waitTime = 5000,
+		waitSelector,
+	} = parameters;
+	const { sessionId, nodeName, nodeId, index } = options;
 
-  // Add logging prefix to clearly identify source
-  const logPrefix = '[ClickAction][executeClickAction]';
+	// Add logging prefix to clearly identify source
+	const logPrefix = "[ClickAction][executeClickAction]";
 
-  // Log action start
-  logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-    `${logPrefix} Executing click action on selector: "${selector}" using session: ${sessionId}`));
+	// Log action start
+	logger.info(
+		formatOperationLog(
+			"ClickAction",
+			nodeName,
+			nodeId,
+			index,
+			`${logPrefix} Executing click action on selector: "${selector}"`,
+		),
+	);
 
-  // First, verify the session exists and get the current page
-  if (!await SessionManager.isSessionActive(sessionId)) {
-    return {
-      success: false,
-      details: {
-        error: `Session ${sessionId} is not active or has expired`,
-        selector
-      },
-      error: new Error(`Session ${sessionId} is not active or has expired`)
-    };
-  }
+	// Skip session verification - page is now passed directly
+	try {
+		// Store the initial URL and title before clicking
+		const beforeUrl = await page.url();
+		const beforeTitle = await page.title();
 
-  try {
-    // Get the current page from session manager
-    const page = SessionManager.getPage(sessionId);
+		logger.info(
+			formatOperationLog(
+				"ClickAction",
+				nodeName,
+				nodeId,
+				index,
+				`${logPrefix} Current page before click - URL: ${beforeUrl}, Title: ${beforeTitle}`,
+			),
+		);
 
-    if (!page) {
-      return {
-        success: false,
-        details: {
-          error: `No page found for session ${sessionId}`,
-          selector
-        },
-        error: new Error(`No page found for session ${sessionId}`)
-      };
-    }
+		// Determine if we need to wait for navigation
+		const shouldWaitForNav =
+			waitAfterAction === "urlChanged" ||
+			waitAfterAction === "anyUrlChange" ||
+			waitAfterAction === "navigationComplete";
 
-    // Store the initial URL and title before clicking
-    const beforeUrl = await page.url();
-    const beforeTitle = await page.title();
+		if (shouldWaitForNav) {
+			// Use the simple navigation approach with Promise.all
+			logger.info(
+				formatOperationLog(
+					"ClickAction",
+					nodeName,
+					nodeId,
+					index,
+					`${logPrefix} Using navigation handling for click with waitAfterAction: ${waitAfterAction}`,
+				),
+			);
 
-    logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-      `${logPrefix} Current page before click - URL: ${beforeUrl}, Title: ${beforeTitle}`));
+			// Map the waitAfterAction to appropriate waitUntil option
+			let waitUntil: puppeteer.PuppeteerLifeCycleEvent = "domcontentloaded";
+			if (waitAfterAction === "navigationComplete") {
+				waitUntil = "networkidle0";
+			}
 
-    // Determine if we need to wait for navigation
-    const shouldWaitForNav =
-      waitAfterAction === 'urlChanged' ||
-      waitAfterAction === 'anyUrlChange' ||
-      waitAfterAction === 'navigationComplete';
+			// Use our simplified navigation utility with proper timeout
+			logger.info(
+				formatOperationLog(
+					"ClickAction",
+					nodeName,
+					nodeId,
+					index,
+					`${logPrefix} Directly handling click and navigation on selector: "${selector}", timeout: ${waitTime}ms, waitUntil: ${waitUntil}`,
+				),
+			);
 
-    if (shouldWaitForNav) {
-      // Use the simple navigation approach with Promise.all
-      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `${logPrefix} Using navigation handling for click with waitAfterAction: ${waitAfterAction}`));
+			// Instead of calling clickAndWaitForNavigation, implement directly
+			const element = await page.$(selector);
+			if (!element) {
+				return {
+					success: false,
+					details: {
+						error: `Element not found: ${selector}`,
+						selector,
+					},
+					error: new Error(`Element not found: ${selector}`),
+				};
+			}
 
-      // Map the waitAfterAction to appropriate waitUntil option
-      let waitUntil: puppeteer.PuppeteerLifeCycleEvent = 'domcontentloaded';
-      if (waitAfterAction === 'navigationComplete') {
-        waitUntil = 'networkidle0';
-      }
+			try {
+				// Set up navigation promise
+				const navigationPromise = page.waitForNavigation({
+					waitUntil: [waitUntil],
+					timeout: waitTime,
+				});
 
-      // Use our simplified navigation utility with proper timeout
-      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `${logPrefix} Calling clickAndWaitForNavigation with selector: "${selector}", timeout: ${waitTime}ms, waitUntil: ${waitUntil}`));
+				// Click the element
+				await element.click();
 
-      const navigationResult = await clickAndWaitForNavigation(
-        sessionId,
-        selector,
-        {
-          timeout: waitTime,
-          waitUntil,
-          stabilizationDelay: 2000,
-          logger
-        }
-      );
+				// Wait for navigation to complete
+				await navigationPromise;
 
-      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `${logPrefix} clickAndWaitForNavigation returned - success: ${navigationResult.success}, contextDestroyed: ${!!navigationResult.contextDestroyed}, urlChanged: ${!!navigationResult.urlChanged}`));
+				// Navigation was successful
+				const finalUrl = await page.url();
+				const finalTitle = await page.title();
 
-      if (navigationResult.success) {
-        // Navigation was successful
-        const finalUrl = navigationResult.finalUrl || '';
-        logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-          `${logPrefix} Click with navigation successful - Final URL: ${finalUrl}`));
+				logger.info(
+					formatOperationLog(
+						"ClickAction",
+						nodeName,
+						nodeId,
+						index,
+						`${logPrefix} Click with navigation successful - Final URL: ${finalUrl}`,
+					),
+				);
 
-        // If we got a new page reference, update the session manager
-        if (navigationResult.newPage) {
-          logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-            `${logPrefix} Updating session manager with new page reference after navigation`));
+				return {
+					success: true,
+					urlChanged: beforeUrl !== finalUrl,
+					navigationSuccessful: true,
+					details: {
+						selector,
+						waitAfterAction,
+						waitTime,
+						beforeUrl,
+						finalUrl,
+						beforeTitle,
+						finalTitle,
+						urlChanged: beforeUrl !== finalUrl,
+						navigationSuccessful: true,
+					},
+				};
+			} catch (navigationError) {
+				// Handle navigation errors
+				const errorMessage = (navigationError as Error).message;
+				const isContextDestroyed =
+					errorMessage.includes("context was destroyed") ||
+					errorMessage.includes("Execution context") ||
+					errorMessage.includes("Target closed");
 
-          // Store the new page in the session manager with a timestamp-based ID
-          const pageId = `page_${Date.now()}`;
-          SessionManager.storePage(sessionId, pageId, navigationResult.newPage);
-          logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-            `${logPrefix} New page stored in SessionManager with ID: ${pageId}`));
-        }
+				logger.warn(
+					formatOperationLog(
+						"ClickAction",
+						nodeName,
+						nodeId,
+						index,
+						`${logPrefix} Navigation error: ${errorMessage}`,
+					),
+				);
 
-        return {
-          success: true,
-          urlChanged: beforeUrl !== finalUrl,
-          navigationSuccessful: true,
-          contextDestroyed: navigationResult.contextDestroyed || false,
-          details: {
-            selector,
-            waitAfterAction,
-            waitTime,
-            beforeUrl,
-            finalUrl,
-            beforeTitle,
-            finalTitle: navigationResult.finalTitle || '',
-            urlChanged: beforeUrl !== finalUrl,
-            navigationSuccessful: true,
-            contextDestroyed: navigationResult.contextDestroyed || false
-          }
-        };
-      }
+				// Return with context destroyed flag if applicable
+				return {
+					success: true, // The click itself may have succeeded
+					urlChanged: false,
+					navigationSuccessful: false,
+					contextDestroyed: isContextDestroyed,
+					details: {
+						selector,
+						waitAfterAction,
+						waitTime,
+						beforeUrl,
+						beforeTitle,
+						error: errorMessage,
+						navigationSuccessful: false,
+						contextDestroyed: isContextDestroyed,
+					},
+					error: navigationError as Error,
+				};
+			}
+		} else {
+			// Simple click without waiting for navigation
+			logger.info(
+				formatOperationLog(
+					"ClickAction",
+					nodeName,
+					nodeId,
+					index,
+					`${logPrefix} Performing simple click without navigation wait on selector: "${selector}"`,
+				),
+			);
 
-      // Navigation failed, but click might have succeeded
-      logger.warn(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `${logPrefix} Click succeeded but navigation may not have occurred: ${navigationResult.error || 'Unknown error'}`));
+			// Find the element
+			const element = await page.$(selector);
+			if (!element) {
+				return {
+					success: false,
+					details: {
+						error: `Element not found: ${selector}`,
+						selector,
+					},
+					error: new Error(`Element not found: ${selector}`),
+				};
+			}
 
-      return {
-        success: true, // The click itself was successful
-        urlChanged: false,
-        navigationSuccessful: false,
-        details: {
-          selector,
-          waitAfterAction,
-          waitTime,
-          beforeUrl,
-          beforeTitle,
-          error: navigationResult.error || 'Navigation failed with no specific error',
-          navigationSuccessful: false
-        }
-      };
-    }
+			// Click the element
+			await element.click();
 
-    if (waitAfterAction === 'fixedTime') {
-      // Simple click with fixed time wait
-      await page.click(selector);
+			// Wait if specified
+			if (waitAfterAction === "fixedTime" && waitTime) {
+				logger.info(
+					formatOperationLog(
+						"ClickAction",
+						nodeName,
+						nodeId,
+						index,
+						`${logPrefix} Waiting for fixed time: ${waitTime}ms`,
+					),
+				);
+				await new Promise((resolve) => setTimeout(resolve, waitTime));
+			} else if (waitAfterAction === "selector" && waitSelector) {
+				logger.info(
+					formatOperationLog(
+						"ClickAction",
+						nodeName,
+						nodeId,
+						index,
+						`${logPrefix} Waiting for selector: "${waitSelector}"`,
+					),
+				);
+				await page.waitForSelector(waitSelector, { timeout: waitTime });
+			}
 
-      // Wait for the specified time
-      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `${logPrefix} Waiting fixed time after click: ${waitTime}ms`));
+			// Get current URL for comparison
+			const currentUrl = await page.url();
+			const currentTitle = await page.title();
 
-      await new Promise(resolve => setTimeout(resolve, waitTime));
+			return {
+				success: true,
+				urlChanged: beforeUrl !== currentUrl,
+				details: {
+					selector,
+					waitAfterAction,
+					waitTime,
+					beforeUrl,
+					currentUrl,
+					beforeTitle,
+					currentTitle,
+					urlChanged: beforeUrl !== currentUrl,
+				},
+			};
+		}
+	} catch (error) {
+		// Log and return error
+		const errorMessage = (error as Error).message;
+		logger.error(
+			formatOperationLog(
+				"ClickAction",
+				nodeName,
+				nodeId,
+				index,
+				`${logPrefix} Click action error: ${errorMessage}`,
+			),
+		);
 
-      // Get the final URL and title - using the session to get the current page
-      const currentPage = SessionManager.getPage(sessionId);
-
-      if (!currentPage) {
-        return {
-          success: true, // Click succeeded but we lost the page reference
-          details: {
-            selector,
-            waitAfterAction,
-            waitTime,
-            beforeUrl,
-            beforeTitle,
-            error: 'Could not get current page after click with fixed wait',
-            sessionId
-          }
-        };
-      }
-
-      const finalUrl = await currentPage.url();
-      const finalTitle = await currentPage.title();
-
-      // Log the action result
-      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `${logPrefix} Click with fixed wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
-
-      return {
-        success: true,
-        urlChanged: beforeUrl !== finalUrl,
-        details: {
-          selector,
-          waitAfterAction,
-          waitTime,
-          beforeUrl,
-          finalUrl,
-          beforeTitle,
-          finalTitle,
-          urlChanged: beforeUrl !== finalUrl,
-          sessionId
-        }
-      };
-    }
-
-    if (waitAfterAction === 'selector' && waitSelector) {
-      // Click and wait for a selector to appear
-      await page.click(selector);
-
-      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `${logPrefix} Waiting for selector after click: ${waitSelector}, timeout: ${waitTime}ms`));
-
-      await page.waitForSelector(waitSelector, { timeout: waitTime });
-
-      // Get the final URL and title - using the session to get the current page
-      const currentPage = SessionManager.getPage(sessionId);
-
-      if (!currentPage) {
-        return {
-          success: true, // Click succeeded but we lost the page reference
-          details: {
-            selector,
-            waitAfterAction,
-            waitSelector,
-            waitTime,
-            beforeUrl,
-            beforeTitle,
-            error: 'Could not get current page after click with selector wait',
-            sessionId
-          }
-        };
-      }
-
-      const finalUrl = await currentPage.url();
-      const finalTitle = await currentPage.title();
-
-      // Log the action result
-      logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-        `${logPrefix} Click with selector wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
-
-      return {
-        success: true,
-        urlChanged: beforeUrl !== finalUrl,
-        details: {
-          selector,
-          waitAfterAction,
-          waitSelector,
-          waitTime,
-          beforeUrl,
-          finalUrl,
-          beforeTitle,
-          finalTitle,
-          urlChanged: beforeUrl !== finalUrl,
-          sessionId
-        }
-      };
-    }
-
-    // Simple click with no wait (default case)
-    await page.click(selector);
-
-    // Get the final URL and title - using the session to get the current page
-    const currentPage = SessionManager.getPage(sessionId);
-
-    if (!currentPage) {
-      return {
-        success: true, // Click succeeded but we lost the page reference
-        details: {
-          selector,
-          waitAfterAction,
-          beforeUrl,
-          beforeTitle,
-          error: 'Could not get current page after click with no wait',
-          sessionId
-        }
-      };
-    }
-
-    const finalUrl = await currentPage.url();
-    const finalTitle = await currentPage.title();
-
-    // Log the action result
-    logger.info(formatOperationLog('ClickAction', nodeName, nodeId, index,
-      `${logPrefix} Click with no wait completed - Final URL: ${finalUrl}, Title: ${finalTitle}`));
-
-    return {
-      success: true,
-      urlChanged: beforeUrl !== finalUrl,
-      details: {
-        selector,
-        waitAfterAction,
-        beforeUrl,
-        finalUrl,
-        beforeTitle,
-        finalTitle,
-        urlChanged: beforeUrl !== finalUrl,
-        sessionId
-      }
-    };
-  } catch (error) {
-    // Handle click action errors
-    logger.error(formatOperationLog('ClickAction', nodeName, nodeId, index,
-      `${logPrefix} Error during click action: ${(error as Error).message}`));
-
-    return {
-      success: false,
-      details: {
-        selector,
-        waitAfterAction,
-        waitTime,
-        error: (error as Error).message,
-        sessionId
-      },
-      error: error as Error
-    };
-  }
+		return {
+			success: false,
+			details: {
+				error: errorMessage,
+				selector,
+			},
+			error: error as Error,
+		};
+	}
 }
-

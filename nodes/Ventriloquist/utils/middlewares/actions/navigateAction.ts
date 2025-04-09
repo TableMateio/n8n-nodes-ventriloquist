@@ -1,9 +1,6 @@
 import type { IDataObject, Logger as ILogger } from 'n8n-workflow';
 import type * as puppeteer from 'puppeteer-core';
 import { formatOperationLog } from '../../resultUtils';
-import { navigateWithRetry } from '../../navigationUtils';
-import { reconnectAfterNavigation } from '../../sessionUtils';
-import type { INodeData } from '../../../Interface';
 
 /**
  * Interface for navigate action parameters
@@ -58,7 +55,6 @@ export async function executeNavigateAction(
     page,
     url,
     waitUntil = 'networkidle0',
-    waitTime = 30000,
     referer,
     headers,
     nodeName,
@@ -79,9 +75,6 @@ export async function executeNavigateAction(
     `Navigating to: ${url} with waitUntil: ${waitUntil}, timeout: ${timeout}ms`));
 
   try {
-    // Store the initial URL
-    const initialUrl = await page.url();
-
     // Determine the navigation options
     const navigationOptions: puppeteer.WaitForOptions & { referer?: string } = {
       waitUntil: waitUntil as puppeteer.PuppeteerLifeCycleEvent,

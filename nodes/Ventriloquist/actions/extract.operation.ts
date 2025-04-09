@@ -3,17 +3,22 @@ import type {
 	IDataObject,
 	INodeExecutionData,
 	INodeProperties,
-} from 'n8n-workflow';
-import type * as puppeteer from 'puppeteer-core';
-import { SessionManager } from '../utils/sessionManager';
+} from "n8n-workflow";
+import type * as puppeteer from "puppeteer-core";
+import { SessionManager } from "../utils/sessionManager";
+import { getActivePage } from "../utils/sessionUtils";
 import {
 	formatExtractedDataForLog,
 	getHumanDelay,
 	getPageInfo,
-} from '../utils/extractionUtils';
-import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
-import { createErrorResponse } from '../utils/errorUtils';
-import { executeExtraction } from '../utils/middlewares/extractMiddleware';
+} from "../utils/extractionUtils";
+import {
+	formatOperationLog,
+	createSuccessResponse,
+	createTimingLog,
+} from "../utils/resultUtils";
+import { createErrorResponse } from "../utils/errorUtils";
+import { executeExtraction } from "../utils/middlewares/extractMiddleware";
 
 /**
  * Extended PageInfo interface with bodyText
@@ -29,373 +34,384 @@ interface PageInfo {
  */
 export const description: INodeProperties[] = [
 	{
-		displayName: 'Session ID',
-		name: 'explicitSessionId',
-		type: 'string',
-		default: '',
-		description: 'Session ID to use (leave empty to use ID from input or create new)',
+		displayName: "Session ID",
+		name: "explicitSessionId",
+		type: "string",
+		default: "",
+		description:
+			"Session ID to use (leave empty to use ID from input or create new)",
 		displayOptions: {
 			show: {
-				operation: ['extract'],
+				operation: ["extract"],
 			},
 		},
 	},
 	{
-		displayName: 'Extraction Type',
-		name: 'extractionType',
-		type: 'options',
+		displayName: "Extraction Type",
+		name: "extractionType",
+		type: "options",
 		options: [
 			{
-				name: 'Attribute',
-				value: 'attribute',
-				description: 'Extract specific attribute from an element',
+				name: "Attribute",
+				value: "attribute",
+				description: "Extract specific attribute from an element",
 			},
 			{
-				name: 'HTML',
-				value: 'html',
-				description: 'Extract HTML content from an element',
+				name: "HTML",
+				value: "html",
+				description: "Extract HTML content from an element",
 			},
 			{
-				name: 'Input Value',
-				value: 'value',
-				description: 'Extract value from input, select or textarea',
+				name: "Input Value",
+				value: "value",
+				description: "Extract value from input, select or textarea",
 			},
 			{
-				name: 'Multiple Elements',
-				value: 'multiple',
-				description: 'Extract data from multiple elements matching a selector',
+				name: "Multiple Elements",
+				value: "multiple",
+				description: "Extract data from multiple elements matching a selector",
 			},
 			{
-				name: 'Table',
-				value: 'table',
-				description: 'Extract data from a table',
+				name: "Table",
+				value: "table",
+				description: "Extract data from a table",
 			},
 			{
-				name: 'Text Content',
-				value: 'text',
-				description: 'Extract text content from an element',
+				name: "Text Content",
+				value: "text",
+				description: "Extract text content from an element",
 			},
 		],
-		default: 'text',
-		description: 'What type of data to extract from the page',
+		default: "text",
+		description: "What type of data to extract from the page",
 		displayOptions: {
 			show: {
-				operation: ['extract'],
+				operation: ["extract"],
 			},
 		},
 	},
 	{
-		displayName: 'Selector',
-		name: 'selector',
-		type: 'string',
-		default: '',
-		placeholder: '#main-content, .result-title, table.data',
-		description: 'CSS selector to target the element. Use "#ID" for IDs, ".class" for classes, "tag" for HTML elements, or "tag[attr=value]" for attributes.',
+		displayName: "Selector",
+		name: "selector",
+		type: "string",
+		default: "",
+		placeholder: "#main-content, .result-title, table.data",
+		description:
+			'CSS selector to target the element. Use "#ID" for IDs, ".class" for classes, "tag" for HTML elements, or "tag[attr=value]" for attributes.',
 		required: true,
 		displayOptions: {
 			show: {
-				operation: ['extract'],
+				operation: ["extract"],
 			},
 		},
 	},
 	{
-		displayName: 'Wait For Selector',
-		name: 'waitForSelector',
-		type: 'boolean',
+		displayName: "Wait For Selector",
+		name: "waitForSelector",
+		type: "boolean",
 		default: true,
-		description: 'Whether to wait for the selector to appear in page',
+		description: "Whether to wait for the selector to appear in page",
 		displayOptions: {
 			show: {
-				operation: ['extract'],
+				operation: ["extract"],
 			},
 		},
 	},
 	{
-		displayName: 'Timeout',
-		name: 'timeout',
-		type: 'number',
+		displayName: "Timeout",
+		name: "timeout",
+		type: "number",
 		default: 30000,
-		description: 'Maximum time to wait for the selector in milliseconds',
+		description: "Maximum time to wait for the selector in milliseconds",
 		displayOptions: {
 			show: {
-				operation: ['extract'],
+				operation: ["extract"],
 				waitForSelector: [true],
 			},
 		},
 	},
 	{
-		displayName: 'Debug Page Content',
-		name: 'debugPageContent',
-		type: 'boolean',
+		displayName: "Debug Page Content",
+		name: "debugPageContent",
+		type: "boolean",
 		default: false,
-		description: 'Whether to include page information in debug logs',
+		description: "Whether to include page information in debug logs",
 		displayOptions: {
 			show: {
-				operation: ['extract'],
+				operation: ["extract"],
 			},
 		},
 	},
 	{
-		displayName: 'Attribute Name',
-		name: 'attributeName',
-		type: 'string',
-		default: '',
-		placeholder: 'href, src, data-ID',
-		description: 'Name of the attribute to extract from the element',
+		displayName: "Attribute Name",
+		name: "attributeName",
+		type: "string",
+		default: "",
+		placeholder: "href, src, data-ID",
+		description: "Name of the attribute to extract from the element",
 		displayOptions: {
 			show: {
-				operation: ['extract'],
-				extractionType: ['attribute'],
+				operation: ["extract"],
+				extractionType: ["attribute"],
 			},
 		},
 		required: true,
 	},
 	{
-		displayName: 'HTML Options',
-		name: 'htmlOptions',
-		type: 'collection',
-		placeholder: 'Add Option',
+		displayName: "HTML Options",
+		name: "htmlOptions",
+		type: "collection",
+		placeholder: "Add Option",
 		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
 		displayOptions: {
 			show: {
-				operation: ['extract'],
-				extractionType: ['html'],
+				operation: ["extract"],
+				extractionType: ["html"],
 			},
 		},
 		options: [
 			{
-				displayName: 'Output Format',
-				name: 'outputFormat',
-				type: 'options',
+				displayName: "Output Format",
+				name: "outputFormat",
+				type: "options",
 				options: [
 					{
-						name: 'HTML (String)',
-						value: 'html',
-						description: 'Return the HTML as a raw string',
+						name: "HTML (String)",
+						value: "html",
+						description: "Return the HTML as a raw string",
 					},
 					{
-						name: 'JSON',
-						value: 'json',
-						description: 'Return the HTML wrapped in a JSON object',
+						name: "JSON",
+						value: "json",
+						description: "Return the HTML wrapped in a JSON object",
 					},
 				],
-				default: 'html',
-				description: 'Format of the output data',
+				default: "html",
+				description: "Format of the output data",
 			},
 			{
-				displayName: 'Include Metadata',
-				name: 'includeMetadata',
-				type: 'boolean',
+				displayName: "Include Metadata",
+				name: "includeMetadata",
+				type: "boolean",
 				default: false,
-				description: 'Whether to include metadata about the HTML (length, structure info)',
+				description:
+					"Whether to include metadata about the HTML (length, structure info)",
 			},
 		],
 	},
 	{
-		displayName: 'Table Options',
-		name: 'tableOptions',
-		type: 'collection',
-		placeholder: 'Add Option',
+		displayName: "Table Options",
+		name: "tableOptions",
+		type: "collection",
+		placeholder: "Add Option",
 		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
 		displayOptions: {
 			show: {
-				operation: ['extract'],
-				extractionType: ['table'],
+				operation: ["extract"],
+				extractionType: ["table"],
 			},
 		},
 		options: [
 			{
-				displayName: 'Include Headers',
-				name: 'includeHeaders',
-				type: 'boolean',
+				displayName: "Include Headers",
+				name: "includeHeaders",
+				type: "boolean",
 				default: true,
-				description: 'Whether to use the first row as headers in the output',
+				description: "Whether to use the first row as headers in the output",
 			},
 			{
-				displayName: 'Row Selector',
-				name: 'rowSelector',
-				type: 'string',
-				default: 'tr',
-				description: 'CSS selector for table rows relative to table selector (default: tr)',
+				displayName: "Row Selector",
+				name: "rowSelector",
+				type: "string",
+				default: "tr",
+				description:
+					"CSS selector for table rows relative to table selector (default: tr)",
 			},
 			{
-				displayName: 'Cell Selector',
-				name: 'cellSelector',
-				type: 'string',
-				default: 'td, th',
-				description: 'CSS selector for table cells relative to row selector (default: td, th)',
+				displayName: "Cell Selector",
+				name: "cellSelector",
+				type: "string",
+				default: "td, th",
+				description:
+					"CSS selector for table cells relative to row selector (default: td, th)",
 			},
 			{
-				displayName: 'Output Format',
-				name: 'outputFormat',
-				type: 'options',
+				displayName: "Output Format",
+				name: "outputFormat",
+				type: "options",
 				options: [
 					{
-						name: 'JSON Objects',
-						value: 'json',
-						description: 'Return table as array of JSON objects using headers as keys',
+						name: "JSON Objects",
+						value: "json",
+						description:
+							"Return table as array of JSON objects using headers as keys",
 					},
 					{
-						name: 'Array of Arrays',
-						value: 'array',
-						description: 'Return table as a simple array of arrays (rows and cells)',
+						name: "Array of Arrays",
+						value: "array",
+						description:
+							"Return table as a simple array of arrays (rows and cells)",
 					},
 					{
-						name: 'HTML',
-						value: 'html',
-						description: 'Return the original HTML of the table',
+						name: "HTML",
+						value: "html",
+						description: "Return the original HTML of the table",
 					},
 					{
-						name: 'CSV',
-						value: 'csv',
-						description: 'Return the table formatted as CSV text',
+						name: "CSV",
+						value: "csv",
+						description: "Return the table formatted as CSV text",
 					},
 				],
-				default: 'json',
-				description: 'Format of the extracted table data',
+				default: "json",
+				description: "Format of the extracted table data",
 			},
 		],
 	},
 	{
-		displayName: 'Multiple Elements Options',
-		name: 'multipleOptions',
-		type: 'collection',
-		placeholder: 'Add Option',
+		displayName: "Multiple Elements Options",
+		name: "multipleOptions",
+		type: "collection",
+		placeholder: "Add Option",
 		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
 		displayOptions: {
 			show: {
-				operation: ['extract'],
-				extractionType: ['multiple'],
+				operation: ["extract"],
+				extractionType: ["multiple"],
 			},
 		},
 		options: [
 			{
-				displayName: 'Extraction Property',
-				name: 'extractionProperty',
-				type: 'options',
+				displayName: "Extraction Property",
+				name: "extractionProperty",
+				type: "options",
 				options: [
 					{
-						name: 'Text Content',
-						value: 'textContent',
+						name: "Text Content",
+						value: "textContent",
 					},
 					{
-						name: 'Inner HTML',
-						value: 'innerHTML',
+						name: "Inner HTML",
+						value: "innerHTML",
 					},
 					{
-						name: 'Outer HTML',
-						value: 'outerHTML',
+						name: "Outer HTML",
+						value: "outerHTML",
 					},
 					{
-						name: 'Attribute',
-						value: 'attribute',
+						name: "Attribute",
+						value: "attribute",
 					},
 				],
-				default: 'textContent',
-				description: 'Property to extract from each matching element',
+				default: "textContent",
+				description: "Property to extract from each matching element",
 			},
 			{
-				displayName: 'Attribute Name',
-				name: 'attributeName',
-				type: 'string',
-				default: '',
-				description: 'Name of the attribute to extract (if Extraction Property is set to Attribute)',
+				displayName: "Attribute Name",
+				name: "attributeName",
+				type: "string",
+				default: "",
+				description:
+					"Name of the attribute to extract (if Extraction Property is set to Attribute)",
 				displayOptions: {
 					show: {
-						extractionProperty: ['attribute'],
+						extractionProperty: ["attribute"],
 					},
 				},
 			},
 			{
-				displayName: 'Limit',
-				name: 'limit',
-				type: 'number',
+				displayName: "Limit",
+				name: "limit",
+				type: "number",
 				default: 50,
-				description: 'Max number of results to return',
+				description: "Max number of results to return",
 				typeOptions: {
 					minValue: 1,
 				},
 			},
 			{
-				displayName: 'Output Format',
-				name: 'outputFormat',
-				type: 'options',
+				displayName: "Output Format",
+				name: "outputFormat",
+				type: "options",
 				options: [
 					{
-						name: 'Array',
-						value: 'array',
-						description: 'Return results as a simple array',
+						name: "Array",
+						value: "array",
+						description: "Return results as a simple array",
 					},
 					{
-						name: 'JSON Objects',
-						value: 'json',
-						description: 'Return results as array of objects with indices as keys',
+						name: "JSON Objects",
+						value: "json",
+						description:
+							"Return results as array of objects with indices as keys",
 					},
 					{
-						name: 'Concatenated String',
-						value: 'string',
-						description: 'Combine all results into one string with separator',
+						name: "Concatenated String",
+						value: "string",
+						description: "Combine all results into one string with separator",
 					},
 				],
-				default: 'array',
-				description: 'Format of the extracted data',
+				default: "array",
+				description: "Format of the extracted data",
 			},
 			{
-				displayName: 'Separator',
-				name: 'separator',
-				type: 'string',
-				default: ',',
-				description: 'Separator to use when concatenating results (if Output Format is String)',
+				displayName: "Separator",
+				name: "separator",
+				type: "string",
+				default: ",",
+				description:
+					"Separator to use when concatenating results (if Output Format is String)",
 				displayOptions: {
 					show: {
-						outputFormat: ['string'],
+						outputFormat: ["string"],
 					},
 				},
 			},
 		],
 	},
 	{
-		displayName: 'Use Human-Like Delays',
-		name: 'useHumanDelays',
-		type: 'boolean',
+		displayName: "Use Human-Like Delays",
+		name: "useHumanDelays",
+		type: "boolean",
 		default: false,
-		description: 'Whether to add a random delay before extraction to simulate human behavior',
+		description:
+			"Whether to add a random delay before extraction to simulate human behavior",
 		displayOptions: {
 			show: {
-				operation: ['extract'],
+				operation: ["extract"],
 			},
 		},
 	},
 	{
-		displayName: 'Take Screenshot',
-		name: 'takeScreenshot',
-		type: 'boolean',
+		displayName: "Take Screenshot",
+		name: "takeScreenshot",
+		type: "boolean",
 		default: false,
-		description: 'Whether to capture a screenshot after extraction',
+		description: "Whether to capture a screenshot after extraction",
 		displayOptions: {
 			show: {
-				operation: ['extract'],
+				operation: ["extract"],
 			},
 		},
 	},
 	{
-		displayName: 'Continue On Fail',
-		name: 'continueOnFail',
-		type: 'boolean',
+		displayName: "Continue On Fail",
+		name: "continueOnFail",
+		type: "boolean",
 		default: true,
-		description: 'Whether to continue execution even when extraction fails',
+		description: "Whether to continue execution even when extraction fails",
 		displayOptions: {
 			show: {
-				operation: ['extract'],
+				operation: ["extract"],
 			},
 		},
 	},
@@ -412,7 +428,7 @@ export async function execute(
 ): Promise<INodeExecutionData> {
 	const startTime = Date.now();
 	const items = this.getInputData();
-	let sessionId = '';
+	let sessionId = "";
 	let page: puppeteer.Page | null = null;
 
 	// Added for better logging
@@ -420,109 +436,220 @@ export async function execute(
 	const nodeId = this.getNode().id;
 
 	// Visual marker to clearly indicate a new node is starting
-	this.logger.info('============ STARTING NODE EXECUTION ============');
-	this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index, 'Starting execution'));
+	this.logger.info("============ STARTING NODE EXECUTION ============");
+	this.logger.info(
+		formatOperationLog(
+			"Extract",
+			nodeName,
+			nodeId,
+			index,
+			"Starting execution",
+		),
+	);
 
 	// Get the node and extract parameters
-	const selector = this.getNodeParameter('selector', index) as string;
-	const extractionType = this.getNodeParameter('extractionType', index) as string;
-	const waitForSelector = this.getNodeParameter('waitForSelector', index, true) as boolean;
-	const timeout = this.getNodeParameter('timeout', index, 30000) as number;
-	const useHumanDelays = this.getNodeParameter('useHumanDelays', index, false) as boolean;
-	const takeScreenshotOption = this.getNodeParameter('takeScreenshot', index, false) as boolean;
-	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
-	const debugPageContent = this.getNodeParameter('debugPageContent', index, false) as boolean;
-	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
+	const selector = this.getNodeParameter("selector", index) as string;
+	const extractionType = this.getNodeParameter(
+		"extractionType",
+		index,
+	) as string;
+	const waitForSelector = this.getNodeParameter(
+		"waitForSelector",
+		index,
+		true,
+	) as boolean;
+	const timeout = this.getNodeParameter("timeout", index, 30000) as number;
+	const useHumanDelays = this.getNodeParameter(
+		"useHumanDelays",
+		index,
+		false,
+	) as boolean;
+	const takeScreenshotOption = this.getNodeParameter(
+		"takeScreenshot",
+		index,
+		false,
+	) as boolean;
+	const continueOnFail = this.getNodeParameter(
+		"continueOnFail",
+		index,
+		true,
+	) as boolean;
+	const debugPageContent = this.getNodeParameter(
+		"debugPageContent",
+		index,
+		false,
+	) as boolean;
+	const explicitSessionId = this.getNodeParameter(
+		"explicitSessionId",
+		index,
+		"",
+	) as string;
 
-	this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
-		`Parameters: selector=${selector}, extractionType=${extractionType}, timeout=${timeout}ms`));
+	this.logger.info(
+		formatOperationLog(
+			"Extract",
+			nodeName,
+			nodeId,
+			index,
+			`Parameters: selector=${selector}, extractionType=${extractionType}, timeout=${timeout}ms`,
+		),
+	);
 
 	try {
-		// Use the centralized session management instead of duplicating code
-		const sessionResult = await SessionManager.getOrCreatePageSession(this.logger, {
-			explicitSessionId,
-			websocketEndpoint,
-			workflowId,
-			operationName: 'Extract',
-			nodeId,
-			nodeName,
-			index,
-		});
-
-		page = sessionResult.page;
+		// Use the centralized session management
+		const sessionResult = await SessionManager.getOrCreatePageSession(
+			this.logger,
+			{
+				explicitSessionId,
+				websocketEndpoint,
+				workflowId,
+				operationName: "Extract",
+				nodeId,
+				nodeName,
+				index,
+			},
+		);
 		sessionId = sessionResult.sessionId;
 
+		// --- START REFACTOR: Correctly get browser before getting page ---
+		page = sessionResult.page; // Use page from result first
 		if (!page) {
-			throw new Error('Failed to get or create a page');
+			// If page wasn't returned directly (e.g., existing session)
+			const currentSession = SessionManager.getSession(sessionId);
+			if (currentSession?.browser?.isConnected()) {
+				page = await getActivePage(currentSession.browser, this.logger);
+			} else {
+				throw new Error(
+					"Failed to get session or browser is disconnected after getOrCreatePageSession",
+				);
+			}
+		}
+		// --- END REFACTOR ---
+
+		if (!page) {
+			throw new Error("Failed to get or create a page");
 		}
 
-		this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
-			`Starting extraction operation with selector: ${selector}`));
+		this.logger.info(
+			formatOperationLog(
+				"Extract",
+				nodeName,
+				nodeId,
+				index,
+				`Starting extraction operation with selector: ${selector}`,
+			),
+		);
 
 		// Add a human-like delay if enabled
 		if (useHumanDelays) {
 			const delay = getHumanDelay();
-			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
-				`Adding human-like delay: ${delay}ms`));
-			await new Promise(resolve => setTimeout(resolve, delay));
+			this.logger.info(
+				formatOperationLog(
+					"Extract",
+					nodeName,
+					nodeId,
+					index,
+					`Adding human-like delay: ${delay}ms`,
+				),
+			);
+			await new Promise((resolve) => setTimeout(resolve, delay));
 		}
 
 		// Wait for the selector if needed
 		if (waitForSelector) {
-			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
-				`Waiting for selector: ${selector} (timeout: ${timeout}ms)`));
+			this.logger.info(
+				formatOperationLog(
+					"Extract",
+					nodeName,
+					nodeId,
+					index,
+					`Waiting for selector: ${selector} (timeout: ${timeout}ms)`,
+				),
+			);
 			try {
 				await page.waitForSelector(selector, { timeout });
-				this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
-					`Selector found: ${selector}`));
+				this.logger.info(
+					formatOperationLog(
+						"Extract",
+						nodeName,
+						nodeId,
+						index,
+						`Selector found: ${selector}`,
+					),
+				);
 			} catch (error) {
-				this.logger.error(formatOperationLog('Extract', nodeName, nodeId, index,
-					`Selector timeout: ${selector} after ${timeout}ms`));
+				this.logger.error(
+					formatOperationLog(
+						"Extract",
+						nodeName,
+						nodeId,
+						index,
+						`Selector timeout: ${selector} after ${timeout}ms`,
+					),
+				);
 				throw error;
 			}
 		}
 
-		let extractedData: string | IDataObject | Array<string | IDataObject> = '';
+		let extractedData: string | IDataObject | Array<string | IDataObject> = "";
 		let extractionDetails: IDataObject = {};
 
 		// Process different extraction types
 		switch (extractionType) {
-			case 'text':
-			case 'html':
-			case 'value':
-			case 'attribute':
-			case 'table':
-			case 'multiple': {
+			case "text":
+			case "html":
+			case "value":
+			case "attribute":
+			case "table":
+			case "multiple": {
 				// Get extraction-specific parameters based on type
 				let extractionParams: IDataObject = {};
 
 				// Get extra options based on extraction type
-				if (extractionType === 'html') {
-					const htmlOptions = this.getNodeParameter('htmlOptions', index, {}) as IDataObject;
+				if (extractionType === "html") {
+					const htmlOptions = this.getNodeParameter(
+						"htmlOptions",
+						index,
+						{},
+					) as IDataObject;
 					extractionParams = {
-						outputFormat: (htmlOptions.outputFormat as string) || 'html',
-						includeMetadata: htmlOptions.includeMetadata === true
+						outputFormat: (htmlOptions.outputFormat as string) || "html",
+						includeMetadata: htmlOptions.includeMetadata === true,
 					};
-				} else if (extractionType === 'attribute') {
+				} else if (extractionType === "attribute") {
 					extractionParams = {
-						attributeName: this.getNodeParameter('attributeName', index, '') as string
+						attributeName: this.getNodeParameter(
+							"attributeName",
+							index,
+							"",
+						) as string,
 					};
-				} else if (extractionType === 'table') {
-					const tableOptions = this.getNodeParameter('tableOptions', index, {}) as IDataObject;
+				} else if (extractionType === "table") {
+					const tableOptions = this.getNodeParameter(
+						"tableOptions",
+						index,
+						{},
+					) as IDataObject;
 					extractionParams = {
 						includeHeaders: tableOptions.includeHeaders !== false,
-						rowSelector: (tableOptions.rowSelector as string) || 'tr',
-						cellSelector: (tableOptions.cellSelector as string) || 'td, th',
-						outputFormat: (tableOptions.outputFormat as string) || 'json'
+						rowSelector: (tableOptions.rowSelector as string) || "tr",
+						cellSelector: (tableOptions.cellSelector as string) || "td, th",
+						outputFormat: (tableOptions.outputFormat as string) || "json",
 					};
-				} else if (extractionType === 'multiple') {
-					const multipleOptions = this.getNodeParameter('multipleOptions', index, {}) as IDataObject;
+				} else if (extractionType === "multiple") {
+					const multipleOptions = this.getNodeParameter(
+						"multipleOptions",
+						index,
+						{},
+					) as IDataObject;
 					extractionParams = {
-						attributeName: (multipleOptions.attributeName as string) || '',
-						extractionProperty: (multipleOptions.extractionProperty as string) || 'textContent',
+						attributeName: (multipleOptions.attributeName as string) || "",
+						extractionProperty:
+							(multipleOptions.extractionProperty as string) || "textContent",
 						limit: (multipleOptions.outputLimit as number) || 0,
-						outputFormat: multipleOptions.extractProperty === true ? 'object' : 'array',
-						separator: (multipleOptions.propertyKey as string) || 'value'
+						outputFormat:
+							multipleOptions.extractProperty === true ? "object" : "array",
+						separator: (multipleOptions.propertyKey as string) || "value",
 					};
 				}
 
@@ -532,24 +659,34 @@ export async function execute(
 					selector,
 					waitForSelector,
 					selectorTimeout: timeout,
-					detectionMethod: 'standard',
+					detectionMethod: "standard",
 					earlyExitDelay: 500,
 					nodeName,
 					nodeId,
 					index,
-					...extractionParams
+					...extractionParams,
 				};
 
 				// Use the extraction middleware
-				const extractResult = await executeExtraction(page, extractOptions, this.logger);
+				const extractResult = await executeExtraction(
+					page,
+					extractOptions,
+					this.logger,
+				);
 
 				if (!extractResult.success) {
-					throw extractResult.error || new Error(`Extraction failed for selector "${selector}"`);
+					throw (
+						extractResult.error ||
+						new Error(`Extraction failed for selector "${selector}"`)
+					);
 				}
 
-				extractedData = extractResult.data ?
-					(extractResult.data as string | IDataObject | (string | IDataObject)[]) :
-					'';
+				extractedData = extractResult.data
+					? (extractResult.data as
+							| string
+							| IDataObject
+							| (string | IDataObject)[])
+					: "";
 				extractionDetails = extractResult.details || {};
 				break;
 			}
@@ -561,26 +698,86 @@ export async function execute(
 
 		// Debug page content if enabled
 		if (debugPageContent) {
-			const pageInfo = await getPageInfo(page) as PageInfo;
-			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
-				`Page info: URL=${pageInfo.url}, title=${pageInfo.title}`));
-			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
-				`Page body preview: ${pageInfo.bodyText.substring(0, 200)}...`));
+			// Ensure page object is still valid before calling getPageInfo
+			if (!page) {
+				this.logger.warn(
+					formatOperationLog(
+						"Extract",
+						nodeName,
+						nodeId,
+						index,
+						`Cannot debug page content: page object is null`,
+					),
+				);
+			} else {
+				try {
+					const pageInfo = (await getPageInfo(page)) as PageInfo;
+					this.logger.info(
+						formatOperationLog(
+							"Extract",
+							nodeName,
+							nodeId,
+							index,
+							`Page info: URL=${pageInfo.url}, title=${pageInfo.title}`,
+						),
+					);
+					this.logger.info(
+						formatOperationLog(
+							"Extract",
+							nodeName,
+							nodeId,
+							index,
+							"Page body preview: " +
+								pageInfo.bodyText.substring(0, 200) +
+								"...",
+						),
+					);
+				} catch (pageInfoError) {
+					this.logger.warn(
+						formatOperationLog(
+							"Extract",
+							nodeName,
+							nodeId,
+							index,
+							`Error getting page info for debug: ${(pageInfoError as Error).message}`,
+						),
+					);
+				}
+			}
 		}
 
 		// Format the data for logging (avoid large outputs)
-		const logSafeData = formatExtractedDataForLog(extractedData, extractionType);
-		this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
-			`Extraction result (${extractionType}): ${logSafeData}`));
+		const logSafeData = formatExtractedDataForLog(
+			extractedData,
+			extractionType,
+		);
+		this.logger.info(
+			formatOperationLog(
+				"Extract",
+				nodeName,
+				nodeId,
+				index,
+				`Extraction result (${extractionType}): ${logSafeData}`,
+			),
+		);
 
 		// Log timing information
-		createTimingLog('Extract', startTime, this.logger, nodeName, nodeId, index);
+		createTimingLog("Extract", startTime, this.logger, nodeName, nodeId, index);
 
 		// Create success response with the extracted data
+		// Get potentially updated page for response
+		let pageForResponse: puppeteer.Page | null = null;
+		const currentSession = SessionManager.getSession(sessionId);
+		if (currentSession?.browser?.isConnected()) {
+			pageForResponse = await getActivePage(
+				currentSession.browser,
+				this.logger,
+			);
+		}
 		const successResponse = await createSuccessResponse({
-			operation: 'extract',
+			operation: "extract",
 			sessionId,
-			page,
+			page: pageForResponse || page, // Use updated page, fallback to original if needed
 			logger: this.logger,
 			startTime,
 			takeScreenshot: takeScreenshotOption,
@@ -598,7 +795,7 @@ export async function execute(
 		// Use the standardized error response utility
 		const errorResponse = await createErrorResponse({
 			error: error as Error,
-			operation: 'extract',
+			operation: "extract",
 			sessionId,
 			nodeId,
 			nodeName,
@@ -610,20 +807,25 @@ export async function execute(
 			additionalData: {
 				...items[index].json,
 				extractionType,
-			}
+			},
 		});
 
 		if (!continueOnFail) {
+			// Attach context before throwing
+			if (error instanceof Error) {
+				// --- START FIX: Use proper type casting ---
+				(error as Error & { context: object }).context = {
+					sessionId,
+					errorResponse,
+				};
+				// --- END FIX ---
+			}
 			throw error;
 		}
 
 		// Return error as response with continue on fail
 		return {
-			json: errorResponse
+			json: errorResponse,
 		};
 	}
 }
-
-
-
-

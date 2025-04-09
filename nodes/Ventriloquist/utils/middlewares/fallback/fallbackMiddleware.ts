@@ -22,6 +22,7 @@ export interface IFallbackOptions {
   fallbackClearField?: boolean;
   fallbackPressEnter?: boolean;
   fallbackFilePath?: string;
+  sessionId?: string;
 }
 
 /**
@@ -46,10 +47,11 @@ export async function executeFallbackAction(
     nodeId: string;
     index: number;
     resultData: IDataObject;
+    sessionId: string;
   },
   logger: ILogger
 ): Promise<IFallbackResult> {
-  const { nodeName, nodeId, index, resultData } = context;
+  const { nodeName, nodeId, index, resultData, sessionId } = context;
 
   // Quick return if fallback is disabled
   if (!options.enableFallback) {
@@ -246,12 +248,13 @@ export async function executeFallbackAction(
           nodeName,
           nodeId,
           index,
-          useHumanDelays: false
+          useHumanDelays: false,
+          sessionId
         };
 
         // Execute the fill action using the action utils
         const actionResult = await executeAction(
-          page,
+          sessionId,
           'fill' as ActionType,
           actionParameters,
           actionOptions,

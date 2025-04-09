@@ -2,82 +2,89 @@ import type {
 	IExecuteFunctions,
 	INodeExecutionData,
 	INodeProperties,
-} from 'n8n-workflow';
-import { SessionManager } from '../utils/sessionManager';
-import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
-import { createErrorResponse } from '../utils/errorUtils';
+} from "n8n-workflow";
+import type { Browser } from "puppeteer-core";
+import { SessionManager } from "../utils/sessionManager";
+import { getActivePage } from "../utils/sessionUtils";
+import {
+	formatOperationLog,
+	createSuccessResponse,
+	createTimingLog,
+} from "../utils/resultUtils";
+import { createErrorResponse } from "../utils/errorUtils";
 
 /**
  * Close operation description
  */
 export const description: INodeProperties[] = [
 	{
-		displayName: 'Close Mode',
-		name: 'closeMode',
-		type: 'options',
+		displayName: "Close Mode",
+		name: "closeMode",
+		type: "options",
 		options: [
 			{
-				name: 'Close Session',
-				value: 'session',
-				description: 'Close a specific browser session',
+				name: "Close Session",
+				value: "session",
+				description: "Close a specific browser session",
 			},
 			{
-				name: 'Close All Sessions',
-				value: 'all',
-				description: 'Close all browser sessions',
+				name: "Close All Sessions",
+				value: "all",
+				description: "Close all browser sessions",
 			},
 			{
-				name: 'Close Multiple Sessions',
-				value: 'multiple',
-				description: 'Close a list of specific browser sessions',
+				name: "Close Multiple Sessions",
+				value: "multiple",
+				description: "Close a list of specific browser sessions",
 			},
 		],
-		default: 'session',
-		description: 'How to close browser sessions',
+		default: "session",
+		description: "How to close browser sessions",
 		displayOptions: {
 			show: {
-				operation: ['close'],
+				operation: ["close"],
 			},
 		},
 	},
 	{
-		displayName: 'Session ID',
-		name: 'explicitSessionId',
-		type: 'string',
-		default: '',
-		description: 'Session ID to close',
+		displayName: "Session ID",
+		name: "explicitSessionId",
+		type: "string",
+		default: "",
+		description: "Session ID to close",
 		displayOptions: {
 			show: {
-				operation: ['close'],
-				closeMode: ['session'],
+				operation: ["close"],
+				closeMode: ["session"],
 			},
 		},
 	},
 	{
-		displayName: 'Session IDs',
-		name: 'sessionIds',
-		type: 'string',
+		displayName: "Session IDs",
+		name: "sessionIds",
+		type: "string",
 		typeOptions: {
 			multipleValues: true,
 		},
 		default: [],
-		description: 'List of session IDs to close',
+		description: "List of session IDs to close",
 		displayOptions: {
 			show: {
-				operation: ['close'],
-				closeMode: ['multiple'],
+				operation: ["close"],
+				closeMode: ["multiple"],
 			},
 		},
 	},
 	{
-		displayName: 'Continue On Fail',
-		name: 'continueOnFail',
-		type: 'boolean',
+		displayName: "Continue On Fail",
+		name: "continueOnFail",
+		type: "boolean",
 		default: true,
-		description: 'Whether to continue execution even when close operations fail',
+		description:
+			"Whether to continue execution even when close operations fail",
 		displayOptions: {
 			show: {
-				operation: ['close'],
+				operation: ["close"],
 			},
 		},
 	},
@@ -101,36 +108,71 @@ export async function execute(
 	const nodeId = this.getNode().id;
 
 	// Visual marker to clearly indicate a new node is starting
-	this.logger.info('============ STARTING NODE EXECUTION ============');
-	this.logger.info(formatOperationLog('Close', nodeName, nodeId, index, 'Starting execution'));
+	this.logger.info("============ STARTING NODE EXECUTION ============");
+	this.logger.info(
+		formatOperationLog("Close", nodeName, nodeId, index, "Starting execution"),
+	);
 
 	// Get parameters
-	const closeMode = this.getNodeParameter('closeMode', index, 'session') as string;
-	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
+	const closeMode = this.getNodeParameter(
+		"closeMode",
+		index,
+		"session",
+	) as string;
+	const continueOnFail = this.getNodeParameter(
+		"continueOnFail",
+		index,
+		true,
+	) as boolean;
 
 	try {
-		if (closeMode === 'session') {
+		if (closeMode === "session") {
 			// Close a specific session
-			let sessionId = '';
+			let sessionId = "";
 
 			// First, check if an explicit session ID was provided
-			const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
+			const explicitSessionId = this.getNodeParameter(
+				"explicitSessionId",
+				index,
+				"",
+			) as string;
 			if (explicitSessionId) {
 				sessionId = explicitSessionId;
-				this.logger.info(formatOperationLog('Close', nodeName, nodeId, index,
-					`Using explicitly provided session ID: ${sessionId}`));
+				this.logger.info(
+					formatOperationLog(
+						"Close",
+						nodeName,
+						nodeId,
+						index,
+						`Using explicitly provided session ID: ${sessionId}`,
+					),
+				);
 			}
 			// If not, try to get sessionId from the current item
 			if (!sessionId && item.json?.sessionId) {
 				sessionId = item.json.sessionId as string;
-				this.logger.info(formatOperationLog('Close', nodeName, nodeId, index,
-					`Using sessionId from input data: ${sessionId}`));
+				this.logger.info(
+					formatOperationLog(
+						"Close",
+						nodeName,
+						nodeId,
+						index,
+						`Using sessionId from input data: ${sessionId}`,
+					),
+				);
 			}
 			// For backward compatibility, also check for pageId
 			if (!sessionId && item.json?.pageId) {
 				sessionId = item.json.pageId as string;
-				this.logger.info(formatOperationLog('Close', nodeName, nodeId, index,
-					`Using legacy pageId as sessionId for compatibility: ${sessionId}`));
+				this.logger.info(
+					formatOperationLog(
+						"Close",
+						nodeName,
+						nodeId,
+						index,
+						`Using legacy pageId as sessionId for compatibility: ${sessionId}`,
+					),
+				);
 			}
 
 			// If we found a sessionId, close it
@@ -139,42 +181,102 @@ export async function execute(
 					// Check if the session exists first
 					if (await SessionManager.isSessionActive(sessionId)) {
 						// Try to close any pages associated with this session first
-						const page = SessionManager.getPage(sessionId);
-						if (page) {
-							try {
-								await page.close();
-								this.logger.info(formatOperationLog('Close', nodeName, nodeId, index,
-									`Closed page for session ID: ${sessionId}`));
-							} catch (pageError) {
-								this.logger.warn(formatOperationLog('Close', nodeName, nodeId, index,
-									`Error closing page: ${(pageError as Error).message}, continuing to close session`));
+						const session = SessionManager.getSession(sessionId);
+						if (session?.browser?.isConnected()) {
+							const page = await getActivePage(
+								session.browser as Browser,
+								this.logger,
+							);
+							if (page) {
+								try {
+									await page.close();
+									this.logger.info(
+										formatOperationLog(
+											"Close",
+											nodeName,
+											nodeId,
+											index,
+											`Closed page for session ID: ${sessionId}`,
+										),
+									);
+								} catch (pageError) {
+									this.logger.warn(
+										formatOperationLog(
+											"Close",
+											nodeName,
+											nodeId,
+											index,
+											`Error closing page: ${(pageError as Error).message}, continuing to close session`,
+										),
+									);
+								}
 							}
+						} else {
+							this.logger.warn(
+								formatOperationLog(
+									"Close",
+									nodeName,
+									nodeId,
+									index,
+									`Browser for session ${sessionId} is not connected, cannot close specific page.`,
+								),
+							);
 						}
 
 						// Then close the full session
-						const result = await SessionManager.closeSessions(this.logger, { sessionId });
-						this.logger.info(formatOperationLog('Close', nodeName, nodeId, index,
-							`Session closed successfully: ${sessionId} (${result.closed} of ${result.total})`));
+						const result = await SessionManager.closeSessions(this.logger, {
+							sessionId,
+						});
+						this.logger.info(
+							formatOperationLog(
+								"Close",
+								nodeName,
+								nodeId,
+								index,
+								`Session closed successfully: ${sessionId} (${result.closed} of ${result.total})`,
+							),
+						);
 					} else {
-						this.logger.warn(formatOperationLog('Close', nodeName, nodeId, index,
-							`Session ID not found or not active: ${sessionId}`));
+						this.logger.warn(
+							formatOperationLog(
+								"Close",
+								nodeName,
+								nodeId,
+								index,
+								`Session ID not found or not active: ${sessionId}`,
+							),
+						);
 					}
 				} catch (error) {
 					// If an error occurs, but we still want to continue
 					if (continueOnFail) {
-						this.logger.error(formatOperationLog('Close', nodeName, nodeId, index,
-							`Error closing session ${sessionId}: ${(error as Error).message}`));
+						this.logger.error(
+							formatOperationLog(
+								"Close",
+								nodeName,
+								nodeId,
+								index,
+								`Error closing session ${sessionId}: ${(error as Error).message}`,
+							),
+						);
 					} else {
 						throw error;
 					}
 				}
 
 				// Log timing information
-				createTimingLog('Close', startTime, this.logger, nodeName, nodeId, index);
+				createTimingLog(
+					"Close",
+					startTime,
+					this.logger,
+					nodeName,
+					nodeId,
+					index,
+				);
 
 				// Create success response
 				const successResponse = await createSuccessResponse({
-					operation: 'close',
+					operation: "close",
 					sessionId,
 					page: null,
 					logger: this.logger,
@@ -190,24 +292,33 @@ export async function execute(
 			}
 
 			// No session ID found
-			throw new Error('No session ID provided or found in input');
+			throw new Error("No session ID provided or found in input");
 		}
 
-		if (closeMode === 'all') {
+		if (closeMode === "all") {
 			// Close all browser sessions
-			const result = await SessionManager.closeSessions(this.logger, { all: true });
+			const result = await SessionManager.closeSessions(this.logger, {
+				all: true,
+			});
 
 			// Log result
-			this.logger.info(formatOperationLog('Close', nodeName, nodeId, index,
-				`Closed ${result.closed} of ${result.total} browser sessions`));
+			this.logger.info(
+				formatOperationLog(
+					"Close",
+					nodeName,
+					nodeId,
+					index,
+					`Closed ${result.closed} of ${result.total} browser sessions`,
+				),
+			);
 
 			// Log timing information
-			createTimingLog('Close', startTime, this.logger, nodeName, nodeId, index);
+			createTimingLog("Close", startTime, this.logger, nodeName, nodeId, index);
 
 			// Create success response
 			const successResponse = await createSuccessResponse({
-				operation: 'close',
-				sessionId: '',
+				operation: "close",
+				sessionId: "",
 				page: null,
 				logger: this.logger,
 				startTime,
@@ -226,9 +337,13 @@ export async function execute(
 			return { json: successResponse };
 		}
 
-		if (closeMode === 'multiple') {
+		if (closeMode === "multiple") {
 			// Close a list of specific sessions
-			const sessionIds = this.getNodeParameter('sessionIds', index, []) as string[];
+			const sessionIds = this.getNodeParameter(
+				"sessionIds",
+				index,
+				[],
+			) as string[];
 			const closedSessions: string[] = [];
 			const failedSessions: string[] = [];
 
@@ -238,46 +353,104 @@ export async function execute(
 					// Check if the session exists and is active
 					if (await SessionManager.isSessionActive(sessionId)) {
 						// Try to close any pages associated with this session first
-						const page = SessionManager.getPage(sessionId);
-						if (page) {
-							try {
-								await page.close();
-								this.logger.info(formatOperationLog('Close', nodeName, nodeId, index,
-									`Closed page for session ID: ${sessionId}`));
-							} catch (pageError) {
-								this.logger.warn(formatOperationLog('Close', nodeName, nodeId, index,
-									`Error closing page: ${(pageError as Error).message}, continuing to close session`));
+						const session = SessionManager.getSession(sessionId);
+						if (session?.browser?.isConnected()) {
+							const page = await getActivePage(
+								session.browser as Browser,
+								this.logger,
+							);
+							if (page) {
+								try {
+									await page.close();
+									this.logger.info(
+										formatOperationLog(
+											"Close",
+											nodeName,
+											nodeId,
+											index,
+											`Closed page for session ID: ${sessionId}`,
+										),
+									);
+								} catch (pageError) {
+									this.logger.warn(
+										formatOperationLog(
+											"Close",
+											nodeName,
+											nodeId,
+											index,
+											`Error closing page: ${(pageError as Error).message}, continuing to close session`,
+										),
+									);
+								}
 							}
+						} else {
+							this.logger.warn(
+								formatOperationLog(
+									"Close",
+									nodeName,
+									nodeId,
+									index,
+									`Browser for session ${sessionId} is not connected, cannot close specific page.`,
+								),
+							);
 						}
 
 						// Then close the full session
 						await SessionManager.closeSessions(this.logger, { sessionId });
 						closedSessions.push(sessionId);
-						this.logger.info(formatOperationLog('Close', nodeName, nodeId, index,
-							`Closed session ID: ${sessionId}`));
+						this.logger.info(
+							formatOperationLog(
+								"Close",
+								nodeName,
+								nodeId,
+								index,
+								`Closed session ID: ${sessionId}`,
+							),
+						);
 					} else {
 						failedSessions.push(sessionId);
-						this.logger.warn(formatOperationLog('Close', nodeName, nodeId, index,
-							`Session ID not found or not active: ${sessionId}`));
+						this.logger.warn(
+							formatOperationLog(
+								"Close",
+								nodeName,
+								nodeId,
+								index,
+								`Session ID not found or not active: ${sessionId}`,
+							),
+						);
 					}
 				} catch (error) {
 					failedSessions.push(sessionId);
-					this.logger.error(formatOperationLog('Close', nodeName, nodeId, index,
-						`Error closing session ${sessionId}: ${(error as Error).message}`));
+					this.logger.error(
+						formatOperationLog(
+							"Close",
+							nodeName,
+							nodeId,
+							index,
+							`Error closing session ${sessionId}: ${(error as Error).message}`,
+						),
+					);
 				}
 			}
 
 			// Log result
-			this.logger.info(formatOperationLog('Close', nodeName, nodeId, index,
-				`Closed ${closedSessions.length} of ${sessionIds.length} sessions successfully`));
+			this.logger.info(
+				formatOperationLog(
+					"Close",
+					nodeName,
+					nodeId,
+					index,
+					`Closed ${closedSessions.length} of ${sessionIds.length} sessions successfully`,
+				),
+			);
 
 			// Log timing information
-			createTimingLog('Close', startTime, this.logger, nodeName, nodeId, index);
+			createTimingLog("Close", startTime, this.logger, nodeName, nodeId, index);
 
 			// Create success response
 			const successResponse = await createSuccessResponse({
-				operation: 'close',
-				sessionId: '',
+				operation: "close",
+				sessionId: "",
 				page: null,
 				logger: this.logger,
 				startTime,
@@ -299,8 +472,8 @@ export async function execute(
 		// Use the standardized error response utility
 		const errorResponse = await createErrorResponse({
 			error: error as Error,
-			operation: 'close',
-			sessionId: '',
+			operation: "close",
+			sessionId: "",
 			nodeId,
 			nodeName,
 			page: null,
@@ -309,7 +482,7 @@ export async function execute(
 			additionalData: {
 				...item.json,
 				closeMode,
-			}
+			},
 		});
 
 		if (!continueOnFail) {
@@ -318,7 +491,7 @@ export async function execute(
 
 		// Return error as response with continue on fail
 		return {
-			json: errorResponse
+			json: errorResponse,
 		};
 	}
 }

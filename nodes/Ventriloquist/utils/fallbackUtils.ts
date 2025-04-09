@@ -22,7 +22,8 @@ export async function executeFallback(
 		nodeName,
 		nodeId,
 		index,
-		resultData
+		resultData,
+		sessionId: fallbackOptions.sessionId || ''  // Add sessionId from options or default to empty string
 	};
 
 	// Add additional parameters from the node if not already in options
