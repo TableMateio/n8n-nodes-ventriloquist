@@ -529,8 +529,8 @@ export async function getActivePage(
 
 		// Quick responsiveness check
 		try {
-			// Use a slightly longer timeout for responsiveness check
-			await page.evaluate(() => true, { timeout: 2000 });
+			// Use original timeout for responsiveness check
+			await page.evaluate(() => true, { timeout: 1000 });
 			logger.info(`${logPrefix} Selected page (${selectedUrl}) is responsive.`);
 			return page;
 		} catch (evalError) {
