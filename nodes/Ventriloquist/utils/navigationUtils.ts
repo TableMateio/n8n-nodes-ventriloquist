@@ -285,7 +285,9 @@ export async function waitForUrlChange(
 	logger: ILogger,
 ): Promise<boolean> {
 	const logPrefix = "[NavigationUtils][waitForUrlChange]";
-	// logger.info(`${logPrefix} Called...`); // Reduced logging
+	logger.info(
+		`${logPrefix} Called. Waiting for URL to change from: ${currentUrl} (Timeout: ${timeout}ms)`,
+	);
 
 	try {
 		const session = SessionManager.getSession(sessionId);
@@ -300,7 +302,7 @@ export async function waitForUrlChange(
 			logger.error(`${logPrefix} No active page found initially: ${sessionId}`);
 			return false;
 		}
-		// logger.info(`${logPrefix} Initial active page URL fetched`);
+		logger.info(`${logPrefix} Initial active page obtained.`);
 
 		const startTime = Date.now();
 		let contextDestroyed = false;
@@ -309,13 +311,27 @@ export async function waitForUrlChange(
 		const pollForUrlChanges = async (pollInterval = 500): Promise<boolean> => {
 			const startPollTime = Date.now();
 			let currentPolledUrl = currentUrl;
+			let iteration = 0;
+			logger.info(`${logPrefix}[Polling] Starting polling.`);
 			while (Date.now() - startPollTime < timeout) {
+				iteration++;
 				try {
 					const page = await getActivePage(browser, logger);
-					if (!page) return false; // Stop polling if page lost
+					if (!page) {
+						logger.warn(
+							`${logPrefix}[Polling][Iter ${iteration}] getActivePage returned null. Stopping poll.`,
+						);
+						return false; // Stop polling if page lost
+					}
 					await new Promise((resolve) => setTimeout(resolve, pollInterval));
 					const newUrl = await page.url();
-					if (newUrl !== currentUrl) return true; // Change detected
+					// logger.info(`${logPrefix}[Polling][Iter ${iteration}] Current URL: ${newUrl}`); // Verbose
+					if (newUrl !== currentUrl) {
+						logger.info(
+							`${logPrefix}[Polling][Iter ${iteration}] URL change DETECTED: ${currentUrl} -> ${newUrl}`,
+						);
+						return true; // Change detected
+					}
 					currentPolledUrl = newUrl;
 				} catch (error) {
 					const err = error as Error;
@@ -323,22 +339,34 @@ export async function waitForUrlChange(
 						err.message.includes("context was destroyed") ||
 						err.message.includes("Target closed")
 					) {
+						logger.info(
+							`${logPrefix}[Polling][Iter ${iteration}] Context destroyed during poll. Assuming URL changed.`,
+						);
 						contextDestroyed = true;
 						return true; // Context destroyed implies navigation
 					}
-					// logger.warn(`${logPrefix} Error polling: ${err.message}`); // Reduced logging
+					logger.warn(
+						`${logPrefix}[Polling][Iter ${iteration}] Error polling: ${err.message}`,
+					);
 				}
 			}
+			logger.warn(
+				`${logPrefix}[Polling] Polling timed out after ${timeout}ms.`,
+			);
 			return false; // Timeout
 		};
 
 		// --- Listener Setup --- //
 		const pageForListeners = await getActivePage(browser, logger);
 		if (!pageForListeners) {
-			// logger.warn(`${logPrefix} No active page for listeners`); // Reduced logging
+			logger.warn(
+				`${logPrefix} No active page for listeners. Returning contextDestroyed: ${contextDestroyed}`,
+			);
 			return contextDestroyed;
 		}
+		logger.info(`${logPrefix} Setting up listeners on page.`);
 
+		logger.info(`${logPrefix} Creating waitForFunction promise.`);
 		const waitFunctionPromise = pageForListeners
 			.waitForFunction(
 				(url: string) => window.location.href !== url,
@@ -346,7 +374,9 @@ export async function waitForUrlChange(
 				currentUrl,
 			)
 			.then(() => {
-				logger.info(`${logPrefix} URL change detected via waitForFunction`);
+				logger.info(
+					`${logPrefix} waitForFunction promise RESOLVED: URL change detected.`,
+				);
 				return true;
 			})
 			.catch((error: Error) => {
@@ -357,18 +387,27 @@ export async function waitForUrlChange(
 				) {
 					contextDestroyed = true;
 					logger.info(
-						`${logPrefix} Context destruction detected during waitForFunction - indicates navigation`,
+						`${logPrefix} waitForFunction promise REJECTED (Context Destroyed): Navigation indicated. ${error.message}`,
 					);
-					return true;
+					return true; // Treat as success in race
 				}
-				logger.warn(`${logPrefix} waitForFunction error: ${error.message}`);
+				logger.warn(
+					`${logPrefix} waitForFunction promise REJECTED (Error): ${error.message}`,
+				);
 				return false;
 			});
 
-		const pollingPromise = pollForUrlChanges();
+		logger.info(`${logPrefix} Creating polling promise.`);
+		const pollingPromise = pollForUrlChanges().then((result) => {
+			logger.info(
+				`${logPrefix} Polling promise RESOLVED with result: ${result}`,
+			);
+			return result;
+		});
 
+		logger.info(`${logPrefix} Creating context destruction listener promise.`);
 		const contextPromise = new Promise<boolean>((resolve) => {
-			pageForListeners?.once("error", (error: Error) => {
+			const listener = (error: Error) => {
 				if (
 					error.message.includes("context was destroyed") ||
 					error.message.includes("Execution context") ||
@@ -376,56 +415,110 @@ export async function waitForUrlChange(
 				) {
 					contextDestroyed = true;
 					logger.info(
-						`${logPrefix} Context destruction event detected - indicates navigation`,
+						`${logPrefix} Context listener promise RESOLVED (Event): Context destruction detected. ${error.message}`,
 					);
 					resolve(true);
 				}
-			});
-			setTimeout(() => {
-				if (!contextDestroyed) resolve(false);
+			};
+			pageForListeners?.once("error", listener);
+
+			// Timeout for the listener itself
+			const listenerTimeoutId = setTimeout(() => {
+				pageForListeners?.off("error", listener); // Clean up listener
+				if (!contextDestroyed) {
+					logger.info(
+						`${logPrefix} Context listener promise RESOLVED (Timeout): No context destruction detected.`,
+					);
+					resolve(false);
+				}
 			}, timeout);
+			// Ensure timeout doesn't keep process alive if resolved early
+			pageForListeners?.on("close", () => clearTimeout(listenerTimeoutId));
 		});
 
+		logger.info(`${logPrefix} Creating navigation listener promise.`);
 		const navigationPromise = new Promise<boolean>((resolve) => {
-			pageForListeners?.once("navigation", () => {
-				logger.info(`${logPrefix} Navigation event detected`);
+			const listener = () => {
+				logger.info(
+					`${logPrefix} Navigation listener promise RESOLVED (Event): 'navigation' detected.`,
+				);
 				resolve(true);
-			});
-			setTimeout(() => resolve(false), timeout);
+			};
+			pageForListeners?.once("navigation", listener);
+
+			// Timeout for the listener itself
+			const listenerTimeoutId = setTimeout(() => {
+				pageForListeners?.off("navigation", listener); // Clean up listener
+				logger.info(
+					`${logPrefix} Navigation listener promise RESOLVED (Timeout): No 'navigation' event detected.`,
+				);
+				resolve(false);
+			}, timeout);
+			// Ensure timeout doesn't keep process alive if resolved early
+			pageForListeners?.on("close", () => clearTimeout(listenerTimeoutId));
 		});
 
 		// --- Race Detection --- //
+		logger.info(`${logPrefix} Starting Promise.race...`);
 		const raceResult = await Promise.race([
 			waitFunctionPromise,
 			pollingPromise,
 			contextPromise,
 			navigationPromise,
 		]);
+		logger.info(
+			`${logPrefix} Promise.race finished with result: ${raceResult}`,
+		);
 		const changeDetected = raceResult || contextDestroyed;
+		logger.info(
+			`${logPrefix} Change detected (raceResult || contextDestroyed): ${changeDetected}`,
+		);
 
 		if (changeDetected) {
+			logger.info(
+				`${logPrefix} Change was detected. Performing final verification after delay.`,
+			);
 			// ... (Stabilization Delay Logic) ...
 			await new Promise((resolve) => setTimeout(resolve, 1000)); // Short delay
 			try {
 				const finalPage = await getActivePage(browser, logger);
-				if (!finalPage) return contextDestroyed;
+				if (!finalPage) {
+					logger.warn(
+						`${logPrefix} Final verification: getActivePage returned null. Returning contextDestroyed: ${contextDestroyed}`,
+					);
+					return contextDestroyed;
+				}
 				const finalUrl = await finalPage.url();
 				const finalUrlChanged = finalUrl !== currentUrl;
+				logger.info(
+					`${logPrefix} Final verification: Final URL: ${finalUrl}. Changed from initial: ${finalUrlChanged}. Overall result: ${changeDetected || finalUrlChanged}`,
+				);
 				return changeDetected || finalUrlChanged;
 			} catch (finalError) {
 				logger.warn(
-					`${logPrefix} Error during final URL verification: ${(finalError as Error).message}`,
+					`${logPrefix} Error during final URL verification: ${(finalError as Error).message}. Returning contextDestroyed: ${contextDestroyed}`,
 				);
-				return contextDestroyed;
+				return contextDestroyed; // Assume change if error occurred here, relying on initial detection
 			}
 		}
 
-		// --- Final Check if No Change Detected --- //
+		// --- Final Check if No Change Detected by Race --- //
+		logger.warn(
+			`${logPrefix} No change detected by race/context destruction. Performing final check.`,
+		);
 		try {
 			const finalPage = await getActivePage(browser, logger);
-			if (!finalPage) return contextDestroyed;
+			if (!finalPage) {
+				logger.warn(
+					`${logPrefix} Final check: getActivePage returned null. Returning contextDestroyed: ${contextDestroyed}`,
+				);
+				return contextDestroyed;
+			}
 			const finalUrl = await finalPage.url();
 			const finalChanged = finalUrl !== currentUrl;
+			logger.info(
+				`${logPrefix} Final check: Final URL: ${finalUrl}. Changed from initial: ${finalChanged}.`,
+			);
 			return finalChanged;
 		} catch (finalError) {
 			const err = finalError as Error;
@@ -434,22 +527,26 @@ export async function waitForUrlChange(
 				err.message.includes("Target closed")
 			) {
 				logger.info(
-					`${logPrefix} Context destruction detected at final check - navigation likely successful`,
+					`${logPrefix} Final check: Context destruction detected during check. Assuming success. ${err.message}`,
 				);
-				return true;
+				return true; // Treat as success
 			}
-			// logger.warn(`${logPrefix} Error getting final URL: ${err.message}`); // Reduced logging
+			logger.error(
+				`${logPrefix} Final check: Error getting final URL: ${err.message}`,
+			);
 			return false;
 		}
 	} catch (error) {
 		const err = error as Error;
-		// logger.warn(`${logPrefix} Top-level error: ${err.message}`); // Reduced logging
+		logger.error(
+			`${logPrefix} Top-level error in waitForUrlChange: ${err.message}`,
+		);
 		if (
 			err.message.includes("context was destroyed") ||
 			err.message.includes("Target closed")
 		) {
 			logger.info(
-				`${logPrefix} Context was destroyed during URL change wait - expected during hard navigations`,
+				`${logPrefix} Top-level error indicates context destroyed. Assuming success. ${err.message}`,
 			);
 			return true; // Still implies navigation happened
 		}

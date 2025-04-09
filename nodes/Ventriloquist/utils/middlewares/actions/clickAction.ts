@@ -162,8 +162,12 @@ export async function executeClickAction(
 						waitTime || 30000,
 						logger,
 					);
+					logger.info(`${logPrefix} waitForUrlChange returned: ${urlChanged}`);
 
 					if (urlChanged) {
+						logger.info(
+							`${logPrefix} urlChanged is true. Proceeding to get final page state.`,
+						);
 						// URL changed, get the new URL
 						let finalUrl: string;
 						let finalTitle: string;
@@ -235,7 +239,7 @@ export async function executeClickAction(
 								nodeName,
 								nodeId,
 								index,
-								`${logPrefix} URL did not change after click within timeout: ${waitTime}ms`,
+								`${logPrefix} URL did not change after click within timeout: ${waitTime}ms. Returning result.`,
 							),
 						);
 
@@ -268,7 +272,7 @@ export async function executeClickAction(
 							nodeName,
 							nodeId,
 							index,
-							`${logPrefix} Error during URL change detection: ${errorMessage}`,
+							`${logPrefix} Error during URL change detection catch block: ${errorMessage}. Returning result.`,
 						),
 					);
 
@@ -280,7 +284,7 @@ export async function executeClickAction(
 								nodeName,
 								nodeId,
 								index,
-								`${logPrefix} Context destruction detected which likely indicates successful navigation`,
+								`${logPrefix} Context destruction detected (in catch). Returning result.`,
 							),
 						);
 
@@ -301,6 +305,9 @@ export async function executeClickAction(
 						};
 					}
 
+					logger.warn(
+						`${logPrefix} Unhandled error in URL change detection catch block. Returning error result.`,
+					);
 					return {
 						success: false,
 						details: {
