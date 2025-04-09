@@ -96,37 +96,23 @@ export async function executeClickAction(
 			waitAfterAction === "navigationComplete";
 
 		if (shouldWaitForNav) {
-			// Use the simple navigation approach with Promise.all
-			logger.info(
-				formatOperationLog(
-					"ClickAction",
-					nodeName,
-					nodeId,
-					index,
-					`${logPrefix} Using navigation handling for click with waitAfterAction: ${waitAfterAction}`,
-				),
-			);
-
-			// Map the waitAfterAction to appropriate waitUntil option
-			let waitUntil: puppeteer.PuppeteerLifeCycleEvent = "domcontentloaded";
-			if (waitAfterAction === "navigationComplete") {
-				waitUntil = "networkidle0";
-			}
-
-			// Special handling for URL change detection which should be different from normal navigation
-			if (waitAfterAction === "urlChanged") {
+			// Special handling for URL change detection
+			if (
+				waitAfterAction === "urlChanged" ||
+				waitAfterAction === "anyUrlChange"
+			) {
+				// Also apply to anyUrlChange for consistency
 				logger.info(
 					formatOperationLog(
 						"ClickAction",
 						nodeName,
 						nodeId,
 						index,
-						`${logPrefix} Using URL change detection for navigation with timeout: ${waitTime}ms`,
+						`${logPrefix} Using Promise.all with networkidle2 wait for navigation. Timeout: ${waitTime || 30000}ms`,
 					),
 				);
 
 				try {
-					// Find the element first
 					const element = await page.$(selector);
 					if (!element) {
 						logger.warn(`${logPrefix} Element ${selector} not found.`);
@@ -140,133 +126,70 @@ export async function executeClickAction(
 						};
 					}
 
-					// Click the element and wait for the promise
-					logger.info(`${logPrefix} Clicking element: ${selector}...`);
-					await element.click(); // Reverted: Await the click promise
-					logger.info(`${logPrefix} Click promise for ${selector} resolved.`);
-
-					// Now explicitly wait for URL change
-					logger.info(`${logPrefix} Getting current URL after click...`);
-					const currentUrl = await page.url();
+					// Wait for navigation and click concurrently
 					logger.info(
-						`${logPrefix} Got current URL: ${currentUrl}. Now calling waitForUrlChange.`,
+						`${logPrefix} Setting up Promise.all for click and networkidle2 wait...`,
 					);
+					const navigationPromise = page.waitForNavigation({
+						waitUntil: "networkidle2", // Try networkidle2
+						timeout: waitTime || 30000,
+					});
+					const clickPromise = element.click();
 
+					await Promise.all([navigationPromise, clickPromise]);
 					logger.info(
-						formatOperationLog(
-							"ClickAction",
-							nodeName,
-							nodeId,
-							index,
-							`${logPrefix} Waiting for URL to change from: ${currentUrl}`,
-						),
+						`${logPrefix} Promise.all for click/networkidle2 wait resolved successfully.`,
 					);
 
-					// Wait for the URL change
-					const urlChanged = await waitForUrlChange(
-						options.sessionId,
-						currentUrl,
-						waitTime || 30000,
-						logger,
-					);
-					logger.info(`${logPrefix} waitForUrlChange returned: ${urlChanged}`);
-
-					if (urlChanged) {
+					// Navigation likely successful
+					let finalUrl = "[Unknown]";
+					let finalTitle = "[Unknown]";
+					try {
+						finalUrl = await page.url();
+						finalTitle = await page.title();
 						logger.info(
-							`${logPrefix} urlChanged is true. Proceeding to get final page state.`,
+							`${logPrefix} Navigation successful. Final URL: ${finalUrl}`,
 						);
-						// URL changed, get the new URL
-						let finalUrl: string;
-						let finalTitle: string;
-
-						try {
-							finalUrl = await page.url();
-							finalTitle = await page.title();
-
-							logger.info(
-								formatOperationLog(
-									"ClickAction",
-									nodeName,
-									nodeId,
-									index,
-									`${logPrefix} URL change detected: ${currentUrl} -> ${finalUrl}`,
-								),
-							);
-						} catch (pageError) {
-							// Context may have been destroyed during navigation
-							logger.warn(
-								formatOperationLog(
-									"ClickAction",
-									nodeName,
-									nodeId,
-									index,
-									`${logPrefix} Page context destroyed during navigation: ${(pageError as Error).message}`,
-								),
-							);
-
-							// This is actually expected during hard navigation
-							return {
-								success: true,
-								urlChanged: true,
-								navigationSuccessful: true,
-								contextDestroyed: true,
-								details: {
-									selector,
-									waitAfterAction,
-									waitTime,
-									beforeUrl,
-									contextDestroyed: true,
-									urlChanged: true,
-									navigationSuccessful: true,
-								},
-							};
-						}
-
-						return {
-							success: true,
-							urlChanged: true,
-							navigationSuccessful: true,
-							details: {
-								selector,
-								waitAfterAction,
-								waitTime,
-								beforeUrl,
-								finalUrl,
-								beforeTitle,
-								finalTitle,
-								urlChanged: true,
-								navigationSuccessful: true,
-							},
-						};
-					} else {
-						// URL did not change
+					} catch (pageError) {
 						logger.warn(
-							formatOperationLog(
-								"ClickAction",
-								nodeName,
-								nodeId,
-								index,
-								`${logPrefix} URL did not change after click within timeout: ${waitTime}ms. Returning result.`,
-							),
+							`${logPrefix} Could not get final page state after navigation: ${(pageError as Error).message}`,
 						);
-
+						// Assume success based on Promise.all resolving
 						return {
 							success: true,
-							urlChanged: false,
-							navigationSuccessful: false,
+							urlChanged: true, // Assume changed
+							navigationSuccessful: true,
+							contextDestroyed: true, // Likely if we error here
 							details: {
 								selector,
 								waitAfterAction,
 								waitTime,
 								beforeUrl,
-								urlChanged: false,
-								navigationSuccessful: false,
-								message: "URL did not change after click within timeout",
+								contextDestroyed: true,
+								urlChanged: true,
+								navigationSuccessful: true,
 							},
 						};
 					}
+
+					return {
+						success: true,
+						urlChanged: beforeUrl !== finalUrl,
+						navigationSuccessful: true,
+						details: {
+							selector,
+							waitAfterAction,
+							waitTime,
+							beforeUrl,
+							finalUrl,
+							beforeTitle,
+							finalTitle,
+							urlChanged: beforeUrl !== finalUrl,
+							navigationSuccessful: true,
+						},
+					};
 				} catch (error) {
-					// Handle errors during the URL change wait process
+					// Handle errors from Promise.all (e.g., timeout, context destruction)
 					const errorMessage = (error as Error).message;
 					const isContextDestroyed =
 						errorMessage.includes("context was destroyed") ||
@@ -279,24 +202,14 @@ export async function executeClickAction(
 							nodeName,
 							nodeId,
 							index,
-							`${logPrefix} Error during URL change detection catch block: ${errorMessage}. Returning result.`,
+							`${logPrefix} Error during click/networkidle2 wait: ${errorMessage}. Context destroyed: ${isContextDestroyed}`,
 						),
 					);
 
-					// If context was destroyed, this likely means navigation happened
+					// If context was destroyed, consider it potentially successful navigation
 					if (isContextDestroyed) {
-						logger.info(
-							formatOperationLog(
-								"ClickAction",
-								nodeName,
-								nodeId,
-								index,
-								`${logPrefix} Context destruction detected (in catch). Returning result.`,
-							),
-						);
-
 						return {
-							success: true,
+							success: true, // Click likely initiated nav
 							urlChanged: true,
 							navigationSuccessful: true,
 							contextDestroyed: true,
@@ -312,9 +225,7 @@ export async function executeClickAction(
 						};
 					}
 
-					logger.warn(
-						`${logPrefix} Unhandled error in URL change detection catch block. Returning error result.`,
-					);
+					// Otherwise, return error
 					return {
 						success: false,
 						details: {
@@ -327,7 +238,12 @@ export async function executeClickAction(
 					};
 				}
 			} else {
-				// For regular navigation (not URL change detection)
+				// Restore waitUntil definition for other cases
+				let waitUntil: puppeteer.PuppeteerLifeCycleEvent = "domcontentloaded";
+				if (waitAfterAction === "navigationComplete") {
+					waitUntil = "networkidle0";
+				}
+				// For regular navigation (e.g., navigationComplete)
 				logger.info(
 					formatOperationLog(
 						"ClickAction",
