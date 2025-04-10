@@ -673,6 +673,9 @@ export async function execute(
 	websocketEndpoint: string,
 	workflowId: string,
 ): Promise<INodeExecutionData> {
+	// Record start time for execution duration tracking
+	const startTime = Date.now();
+
 	// Get parameters
 	const formFields = this.getNodeParameter(
 		"formFields.fields",
@@ -1047,14 +1050,32 @@ export async function execute(
 
 		// Return the result data
 		const resultData: IDataObject = {
+			success: true,
+			operation: "form",
 			sessionId,
 			formFields: results,
 			currentUrl: page ? await page.url() : "Page unavailable",
 			pageTitle: page ? await page.title() : "Page unavailable",
+			timestamp: new Date().toISOString(),
+			executionDuration: Date.now() - startTime,
 		};
 
 		if (submitFormAfterFill) {
 			resultData.formSubmission = formSubmissionResult;
+
+			// Log success message if form was submitted
+			if (formSubmissionResult?.success) {
+				this.logger.info(
+					`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Form submission completed successfully`
+				);
+			} else {
+				const errorMessage = typeof formSubmissionResult?.details === 'object'
+					? (formSubmissionResult?.details as any)?.error || 'Unknown issue'
+					: 'Unknown submission issue';
+				this.logger.warn(
+					`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Form submission had issues: ${errorMessage}`
+				);
+			}
 		}
 
 		if (screenshot) {
@@ -1160,6 +1181,12 @@ export async function execute(
 				}
 			}
 		}
+
+		// Add a summary message about the operation
+		this.logger.info(
+			`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Form operation completed successfully with ${results.length} field(s)`
+		);
+		this.logger.info("============ NODE EXECUTION COMPLETE ============");
 
 		return this.helpers.returnJsonArray([
 			resultData,
