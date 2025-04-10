@@ -8,27 +8,13 @@ import type * as puppeteer from "puppeteer-core";
 import { SessionManager } from "../utils/sessionManager";
 import { getActivePage } from "../utils/sessionUtils";
 import {
-	formatExtractedDataForLog,
-	getHumanDelay,
-	getPageInfo,
-} from "../utils/extractionUtils";
-import {
 	formatOperationLog,
 	createSuccessResponse,
 	createTimingLog,
 } from "../utils/resultUtils";
 import { createErrorResponse } from "../utils/errorUtils";
-import { executeExtraction } from "../utils/middlewares/extraction/extractMiddleware";
-import type { IExtractOptions, IExtractResult } from "../utils/middlewares/extraction/extractMiddleware";
-
-/**
- * Extended PageInfo interface with bodyText
- */
-interface PageInfo {
-	url: string;
-	title: string;
-	bodyText: string;
-}
+import { processExtractionItems, type IExtractItem } from "../utils/extractNodeUtils";
+import { logPageDebugInfo } from "../utils/debugUtils";
 
 /**
  * Extract operation description
@@ -486,10 +472,9 @@ export async function execute(
 		);
 		sessionId = sessionResult.sessionId;
 
-		// --- START REFACTOR: Correctly get browser before getting page ---
-		page = sessionResult.page; // Use page from result first
+		// Get the page
+		page = sessionResult.page;
 		if (!page) {
-			// If page wasn't returned directly (e.g., existing session)
 			const currentSession = SessionManager.getSession(sessionId);
 			if (currentSession?.browser?.isConnected()) {
 				page = await getActivePage(currentSession.browser, this.logger);
@@ -499,7 +484,6 @@ export async function execute(
 				);
 			}
 		}
-		// --- END REFACTOR ---
 
 		if (!page) {
 			throw new Error("Failed to get or create a page");
@@ -507,58 +491,17 @@ export async function execute(
 
 		// Debug page content if enabled
 		if (debugPageContent) {
-			try {
-				const pageInfo = (await getPageInfo(page)) as PageInfo;
-				this.logger.info(
-					formatOperationLog(
-						"Extract",
-						nodeName,
-						nodeId,
-						index,
-						`Page info: URL=${pageInfo.url}, title=${pageInfo.title}`,
-					),
-				);
-				this.logger.info(
-					formatOperationLog(
-						"Extract",
-						nodeName,
-						nodeId,
-						index,
-						"Page body preview: " +
-							pageInfo.bodyText.substring(0, 200) +
-							"...",
-					),
-				);
-			} catch (pageInfoError) {
-				this.logger.warn(
-					formatOperationLog(
-						"Extract",
-						nodeName,
-						nodeId,
-						index,
-						`Error getting page info for debug: ${(pageInfoError as Error).message}`,
-					),
-				);
-			}
-		}
-
-		// Add a human-like delay if enabled
-		if (useHumanDelays) {
-			const delay = getHumanDelay();
-			this.logger.info(
-				formatOperationLog(
-					"Extract",
+			await logPageDebugInfo(
+				page,
+				this.logger,
+				{
+					operation: "Extract",
 					nodeName,
 					nodeId,
 					index,
-					`Adding human-like delay: ${delay}ms`,
-				),
+				}
 			);
-			await new Promise((resolve) => setTimeout(resolve, delay));
 		}
-
-		// Initialize extraction results container
-		let extractionResults: IDataObject = {};
 
 		// Get all extraction items
 		const extractionItems = this.getNodeParameter(
@@ -571,174 +514,52 @@ export async function execute(
 			throw new Error("No extraction items defined");
 		}
 
-		this.logger.info(
-			formatOperationLog(
-				"Extract",
+		// Convert extraction items to properly typed items
+		const typedExtractionItems: IExtractItem[] = extractionItems.map((item) => ({
+			name: item.name as string,
+			extractionType: item.extractionType as string,
+			selector: item.selector as string,
+			attributeName: item.attributeName as string | undefined,
+			htmlOptions: item.htmlOptions as {
+				outputFormat?: string;
+				includeMetadata?: boolean;
+			} | undefined,
+			tableOptions: item.tableOptions as {
+				includeHeaders?: boolean;
+				rowSelector?: string;
+				cellSelector?: string;
+				outputFormat?: string;
+			} | undefined,
+			multipleOptions: item.multipleOptions as {
+				attributeName?: string;
+				extractionProperty?: string;
+				outputLimit?: number;
+				extractProperty?: boolean;
+				propertyKey?: string;
+			} | undefined,
+		}));
+
+		// Using our new utility to process all extraction items
+		const extractionData = await processExtractionItems(
+			page,
+			typedExtractionItems,
+			{
+				waitForSelector,
+				timeout,
+				useHumanDelays,
+				continueOnFail,
+			},
+			{
+				logger: this.logger,
 				nodeName,
 				nodeId,
+				sessionId,
 				index,
-				`Starting extraction operation with ${extractionItems.length} item(s)`,
-			),
+			}
 		);
 
-		// Process each extraction item
-		const extractionData: IDataObject = {};
-		for (let i = 0; i < extractionItems.length; i++) {
-			const item = extractionItems[i];
-			const itemName = item.name as string;
-			const extractionType = item.extractionType as string;
-			const selector = item.selector as string;
-
-			this.logger.info(
-				formatOperationLog(
-					"Extract",
-					nodeName,
-					nodeId,
-					index,
-					`Processing extraction item ${i+1}/${extractionItems.length}: ${itemName} (${extractionType}) with selector: ${selector}`,
-				),
-			);
-
-			// Wait for the selector if needed
-			if (waitForSelector) {
-				this.logger.info(
-					formatOperationLog(
-						"Extract",
-						nodeName,
-						nodeId,
-						index,
-						`Waiting for selector: ${selector} (timeout: ${timeout}ms)`,
-					),
-				);
-				try {
-					await page.waitForSelector(selector, { timeout });
-				} catch (error) {
-					this.logger.error(
-						formatOperationLog(
-							"Extract",
-							nodeName,
-							nodeId,
-							index,
-							`Selector timeout for ${itemName}: ${selector} after ${timeout}ms`,
-						),
-					);
-					// Continue with next item instead of throwing
-					if (continueOnFail) {
-						extractionData[itemName] = { error: `Selector not found: ${selector}` };
-						continue;
-					} else {
-						throw error;
-					}
-				}
-			}
-
-			// Get extraction-specific parameters based on type
-			let extractionParams: IDataObject = {};
-
-			// Get parameters based on extraction type
-			if (extractionType === "html") {
-				const htmlOptions = (item.htmlOptions as IDataObject) || {};
-				extractionParams = {
-					outputFormat: (htmlOptions.outputFormat as string) || "html",
-					includeMetadata: htmlOptions.includeMetadata === true,
-				};
-			} else if (extractionType === "attribute") {
-				extractionParams = {
-					attributeName: item.attributeName as string,
-				};
-			} else if (extractionType === "table") {
-				const tableOptions = (item.tableOptions as IDataObject) || {};
-				extractionParams = {
-					includeHeaders: tableOptions.includeHeaders !== false,
-					rowSelector: (tableOptions.rowSelector as string) || "tr",
-					cellSelector: (tableOptions.cellSelector as string) || "td, th",
-					outputFormat: (tableOptions.outputFormat as string) || "json",
-				};
-			} else if (extractionType === "multiple") {
-				const multipleOptions = (item.multipleOptions as IDataObject) || {};
-				extractionParams = {
-					attributeName: (multipleOptions.attributeName as string) || "",
-					extractionProperty: (multipleOptions.extractionProperty as string) || "textContent",
-					limit: (multipleOptions.outputLimit as number) || 0,
-					outputFormat: multipleOptions.extractProperty === true ? "object" : "array",
-					separator: (multipleOptions.propertyKey as string) || "value",
-				};
-			}
-
-			// Create extraction options
-			const extractOptions: IExtractOptions = {
-				extractionType,
-				selector,
-				waitForSelector: false, // We already waited above
-				selectorTimeout: timeout,
-				detectionMethod: "standard",
-				earlyExitDelay: 500,
-				nodeName,
-				nodeId,
-				index,
-				...extractionParams,
-			};
-
-			try {
-				// Execute extraction
-				const extractResult = await executeExtraction(page, extractOptions, this.logger);
-
-				if (extractResult.success) {
-					const extractedData = extractResult.data;
-
-					// Format the data for logging
-					const logSafeData = formatExtractedDataForLog(extractedData, extractionType);
-
-					this.logger.info(
-						formatOperationLog(
-							"Extract",
-							nodeName,
-							nodeId,
-							index,
-							`Extraction result for ${itemName} (${extractionType}): ${logSafeData}`,
-						),
-					);
-
-					// Store result under the item name
-					extractionData[itemName] = extractedData;
-				} else {
-					this.logger.error(
-						formatOperationLog(
-							"Extract",
-							nodeName,
-							nodeId,
-							index,
-							`Extraction failed for ${itemName}: ${extractResult.error?.message || "Unknown error"}`,
-						),
-					);
-
-					if (continueOnFail) {
-						extractionData[itemName] = { error: extractResult.error?.message || "Extraction failed" };
-					} else {
-						throw extractResult.error || new Error(`Extraction failed for item "${itemName}"`);
-					}
-				}
-			} catch (error) {
-				this.logger.error(
-					formatOperationLog(
-						"Extract",
-						nodeName,
-						nodeId,
-						index,
-						`Error processing extraction item ${itemName}: ${(error as Error).message}`,
-					),
-				);
-
-				if (continueOnFail) {
-					extractionData[itemName] = { error: (error as Error).message };
-				} else {
-					throw error;
-				}
-			}
-		}
-
 		// Store all extraction results
-		extractionResults = {
+		const extractionResults: IDataObject = {
 			extractedData: extractionData,
 		};
 
@@ -755,6 +576,8 @@ export async function execute(
 				this.logger,
 			);
 		}
+
+		// We'll let createSuccessResponse handle the screenshot
 		const successResponse = await createSuccessResponse({
 			operation: "extract",
 			sessionId,
@@ -790,12 +613,10 @@ export async function execute(
 		if (!continueOnFail) {
 			// Attach context before throwing
 			if (error instanceof Error) {
-				// --- START FIX: Use proper type casting ---
 				(error as Error & { context: object }).context = {
 					sessionId,
 					errorResponse,
 				};
-				// --- END FIX ---
 			}
 			throw error;
 		}
