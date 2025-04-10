@@ -1,5 +1,7 @@
 import * as puppeteerRuntime from "puppeteer-core";
 import type { Browser, Page, ConnectOptions } from "puppeteer-core";
+import type { IDataObject } from 'n8n-workflow';
+import { formatOperationLog } from './resultUtils';
 
 /**
  * Interface for logger
@@ -29,6 +31,7 @@ export interface CreateSessionOptions {
 	forceNew?: boolean;
 	credentialType?: string;
 	workflowId?: string; // Optional for backwards compatibility
+	browser?: Browser; // For local Chrome
 }
 
 /**
@@ -94,42 +97,79 @@ export namespace SessionManager {
 		credentialType: string,
 		credentials: { [key: string]: unknown },
 	): string {
+		logger.info(`Getting WebSocket URL from credentials for type: ${credentialType}`);
+
+		// Special case: Local Chrome doesn't need a WebSocket URL
+		if (credentialType === 'localChromeApi') {
+			logger.info(`Using local Chrome - no WebSocket URL needed`);
+			// Return a dummy placeholder URL that will be ignored by the transport
+			return 'local-chrome://localhost';
+		}
+
 		let websocketEndpoint = "";
 
+		// Handle different credential types
 		if (credentialType === "brightDataApi") {
-			websocketEndpoint = (credentials as { websocketEndpoint: string })
-				.websocketEndpoint;
+			// For Bright Data, get the explicit endpoint
+			websocketEndpoint = credentials.websocketEndpoint as string;
 		} else if (credentialType === "browserlessApi") {
-			const connectionType =
-				(credentials as { connectionType?: string }).connectionType || "direct";
+			// For Browserless, get the endpoint based on connection type
+			const connectionType = (credentials.connectionType as string) || "direct";
+
 			if (connectionType === "direct") {
-				websocketEndpoint = (credentials as { wsEndpoint: string }).wsEndpoint;
-			} else {
-				const baseUrl =
-					(credentials as { baseUrl?: string }).baseUrl ||
-					"https://browserless.io";
-				const apiKey = (credentials as { apiKey?: string }).apiKey;
-				if (!apiKey) {
-					throw new Error(
-						"API token is required for Browserless standard connection",
-					);
-				}
-				const wsBaseUrl = baseUrl.replace(/^https?:\/\//, "");
-				websocketEndpoint = `wss://${wsBaseUrl}?token=${apiKey}`;
+				// Direct WebSocket connection
+				websocketEndpoint = credentials.wsEndpoint as string;
 				logger.info(
-					`Creating WebSocket URL from credentials: ${wsBaseUrl}?token=***`,
+					`Using direct WebSocket endpoint for Browserless: ${
+						websocketEndpoint
+							? websocketEndpoint.replace(/token=([^&]+)/, "token=***")
+							: "NONE_CONFIGURED"
+					}`,
+				);
+			} else {
+				// Standard connection - construct WS URL from base URL and token
+				const apiKey = credentials.apiKey as string;
+				let baseUrl = (credentials.baseUrl as string) || "chrome.browserless.io";
+
+				// Ensure baseUrl has http/https protocol
+				if (
+					!baseUrl.startsWith("http://") &&
+					!baseUrl.startsWith("https://")
+				) {
+					baseUrl = `https://${baseUrl}`;
+				}
+
+				// Convert HTTP base URL to WebSocket URL
+				// For Browserless, we need to format the WebSocket URL
+				let wsBaseUrl = baseUrl.replace("http://", "ws://").replace("https://", "wss://");
+				wsBaseUrl = `${wsBaseUrl}/puppeteer`;
+
+				// Add auth token to URL if provided
+				if (apiKey) {
+					wsBaseUrl += `?token=${apiKey}`;
+				}
+
+				websocketEndpoint = wsBaseUrl;
+				logger.info(
+					`Creating WebSocket URL from credentials: ${wsBaseUrl.replace(
+						/token=([^&]+)/,
+						"token=***",
+					)}`,
 				);
 			}
 		}
 
-		if (
-			!websocketEndpoint ||
-			typeof websocketEndpoint !== "string" ||
-			websocketEndpoint.trim() === ""
-		) {
-			throw new Error(
-				`WebSocket endpoint is required but not configured or invalid for ${credentialType}. Please check your credentials configuration.`,
-			);
+		// Skip WebSocket validation for localChromeApi
+		if (credentialType !== 'localChromeApi') {
+			if (
+				!websocketEndpoint ||
+				typeof websocketEndpoint !== "string" ||
+				websocketEndpoint.trim() === ""
+			) {
+				throw new Error(
+					`WebSocket endpoint is required but not configured or invalid for ${credentialType}. Please check your credentials configuration.`,
+				);
+			}
 		}
 
 		return websocketEndpoint;
@@ -431,36 +471,55 @@ export namespace SessionManager {
 		const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
 
 		logger.info(
-			`Creating new browser session with endpoint: ${websocketEndpoint}`,
+			`Creating new browser session with credential type: ${credentialType}`,
 		);
 
 		try {
-			// Format the WebSocket URL (PASSING LOGGER)
-			const wsUrl = formatWebsocketUrl(websocketEndpoint, { apiToken }, logger);
-			logConnection(logger, "Connecting with formatted WebSocket URL", wsUrl);
+			let browser: Browser;
 
-			// Create connection options (REMOVED INCORRECT TIMEOUT)
-			const connectionOptions: ConnectOptions = {
-				browserWSEndpoint: wsUrl,
-				defaultViewport: {
-					width: 1280,
-					height: 720,
-				},
-				// timeout: 300000, // INCORRECT: Removed from here
-			};
+			// Check if we're using local Chrome or a remote browser service
+			if (credentialType === 'localChromeApi') {
+				// For local Chrome, we don't use websocketEndpoint - we'll launch Chrome directly
+				// The actual launching happens in the LocalChromeTransport
+				// This block is kept minimal as the work is done in the transport
+				logger.info('Using Local Chrome - creating browser instance directly');
 
-			// Connect to browser
-			logger.info(
-				`Attempting puppeteer.connect with options: ${JSON.stringify({ ...connectionOptions, browserWSEndpoint: "ws://...masked..." })}`,
-			);
-			const browser = await puppeteerRuntime.connect(connectionOptions);
-			logger.info("Successfully connected to browser service");
+				// Get browser via BrowserTransportFactory - this is handled in open.operation.ts
+				// We're just setting up the session management part here
+				browser = options.browser as Browser;
+
+				if (!browser) {
+					throw new Error('Browser instance must be provided for localChromeApi in createSession options');
+				}
+
+				logger.info('Successfully connected to local Chrome browser');
+			} else {
+				// For Bright Data and Browserless, use WebSocket connection
+				// Format the WebSocket URL (PASSING LOGGER)
+				const wsUrl = formatWebsocketUrl(websocketEndpoint, { apiToken }, logger);
+				logConnection(logger, "Connecting with formatted WebSocket URL", wsUrl);
+
+				// Create connection options (REMOVED INCORRECT TIMEOUT)
+				const connectionOptions: ConnectOptions = {
+					browserWSEndpoint: wsUrl,
+					defaultViewport: {
+						width: 1280,
+						height: 720,
+					},
+				};
+
+				// Connect to browser
+				logger.info(
+					`Attempting puppeteer.connect with options: ${JSON.stringify({ ...connectionOptions, browserWSEndpoint: "ws://...masked..." })}`,
+				);
+				browser = await puppeteerRuntime.connect(connectionOptions);
+				logger.info("Successfully connected to browser service via WebSocket");
+			}
 
 			// Store the session (without pages map)
 			const session: IBrowserSession = {
 				browser,
 				lastUsed: new Date(),
-				// pages: new Map<string, Page>(), // Removed
 				credentialType,
 				workflowId, // Store workflowId for backwards compatibility
 			};
@@ -503,10 +562,12 @@ export namespace SessionManager {
 		logger: ILogger,
 		sessionId: string,
 		websocketEndpoint: string,
-		options: { apiToken?: string; credentialType?: string } = {},
+		options: { apiToken?: string; credentialType?: string; browser?: Browser } = {},
 	): Promise<{ browser: Browser }> {
 		// Removed page from return type
 		logger.info(`Connecting to existing browser session: ${sessionId}`);
+
+		const credentialType = options.credentialType || 'browserlessApi';
 
 		// Check if session exists locally first
 		const existingSession = sessions.get(sessionId);
@@ -520,7 +581,6 @@ export namespace SessionManager {
 				logger.info(`Connection to session ${sessionId} is active`);
 				return {
 					browser: existingSession.browser,
-					// page: existingSession.pages.size > 0 ? existingSession.pages.values().next().value : undefined // Removed
 				};
 			} catch (error) {
 				logger.warn(
@@ -530,42 +590,56 @@ export namespace SessionManager {
 			}
 		}
 
-		// Session not found locally or not active - try to reconnect remotely
+		// Session not found locally or not active - try to reconnect
 		try {
-			// Format the WebSocket URL with session ID (PASSING LOGGER)
-			const wsUrl = formatWebsocketUrl(
-				websocketEndpoint,
-				{
-					apiToken: options.apiToken,
-					sessionId,
-				},
-				logger,
-			);
+			let browser: Browser;
 
-			logConnection(logger, "Reconnecting with formatted WebSocket URL", wsUrl);
+			if (credentialType === 'localChromeApi') {
+				// For local Chrome, we need a browser instance passed in
+				logger.info('Reconnecting to local Chrome browser instance');
 
-			// Create connection options (REMOVED INCORRECT TIMEOUT)
-			const connectionOptions: ConnectOptions = {
-				browserWSEndpoint: wsUrl,
-				defaultViewport: {
-					width: 1280,
-					height: 720,
-				},
-				// timeout: 300000, // INCORRECT: Removed from here
-			};
+				// Use provided browser instance - must be provided for local Chrome
+				if (!options.browser) {
+					throw new Error('Browser instance must be provided for localChromeApi reconnection');
+				}
 
-			// Connect to browser
-			logger.info(
-				`Attempting puppeteer.connect (reconnect) with options: ${JSON.stringify({ ...connectionOptions, browserWSEndpoint: "ws://...masked..." })}`,
-			);
-			const browser = await puppeteerRuntime.connect(connectionOptions);
-			logger.info(`Successfully reconnected to browser session: ${sessionId}`);
+				browser = options.browser;
+				logger.info(`Successfully reconnected to local Chrome browser for session: ${sessionId}`);
+			} else {
+				// For Bright Data and Browserless, use WebSocket connection
+				// Format the WebSocket URL with session ID (PASSING LOGGER)
+				const wsUrl = formatWebsocketUrl(
+					websocketEndpoint,
+					{
+						apiToken: options.apiToken,
+						sessionId,
+					},
+					logger,
+				);
 
-			// Update or create session (without pages map)
+				logConnection(logger, "Reconnecting with formatted WebSocket URL", wsUrl);
+
+				// Create connection options
+				const connectionOptions: ConnectOptions = {
+					browserWSEndpoint: wsUrl,
+					defaultViewport: {
+						width: 1280,
+						height: 720,
+					},
+				};
+
+				// Connect to browser
+				logger.info(
+					`Attempting puppeteer.connect (reconnect) with options: ${JSON.stringify({ ...connectionOptions, browserWSEndpoint: "ws://...masked..." })}`,
+				);
+				browser = await puppeteerRuntime.connect(connectionOptions);
+				logger.info(`Successfully reconnected to browser session: ${sessionId}`);
+			}
+
+			// Update or create session
 			const updatedSession: IBrowserSession = {
 				browser,
 				lastUsed: new Date(),
-				// pages: new Map<string, Page>(), // Removed
 				credentialType:
 					options.credentialType ||
 					existingSession?.credentialType ||

@@ -166,26 +166,57 @@ export async function execute(
 	try {
 		// Create a new session - Open always creates a new session
 		try {
-			const sessionResult = await SessionManager.createSession(
-				this.logger,
-				actualWebsocketEndpoint,
-				{
-					apiToken: credentials.apiKey as string,
-					workflowId, // For backwards compatibility
-					credentialType,
-				},
-			);
+			// For local Chrome, we need to create the browser first
+			if (credentialType === 'localChromeApi') {
+				this.logger.info(
+					`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Creating local Chrome browser instance directly`
+				);
 
-			// Store session details
-			browser = sessionResult.browser;
-			sessionId = sessionResult.sessionId;
-			brightDataSessionId = ""; // To be populated if needed
+				// Launch the browser directly using the transport
+				browser = await browserTransport.connect();
+
+				// Now create the session with the browser instance
+				const sessionResult = await SessionManager.createSession(
+					this.logger,
+					'local-chrome://localhost', // Dummy URL, won't be used
+					{
+						apiToken: 'not-used-for-local-chrome',
+						workflowId,
+						credentialType,
+						browser, // Pass the browser instance
+					},
+				);
+
+				// Store session details
+				sessionId = sessionResult.sessionId;
+
+				this.logger.info(
+					`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Created new local Chrome browser session with ID: ${sessionId}`
+				);
+			} else {
+				// For remote browsers (Bright Data, Browserless), use the existing flow
+				const sessionResult = await SessionManager.createSession(
+					this.logger,
+					actualWebsocketEndpoint,
+					{
+						apiToken: credentials.apiKey as string,
+						workflowId,
+						credentialType,
+					},
+				);
+
+				// Store session details
+				browser = sessionResult.browser;
+				sessionId = sessionResult.sessionId;
+				brightDataSessionId = ""; // To be populated if needed
+
+				this.logger.info(
+					`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Created new browser session with ID: ${sessionId}`
+				);
+			}
 
 			this.logger.info(
-				`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Created new browser session with ID: ${sessionId}`,
-			);
-			this.logger.info(
-				`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] IMPORTANT: This session ID must be passed to subsequent operations.`,
+				`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] IMPORTANT: This session ID must be passed to subsequent operations.`
 			);
 
 			// Create a new page

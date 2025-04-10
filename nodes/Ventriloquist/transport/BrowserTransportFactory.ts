@@ -2,6 +2,7 @@ import type { ICredentialDataDecryptedObject } from 'n8n-workflow';
 import { BrowserTransport } from './BrowserTransport';
 import { BrightDataBrowser } from './BrightDataBrowser';
 import { BrowserlessTransport } from './BrowserlessTransport';
+import { LocalChromeTransport } from './LocalChromeTransport';
 
 /**
  * Factory for creating browser transports based on credential type
@@ -125,6 +126,32 @@ export class BrowserTransportFactory {
         websocketEndpoint,
         authorizedDomains,
         password,
+      );
+    }
+
+    if (credentialType === 'localChromeApi') {
+      // Get credential values with defaults
+      const executablePath = credentials.executablePath as string || ''; // Will be auto-detected if empty
+      const userDataDir = credentials.userDataDir as string || '';
+      const headless = credentials.headless !== false; // Default to true
+      const connectionTimeout = credentials.connectionTimeout ? credentials.connectionTimeout as number : 120000;
+      const stealthMode = credentials.stealthMode !== undefined ? credentials.stealthMode as boolean : true;
+
+      // Parse launch arguments
+      const launchArgsStr = credentials.launchArgs as string || '--no-sandbox,--disable-setuid-sandbox';
+      const launchArgs = launchArgsStr.split(',').map(arg => arg.trim()).filter(arg => arg.length > 0);
+
+      logger.info(`Creating Local Chrome transport with headless: ${headless}`);
+      logger.info(`Launch arguments: ${launchArgs.join(' ')}`);
+
+      return new LocalChromeTransport(
+        logger,
+        executablePath,
+        userDataDir,
+        headless,
+        launchArgs,
+        stealthMode,
+        connectionTimeout
       );
     }
 

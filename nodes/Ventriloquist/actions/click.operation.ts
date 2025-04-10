@@ -15,6 +15,14 @@ import {
 import { SessionManager } from "../utils/sessionManager";
 import { getActivePage } from "../utils/sessionUtils";
 
+/**
+ * Helper function to wait for a specified time using page.evaluate
+ * This replaces puppeteer's built-in waitForTimeout which may not be available in all versions
+ */
+async function waitForDuration(page: Page, duration: number): Promise<void> {
+	await page.evaluate((ms) => new Promise(resolve => setTimeout(resolve, ms)), duration);
+}
+
 // Define the properties for the click operation
 export const description: INodeProperties[] = [
 	{
@@ -69,6 +77,68 @@ export const description: INodeProperties[] = [
 		default: true,
 		description: "Whether to continue execution even if the operation fails",
 	},
+	{
+		displayName: "Wait After Action",
+		name: "waitAfterAction",
+		type: "options",
+		options: [
+			{
+				name: "Quick Action (No Wait)",
+				value: "quick",
+				description: "Continue immediately after the action (default)",
+			},
+			{
+				name: "Wait for Element",
+				value: "element",
+				description: "Wait for a specific element to appear after the action",
+			},
+			{
+				name: "Wait for Navigation (Fast)",
+				value: "navFast",
+				description: "Wait for navigation using networkidle2 (good for SPAs)",
+			},
+			{
+				name: "Wait for Page Load (Full)",
+				value: "navFull",
+				description: "Wait for navigation using networkidle0 (full page loads)",
+			},
+			{
+				name: "Wait Fixed Time",
+				value: "fixed",
+				description: "Wait for a fixed duration after the action",
+			},
+		],
+		default: "quick",
+		description: "Strategy to wait for after the click action completes",
+	},
+	{
+		displayName: "Wait Selector",
+		name: "waitSelector",
+		type: "string",
+		default: "",
+		description: "CSS selector of the element to wait for",
+		displayOptions: {
+			show: {
+				waitAfterAction: ["element"],
+			},
+		},
+		placeholder: "#new-element-id",
+	},
+	{
+		displayName: "Wait Duration (ms)",
+		name: "waitDuration",
+		type: "number",
+		default: 1000, // Default to 1 second
+		description: "Time to wait in milliseconds",
+		displayOptions: {
+			show: {
+				waitAfterAction: ["fixed"],
+			},
+		},
+		typeOptions: {
+			minValue: 0,
+		},
+	},
 ];
 
 /**
@@ -121,6 +191,13 @@ export async function execute(
 		index,
 		true,
 	) as boolean;
+	const waitAfterAction = this.getNodeParameter(
+		"waitAfterAction",
+		index,
+		"quick",
+	) as string;
+	const waitSelector = this.getNodeParameter("waitSelector", index, "") as string;
+	const waitDuration = this.getNodeParameter("waitDuration", index, 1000) as number;
 
 	try {
 		// Use the centralized session management
@@ -200,6 +277,111 @@ export async function execute(
 
 			success = clickResult.success;
 			error = clickResult.error;
+		}
+
+		// Wait After Action Logic
+		if (success && waitAfterAction !== "quick") {
+			this.logger.info(
+				formatOperationLog(
+					"Click",
+					nodeName,
+					nodeId,
+					index,
+					`Performing wait after action: ${waitAfterAction}`,
+				),
+			);
+
+			try {
+				let waitPromise: Promise<any> | null = null;
+
+				switch (waitAfterAction) {
+					case "element":
+						if (!waitSelector) {
+							throw new Error(
+								'"Wait for Element" selected but no selector provided',
+							);
+						}
+						this.logger.info(
+							formatOperationLog(
+								"Click",
+								nodeName,
+								nodeId,
+								index,
+								`Waiting for selector: ${waitSelector}`,
+							),
+						);
+						waitPromise = page.waitForSelector(waitSelector, { timeout });
+						break;
+					case "navFast":
+						this.logger.info(
+							formatOperationLog(
+								"Click",
+								nodeName,
+								nodeId,
+								index,
+								`Waiting for navigation (fast - networkidle2)`,
+							),
+						);
+						// Note: waitForNavigation should ideally be combined with the action triggering it (like click)
+						// Using it standalone might miss the navigation if it starts/finishes too quickly.
+						// For click actions, Promise.all([page.waitForNavigation(), page.click()]) is better,
+						// but we are implementing a simpler post-action wait here.
+						waitPromise = page.waitForNavigation({ waitUntil: "networkidle2", timeout });
+						break;
+					case "navFull":
+						this.logger.info(
+							formatOperationLog(
+								"Click",
+								nodeName,
+								nodeId,
+								index,
+								`Waiting for navigation (full - networkidle0)`,
+							),
+						);
+						waitPromise = page.waitForNavigation({ waitUntil: "networkidle0", timeout });
+						break;
+					case "fixed":
+						this.logger.info(
+							formatOperationLog(
+								"Click",
+								nodeName,
+								nodeId,
+								index,
+								`Waiting for fixed time: ${waitDuration}ms`,
+							),
+						);
+						waitPromise = waitForDuration(page, waitDuration);
+						break;
+				}
+
+				if (waitPromise) {
+					await waitPromise;
+					this.logger.info(
+						formatOperationLog(
+							"Click",
+							nodeName,
+							nodeId,
+							index,
+							`Wait after action (${waitAfterAction}) completed successfully.`,
+						),
+					);
+				}
+			} catch (waitError) {
+				const waitErrorMessage = `Wait after action (${waitAfterAction}) failed: ${(waitError as Error).message}`;
+				this.logger.warn(
+					formatOperationLog(
+						"Click",
+						nodeName,
+						nodeId,
+						index,
+						waitErrorMessage,
+					),
+				);
+				if (!continueOnFail) {
+					error = new Error(waitErrorMessage);
+					success = false;
+				}
+			}
 		}
 
 		// Log timing information

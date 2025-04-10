@@ -2629,6 +2629,25 @@ export async function execute(
 										),
 									);
 
+									// Determine the wait strategy for the click action utility
+									// Prioritize 'navigationComplete' if specified, otherwise use the selected waitAfterAction
+									// This ensures we use a more robust wait when explicitly requested
+									const effectiveWaitAfterAction =
+										(group.waitAfterAction as string) === "navigationComplete"
+											? "navigationComplete" // Use networkidle0 via enhancedNavigationWait
+											: (group.waitAfterAction as string) || "anyUrlChange"; // Default to anyUrlChange
+
+									// Log the effective wait strategy being used
+									this.logger.info(
+										formatOperationLog(
+											"Decision",
+											nodeName,
+											nodeId,
+											index,
+											`[Decision][clickAction] Effective wait strategy: ${effectiveWaitAfterAction} (Original: ${group.waitAfterAction || "default"})`,
+										),
+									);
+
 									// Execute the click action using the utility
 									this.logger.info(
 										formatOperationLog(
@@ -2636,7 +2655,8 @@ export async function execute(
 											nodeName,
 											nodeId,
 											index,
-											`[Decision][clickAction] Calling executeAction with type: click, selector: "${actionSelector}", waitAfterAction: ${waitAfterAction}`,
+											// Use the effective wait strategy in the log message
+											`[Decision][clickAction] Calling executeAction with type: click, selector: "${actionSelector}", waitAfterAction: ${effectiveWaitAfterAction}`,
 										),
 									);
 
@@ -2645,7 +2665,8 @@ export async function execute(
 										"click" as ActionType,
 										{
 											selector: actionSelector,
-											waitAfterAction,
+											// Pass the effective wait strategy to the action utility
+											waitAfterAction: effectiveWaitAfterAction,
 											waitTime,
 											waitSelector: group.waitSelector as string,
 										},
@@ -3582,7 +3603,9 @@ export async function execute(
 												// For URL changed form submission, we'll use our improved click action middleware
 												if (
 													waitAfterSubmit === "urlChanged" ||
-													waitAfterSubmit === "anyUrlChange"
+													waitAfterSubmit === "anyUrlChange" ||
+													// ADDED: Also use click middleware for navigationComplete
+													waitAfterSubmit === "navigationComplete"
 												) {
 													this.logger.info(
 														formatOperationLog(
@@ -3590,9 +3613,8 @@ export async function execute(
 															nodeName,
 															nodeId,
 															index,
-															waitAfterSubmit === "anyUrlChange"
-																? "Using click action middleware for form submission with any URL change detection"
-																: "Using click action middleware for form submission with URL change detection",
+															// Updated log message to include navigationComplete
+															`Using click action middleware for form submission with ${waitAfterSubmit} detection`,
 														),
 													);
 
@@ -3609,10 +3631,23 @@ export async function execute(
 														useHumanDelays,
 													};
 
-													// Use at least 20 seconds for timeout
+													// Use at least 20 seconds for timeout, especially for navigationComplete
 													const effectiveWaitTime = Math.max(
 														waitSubmitTime,
-														20000,
+														waitAfterSubmit === "navigationComplete"
+															? 30000
+															: 20000, // Increased timeout for navigationComplete
+													);
+
+													// Log the effective wait time
+													this.logger.info(
+														formatOperationLog(
+															"Decision",
+															nodeName,
+															nodeId,
+															index,
+															`[Form Submit] Effective wait time: ${effectiveWaitTime}ms (Original: ${waitSubmitTime}ms)`,
+														),
 													);
 
 													const clickResult = await executeAction(
@@ -3620,8 +3655,8 @@ export async function execute(
 														"click" as ActionType,
 														{
 															selector: submitSelector,
-															waitAfterAction: waitAfterSubmit,
-															waitTime: effectiveWaitTime,
+															waitAfterAction: waitAfterSubmit, // Pass the original wait strategy
+															waitTime: effectiveWaitTime, // Use the adjusted timeout
 														},
 														actionOptions,
 														this.logger,
@@ -3661,6 +3696,7 @@ export async function execute(
 													}
 
 													// After successful submission, add an additional stabilization delay
+													// Especially important for navigationComplete to ensure stability
 													if (clickResult.success) {
 														this.logger.info(
 															formatOperationLog(
@@ -3668,22 +3704,26 @@ export async function execute(
 																nodeName,
 																nodeId,
 																index,
-																"Form submission successful with URL change using click middleware",
+																`Form submission successful with ${waitAfterSubmit} using click middleware`,
 															),
 														);
 
 														// Add additional stabilization delay after form submission
+														const stabilizationDelay =
+															waitAfterSubmit === "navigationComplete"
+																? 7000
+																: 5000; // Longer delay for navigationComplete
 														this.logger.info(
 															formatOperationLog(
 																"Decision",
 																nodeName,
 																nodeId,
 																index,
-																"Adding post-submission stabilization delay (5000ms)",
+																`Adding post-submission stabilization delay (${stabilizationDelay}ms)`,
 															),
 														);
 														await new Promise((resolve) =>
-															setTimeout(resolve, 5000),
+															setTimeout(resolve, stabilizationDelay),
 														);
 
 														resultData.formSubmission = {

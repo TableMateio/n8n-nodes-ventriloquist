@@ -275,325 +275,205 @@ export async function isElementVisible(
 }
 
 /**
- * Wait for a URL change with improved detection of both hard and soft URL changes
- * Refactored to use getActivePage utility.
+ * Waits for the URL of the active page in a session to change from a given URL.
+ * Handles potential page context destruction during navigation.
+ *
+ * @param sessionId The ID of the browser session.
+ * @param initialUrl The URL to detect changes from.
+ * @param timeout The maximum time to wait in milliseconds.
+ * @param logger The logger instance.
+ * @returns A promise that resolves to true if the URL changed, false otherwise.
  */
 export async function waitForUrlChange(
 	sessionId: string,
-	currentUrl: string,
+	initialUrl: string,
 	timeout: number,
 	logger: ILogger,
 ): Promise<boolean> {
-	const logPrefix = "[NavigationUtils][waitForUrlChange]";
-	logger.info(
-		`${logPrefix} Called. Waiting for URL to change from: ${currentUrl} (Timeout: ${timeout}ms)`,
-	);
-	let initialPageCheckFailed = false; // Flag to track if initial check failed
+	const logPrefix = `[NavigationUtils][waitForUrlChange]`;
+	logger.info(`${logPrefix} Called. Waiting for URL to change from: ${initialUrl} (Timeout: ${timeout}ms)`);
 
-	try {
-		const session = SessionManager.getSession(sessionId);
-		if (!session?.browser?.isConnected()) {
-			logger.error(`${logPrefix} Invalid browser session: ${sessionId}`);
-			return false;
-		}
-		const browser = session.browser;
+	const startTime = Date.now();
+	let contextDestroyed = false;
+	let pollingDetectedChange = false;
+	let raceWinner = 'timeout'; // Default winner
 
-		// Try to get initial page, but don't fail immediately if context is destroyed
-		let pageForListeners: Page | null = null;
-		try {
-			pageForListeners = await getActivePage(browser, logger);
-			if (!pageForListeners) {
-				logger.warn(
-					`${logPrefix} Initial getActivePage returned null. Will rely on polling/listeners.`,
-				);
-				initialPageCheckFailed = true; // Mark that the initial page wasn't available
-			} else {
-				logger.info(`${logPrefix} Initial active page obtained successfully.`);
-			}
-		} catch (pageError) {
-			logger.warn(
-				`${logPrefix} Error during initial getActivePage: ${(pageError as Error).message}. Will rely on polling/listeners.`,
-			);
-			initialPageCheckFailed = true; // Mark that the initial page wasn't available
-		}
-
-		const startTime = Date.now();
-		let contextDestroyed = false;
-
-		// --- Polling Function --- //
-		const pollForUrlChanges = async (pollInterval = 500): Promise<boolean> => {
-			const startPollTime = Date.now();
-			let currentPolledUrl = currentUrl;
-			let iteration = 0;
-			logger.info(`${logPrefix}[Polling] Starting polling.`);
-			while (Date.now() - startPollTime < timeout) {
-				iteration++;
-				try {
-					const page = await getActivePage(browser, logger);
-					if (!page) {
-						logger.warn(
-							`${logPrefix}[Polling][Iter ${iteration}] getActivePage returned null. Stopping poll.`,
-						);
-						return false; // Stop polling if page lost
-					}
-					await new Promise((resolve) => setTimeout(resolve, pollInterval));
-					const newUrl = await page.url();
-					// logger.info(`${logPrefix}[Polling][Iter ${iteration}] Current URL: ${newUrl}`); // Verbose
-					if (newUrl !== currentUrl) {
-						logger.info(
-							`${logPrefix}[Polling][Iter ${iteration}] URL change DETECTED: ${currentUrl} -> ${newUrl}`,
-						);
-						return true; // Change detected
-					}
-					currentPolledUrl = newUrl;
-				} catch (error) {
-					const err = error as Error;
-					if (
-						err.message.includes("context was destroyed") ||
-						err.message.includes("Target closed")
-					) {
-						logger.info(
-							`${logPrefix}[Polling][Iter ${iteration}] Context destroyed during poll. Assuming URL changed.`,
-						);
-						contextDestroyed = true;
-						return true; // Context destroyed implies navigation
-					}
-					logger.warn(
-						`${logPrefix}[Polling][Iter ${iteration}] Error polling: ${err.message}`,
-					);
-				}
-			}
-			logger.warn(
-				`${logPrefix}[Polling] Polling timed out after ${timeout}ms.`,
-			);
-			return false; // Timeout
-		};
-
-		// --- Listener Setup --- //
-		// Use the page obtained earlier IF available, otherwise listeners might not attach
-		if (!pageForListeners) {
-			logger.warn(
-				`${logPrefix} No valid initial page for listeners. Relying solely on polling.`,
-			);
-			// If no initial page, we MUST rely on polling
-			const pollingResult = await pollForUrlChanges();
-			// Final verification after polling result
-			logger.info(
-				`${logPrefix} Polling finished (no listeners). Result: ${pollingResult}. Verifying final state.`,
-			);
-			await new Promise((resolve) => setTimeout(resolve, 1000)); // Stabilize
-			try {
-				const finalPage = await getActivePage(browser, logger);
-				if (!finalPage) {
-					logger.warn(
-						`${logPrefix} Final verification (polling only): getActivePage failed. Returning polling result: ${pollingResult || contextDestroyed}`,
-					);
-					return pollingResult || contextDestroyed;
-				}
-				const finalUrl = await finalPage.url();
-				const finalUrlChanged = finalUrl !== currentUrl;
-				logger.info(
-					`${logPrefix} Final verification (polling only): Final URL: ${finalUrl}. Changed: ${finalUrlChanged}. Overall: ${pollingResult || contextDestroyed || finalUrlChanged}`,
-				);
-				return pollingResult || contextDestroyed || finalUrlChanged;
-			} catch (finalError) {
-				logger.warn(
-					`${logPrefix} Error during final verification (polling only): ${(finalError as Error).message}. Returning polling result: ${pollingResult || contextDestroyed}`,
-				);
-				return pollingResult || contextDestroyed; // Best guess
-			}
-		}
-
-		// If we have a page, set up listeners and race
-		logger.info(
-			`${logPrefix} Initial page exists. Setting up listeners and Promise.race.`,
-		);
-		logger.info(`${logPrefix} Creating waitForFunction promise.`);
-		const waitFunctionPromise = pageForListeners
-			.waitForFunction(
-				(url: string) => window.location.href !== url,
-				{ timeout },
-				currentUrl,
-			)
-			.then(() => {
-				logger.info(
-					`${logPrefix} waitForFunction promise RESOLVED: URL change detected.`,
-				);
-				return true;
-			})
-			.catch((error: Error) => {
-				if (
-					error.message.includes("context was destroyed") ||
-					error.message.includes("Execution context") ||
-					error.message.includes("Target closed")
-				) {
-					contextDestroyed = true;
-					logger.info(
-						`${logPrefix} waitForFunction promise REJECTED (Context Destroyed): Navigation indicated. ${error.message}`,
-					);
-					return true; // Treat as success in race
-				}
-				logger.warn(
-					`${logPrefix} waitForFunction promise REJECTED (Error): ${error.message}`,
-				);
-				return false;
-			});
-
-		logger.info(`${logPrefix} Creating polling promise.`);
-		const pollingPromise = pollForUrlChanges().then((result) => {
-			logger.info(
-				`${logPrefix} Polling promise RESOLVED with result: ${result}`,
-			);
-			return result;
-		});
-
-		logger.info(`${logPrefix} Creating context destruction listener promise.`);
-		const contextPromise = new Promise<boolean>((resolve) => {
-			const listener = (error: Error) => {
-				if (
-					error.message.includes("context was destroyed") ||
-					error.message.includes("Execution context") ||
-					error.message.includes("Target closed")
-				) {
-					contextDestroyed = true;
-					logger.info(
-						`${logPrefix} Context listener promise RESOLVED (Event): Context destruction detected. ${error.message}`,
-					);
-					resolve(true);
-				}
-			};
-			pageForListeners?.once("error", listener);
-
-			// Timeout for the listener itself
-			const listenerTimeoutId = setTimeout(() => {
-				pageForListeners?.off("error", listener); // Clean up listener
-				if (!contextDestroyed) {
-					logger.info(
-						`${logPrefix} Context listener promise RESOLVED (Timeout): No context destruction detected.`,
-					);
-					resolve(false);
-				}
-			}, timeout);
-			// Ensure timeout doesn't keep process alive if resolved early
-			pageForListeners?.on("close", () => clearTimeout(listenerTimeoutId));
-		});
-
-		logger.info(`${logPrefix} Creating navigation listener promise.`);
-		const navigationPromise = new Promise<boolean>((resolve) => {
-			const listener = () => {
-				logger.info(
-					`${logPrefix} Navigation listener promise RESOLVED (Event): 'navigation' detected.`,
-				);
-				resolve(true);
-			};
-			pageForListeners?.once("navigation", listener);
-
-			// Timeout for the listener itself
-			const listenerTimeoutId = setTimeout(() => {
-				pageForListeners?.off("navigation", listener); // Clean up listener
-				logger.info(
-					`${logPrefix} Navigation listener promise RESOLVED (Timeout): No 'navigation' event detected.`,
-				);
-				resolve(false);
-			}, timeout);
-			// Ensure timeout doesn't keep process alive if resolved early
-			pageForListeners?.on("close", () => clearTimeout(listenerTimeoutId));
-		});
-
-		// --- Race Detection --- //
-		logger.info(`${logPrefix} Starting Promise.race...`);
-		const raceResult = await Promise.race([
-			waitFunctionPromise,
-			pollingPromise,
-			contextPromise,
-			navigationPromise,
-		]);
-		logger.info(
-			`${logPrefix} Promise.race finished with result: ${raceResult}`,
-		);
-		const changeDetected = raceResult || contextDestroyed;
-		logger.info(
-			`${logPrefix} Change detected (raceResult || contextDestroyed): ${changeDetected}`,
-		);
-
-		if (changeDetected) {
-			logger.info(
-				`${logPrefix} Change was detected. Performing final verification after delay.`,
-			);
-			// ... (Stabilization Delay Logic) ...
-			await new Promise((resolve) => setTimeout(resolve, 1000)); // Short delay
-			try {
-				const finalPage = await getActivePage(browser, logger);
-				if (!finalPage) {
-					logger.warn(
-						`${logPrefix} Final verification: getActivePage returned null. Returning contextDestroyed: ${contextDestroyed}`,
-					);
-					return contextDestroyed;
-				}
-				const finalUrl = await finalPage.url();
-				const finalUrlChanged = finalUrl !== currentUrl;
-				logger.info(
-					`${logPrefix} Final verification: Final URL: ${finalUrl}. Changed from initial: ${finalUrlChanged}. Overall result: ${changeDetected || finalUrlChanged}`,
-				);
-				return changeDetected || finalUrlChanged;
-			} catch (finalError) {
-				logger.warn(
-					`${logPrefix} Error during final URL verification: ${(finalError as Error).message}. Returning contextDestroyed: ${contextDestroyed}`,
-				);
-				return contextDestroyed; // Assume change if error occurred here, relying on initial detection
-			}
-		}
-
-		// --- Final Check if No Change Detected by Race --- //
-		logger.warn(
-			`${logPrefix} No change detected by race/context destruction. Performing final check.`,
-		);
-		try {
-			const finalPage = await getActivePage(browser, logger);
-			if (!finalPage) {
-				logger.warn(
-					`${logPrefix} Final check: getActivePage returned null. Returning contextDestroyed: ${contextDestroyed}`,
-				);
-				return contextDestroyed;
-			}
-			const finalUrl = await finalPage.url();
-			const finalChanged = finalUrl !== currentUrl;
-			logger.info(
-				`${logPrefix} Final check: Final URL: ${finalUrl}. Changed from initial: ${finalChanged}.`,
-			);
-			return finalChanged;
-		} catch (finalError) {
-			const err = finalError as Error;
-			if (
-				err.message.includes("context was destroyed") ||
-				err.message.includes("Target closed")
-			) {
-				logger.info(
-					`${logPrefix} Final check: Context destruction detected during check. Assuming success. ${err.message}`,
-				);
-				return true; // Treat as success
-			}
-			logger.error(
-				`${logPrefix} Final check: Error getting final URL: ${err.message}`,
-			);
-			return false;
-		}
-	} catch (error) {
-		const err = error as Error;
-		logger.error(
-			`${logPrefix} Top-level error in waitForUrlChange: ${err.message}`,
-		);
-		if (
-			err.message.includes("context was destroyed") ||
-			err.message.includes("Target closed")
-		) {
-			logger.info(
-				`${logPrefix} Top-level error indicates context destroyed. Assuming success. ${err.message}`,
-			);
-			return true; // Still implies navigation happened
-		}
-		return false;
+	// Get the browser instance for the session
+	const session = SessionManager.getSession(sessionId);
+	if (!session || !session.browser || !session.browser.isConnected()) {
+		logger.error(`${logPrefix} Invalid session or disconnected browser for session ID: ${sessionId}`);
+		return false; // Cannot proceed without a valid browser
 	}
+	const browser = session.browser;
+
+	// Get the initial active page (might be null if none exists yet)
+	let initialPage: Page | null = null;
+	try {
+		initialPage = await getActivePage(browser, logger);
+		if (initialPage) {
+			logger.info(`${logPrefix} Initial active page obtained successfully. URL: ${await initialPage.url()}`);
+		} else {
+			logger.warn(`${logPrefix} No initial active page found for session: ${sessionId}. Will rely on polling.`);
+			// If no initial page, we can't rely on context destruction listener for that specific page
+		}
+	} catch (err) {
+		logger.warn(`${logPrefix} Error getting initial active page: ${(err as Error).message}. Proceeding with polling.`);
+	}
+
+	// --- Promise Setup ---
+
+	// 1. Timeout Promise
+	const timeoutPromise = new Promise<string>((resolve) => {
+		setTimeout(() => resolve('timeout'), timeout);
+	});
+
+	// 2. Context Destruction Promise (only if initial page exists)
+	let contextListenerPromise = new Promise<string>(() => { }); // Non-resolving if no initial page
+	if (initialPage) {
+		// Ensure initialPage is not null before adding listener
+		const pageForListener = initialPage;
+		contextListenerPromise = new Promise<string>((resolve) => {
+			const listener = () => {
+				logger.info(`${logPrefix} Initial page context destroyed.`);
+				contextDestroyed = true;
+				resolve('context_destroyed');
+			};
+			// Use the safe reference
+			pageForListener.once('close', listener);
+
+			// Cleanup listener if timeout wins
+			timeoutPromise.then(() => {
+				// Use the safe reference
+				pageForListener.off('close', listener);
+				logger.debug(`${logPrefix} Context listener removed due to timeout.`);
+			});
+		});
+		logger.info(`${logPrefix} Context destruction listener attached to initial page.`);
+	} else {
+		logger.info(`${logPrefix} Skipping context destruction listener as no initial page was found.`);
+	}
+
+
+	// 3. Polling Promise
+	const pollForUrlChanges = async (pollInterval = 500): Promise<string> => {
+		logger.info(`${logPrefix}[Polling] Starting polling.`);
+		let elapsed = Date.now() - startTime;
+		let iter = 1;
+
+		while (elapsed < timeout) {
+			try {
+				// IMPORTANT: Always get the *current* active page from the *browser*
+				const currentPage = await getActivePage(browser, logger);
+
+				if (!currentPage) {
+					logger.warn(`${logPrefix}[Polling][Iter ${iter}] getActivePage returned null. Possible transient state or closed session.`);
+					// Optional: If consistently null, maybe stop polling early? For now, continue.
+				} else {
+					const currentUrlCheck = await currentPage.url();
+					logger.debug(`${logPrefix}[Polling][Iter ${iter}] Current active page URL: ${currentUrlCheck}`);
+
+					if (currentUrlCheck !== initialUrl) {
+						logger.info(`${logPrefix}[Polling][Iter ${iter}] URL change DETECTED: ${initialUrl} -> ${currentUrlCheck}`);
+						pollingDetectedChange = true;
+						return 'polling_detected_change'; // Resolve the promise
+					}
+				}
+			} catch (error) {
+				// Ignore errors during polling (e.g., page closed transiently), log and continue
+				logger.warn(`${logPrefix}[Polling][Iter ${iter}] Error during poll check: ${(error as Error).message}`);
+			}
+
+			await new Promise(resolve => setTimeout(resolve, pollInterval));
+			elapsed = Date.now() - startTime;
+			iter++;
+		}
+
+		logger.info(`${logPrefix}[Polling] Polling timed out after ${elapsed}ms without detecting change.`);
+		return 'polling_timeout'; // Indicate polling finished without success
+	};
+	const pollingPromise = pollForUrlChanges();
+
+	// --- Wait for Race ---
+	logger.info(`${logPrefix} Starting Promise.race...`);
+	try {
+		raceWinner = await Promise.race([
+			timeoutPromise,
+			contextListenerPromise,
+			pollingPromise,
+		]);
+		logger.info(`${logPrefix} Promise.race finished with winner: ${raceWinner}`);
+	} catch (raceError) {
+		// This shouldn't typically happen if promises resolve with strings, but handle defensively
+		logger.error(`${logPrefix} Unexpected error during Promise.race: ${(raceError as Error).message}`);
+		raceWinner = 'race_error';
+	}
+
+
+	// --- Final Verification ---
+	const navigationSuspected = contextDestroyed || pollingDetectedChange;
+	logger.info(`${logPrefix} Navigation suspected based on race result: ${navigationSuspected} (ContextDestroyed: ${contextDestroyed}, PollingDetected: ${pollingDetectedChange})`);
+
+	if (navigationSuspected) {
+		const stabilizationDelay = 1000; // Delay to allow the new page state to settle
+		logger.info(`${logPrefix} Waiting ${stabilizationDelay}ms for stabilization after suspected navigation...`);
+		await new Promise(resolve => setTimeout(resolve, stabilizationDelay));
+
+		logger.info(`${logPrefix} Performing final verification check by iterating through all pages.`);
+		let finalUrlVerified = false;
+		try {
+			const allPages = await browser.pages();
+			logger.info(`${logPrefix} Final Check - Found ${allPages.length} pages.`);
+
+			for (const page of allPages) {
+				const pageUrl = page.url(); // Get URL for logging early
+
+				// Skip blank pages unless it's the only one (less critical here, focus on changed URL)
+				if (pageUrl === 'about:blank' && allPages.length > 1) {
+					logger.debug(`${logPrefix} Final Check - Skipping 'about:blank' page.`);
+					continue;
+				}
+
+				// Check if closed first
+				if (page.isClosed()) {
+					logger.debug(`${logPrefix} Final Check - Skipping closed page with initial URL: ${pageUrl}`);
+					continue;
+				}
+
+				// Check responsiveness and get final URL
+				try {
+					// Use a short timeout for responsiveness check
+					await page.evaluate(() => true, { timeout: 500 });
+					const currentFinalUrl = await page.url(); // Re-fetch URL after ensuring responsiveness
+
+					logger.info(`${logPrefix} Final Check - Checking Page URL: ${currentFinalUrl}`);
+					if (currentFinalUrl !== initialUrl) {
+						logger.info(`${logPrefix} Final Check Result: URL CHANGED! (Initial: ${initialUrl}, Final: ${currentFinalUrl})`);
+						finalUrlVerified = true;
+						break; // Found a changed page, no need to check others
+					}
+				} catch (pageCheckError) {
+					logger.warn(`${logPrefix} Final Check - Page with initial URL ${pageUrl} failed check: ${(pageCheckError as Error).message}. Skipping.`);
+					// Continue to the next page implicitly
+				}
+			} // End of page loop
+
+			if (!finalUrlVerified) {
+				logger.warn(`${logPrefix} Final Check - Iterated through all pages, but could not confirm a valid URL change from initial: ${initialUrl}`);
+				return false;
+			}
+
+			logger.info(`${logPrefix} Confirmed URL change based on iterating pages.`);
+			return true;
+		} catch (error) {
+			logger.error(`${logPrefix} Final Check - Error getting/iterating pages: ${(error as Error).message}`);
+			// Error during final check, assume no change confirmed
+			return false;
+		}
+	}
+
+	// If navigation was NOT suspected (e.g., timeout won without other signals, or race error)
+	logger.info(`${logPrefix} No navigation suspected or final check failed. Race winner was '${raceWinner}'. Returning false.`);
+	return false;
 }
 
 /**

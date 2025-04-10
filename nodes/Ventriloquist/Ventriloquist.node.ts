@@ -416,7 +416,7 @@ export class Ventriloquist implements INodeType {
 		group: ['browser'],
 		version: 1,
 		subtitle: '={{ $parameter["operation"] }}',
-		description: 'Automate browser interactions using Bright Data or Browserless',
+		description: 'Automate browser interactions using Bright Data, Browserless, or local Chrome',
 		defaults: {
 			name: 'Ventriloquist',
 		},
@@ -441,6 +441,15 @@ export class Ventriloquist implements INodeType {
 					},
 				},
 			},
+			{
+				name: 'localChromeApi',
+				required: true,
+				displayOptions: {
+					show: {
+						browserService: ['localChrome'],
+					},
+				},
+			},
 		],
 		properties: [
 			{
@@ -457,6 +466,11 @@ export class Ventriloquist implements INodeType {
 						name: 'Browserless',
 						value: 'browserless',
 						description: 'Use Browserless browser automation service',
+					},
+					{
+						name: 'Local Chrome',
+						value: 'localChrome',
+						description: 'Use locally installed Chrome/Chromium browser',
 					},
 				],
 				default: 'brightData',
@@ -713,6 +727,12 @@ export class Ventriloquist implements INodeType {
 
 			// For Browserless, we'll build the websocket endpoint dynamically using the baseUrl
 			websocketEndpoint = ''; // Will be built in the transport
+		} else if (browserService === 'localChrome') {
+			credentialType = 'localChromeApi';
+			credentials = await this.getCredentials('localChromeApi');
+
+			// For Local Chrome, we don't need a WebSocket endpoint as we're controlling the browser directly
+			websocketEndpoint = '';
 		} else {
 			throw new Error(`Unsupported browser service: ${browserService}`);
 		}

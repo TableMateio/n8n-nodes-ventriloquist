@@ -14,11 +14,20 @@ import {
 import { takeScreenshot } from "../utils/navigationUtils";
 import { getActivePage } from "../utils/sessionUtils";
 import { executeAction } from "../utils/actionUtils";
+import { formatOperationLog, createTimingLog } from "../utils/resultUtils";
 import type {
 	IActionParameters,
 	IActionOptions,
 	ActionType,
 } from "../utils/actionUtils";
+
+/**
+ * Helper function to wait for a specified time using page.evaluate
+ * This replaces puppeteer's built-in waitForTimeout which may not be available in all versions
+ */
+async function waitForDuration(page: Page, duration: number): Promise<void> {
+	await page.evaluate((ms) => new Promise(resolve => setTimeout(resolve, ms)), duration);
+}
 
 /**
  * Form operation description
@@ -584,6 +593,75 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: "Wait After Action",
+		name: "waitAfterAction",
+		type: "options",
+		options: [
+			{
+				name: "Quick Action (No Wait)",
+				value: "quick",
+				description: "Continue immediately after the action (default)",
+			},
+			{
+				name: "Wait for Element",
+				value: "element",
+				description: "Wait for a specific element to appear after the action",
+			},
+			{
+				name: "Wait for Navigation (Fast)",
+				value: "navFast",
+				description: "Wait for navigation using networkidle2 (good for SPAs)",
+			},
+			{
+				name: "Wait for Page Load (Full)",
+				value: "navFull",
+				description: "Wait for navigation using networkidle0 (full page loads)",
+			},
+			{
+				name: "Wait Fixed Time",
+				value: "fixed",
+				description: "Wait for a fixed duration after the action",
+			},
+		],
+		default: "quick",
+		description: "Strategy to wait for after the form action completes",
+		displayOptions: {
+			show: {
+				operation: ["form"],
+			},
+		},
+	},
+	{
+		displayName: "Wait Selector",
+		name: "waitSelector",
+		type: "string",
+		default: "",
+		description: "CSS selector of the element to wait for",
+		displayOptions: {
+			show: {
+				operation: ["form"],
+				waitAfterAction: ["element"],
+			},
+		},
+		placeholder: "#confirmation-message",
+	},
+	{
+		displayName: "Wait Duration (ms)",
+		name: "waitDuration",
+		type: "number",
+		default: 1000,
+		description: "Time to wait in milliseconds",
+		displayOptions: {
+			show: {
+				operation: ["form"],
+				waitAfterAction: ["fixed"],
+			},
+		},
+		typeOptions: {
+			minValue: 0,
+		},
+	},
 ];
 
 /**
@@ -649,6 +727,13 @@ export async function execute(
 	) as boolean;
 	const maxRetries = this.getNodeParameter("maxRetries", index, 2) as number;
 	const retryDelay = this.getNodeParameter("retryDelay", index, 1000) as number;
+	const waitAfterAction = this.getNodeParameter(
+		"waitAfterAction",
+		index,
+		"quick",
+	) as string;
+	const waitSelector = this.getNodeParameter("waitSelector", index, "") as string;
+	const waitDuration = this.getNodeParameter("waitDuration", index, 1000) as number;
 
 	// Added for better logging
 	const nodeName = this.getNode().name;
@@ -974,6 +1059,106 @@ export async function execute(
 
 		if (screenshot) {
 			resultData.screenshot = screenshot;
+		}
+
+		// Wait After Action Logic
+		if (results.every(r => r.success) && waitAfterAction !== "quick") {
+			this.logger.info(
+				formatOperationLog(
+					"Form",
+					nodeName,
+					nodeId,
+					index,
+					`Performing wait after action: ${waitAfterAction}`,
+				),
+			);
+			try {
+				let waitPromise: Promise<any> | null = null;
+				const waitTimeout = selectorTimeout; // Reuse selectorTimeout for wait
+
+				switch (waitAfterAction) {
+					case "element":
+						if (!waitSelector) {
+							throw new Error(
+								'"Wait for Element" selected but no selector provided',
+							);
+						}
+						this.logger.info(
+							formatOperationLog(
+								"Form",
+								nodeName,
+								nodeId,
+								index,
+								`Waiting for selector: ${waitSelector}`,
+							),
+						);
+						waitPromise = page.waitForSelector(waitSelector, { timeout: waitTimeout });
+						break;
+					case "navFast":
+						this.logger.info(
+							formatOperationLog(
+								"Form",
+								nodeName,
+								nodeId,
+								index,
+								`Waiting for navigation (fast - networkidle2)`,
+							),
+						);
+						waitPromise = page.waitForNavigation({ waitUntil: "networkidle2", timeout: waitTimeout });
+						break;
+					case "navFull":
+						this.logger.info(
+							formatOperationLog(
+								"Form",
+								nodeName,
+								nodeId,
+								index,
+								`Waiting for navigation (full - networkidle0)`,
+							),
+						);
+						waitPromise = page.waitForNavigation({ waitUntil: "networkidle0", timeout: waitTimeout });
+						break;
+					case "fixed":
+						this.logger.info(
+							formatOperationLog(
+								"Form",
+								nodeName,
+								nodeId,
+								index,
+								`Waiting for fixed time: ${waitDuration}ms`,
+							),
+						);
+						waitPromise = waitForDuration(page, waitDuration);
+						break;
+				}
+
+				if (waitPromise) {
+					await waitPromise;
+					this.logger.info(
+						formatOperationLog(
+							"Form",
+							nodeName,
+							nodeId,
+							index,
+							`Wait after action (${waitAfterAction}) completed successfully.`,
+						),
+					);
+				}
+			} catch (waitError) {
+				const waitErrorMessage = `Wait after action (${waitAfterAction}) failed: ${(waitError as Error).message}`;
+				this.logger.warn(
+					formatOperationLog(
+						"Form",
+						nodeName,
+						nodeId,
+						index,
+						waitErrorMessage,
+					),
+				);
+				if (!continueOnFail) {
+					throw new Error(waitErrorMessage);
+				}
+			}
 		}
 
 		return this.helpers.returnJsonArray([

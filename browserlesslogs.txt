@@ -1,0 +1,73 @@
+2025-04-10T18:56:37.764Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.238","timestamp":4074948.314585,"dataLength":65536,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.764Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.238","timestamp":4074948.3148,"dataLength":224273,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.764Z puppeteer:protocol:RECV ◀ {"method":"Network.loadingFinished","params":{"requestId":"1127.236","timestamp":4074946.97468,"encodedDataLength":0,"shouldReportCorbBlocking":false},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.764Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.238","timestamp":4074948.315263,"dataLength":160334,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.764Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.239","timestamp":4074948.315515,"dataLength":0,"encodedDataLength":101750},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.764Z puppeteer:protocol:RECV ◀ {"method":"Network.loadingFinished","params":{"requestId":"1127.239","timestamp":4074947.026166,"encodedDataLength":102200,"shouldReportCorbBlocking":false},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.764Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.238","timestamp":4074948.315566,"dataLength":524288,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.764Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.240","timestamp":4074948.316324,"dataLength":524288,"encodedDataLength":398598},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.764Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.244","timestamp":4074948.317124,"dataLength":0,"encodedDataLength":4302},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.764Z puppeteer:protocol:RECV ◀ {"method":"Network.loadingFinished","params":{"requestId":"1127.244","timestamp":4074947.029982,"encodedDataLength":4729,"shouldReportCorbBlocking":false},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.765Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.240","timestamp":4074948.317184,"dataLength":345824,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.765Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.241","timestamp":4074948.31772,"dataLength":524288,"encodedDataLength":679619},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.768Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.238","timestamp":4074948.320541,"dataLength":179972,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.768Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.242","timestamp":4074948.320824,"dataLength":524288,"encodedDataLength":2072081},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.768Z puppeteer:protocol:RECV ◀ {"method":"Network.loadingFinished","params":{"requestId":"1127.240","timestamp":4074948.107608,"encodedDataLength":399003,"shouldReportCorbBlocking":false},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.852Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.241","timestamp":4074948.402693,"dataLength":524288,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.853Z puppeteer:protocol:RECV ◀ {"method":"Network.loadingFinished","params":{"requestId":"1127.243","timestamp":4074947.016711,"encodedDataLength":0,"shouldReportCorbBlocking":false},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.853Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.306","timestamp":4074948.404282,"dataLength":65536,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.864Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.306","timestamp":4074948.404882,"dataLength":40694,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:37.864Z puppeteer:protocol:RECV ◀ {"method":"Network.loadingFinished","params":{"requestId":"1127.306","timestamp":4074947.421681,"encodedDataLength":52647,"shouldReportCorbBlocking":false},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.157Z puppeteer:protocol:RECV ◀ {"method":"Network.requestWillBeSent","params":{"requestId":"1127.318","loaderId":"F61E52FB09DE2F4426DAB03AAC9709C2","documentURL":"https://1.next.westlaw.com/Browse/Home/PublicRecords?transitionType=Default&contextData=(sc.Default)&originationContext=Favorites&firstPage=true","request":{"url":"https://app-data.gcs.trstatic.net/wel-trdotcom/fonts/all-characters/knowledge2017-regular-webfont.woff2","method":"GET","headers";:{"sec-ch-ua":"","Referer":"https://app-data.gcs.trstatic.net/emcm-ui/ipx-help-center/v16.7.0/static/css/main.9bd90e6a.chunk.css","Origin":"https://1.next.westlaw.com","sec-ch-ua-mobile":"?0","User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/93.0.4577.0 Safari/537.36","sec-ch-ua-platform":""},"mixedContentType":"none","initialPriority":"VeryHigh","referrerPolicy":"strict-origin-when-cross-origin","isSameSite":false},"timestamp":4074948.625382,"wallTime":1744311398.072906,"initiator":{"type":"parser","url":"https://app-data.gcs.trstatic.net/emcm-ui/ipx-help-center/v16.7.0/static/css/main.9bd90e6a.chunk.css";},"type":"Font","frameId":"02B72B650A13EB7BEA7E35534F39D83A","hasUserGesture":true},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.283Z puppeteer:protocol:RECV ◀ {"method":"Network.loadingFinished","params":{"requestId":"1127.238","timestamp":4074948.104872,"encodedDataLength":0,"shouldReportCorbBlocking":false},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.293Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.242","timestamp":4074948.834747,"dataLength":524288,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.295Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.241","timestamp":4074948.838884,"dataLength":524288,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.295Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.242","timestamp":4074948.841985,"dataLength":524288,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.295Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.241","timestamp":4074948.84292,"dataLength":45260,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.295Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.242","timestamp":4074948.843118,"dataLength":524288,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.295Z puppeteer:protocol:RECV ◀ {"method":"Network.loadingFinished","params":{"requestId":"1127.241","timestamp":4074948.330463,"encodedDataLength":680253,"shouldReportCorbBlocking":false},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.298Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.242","timestamp":4074948.845558,"dataLength":524288,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.299Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.242","timestamp":4074948.849071,"dataLength":524288,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.428Z puppeteer:protocol:RECV ◀ {"method":"Network.dataReceived","params":{"requestId":"1127.242","timestamp":4074948.851498,"dataLength":524288,"encodedDataLength":0},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.449Z puppeteer:protocol:RECV ◀ {"method":"Network.requestWillBeSentExtraInfo","params":{"requestId":"1127.318","associatedCookies":[],"headers":{":method":"GET",":authority":"app-data.gcs.trstatic.net",":scheme":"https",":path":"/wel-trdotcom/fonts/all-characters/knowledge2017-regular-webfont.woff2","sec-ch-ua":"","origin":"https://1.next.westlaw.com","sec-ch-ua-mobile":"?0","user-agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/93.0.4577.0 Safari/537.36","sec-ch-ua-platform":"","accept":"*/*","sec-fetch-site":"cross-site","sec-fetch-mode":"cors","sec-fetch-dest":"font","referer":"https://app-data.gcs.trstatic.net/emcm-ui/ipx-help-center/v16.7.0/static/css/main.9bd90e6a.chunk.css","accept-encoding":"gzip, deflate, br","accept-language":"en-US"},"clientSecurityState":{"initiatorIsSecureContext":true,"initiatorIPAddressSpace":"Public","privateNetworkRequestPolicy":"Allow"}},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.449Z puppeteer:protocol:RECV ◀ {"method":"Network.responseReceivedExtraInfo","params":{"requestId":"1127.318","blockedCookies":[],"headers":{"content-type":"binary/octet-stream","content-length":"39408","date":"Sat, 08 Feb 2025 08:26:26 GMT","access-control-allow-origin":"*","access-control-allow-methods":"GET, HEAD","access-control-max-age":"3000","last-modified":"Tue, 08 Dec 2020 19:37:11 GMT","etag":"\"de994d71a311e3119703dd67ef632f04\"","cache-control":"max-age=365000000,immutable","accept-ranges":"bytes","server":"AmazonS3","vary":"Origin,Access-Control-Request-Headers,Access-Control-Request-Method","x-cache":"Hit from cloudfront","via":"1.1 23d9e67c276b83ea51d0d51c40d0b45e.cloudfront.net (CloudFront)","x-amz-cf-pop":"IAD61-P8","x-amz-cf-id":"HJaIdrbpIihGwDbk77deTcGm_mUtF9y9kTGXUQ9sd14V3rO-StbtJA==","age":"5308213"},"resourceIPAddressSpace":"Public"},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.476Z puppeteer:protocol:RECV ◀ {"method":"Inspector.targetCrashed","params":{},"sessionId":"87CDC7E9A25D7CC98A46489B73C80798"}
+
+2025-04-10T18:56:38.476Z puppeteer:protocol:RECV ◀ {"method":"Target.targetCrashed","params":{"targetId":"02B72B650A13EB7BEA7E35534F39D83A","status":"killed","errorCode":9}}
+
+2025-04-10T18:56:56.497Z browserless:server Health check stats: CPU 25%,20% MEM: 51%,51%
+
+2025-04-10T18:56:56.497Z browserless:server Current period usage: {"date":1744311116489,"error":0,"rejected":0,"successful":0,"timedout":0,"totalTime":0,"maxTime":0,"minTime":0,"meanTime":0,"maxConcurrent":1,"units":0}

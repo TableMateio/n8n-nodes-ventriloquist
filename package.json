@@ -2,7 +2,9 @@
 	"name": "n8n-nodes-ventriloquist",
 	"version": "0.1.0",
 	"description": "",
-	"keywords": ["n8n-community-node-package"],
+	"keywords": [
+		"n8n-community-node-package"
+	],
 	"license": "MIT",
 	"homepage": "",
 	"author": {
@@ -26,14 +28,17 @@
 		"prepublishOnly": "npm run build && npm run lint -c .eslintrc.prepublish.js nodes credentials package.json --ignore-pattern nodes/Ventriloquist/actions/decision.operation.ts",
 		"test:browserless": "node nodes/Ventriloquist/utils/testBrowserlessConnection.js"
 	},
-	"files": ["dist"],
+	"files": [
+		"dist"
+	],
 	"n8n": {
 		"n8nNodesApiVersion": 1,
 		"credentials": [
 			"dist/credentials/ExampleCredentialsApi.credentials.js",
 			"dist/credentials/HttpBinApi.credentials.js",
 			"dist/credentials/BrightDataApi.credentials.js",
-			"dist/credentials/BrowserlessApi.credentials.js"
+			"dist/credentials/BrowserlessApi.credentials.js",
+			"dist/credentials/LocalChromeApi.credentials.js"
 		],
 		"nodes": [
 			"dist/nodes/ExampleNode/ExampleNode.node.js",
@@ -42,6 +47,7 @@
 		]
 	},
 	"devDependencies": {
+		"@types/puppeteer-core": "^5.4.0",
 		"@types/speakeasy": "^2.0.10",
 		"@types/ws": "^8.18.1",
 		"@typescript-eslint/parser": "^7.15.0",
