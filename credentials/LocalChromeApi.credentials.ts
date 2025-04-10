@@ -63,10 +63,125 @@ export class LocalChromeApi implements ICredentialType {
 			required: false,
 		},
 		{
+			displayName: 'Connect to Existing Instance',
+			name: 'connectToExisting',
+			type: 'boolean',
+			default: false,
+			description: 'Whether to connect to an existing Chrome instance instead of launching a new one',
+			required: false,
+		},
+		{
+			displayName: 'Remote Debugging Port',
+			name: 'debuggingPort',
+			type: 'number',
+			default: 9222,
+			description: 'Port number of existing Chrome instance with remote debugging enabled. Chrome must be started with --remote-debugging-port=9222',
+			required: false,
+			displayOptions: {
+				show: {
+					connectToExisting: [true],
+				},
+			},
+		},
+		{
+			displayName: 'Window Position and Size',
+			name: 'windowPositioning',
+			type: 'boolean',
+			default: false,
+			description: 'Whether to specify window position and size for the Chrome window',
+			required: false,
+			displayOptions: {
+				show: {
+					headless: [false],
+				},
+			},
+		},
+		{
+			displayName: 'Maximize Window',
+			name: 'maximizeWindow',
+			type: 'boolean',
+			default: false,
+			description: 'Start Chrome with a maximized window',
+			required: false,
+			displayOptions: {
+				show: {
+					headless: [false],
+					windowPositioning: [false],
+				},
+			},
+		},
+		{
+			displayName: 'Window Width',
+			name: 'windowWidth',
+			type: 'number',
+			default: 1024,
+			description: 'Width of the browser window in pixels',
+			required: false,
+			displayOptions: {
+				show: {
+					headless: [false],
+					windowPositioning: [true],
+				},
+			},
+		},
+		{
+			displayName: 'Window Height',
+			name: 'windowHeight',
+			type: 'number',
+			default: 768,
+			description: 'Height of the browser window in pixels',
+			required: false,
+			displayOptions: {
+				show: {
+					headless: [false],
+					windowPositioning: [true],
+				},
+			},
+		},
+		{
+			displayName: 'Window X Position',
+			name: 'windowX',
+			type: 'number',
+			default: 100,
+			description: 'X coordinate of the browser window (0 is the left edge of the screen)',
+			required: false,
+			displayOptions: {
+				show: {
+					headless: [false],
+					windowPositioning: [true],
+				},
+			},
+		},
+		{
+			displayName: 'Window Y Position',
+			name: 'windowY',
+			type: 'number',
+			default: 100,
+			description: 'Y coordinate of the browser window (0 is the top edge of the screen)',
+			required: false,
+			displayOptions: {
+				show: {
+					headless: [false],
+					windowPositioning: [true],
+				},
+			},
+		},
+		{
 			displayName: 'Note: Local Chrome',
 			name: 'localChromeNote',
 			type: 'notice',
 			default: 'Local Chrome uses your installed Chrome/Chromium browser. For Mac, Windows and Linux, common installation paths are checked automatically if no path is provided.',
+		},
+		{
+			displayName: 'Note: Existing Chrome',
+			name: 'existingChromeNote',
+			type: 'notice',
+			default: 'To connect to an existing Chrome instance, start Chrome with: chrome --remote-debugging-port=9222 --user-data-dir=/path/to/data',
+			displayOptions: {
+				show: {
+					connectToExisting: [true],
+				},
+			},
 		},
 	];
 }

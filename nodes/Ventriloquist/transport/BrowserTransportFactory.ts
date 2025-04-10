@@ -141,7 +141,27 @@ export class BrowserTransportFactory {
       const launchArgsStr = credentials.launchArgs as string || '--no-sandbox,--disable-setuid-sandbox';
       const launchArgs = launchArgsStr.split(',').map(arg => arg.trim()).filter(arg => arg.length > 0);
 
+      // Get window positioning parameters
+      const windowPositioning = credentials.windowPositioning === true;
+      const windowWidth = credentials.windowWidth as number || 1280;
+      const windowHeight = credentials.windowHeight as number || 800;
+      const windowX = credentials.windowX as number || 100;
+      const windowY = credentials.windowY as number || 100;
+
+      // Get existing Chrome connection parameters
+      const connectToExisting = credentials.connectToExisting === true;
+      const debuggingPort = credentials.debuggingPort as number || 9222;
+      const maximizeWindow = credentials.maximizeWindow === true;
+
       logger.info(`Creating Local Chrome transport with headless: ${headless}`);
+      if (maximizeWindow) {
+        logger.info('Window will be maximized');
+      } else if (windowPositioning) {
+        logger.info(`Window positioning: enabled (${windowX},${windowY} ${windowWidth}x${windowHeight})`);
+      } else {
+        logger.info('Window positioning: disabled (using default position and size)');
+      }
+      logger.info(`Connection to existing Chrome: ${connectToExisting ? `enabled (port: ${debuggingPort})` : 'disabled'}`);
       logger.info(`Launch arguments: ${launchArgs.join(' ')}`);
 
       return new LocalChromeTransport(
@@ -151,7 +171,15 @@ export class BrowserTransportFactory {
         headless,
         launchArgs,
         stealthMode,
-        connectionTimeout
+        connectionTimeout,
+        connectToExisting,
+        debuggingPort,
+        windowPositioning,
+        windowWidth,
+        windowHeight,
+        windowX,
+        windowY,
+        maximizeWindow
       );
     }
 

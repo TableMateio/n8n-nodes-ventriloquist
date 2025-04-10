@@ -17,14 +17,37 @@ export class LocalChromeTransport implements BrowserTransport {
     private headless: boolean,
     private launchArgs: string[],
     private stealthMode: boolean,
-    private connectionTimeout: number
+    private connectionTimeout: number,
+    private connectToExisting: boolean = false,
+    private debuggingPort: number = 9222,
+    private windowPositioning: boolean = false,
+    private windowWidth: number = 1024,
+    private windowHeight: number = 768,
+    private windowX: number = 100,
+    private windowY: number = 100,
+    private maximizeWindow: boolean = false
   ) {
     this.logger.info(`LocalChromeTransport created with executable: ${executablePath || 'auto-detect'}`);
 
     // Generate temporary user data directory if none provided
-    if (!userDataDir) {
+    if (!userDataDir && !connectToExisting) {
       this.tempUserDataDir = path.join(os.tmpdir(), `n8n-chrome-${Date.now()}`);
       this.logger.info(`Using temporary user data directory: ${this.tempUserDataDir}`);
+    }
+
+    // Always calculate screen-centered position for window regardless of window positioning setting
+    try {
+      const screenWidth = 1920; // Default assumption for common screen width
+      const screenHeight = 1080; // Default assumption for common screen height
+
+      // Center the window on screen by default
+      this.windowX = Math.max(0, Math.floor((screenWidth - this.windowWidth) / 2));
+      this.windowY = Math.max(0, Math.floor((screenHeight - this.windowHeight) / 2));
+
+      this.logger.info(`Window position calculated as: x=${this.windowX}, y=${this.windowY}`);
+    } catch (error) {
+      // Fall back to default values if calculation fails
+      this.logger.warn(`Failed to calculate centered window position: ${(error as Error).message}`);
     }
   }
 
@@ -33,6 +56,24 @@ export class LocalChromeTransport implements BrowserTransport {
    */
   async connect(): Promise<puppeteer.Browser> {
     try {
+      // If connecting to an existing Chrome instance
+      if (this.connectToExisting) {
+        this.logger.info(`Connecting to existing Chrome instance at debugging port: ${this.debuggingPort}`);
+
+        // Connect to the existing Chrome instance
+        const browser = await puppeteer.connect({
+          browserURL: `http://localhost:${this.debuggingPort}`,
+          defaultViewport: {
+            width: this.windowWidth,
+            height: this.windowHeight
+          }
+        });
+
+        this.logger.info('Successfully connected to existing Chrome instance');
+        return browser;
+      }
+
+      // Otherwise, launch a new Chrome instance
       // Determine the Chrome executable path
       const chromeInfo = await findChrome(this.executablePath);
       this.logger.info(`Using ${chromeInfo.type} browser at: ${chromeInfo.executablePath}`);
@@ -47,6 +88,24 @@ export class LocalChromeTransport implements BrowserTransport {
         '--disable-setuid-sandbox',
         ...this.launchArgs
       ];
+
+      // Always apply window sizing args for non-headless mode
+      if (!this.headless) {
+        // Always use specific window size and position
+        const windowSizeArg = `--window-size=${this.windowWidth},${this.windowHeight}`;
+        const windowPositionArg = `--window-position=${this.windowX},${this.windowY}`;
+
+        // Check if these args are already included
+        if (!puppeteerArgs.some(arg => arg.startsWith('--window-size'))) {
+          puppeteerArgs.push(windowSizeArg);
+        }
+
+        if (!puppeteerArgs.some(arg => arg.startsWith('--window-position'))) {
+          puppeteerArgs.push(windowPositionArg);
+        }
+
+        this.logger.info(`Setting window position and size: ${windowPositionArg} ${windowSizeArg}`);
+      }
 
       // Apply stealth mode settings if enabled
       if (this.stealthMode) {
@@ -70,8 +129,8 @@ export class LocalChromeTransport implements BrowserTransport {
         // @ts-ignore - ignoreHTTPSErrors not in type definition but supported by puppeteer
         ignoreHTTPSErrors: true,
         defaultViewport: {
-          width: 1920,
-          height: 1080
+          width: this.windowWidth,
+          height: this.windowHeight
         }
       });
 

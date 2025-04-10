@@ -127,6 +127,25 @@ export async function executeClickAction(
 				// Find element first
 				const element = await page.$(selector);
 				if (!element) {
+					// Add debug info for complex selectors
+					if (selector.includes(':nth-') || selector.includes('nth-of-type') || selector.includes('nth-child')) {
+						logger.info(`${logPrefix} [Debug] Attempting to evaluate complex selector: "${selector}"`);
+						// Try to debug the selector by counting matching elements
+						const debugInfo = await page.evaluate((sel) => {
+							const elements = document.querySelectorAll(sel.split(':')[0]); // Get base selector without pseudo
+							const allMatches = document.querySelectorAll(sel);
+							return {
+								baseCount: elements.length,
+								matchCount: allMatches.length,
+								baseSelText: Array.from(elements).map(el => el.outerHTML.slice(0, 100)).join('\n'),
+								matchSelText: Array.from(allMatches).map(el => el.outerHTML.slice(0, 100)).join('\n')
+							};
+						}, selector);
+						logger.info(`${logPrefix} [Debug] Selector "${selector}": Base elements: ${debugInfo.baseCount}, Matches: ${debugInfo.matchCount}`);
+						logger.info(`${logPrefix} [Debug] Base elements sample: ${debugInfo.baseSelText.substring(0, 500)}`);
+						logger.info(`${logPrefix} [Debug] Matching elements sample: ${debugInfo.matchSelText.substring(0, 500)}`);
+					}
+
 					throw new Error(`Element not found: ${selector}`);
 				}
 
@@ -255,6 +274,25 @@ export async function executeClickAction(
 			// Find the element
 			const element = await page.$(selector);
 			if (!element) {
+				// Add debug info for complex selectors
+				if (selector.includes(':nth-') || selector.includes('nth-of-type') || selector.includes('nth-child')) {
+					logger.info(`${logPrefix} [Debug] Attempting to evaluate complex selector: "${selector}"`);
+					// Try to debug the selector by counting matching elements
+					const debugInfo = await page.evaluate((sel) => {
+						const elements = document.querySelectorAll(sel.split(':')[0]); // Get base selector without pseudo
+						const allMatches = document.querySelectorAll(sel);
+						return {
+							baseCount: elements.length,
+							matchCount: allMatches.length,
+							baseSelText: Array.from(elements).map(el => el.outerHTML.slice(0, 100)).join('\n'),
+							matchSelText: Array.from(allMatches).map(el => el.outerHTML.slice(0, 100)).join('\n')
+						};
+					}, selector);
+					logger.info(`${logPrefix} [Debug] Selector "${selector}": Base elements: ${debugInfo.baseCount}, Matches: ${debugInfo.matchCount}`);
+					logger.info(`${logPrefix} [Debug] Base elements sample: ${debugInfo.baseSelText.substring(0, 500)}`);
+					logger.info(`${logPrefix} [Debug] Matching elements sample: ${debugInfo.matchSelText.substring(0, 500)}`);
+				}
+
 				return {
 					success: false,
 					details: {
