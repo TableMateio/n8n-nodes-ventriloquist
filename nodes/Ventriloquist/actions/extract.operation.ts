@@ -370,7 +370,7 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Use Human-like Delays",
+		displayName: "Use Human-Like Delays",
 		name: "useHumanDelays",
 		type: "boolean",
 		default: false,
