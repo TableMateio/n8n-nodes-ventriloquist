@@ -1455,6 +1455,12 @@ export const description: INodeProperties[] = [
 								description:
 									"Wait only until the URL changes to confirm navigation started",
 							},
+							{
+								name: "Any URL Change",
+								value: "anyUrlChange",
+								description:
+									"Detect any URL change (hard navigation or client-side routing)",
+							},
 						],
 						default: "domContentLoaded",
 						description: "What to wait for after clicking the submit button",
@@ -3574,14 +3580,19 @@ export async function execute(
 
 											try {
 												// For URL changed form submission, we'll use our improved click action middleware
-												if (waitAfterSubmit === "urlChanged") {
+												if (
+													waitAfterSubmit === "urlChanged" ||
+													waitAfterSubmit === "anyUrlChange"
+												) {
 													this.logger.info(
 														formatOperationLog(
 															"Decision",
 															nodeName,
 															nodeId,
 															index,
-															"Using click action middleware for form submission with URL change detection",
+															waitAfterSubmit === "anyUrlChange"
+																? "Using click action middleware for form submission with any URL change detection"
+																: "Using click action middleware for form submission with URL change detection",
 														),
 													);
 
@@ -3609,7 +3620,7 @@ export async function execute(
 														"click" as ActionType,
 														{
 															selector: submitSelector,
-															waitAfterAction: "urlChanged",
+															waitAfterAction: waitAfterSubmit,
 															waitTime: effectiveWaitTime,
 														},
 														actionOptions,
@@ -3788,7 +3799,8 @@ export async function execute(
 											} catch (navError) {
 												// Don't treat context destruction as an error if we're doing URL navigation
 												if (
-													waitAfterSubmit === "urlChanged" &&
+													(waitAfterSubmit === "urlChanged" ||
+														waitAfterSubmit === "anyUrlChange") &&
 													((navError as Error).message.includes(
 														"context was destroyed",
 													) ||

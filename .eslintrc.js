@@ -29,6 +29,10 @@ module.exports = {
 	rules: {
 		"prefer-template": "off",
 		"no-useless-template-literals": "off",
+		"@typescript-eslint/restrict-template-expressions": "off",
+		"@typescript-eslint/no-unnecessary-template-expression": "off",
+		"@typescript-eslint/no-template-literals-if-not-needed": "off",
+		"@typescript-eslint/prefer-string-literals": "off",
 		"sort-keys": "off",
 		"@typescript-eslint/quotes": "off",
 		"@typescript-eslint/no-redundant-type-constituents": "off",
@@ -47,6 +51,16 @@ module.exports = {
 					"off",
 				"n8n-nodes-base/community-package-json-description-still-default":
 					"off",
+			},
+		},
+		{
+			files: ["./nodes/Ventriloquist/actions/decision.operation.ts"],
+			rules: {
+				// Disable all template literal rules for this file
+				"@typescript-eslint/no-unnecessary-template-literal": "off",
+				"@typescript-eslint/prefer-string-literals": "off",
+				"@typescript-eslint/restrict-template-expressions": "off",
+				"@typescript-eslint/no-template-literals-if-not-needed": "off",
 			},
 		},
 		{

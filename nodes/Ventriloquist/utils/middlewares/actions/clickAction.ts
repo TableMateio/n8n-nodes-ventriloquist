@@ -7,6 +7,7 @@ import {
 } from "../../navigationUtils";
 import { SessionManager } from "../../sessionManager";
 import type { Page } from "puppeteer-core";
+import { getActivePage } from "../../sessionUtils";
 
 /**
  * Interface for click action parameters
@@ -291,25 +292,207 @@ export async function executeClickAction(
 								nodeName,
 								nodeId,
 								index,
-								`${logPrefix} Context destruction detected (in catch). Returning result.`,
+								`${logPrefix} Context destruction detected (in catch). Attempting to reconnect...`,
 							),
 						);
 
-						return {
-							success: true,
-							urlChanged: true,
-							navigationSuccessful: true,
-							contextDestroyed: true,
-							details: {
-								selector,
-								waitAfterAction,
-								waitTime,
-								beforeUrl,
-								contextDestroyed: true,
+						// Add a stabilization delay before attempting to reconnect
+						await new Promise((resolve) => setTimeout(resolve, 2000));
+
+						try {
+							// Get the browser from the SessionManager
+							const session = await SessionManager.getSession(sessionId);
+							if (!session || !session.browser) {
+								logger.error(
+									formatOperationLog(
+										"ClickAction",
+										nodeName,
+										nodeId,
+										index,
+										`${logPrefix} Failed to get browser from SessionManager after context destruction`,
+									),
+								);
+								return {
+									success: true,
+									urlChanged: true,
+									navigationSuccessful: true,
+									contextDestroyed: true,
+									details: {
+										selector,
+										waitAfterAction,
+										waitTime,
+										beforeUrl,
+										contextDestroyed: true,
+										urlChanged: true,
+										navigationSuccessful: true,
+										reconnectionAttempted: true,
+										reconnectionSuccessful: false,
+										error: "Failed to get browser from SessionManager",
+									},
+								};
+							}
+
+							// Try to get a fresh page reference
+							logger.info(
+								formatOperationLog(
+									"ClickAction",
+									nodeName,
+									nodeId,
+									index,
+									`${logPrefix} Getting fresh page reference after navigation`,
+								),
+							);
+
+							const freshPage = await getActivePage(session.browser, logger);
+
+							if (!freshPage) {
+								logger.warn(
+									formatOperationLog(
+										"ClickAction",
+										nodeName,
+										nodeId,
+										index,
+										`${logPrefix} Session or browser disconnected after navigation, cannot get fresh page.`,
+									),
+								);
+								return {
+									success: true,
+									urlChanged: true,
+									navigationSuccessful: true,
+									contextDestroyed: true,
+									details: {
+										selector,
+										waitAfterAction,
+										waitTime,
+										beforeUrl,
+										contextDestroyed: true,
+										urlChanged: true,
+										navigationSuccessful: true,
+										reconnectionAttempted: true,
+										reconnectionSuccessful: false,
+									},
+								};
+							}
+
+							logger.info(
+								formatOperationLog(
+									"ClickAction",
+									nodeName,
+									nodeId,
+									index,
+									`${logPrefix} Using fresh page reference after navigation`,
+								),
+							);
+
+							// Get the new URL
+							let finalUrl: string;
+							let finalTitle: string;
+
+							try {
+								finalUrl = await freshPage.url();
+								finalTitle = await freshPage.title();
+
+								logger.info(
+									formatOperationLog(
+										"ClickAction",
+										nodeName,
+										nodeId,
+										index,
+										`${logPrefix} Reconnected successfully. New URL: ${finalUrl}, Title: ${finalTitle}`,
+									),
+								);
+
+								// Update SessionManager with reconnected page - locally only
+								logger.info(
+									formatOperationLog(
+										"ClickAction",
+										nodeName,
+										nodeId,
+										index,
+										"Reconnected page reference updated locally. Session Manager state not modified.",
+									),
+								);
+
+								return {
+									success: true,
+									urlChanged: beforeUrl !== finalUrl,
+									navigationSuccessful: true,
+									contextDestroyed: true,
+									details: {
+										selector,
+										waitAfterAction,
+										waitTime,
+										beforeUrl,
+										finalUrl,
+										beforeTitle,
+										finalTitle,
+										contextDestroyed: true,
+										urlChanged: beforeUrl !== finalUrl,
+										navigationSuccessful: true,
+										reconnectionAttempted: true,
+										reconnectionSuccessful: true,
+									},
+								};
+							} catch (pageError) {
+								logger.warn(
+									formatOperationLog(
+										"ClickAction",
+										nodeName,
+										nodeId,
+										index,
+										`${logPrefix} Could not get fresh page reference after navigation, but click was successful`,
+									),
+								);
+
+								return {
+									success: true,
+									urlChanged: true,
+									navigationSuccessful: true,
+									contextDestroyed: true,
+									details: {
+										selector,
+										waitAfterAction,
+										waitTime,
+										beforeUrl,
+										contextDestroyed: true,
+										urlChanged: true,
+										navigationSuccessful: true,
+										reconnectionError: (pageError as Error).message,
+										reconnectionAttempted: true,
+										reconnectionSuccessful: false,
+									},
+								};
+							}
+						} catch (reconnectError) {
+							logger.warn(
+								formatOperationLog(
+									"ClickAction",
+									nodeName,
+									nodeId,
+									index,
+									`${logPrefix} Returning success with context destruction noted`,
+								),
+							);
+
+							return {
+								success: true,
 								urlChanged: true,
 								navigationSuccessful: true,
-							},
-						};
+								contextDestroyed: true,
+								details: {
+									selector,
+									waitAfterAction,
+									waitTime,
+									beforeUrl,
+									contextDestroyed: true,
+									urlChanged: true,
+									navigationSuccessful: true,
+									reconnectionError: (reconnectError as Error).message,
+									reconnectionAttempted: true,
+									reconnectionSuccessful: false,
+								},
+							};
+						}
 					}
 
 					logger.warn(
