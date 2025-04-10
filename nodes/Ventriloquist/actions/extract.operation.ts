@@ -18,8 +18,8 @@ import {
 	createTimingLog,
 } from "../utils/resultUtils";
 import { createErrorResponse } from "../utils/errorUtils";
-import { executeExtraction } from "../utils/middlewares/extractMiddleware";
-import type { IExtractOptions, IExtractResult } from "../utils/middlewares/extractMiddleware";
+import { executeExtraction } from "../utils/middlewares/extraction/extractMiddleware";
+import type { IExtractOptions, IExtractResult } from "../utils/middlewares/extraction/extractMiddleware";
 
 /**
  * Extended PageInfo interface with bodyText

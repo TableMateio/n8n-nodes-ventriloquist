@@ -9,3 +9,6 @@ export * from './extractionPatterns';
 
 // Re-export entity matching middleware and factory
 export * from './middlewares/matching';
+
+// Re-export extraction middleware and factory
+export * from './middlewares/extraction';

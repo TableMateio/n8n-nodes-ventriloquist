@@ -22,7 +22,7 @@ import { getActivePage } from "../sessionUtils";
 import {
 	executeExtraction,
 	type IExtractOptions,
-} from "../middlewares/extractMiddleware";
+} from "../middlewares/extraction/extractMiddleware";
 
 /**
  * Action types supported by the action utilities
