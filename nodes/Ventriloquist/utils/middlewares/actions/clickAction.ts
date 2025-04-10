@@ -404,11 +404,95 @@ export async function executeClickAction(
 						nodeName,
 						nodeId,
 						index,
+						`${logPrefix} Performing simple click with ${waitTime}ms fixed wait`,
+					),
+				);
+
+				// CRUCIAL CHANGE: Initiate click without await, then start timer immediately
+				logger.info(
+					formatOperationLog(
+						"ClickAction",
+						nodeName,
+						nodeId,
+						index,
+						`${logPrefix} Initiating click on selector: "${selector}" and starting fixed time wait without awaiting click completion`,
+					),
+				);
+
+				// Start click but don't await its completion
+				element.click().catch((err) => {
+					// Log errors but don't block execution
+					logger.warn(
+						formatOperationLog(
+							"ClickAction",
+							nodeName,
+							nodeId,
+							index,
+							`${logPrefix} Non-blocking error during fixedTime click: ${(err as Error).message}`,
+						),
+					);
+				});
+
+				// Immediately start the timer without waiting for click to complete
+				logger.info(
+					formatOperationLog(
+						"ClickAction",
+						nodeName,
+						nodeId,
+						index,
 						`${logPrefix} Waiting for fixed time: ${waitTime}ms`,
 					),
 				);
 				await new Promise((resolve) => setTimeout(resolve, waitTime));
-			} else if (waitAfterAction === "selector" && waitSelector) {
+
+				// Get current state after wait
+				let finalUrl = beforeUrl;
+				let finalTitle = beforeTitle;
+				try {
+					finalUrl = await page.url();
+					finalTitle = await page.title();
+				} catch (pageError) {
+					logger.warn(
+						formatOperationLog(
+							"ClickAction",
+							nodeName,
+							nodeId,
+							index,
+							`${logPrefix} Could not get page state after fixed time wait: ${(pageError as Error).message}`,
+						),
+					);
+					// Return with success but note the context destruction
+					return {
+						success: true,
+						contextDestroyed: true,
+						urlChanged: true, // Assume changed if context destroyed
+						details: {
+							selector,
+							waitAfterAction,
+							waitTime,
+							beforeUrl,
+							contextDestroyed: true,
+						},
+					};
+				}
+
+				return {
+					success: true,
+					urlChanged: finalUrl !== beforeUrl,
+					details: {
+						selector,
+						waitAfterAction,
+						waitTime,
+						beforeUrl,
+						finalUrl,
+						beforeTitle,
+						finalTitle,
+						urlChanged: finalUrl !== beforeUrl,
+					},
+				};
+			}
+
+			if (waitAfterAction === "selector" && waitSelector) {
 				logger.info(
 					formatOperationLog(
 						"ClickAction",
