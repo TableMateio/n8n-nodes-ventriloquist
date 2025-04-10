@@ -19,7 +19,9 @@ import type {
 	IActionParameters,
 	IActionOptions,
 	ActionType,
+	IActionResult,
 } from "../utils/actionUtils";
+import type { IClickActionResult } from "../utils/actions/clickAction";
 
 /**
  * Helper function to wait for a specified time using page.evaluate
@@ -925,88 +927,127 @@ export async function execute(
 
 		// Submit the form if requested
 		let formSubmissionResult: IDataObject = {};
-		let retryResults: IDataObject[] = [];
 
 		if (submitFormAfterFill && submitSelector) {
 			this.logger.info(
 				`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Submitting form using selector: ${submitSelector}`,
 			);
 
-			if (retrySubmission) {
-				// Use the retry utility
-				const retrySubmissionResult = await retryFormSubmission(
-					sessionId,
-					submitSelector,
-					{
-						waitAfterSubmit: waitAfterSubmit as
-							| "noWait"
-							| "fixedTime"
-							| "domContentLoaded"
-							| "navigationComplete"
-							| "urlChanged",
-						waitTime,
-						maxRetries,
-						retryDelay,
-					},
-					this.logger,
+			// Use the executeAction utility with "click" type to handle form submission
+			// This provides better consistency with other operations like Decision
+
+			// Set up action options
+			const actionOptions: IActionOptions = {
+				sessionId,
+				waitForSelector: waitForSelectors,
+				selectorTimeout,
+				detectionMethod: "standard",
+				earlyExitDelay: 500,
+				nodeName,
+				nodeId,
+				index,
+				useHumanDelays,
+			};
+
+			// Set effective timeout for form submission - should be longer than regular clicks
+			const effectiveWaitTime = Math.max(
+				waitTime,
+				waitAfterSubmit === "navigationComplete" ? 30000 : 20000
+			);
+
+			this.logger.info(
+				formatOperationLog(
+					"Form",
+					nodeName,
+					nodeId,
+					index,
+					`[Form][Submit] Using click action for form submission with ${waitAfterSubmit} detection (timeout: ${effectiveWaitTime}ms)`
+				)
+			);
+
+			// Execute the click action for form submission
+			const clickResult = await executeAction(
+				sessionId,
+				"click" as ActionType,
+				{
+					selector: submitSelector,
+					waitAfterAction: waitAfterSubmit,
+					waitTime: effectiveWaitTime,
+					waitSelector: waitSelector,
+				},
+				actionOptions,
+				this.logger
+			) as IClickActionResult;
+
+			// Update formSubmissionResult with the click result
+			formSubmissionResult = {
+				success: clickResult.success,
+				details: clickResult.details,
+				error: clickResult.error,
+				submitSelector,
+				waitAfterSubmit,
+				waitTime: effectiveWaitTime,
+			};
+
+			// If navigation occurred or context was destroyed, we need to get a fresh page reference
+			if ((clickResult as any).contextDestroyed || (clickResult.details?.urlChanged === true)) {
+				this.logger.info(
+					formatOperationLog(
+						"Form",
+						nodeName,
+						nodeId,
+						index,
+						`[Form][Submit] Navigation detected after submission: Context destroyed=${!!(clickResult as any).contextDestroyed}, URL changed=${!!clickResult.details?.urlChanged}`
+					)
 				);
 
-				formSubmissionResult = retrySubmissionResult.finalResult;
-				retryResults = retrySubmissionResult.retryResults;
-
-				// Update page reference if retry resulted in a new page object
-				if (retrySubmissionResult.reconnectedPage) {
-					page = retrySubmissionResult.reconnectedPage;
-					this.logger.info(
-						`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Updated local page reference from retry submission result.`,
-					);
+				// Try to get a fresh page reference
+				const currentSession = SessionManager.getSession(sessionId);
+				if (currentSession?.browser?.isConnected()) {
+					const freshPage = await getActivePage(currentSession.browser, this.logger);
+					if (freshPage) {
+						page = freshPage;
+						this.logger.info(
+							formatOperationLog(
+								"Form",
+								nodeName,
+								nodeId,
+								index,
+								`[Form][Submit] Using fresh page reference after navigation`
+							)
+						);
+					}
 				}
+			}
 
-				// Add the initial submission result
-				results.push({
-					fieldType: "formSubmission",
-					success: formSubmissionResult.success,
-					details: formSubmissionResult,
-				});
+			// Add to results array
+			results.push({
+				fieldType: "formSubmission",
+				success: clickResult.success,
+				details: clickResult.details,
+			});
 
-				// Add retry results to the results array
-				for (const retryResult of retryResults) {
-					results.push({
-						fieldType: "formSubmissionRetry",
-						...retryResult,
-					});
-				}
+			// Log success or failure of form submission
+			if (clickResult.success) {
+				this.logger.info(
+					formatOperationLog(
+						"Form",
+						nodeName,
+						nodeId,
+						index,
+						`[Form][Submit] Form submission completed successfully`
+					)
+				);
 			} else {
-				// Simple submission without retry
-				formSubmissionResult = await submitForm(
-					sessionId,
-					submitSelector,
-					{
-						waitAfterSubmit: waitAfterSubmit as
-							| "noWait"
-							| "fixedTime"
-							| "domContentLoaded"
-							| "navigationComplete"
-							| "urlChanged",
-						waitTime,
-					},
-					this.logger,
+				this.logger.warn(
+					formatOperationLog(
+						"Form",
+						nodeName,
+						nodeId,
+						index,
+						`[Form][Submit] Form submission had issues: ${clickResult.error || 'Unknown issue'}`
+					)
 				);
-
-				// Update page reference if submission resulted in a new page object
-				if (formSubmissionResult.reconnectedPage) {
-					page = formSubmissionResult.reconnectedPage as Page;
-					this.logger.info(
-						`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Updated local page reference from form submission result.`,
-					);
-				}
-
-				// Add to results array
-				results.push({
-					fieldType: "formSubmission",
-					success: formSubmissionResult.success,
-					details: formSubmissionResult,
-				});
 			}
 		}
 
@@ -1062,27 +1103,13 @@ export async function execute(
 
 		if (submitFormAfterFill) {
 			resultData.formSubmission = formSubmissionResult;
-
-			// Log success message if form was submitted
-			if (formSubmissionResult?.success) {
-				this.logger.info(
-					`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Form submission completed successfully`
-				);
-			} else {
-				const errorMessage = typeof formSubmissionResult?.details === 'object'
-					? (formSubmissionResult?.details as any)?.error || 'Unknown issue'
-					: 'Unknown submission issue';
-				this.logger.warn(
-					`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Form submission had issues: ${errorMessage}`
-				);
-			}
 		}
 
 		if (screenshot) {
 			resultData.screenshot = screenshot;
 		}
 
-		// Wait After Action Logic
+		// Wait After Action Logic using action utilities pattern
 		if (results.every(r => r.success) && waitAfterAction !== "quick") {
 			this.logger.info(
 				formatOperationLog(
@@ -1093,68 +1120,103 @@ export async function execute(
 					`Performing wait after action: ${waitAfterAction}`,
 				),
 			);
+
 			try {
-				let waitPromise: Promise<any> | null = null;
-				const waitTimeout = selectorTimeout; // Reuse selectorTimeout for wait
+				// Map waitAfterAction values to appropriate action parameters
+				let waitActionType: string = "";
+				let waitActionParams: IActionParameters = {};
 
 				switch (waitAfterAction) {
 					case "element":
 						if (!waitSelector) {
-							throw new Error(
-								'"Wait for Element" selected but no selector provided',
-							);
+							throw new Error('"Wait for Element" selected but no selector provided');
 						}
-						this.logger.info(
-							formatOperationLog(
-								"Form",
-								nodeName,
-								nodeId,
-								index,
-								`Waiting for selector: ${waitSelector}`,
-							),
-						);
-						waitPromise = page.waitForSelector(waitSelector, { timeout: waitTimeout });
+						// Use the existing page and executeAction pattern
+						waitActionType = "wait";
+						waitActionParams = {
+							type: "selector",
+							selector: waitSelector,
+							timeout: selectorTimeout,
+						};
 						break;
+
 					case "navFast":
-						this.logger.info(
-							formatOperationLog(
-								"Form",
-								nodeName,
-								nodeId,
-								index,
-								`Waiting for navigation (fast - networkidle2)`,
-							),
-						);
-						waitPromise = page.waitForNavigation({ waitUntil: "networkidle2", timeout: waitTimeout });
+						waitActionType = "wait";
+						waitActionParams = {
+							type: "navigation",
+							waitUntil: "networkidle2",
+							timeout: selectorTimeout,
+						};
 						break;
+
 					case "navFull":
-						this.logger.info(
-							formatOperationLog(
-								"Form",
-								nodeName,
-								nodeId,
-								index,
-								`Waiting for navigation (full - networkidle0)`,
-							),
-						);
-						waitPromise = page.waitForNavigation({ waitUntil: "networkidle0", timeout: waitTimeout });
+						waitActionType = "wait";
+						waitActionParams = {
+							type: "navigation",
+							waitUntil: "networkidle0",
+							timeout: selectorTimeout,
+						};
 						break;
+
 					case "fixed":
-						this.logger.info(
-							formatOperationLog(
-								"Form",
-								nodeName,
-								nodeId,
-								index,
-								`Waiting for fixed time: ${waitDuration}ms`,
-							),
-						);
-						waitPromise = waitForDuration(page, waitDuration);
+						waitActionType = "wait";
+						waitActionParams = {
+							type: "timeout",
+							timeout: waitDuration,
+						};
 						break;
 				}
 
-				if (waitPromise) {
-					await waitPromise;
+				// If we have a wait action type, execute it
+				if (waitActionType && page) {
+					// For now, perform direct page operations since wait is not a full action type
+					// In the future, this could be enhanced to use a proper "wait" action type
+					switch (waitActionParams.type) {
+						case "selector":
+							this.logger.info(
+								formatOperationLog(
+									"Form",
+									nodeName,
+									nodeId,
+									index,
+									`Waiting for selector: ${waitActionParams.selector}`,
+								),
+							);
+							await page.waitForSelector(waitActionParams.selector as string, {
+								timeout: waitActionParams.timeout as number
+							});
+							break;
+
+						case "navigation":
+							this.logger.info(
+								formatOperationLog(
+									"Form",
+									nodeName,
+									nodeId,
+									index,
+									`Waiting for navigation (${waitActionParams.waitUntil})`,
+								),
+							);
+							await page.waitForNavigation({
+								waitUntil: waitActionParams.waitUntil as "networkidle0" | "networkidle2",
+								timeout: waitActionParams.timeout as number
+							});
+							break;
+
+						case "timeout":
+							this.logger.info(
+								formatOperationLog(
+									"Form",
+									nodeName,
+									nodeId,
+									index,
+									`Waiting for fixed time: ${waitActionParams.timeout}ms`,
+								),
+							);
+							await waitForDuration(page, waitActionParams.timeout as number);
+							break;
+					}
+
 					this.logger.info(
 						formatOperationLog(
 							"Form",
@@ -1181,6 +1243,16 @@ export async function execute(
 				}
 			}
 		}
+
+		// Add timing log
+		createTimingLog(
+			"Form",
+			startTime,
+			this.logger,
+			nodeName,
+			nodeId,
+			index,
+		);
 
 		// Add a summary message about the operation
 		this.logger.info(
