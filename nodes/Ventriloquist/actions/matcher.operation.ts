@@ -42,14 +42,193 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Data to Match Against",
-		name: "sourceEntity",
+		displayName: "Target Entity Configuration",
+		name: "targetEntity",
 		type: "fixedCollection",
 		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
-		description: "Define what data you want to find on the page",
+		description: "Configure how to find and extract entities from the page",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+		options: [
+			{
+				name: "selectors",
+				displayName: "Content Selection",
+				values: [
+					{
+						displayName: "Container Selector",
+						name: "resultsSelector",
+						type: "string",
+						default: "",
+						placeholder: ".search-results, #results-list",
+						description: "CSS selector for the container holding all potential matches",
+						required: true,
+					},
+					{
+						displayName: "Item Selector",
+						name: "itemSelector",
+						type: "string",
+						default: "",
+						placeholder: ".result-item, .card",
+						description: "CSS selector for individual items within the container",
+						required: true,
+					},
+					{
+						displayName: "Wait for Selector",
+						name: "waitForSelector",
+						type: "boolean",
+						default: true,
+						description: "Wait for the container selector to appear before attempting extraction",
+					},
+					{
+						displayName: "Timeout",
+						name: "selectorTimeout",
+						type: "number",
+						default: 10000,
+						description: "Maximum time to wait for selectors to appear (in milliseconds)",
+						displayOptions: {
+							show: {
+								waitForSelector: [true],
+							},
+						},
+					}
+				]
+			},
+			{
+				name: "matching",
+				displayName: "Matching Options",
+				values: [
+					{
+						displayName: "Match Selection",
+						name: "matchMode",
+						type: "options",
+						options: [
+							{
+								name: "Best Match Only",
+								value: "best",
+								description: "Return only the best matching item",
+							},
+							{
+								name: "All Above Threshold",
+								value: "all",
+								description: "Return all items above the threshold",
+							},
+							{
+								name: "First Above Threshold",
+								value: "first",
+								description: "Return the first item that exceeds the threshold",
+							},
+						],
+						default: "best",
+						description: "How to select matches from the results",
+					},
+					{
+						displayName: "Limit Results",
+						name: "limitResults",
+						type: "number",
+						default: 10,
+						description: "Maximum number of results to return when using 'All Above Threshold'",
+						displayOptions: {
+							show: {
+								matchMode: ["all"],
+							},
+						},
+					},
+					{
+						displayName: "Sort Results",
+						name: "sortResults",
+						type: "boolean",
+						default: true,
+						description: "Sort results by similarity score (highest first)",
+					}
+				]
+			},
+			{
+				name: "textProcessing",
+				displayName: "Text Processing",
+				values: [
+					{
+						displayName: "Text Normalization",
+						name: "textNormalization",
+						type: "options",
+						options: [
+							{
+								name: "None",
+								value: "none",
+								description: "No text normalization",
+							},
+							{
+								name: "Basic Cleanup",
+								value: "basic",
+								description: "Trim whitespace, normalize spaces",
+							},
+							{
+								name: "Company Names",
+								value: "company",
+								description: "Remove legal suffixes, standardize company terms",
+							},
+							{
+								name: "Product Identifiers",
+								value: "product",
+								description: "Standardize product IDs and codes",
+							},
+							{
+								name: "Addresses",
+								value: "address",
+								description: "Standardize address formats",
+							},
+							{
+								name: "Full Normalization",
+								value: "full",
+								description: "Apply all normalization techniques",
+							},
+							{
+								name: "Custom",
+								value: "custom",
+								description: "Define custom text normalization rules",
+							}
+						],
+						default: "basic",
+						description: "How to normalize text before comparison",
+					},
+					{
+						displayName: "Case Sensitivity",
+						name: "caseSensitive",
+						type: "boolean",
+						default: false,
+						description: "Whether text comparison should be case sensitive",
+					},
+					{
+						displayName: "Custom Normalization Expression",
+						name: "customNormalization",
+						type: "string",
+						default: "return text.trim().toLowerCase().replace(/\\s+/g, ' ');",
+						description: "JavaScript expression to normalize text (input: 'text', output: normalized text)",
+						displayOptions: {
+							show: {
+								textNormalization: ["custom"],
+							},
+						},
+					}
+				]
+			}
+		],
+	},
+	{
+		displayName: "Data to Match",
+		name: "dataToMatch",
+		type: "fixedCollection",
+		typeOptions: {
+			multipleValues: true,
+			sortable: true,
+		},
+		default: {},
+		description: "Define data fields you want to match against page content",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -58,14 +237,14 @@ export const description: INodeProperties[] = [
 		options: [
 			{
 				name: "fields",
-				displayName: "Input Field",
+				displayName: "Field",
 				values: [
 					{
 						displayName: "Field Name",
-						name: "fieldName",
+						name: "name",
 						type: "string",
 						default: "name",
-						placeholder: "e.g., name, ID, price",
+						placeholder: "e.g., name, price, ID",
 						description: "Name of the field to match",
 						required: true,
 					},
@@ -109,7 +288,7 @@ export const description: INodeProperties[] = [
 							},
 						],
 						default: "fuzzy",
-						description: "How to compare the source value with target values",
+						description: "How to compare this value with target values",
 					},
 					{
 						displayName: "Minimum Match Score",
@@ -120,187 +299,42 @@ export const description: INodeProperties[] = [
 							minValue: 0,
 							maxValue: 1,
 						},
-						description: "Minimum similarity score required to consider an item a match (0-1)",
+						description: "Minimum similarity score required (0-1)",
 						displayOptions: {
 							show: {
 								matchType: ["fuzzy"],
 							},
 						},
-					}
-				],
-			}
-		],
-	},
-	{
-		displayName: "Match Selection",
-		name: "matchSelection",
-		type: "options",
-		options: [
-			{
-				name: "Best Match Only",
-				value: "best",
-				description: "Return only the best matching item",
-			},
-			{
-				name: "All Above Threshold",
-				value: "all",
-				description: "Return all items above the threshold",
-			},
-			{
-				name: "First Above Threshold",
-				value: "first",
-				description: "Return the first item that exceeds the threshold",
-			},
-		],
-		default: "best",
-		description: "How to select matches from the results",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Limit Results",
-		name: "limitResults",
-		type: "number",
-		default: 10,
-		description: "Maximum number of results to return when using 'All Above Threshold'",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				matchSelection: ["all"],
-			},
-		},
-	},
-	{
-		displayName: "Sort Results",
-		name: "sortResults",
-		type: "boolean",
-		default: true,
-		description: "Sort results by similarity score (highest first)",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Target Entities Configuration",
-		name: "extractionConfig",
-		type: "fixedCollection",
-		default: {},
-		typeOptions: {
-			multipleValues: false,
-		},
-		description: "Configure how to find and extract entities from the page",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-		options: [
-			{
-				name: "config",
-				displayName: "Configuration",
-				values: [
-					{
-						displayName: "Container Selector",
-						name: "resultsSelector",
-						type: "string",
-						default: "",
-						placeholder: ".search-results, #results-list",
-						description: "CSS selector for the container holding all potential matches",
-						required: true,
 					},
 					{
-						displayName: "Item Selector",
-						name: "itemSelector",
-						type: "string",
-						default: "",
-						placeholder: ".result-item, .card",
-						description: "CSS selector for individual items within the container",
-						required: true,
-					},
-					{
-						displayName: "Wait for Selector",
-						name: "waitForSelector",
-						type: "boolean",
-						default: true,
-						description: "Wait for the container selector to appear before attempting extraction",
-					},
-					{
-						displayName: "Timeout",
-						name: "selectorTimeout",
+						displayName: "Weight",
+						name: "weight",
 						type: "number",
-						default: 10000,
-						description: "Maximum time to wait for selectors to appear (in milliseconds)",
-						displayOptions: {
-							show: {
-								waitForSelector: [true],
-							},
-						},
+						default: 1,
+						description: "Importance of this field when calculating match score (higher = more important)",
+						required: true,
 					},
 					{
-						displayName: "Text Normalization",
-						name: "textNormalization",
-						type: "options",
-						options: [
-							{
-								name: "None",
-								value: "none",
-								description: "No text normalization",
-							},
-							{
-								name: "Basic Cleanup",
-								value: "basic",
-								description: "Trim whitespace, normalize spaces",
-							},
-							{
-								name: "Company Names",
-								value: "company",
-								description: "Remove legal suffixes, standardize company terms",
-							},
-							{
-								name: "Product Identifiers",
-								value: "product",
-								description: "Standardize product IDs and codes",
-							},
-							{
-								name: "Addresses",
-								value: "address",
-								description: "Standardize address formats",
-							},
-							{
-								name: "Full Normalization",
-								value: "full",
-								description: "Apply all normalization techniques",
-							},
-						],
-						default: "basic",
-						description: "How to normalize text before comparison",
-					},
-					{
-						displayName: "Case Sensitivity",
-						name: "caseSensitive",
+						displayName: "Required Field",
+						name: "required",
 						type: "boolean",
 						default: false,
-						description: "Whether text comparison should be case sensitive",
+						description: "Whether this field must be present for an item to be considered a match",
 					}
 				],
 			},
 		],
 	},
 	{
-		displayName: "Field Mapping",
-		name: "fieldMapping",
+		displayName: "Field Extractors",
+		name: "fieldExtractors",
 		type: "fixedCollection",
 		typeOptions: {
 			multipleValues: true,
 			sortable: true,
 		},
 		default: {},
-		description: "Define which fields to extract from each target item",
+		description: "Define which fields to extract from each potential match",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -308,8 +342,8 @@ export const description: INodeProperties[] = [
 		},
 		options: [
 			{
-				name: "fields",
-				displayName: "Fields",
+				name: "extractors",
+				displayName: "Extractor",
 				values: [
 					{
 						displayName: "Field Name",
@@ -326,12 +360,12 @@ export const description: INodeProperties[] = [
 						type: "string",
 						default: "",
 						placeholder: ".product-name, .price",
-						description: "CSS selector to extract this field from each result item",
+						description: "CSS selector to extract this field (relative to each item)",
 						required: true,
 					},
 					{
-						displayName: "Extraction Method",
-						name: "extractionMethod",
+						displayName: "Extraction Type",
+						name: "extractionType",
 						type: "options",
 						options: [
 							{
@@ -359,46 +393,31 @@ export const description: INodeProperties[] = [
 						description: "How to extract data from the selected element",
 					},
 					{
-						displayName: "Attribute",
-						name: "attribute",
+						displayName: "Attribute Name",
+						name: "attributeName",
 						type: "string",
 						default: "",
-						placeholder: "href, data-ID",
-						description: "Attribute to extract (only used with Attribute extraction method)",
+						placeholder: "href, data-id",
+						description: "Attribute to extract (only used with Attribute extraction type)",
 						displayOptions: {
 							show: {
-								extractionMethod: ["attribute"],
+								extractionType: ["attribute"],
 							},
 						},
-					},
-					{
-						displayName: "Weight",
-						name: "weight",
-						type: "number",
-						default: 1,
-						description: "Importance of this field when calculating match score (higher = more important)",
-						required: true,
-					},
-					{
-						displayName: "Required Field",
-						name: "required",
-						type: "boolean",
-						default: false,
-						description: "Whether this field must be present for an item to be considered a match",
-					},
+					}
 				],
 			},
 		],
 	},
 	{
 		displayName: "Match Action",
-		name: "actionConfig",
+		name: "matchAction",
 		type: "fixedCollection",
 		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
-		description: "What to do with the matched items",
+		description: "What to do with matched items",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -406,12 +425,12 @@ export const description: INodeProperties[] = [
 		},
 		options: [
 			{
-				name: "config",
-				displayName: "Configuration",
+				name: "action",
+				displayName: "Action Configuration",
 				values: [
 					{
 						displayName: "Action Type",
-						name: "action",
+						name: "actionType",
 						type: "options",
 						options: [
 							{
@@ -438,17 +457,7 @@ export const description: INodeProperties[] = [
 								name: "Navigate to URL",
 								value: "navigate",
 								description: "Navigate to a URL found in the matched item",
-							},
-							{
-								name: "Hover Element",
-								value: "hover",
-								description: "Hover over an element in the matched item",
-							},
-							{
-								name: "Take Screenshot",
-								value: "screenshot",
-								description: "Take a screenshot of the matched item",
-							},
+							}
 						],
 						default: "none",
 					},
@@ -461,74 +470,7 @@ export const description: INodeProperties[] = [
 						description: "CSS selector for the element to interact with (relative to the matched item)",
 						displayOptions: {
 							show: {
-								action: ["click", "extract", "fill", "hover"],
-							},
-						},
-					},
-					{
-						displayName: "Extraction Type",
-						name: "extractionType",
-						type: "options",
-						options: [
-							{
-								name: "Text",
-								value: "text",
-								description: "Extract text content",
-							},
-							{
-								name: "Attribute",
-								value: "attribute",
-								description: "Extract specific attribute",
-							},
-							{
-								name: "HTML",
-								value: "html",
-								description: "Extract inner HTML",
-							},
-						],
-						default: "text",
-						description: "What to extract from the element",
-						displayOptions: {
-							show: {
-								action: ["extract"],
-							},
-						},
-					},
-					{
-						displayName: "Attribute",
-						name: "actionAttribute",
-						type: "string",
-						default: "",
-						placeholder: "href, data-url",
-						description: "Attribute to extract",
-						displayOptions: {
-							show: {
-								action: ["extract"],
-								extractionType: ["attribute"],
-							},
-						},
-					},
-					{
-						displayName: "Field Value",
-						name: "fieldValue",
-						type: "string",
-						default: "",
-						description: "Value to fill in the form field",
-						displayOptions: {
-							show: {
-								action: ["fill"],
-							},
-						},
-					},
-					{
-						displayName: "URL Property",
-						name: "urlProperty",
-						type: "string",
-						default: "href",
-						description: "Property or attribute containing the URL to navigate to",
-						displayOptions: {
-							show: {
-								action: ["navigate"],
+								actionType: ["click", "extract", "fill"],
 							},
 						},
 					},
@@ -540,7 +482,42 @@ export const description: INodeProperties[] = [
 						description: "Wait after performing the action",
 						displayOptions: {
 							show: {
-								action: ["click", "fill", "navigate", "hover"],
+								actionType: ["click", "fill", "navigate"],
+							},
+						},
+					},
+					{
+						displayName: "Wait Type",
+						name: "waitType",
+						type: "options",
+						options: [
+							{
+								name: "Fixed Time",
+								value: "fixed",
+								description: "Wait a fixed amount of time",
+							},
+							{
+								name: "Wait For Navigation",
+								value: "navigation",
+								description: "Wait for page navigation to complete",
+							},
+							{
+								name: "Wait For Selector",
+								value: "selector",
+								description: "Wait for a specific selector to appear",
+							},
+							{
+								name: "Wait For URL Change",
+								value: "urlChange",
+								description: "Wait for the URL to change",
+							},
+						],
+						default: "fixed",
+						description: "How to wait after the action",
+						displayOptions: {
+							show: {
+								actionType: ["click", "fill", "navigate"],
+								waitAfterAction: [true],
 							},
 						},
 					},
@@ -552,22 +529,167 @@ export const description: INodeProperties[] = [
 						description: "Time to wait after action in milliseconds",
 						displayOptions: {
 							show: {
-								action: ["click", "fill", "navigate", "hover"],
+								actionType: ["click", "fill", "navigate"],
 								waitAfterAction: [true],
+								waitType: ["fixed"],
 							},
 						},
 					},
 					{
-						displayName: "Wait For Selector",
+						displayName: "Wait Selector",
 						name: "waitSelector",
 						type: "string",
 						default: "",
 						placeholder: "#details-content, .loading-complete",
-						description: "Selector to wait for after action (leave empty to wait for navigation to complete)",
+						description: "Selector to wait for after action",
 						displayOptions: {
 							show: {
-								action: ["click", "navigate"],
+								actionType: ["click", "navigate"],
 								waitAfterAction: [true],
+								waitType: ["selector"],
+							},
+						},
+					},
+					{
+						displayName: "Field Value",
+						name: "fieldValue",
+						type: "string",
+						default: "",
+						description: "Value to fill in the form field",
+						displayOptions: {
+							show: {
+								actionType: ["fill"],
+							},
+						},
+					},
+				],
+			},
+		],
+	},
+	{
+		displayName: "Fallback Options",
+		name: "fallbackOptions",
+		type: "fixedCollection",
+		default: {},
+		typeOptions: {
+			multipleValues: false,
+		},
+		description: "What to do if no match is found",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+		options: [
+			{
+				name: "options",
+				displayName: "Fallback Configuration",
+				values: [
+					{
+						displayName: "Fallback Action",
+						name: "fallbackAction",
+						type: "options",
+						options: [
+							{
+								name: "Return Error",
+								value: "error",
+								description: "Return an error if no match is found",
+							},
+							{
+								name: "Return Empty Result",
+								value: "empty",
+								description: "Return an empty result if no match is found",
+							},
+							{
+								name: "Use Default Values",
+								value: "default",
+								description: "Use default values if no match is found",
+							},
+							{
+								name: "Take Specific Action",
+								value: "action",
+								description: "Take a specific action if no match is found",
+							},
+						],
+						default: "error",
+					},
+					{
+						displayName: "Error Message",
+						name: "errorMessage",
+						type: "string",
+						default: "No matching entity found",
+						description: "Error message to return if no match is found",
+						displayOptions: {
+							show: {
+								fallbackAction: ["error"],
+							},
+						},
+					},
+					{
+						displayName: "Fallback Action Type",
+						name: "fallbackActionType",
+						type: "options",
+						options: [
+							{
+								name: "Click Element",
+								value: "click",
+								description: "Click on an element as fallback",
+							},
+							{
+								name: "Navigate to URL",
+								value: "navigate",
+								description: "Navigate to a URL as fallback",
+							},
+							{
+								name: "Execute JavaScript",
+								value: "javascript",
+								description: "Execute custom JavaScript as fallback",
+							},
+						],
+						default: "click",
+						description: "Action to take if no match is found",
+						displayOptions: {
+							show: {
+								fallbackAction: ["action"],
+							},
+						},
+					},
+					{
+						displayName: "Fallback Selector",
+						name: "fallbackSelector",
+						type: "string",
+						default: "",
+						description: "Selector for fallback action",
+						displayOptions: {
+							show: {
+								fallbackAction: ["action"],
+								fallbackActionType: ["click"],
+							},
+						},
+					},
+					{
+						displayName: "Fallback URL",
+						name: "fallbackUrl",
+						type: "string",
+						default: "",
+						description: "URL to navigate to as fallback",
+						displayOptions: {
+							show: {
+								fallbackAction: ["action"],
+								fallbackActionType: ["navigate"],
+							},
+						},
+					},
+					{
+						displayName: "JavaScript Code",
+						name: "javascriptCode",
+						type: "string",
+						default: "",
+						description: "JavaScript code to execute as fallback",
+						displayOptions: {
+							show: {
+								fallbackAction: ["action"],
+								fallbackActionType: ["javascript"],
 							},
 						},
 					},
@@ -897,3 +1019,5 @@ export async function execute(
 		return buildNodeResponse(errorResponse);
 	}
 }
+
+
