@@ -112,14 +112,7 @@ export const description: INodeProperties[] = [
 		displayName: "Results Configuration",
 		name: "extractionConfig",
 		type: "fixedCollection",
-		default: {
-			config: [
-				{
-					resultsSelector: "",
-					itemSelector: "",
-				}
-			]
-		},
+		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
@@ -183,15 +176,7 @@ export const description: INodeProperties[] = [
 			multipleValues: true,
 			sortable: true,
 		},
-		default: {
-			fields: [
-				{
-					name: "name",
-					selector: ".item-name",
-					weight: 1
-				}
-			]
-		},
+		default: {},
 		description: "Map fields to extract from each result item",
 		displayOptions: {
 			show: {
@@ -252,16 +237,7 @@ export const description: INodeProperties[] = [
 		displayName: "Matching Configuration",
 		name: "comparisonConfig",
 		type: "fixedCollection",
-		default: {
-			config: [
-				{
-					threshold: 0.7,
-					matchMode: "best",
-					limitResults: 10,
-					sortResults: true,
-				}
-			]
-		},
+		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
@@ -339,13 +315,7 @@ export const description: INodeProperties[] = [
 		displayName: "Action Configuration",
 		name: "actionConfig",
 		type: "fixedCollection",
-		default: {
-			config: [
-				{
-					action: "none",
-				}
-			]
-		},
+		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
