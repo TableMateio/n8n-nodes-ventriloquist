@@ -49,7 +49,7 @@ export const description: INodeProperties[] = [
 		typeOptions: {
 			multipleValues: false,
 		},
-		description: "Source data fields to match with content found on the page",
+		description: "Define what data you want to find on the page",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -58,101 +58,61 @@ export const description: INodeProperties[] = [
 		options: [
 			{
 				name: "fields",
-				displayName: "Fields",
+				displayName: "Input Field",
 				values: [
 					{
 						displayName: "Field Name",
 						name: "fieldName",
 						type: "string",
-						default: "",
-						placeholder: "e.g., name, id, price",
-						description: "Name of the field in the source data",
+						default: "name",
+						placeholder: "e.g., name, ID, price",
+						description: "Name of the field to match",
 						required: true,
 					},
 					{
 						displayName: "Value",
 						name: "value",
 						type: "string",
-						default: "",
+						default: "{{$json.name}}",
 						description: "Value to match against",
 						required: true,
-					}
-				],
-			},
-			{
-				name: "normalizationOptions",
-				displayName: "Text Normalization Options",
-				values: [
-					{
-						displayName: "Normalize Company Names",
-						name: "normalizeCompanyNames",
-						type: "boolean",
-						default: true,
-						description: "Normalize company names (remove legal suffixes, standardize common terms)",
 					},
 					{
-						displayName: "Normalize Product Identifiers",
-						name: "normalizeProductIdentifiers",
-						type: "boolean",
-						default: true,
-						description: "Standardize product identifiers (remove hyphens, standardize formats)",
-					},
-					{
-						displayName: "Normalize Addresses",
-						name: "normalizeAddresses",
-						type: "boolean",
-						default: true,
-						description: "Standardize address formats",
-					}
-				],
-			},
-		],
-	},
-	{
-		displayName: "Matching Method",
-		name: "comparisonConfig",
-		type: "fixedCollection",
-		default: {},
-		typeOptions: {
-			multipleValues: false,
-		},
-		description: "How to compare and select matches",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-		options: [
-			{
-				name: "config",
-				displayName: "Configuration",
-				values: [
-					{
-						displayName: "Match Selection",
-						name: "matchMode",
+						displayName: "Match Type",
+						name: "matchType",
 						type: "options",
 						options: [
 							{
-								name: "Best Match Only",
-								value: "best",
-								description: "Return only the best matching item",
+								name: "Fuzzy Match",
+								value: "fuzzy",
+								description: "Find closest matches using string similarity",
 							},
 							{
-								name: "All Above Threshold",
-								value: "all",
-								description: "Return all items above the threshold",
+								name: "Contains",
+								value: "contains",
+								description: "Check if text contains this value",
 							},
 							{
-								name: "First Above Threshold",
-								value: "firstAboveThreshold",
-								description: "Return the first item that exceeds the threshold",
+								name: "Exact Match",
+								value: "exact",
+								description: "Match exactly (case sensitive)",
+							},
+							{
+								name: "Case Insensitive Match",
+								value: "caseInsensitive",
+								description: "Match exactly but ignore case",
+							},
+							{
+								name: "Regular Expression",
+								value: "regex",
+								description: "Match using regular expression pattern",
 							},
 						],
-						default: "best",
-						description: "How to select matches from the results",
+						default: "fuzzy",
+						description: "How to compare the source value with target values",
 					},
 					{
-						displayName: "Similarity Threshold",
+						displayName: "Minimum Match Score",
 						name: "threshold",
 						type: "number",
 						default: 0.7,
@@ -161,40 +121,79 @@ export const description: INodeProperties[] = [
 							maxValue: 1,
 						},
 						description: "Minimum similarity score required to consider an item a match (0-1)",
-						required: true,
-					},
-					{
-						displayName: "Limit Results",
-						name: "limitResults",
-						type: "number",
-						default: 10,
-						description: "Maximum number of results to return when using 'All Above Threshold'",
 						displayOptions: {
 							show: {
-								matchMode: ["all"],
+								matchType: ["fuzzy"],
 							},
 						},
-					},
-					{
-						displayName: "Sort Results",
-						name: "sortResults",
-						type: "boolean",
-						default: true,
-						description: "Sort results by similarity score (highest first)",
-					},
+					}
 				],
-			},
+			}
 		],
 	},
 	{
-		displayName: "Target Entities",
+		displayName: "Match Selection",
+		name: "matchSelection",
+		type: "options",
+		options: [
+			{
+				name: "Best Match Only",
+				value: "best",
+				description: "Return only the best matching item",
+			},
+			{
+				name: "All Above Threshold",
+				value: "all",
+				description: "Return all items above the threshold",
+			},
+			{
+				name: "First Above Threshold",
+				value: "first",
+				description: "Return the first item that exceeds the threshold",
+			},
+		],
+		default: "best",
+		description: "How to select matches from the results",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Limit Results",
+		name: "limitResults",
+		type: "number",
+		default: 10,
+		description: "Maximum number of results to return when using 'All Above Threshold'",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				matchSelection: ["all"],
+			},
+		},
+	},
+	{
+		displayName: "Sort Results",
+		name: "sortResults",
+		type: "boolean",
+		default: true,
+		description: "Sort results by similarity score (highest first)",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Target Entities Configuration",
 		name: "extractionConfig",
 		type: "fixedCollection",
 		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
-		description: "Configure how to locate and extract potential matches from the page",
+		description: "Configure how to find and extract entities from the page",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -242,6 +241,52 @@ export const description: INodeProperties[] = [
 							},
 						},
 					},
+					{
+						displayName: "Text Normalization",
+						name: "textNormalization",
+						type: "options",
+						options: [
+							{
+								name: "None",
+								value: "none",
+								description: "No text normalization",
+							},
+							{
+								name: "Basic Cleanup",
+								value: "basic",
+								description: "Trim whitespace, normalize spaces",
+							},
+							{
+								name: "Company Names",
+								value: "company",
+								description: "Remove legal suffixes, standardize company terms",
+							},
+							{
+								name: "Product Identifiers",
+								value: "product",
+								description: "Standardize product IDs and codes",
+							},
+							{
+								name: "Addresses",
+								value: "address",
+								description: "Standardize address formats",
+							},
+							{
+								name: "Full Normalization",
+								value: "full",
+								description: "Apply all normalization techniques",
+							},
+						],
+						default: "basic",
+						description: "How to normalize text before comparison",
+					},
+					{
+						displayName: "Case Sensitivity",
+						name: "caseSensitive",
+						type: "boolean",
+						default: false,
+						description: "Whether text comparison should be case sensitive",
+					}
 				],
 			},
 		],
@@ -255,7 +300,7 @@ export const description: INodeProperties[] = [
 			sortable: true,
 		},
 		default: {},
-		description: "Define which fields to extract from each target item and how to compare them",
+		description: "Define which fields to extract from each target item",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -271,8 +316,8 @@ export const description: INodeProperties[] = [
 						name: "name",
 						type: "string",
 						default: "",
-						placeholder: "e.g., name, price, id",
-						description: "Name of the field to extract (should match source data field names for comparison)",
+						placeholder: "e.g., name, price, ID",
+						description: "Name of the field to extract",
 						required: true,
 					},
 					{
@@ -285,12 +330,46 @@ export const description: INodeProperties[] = [
 						required: true,
 					},
 					{
+						displayName: "Extraction Method",
+						name: "extractionMethod",
+						type: "options",
+						options: [
+							{
+								name: "Text Content",
+								value: "text",
+								description: "Extract text content of the element",
+							},
+							{
+								name: "Attribute",
+								value: "attribute",
+								description: "Extract specific attribute value",
+							},
+							{
+								name: "HTML",
+								value: "html",
+								description: "Extract inner HTML of the element",
+							},
+							{
+								name: "Outer HTML",
+								value: "outerHtml",
+								description: "Extract outer HTML of the element",
+							},
+						],
+						default: "text",
+						description: "How to extract data from the selected element",
+					},
+					{
 						displayName: "Attribute",
 						name: "attribute",
 						type: "string",
 						default: "",
-						placeholder: "href, data-id",
-						description: "Optional attribute to extract instead of text content (leave empty for text)",
+						placeholder: "href, data-ID",
+						description: "Attribute to extract (only used with Attribute extraction method)",
+						displayOptions: {
+							show: {
+								extractionMethod: ["attribute"],
+							},
+						},
 					},
 					{
 						displayName: "Weight",
@@ -312,7 +391,7 @@ export const description: INodeProperties[] = [
 		],
 	},
 	{
-		displayName: "Actions",
+		displayName: "Match Action",
 		name: "actionConfig",
 		type: "fixedCollection",
 		default: {},
@@ -336,7 +415,12 @@ export const description: INodeProperties[] = [
 						type: "options",
 						options: [
 							{
-								name: "Click on Element",
+								name: "No Action (Return Match Only)",
+								value: "none",
+								description: "Just return the match without taking any action",
+							},
+							{
+								name: "Click Element",
 								value: "click",
 								description: "Click on an element within or related to the matched item",
 							},
@@ -346,9 +430,24 @@ export const description: INodeProperties[] = [
 								description: "Extract additional data from the matched item",
 							},
 							{
-								name: "No Action (Return Match Only)",
-								value: "none",
-								description: "Just return the match without taking any action",
+								name: "Fill Form Field",
+								value: "fill",
+								description: "Fill a form field within the matched item",
+							},
+							{
+								name: "Navigate to URL",
+								value: "navigate",
+								description: "Navigate to a URL found in the matched item",
+							},
+							{
+								name: "Hover Element",
+								value: "hover",
+								description: "Hover over an element in the matched item",
+							},
+							{
+								name: "Take Screenshot",
+								value: "screenshot",
+								description: "Take a screenshot of the matched item",
 							},
 						],
 						default: "none",
@@ -362,20 +461,74 @@ export const description: INodeProperties[] = [
 						description: "CSS selector for the element to interact with (relative to the matched item)",
 						displayOptions: {
 							show: {
-								action: ["click", "extract"],
+								action: ["click", "extract", "fill", "hover"],
 							},
 						},
 					},
 					{
-						displayName: "Extract Attribute",
+						displayName: "Extraction Type",
+						name: "extractionType",
+						type: "options",
+						options: [
+							{
+								name: "Text",
+								value: "text",
+								description: "Extract text content",
+							},
+							{
+								name: "Attribute",
+								value: "attribute",
+								description: "Extract specific attribute",
+							},
+							{
+								name: "HTML",
+								value: "html",
+								description: "Extract inner HTML",
+							},
+						],
+						default: "text",
+						description: "What to extract from the element",
+						displayOptions: {
+							show: {
+								action: ["extract"],
+							},
+						},
+					},
+					{
+						displayName: "Attribute",
 						name: "actionAttribute",
 						type: "string",
 						default: "",
 						placeholder: "href, data-url",
-						description: "For extract action, the attribute to extract",
+						description: "Attribute to extract",
 						displayOptions: {
 							show: {
 								action: ["extract"],
+								extractionType: ["attribute"],
+							},
+						},
+					},
+					{
+						displayName: "Field Value",
+						name: "fieldValue",
+						type: "string",
+						default: "",
+						description: "Value to fill in the form field",
+						displayOptions: {
+							show: {
+								action: ["fill"],
+							},
+						},
+					},
+					{
+						displayName: "URL Property",
+						name: "urlProperty",
+						type: "string",
+						default: "href",
+						description: "Property or attribute containing the URL to navigate to",
+						displayOptions: {
+							show: {
+								action: ["navigate"],
 							},
 						},
 					},
@@ -384,10 +537,10 @@ export const description: INodeProperties[] = [
 						name: "waitAfterAction",
 						type: "boolean",
 						default: false,
-						description: "Wait for navigation or a specific selector after performing the action",
+						description: "Wait after performing the action",
 						displayOptions: {
 							show: {
-								action: ["click"],
+								action: ["click", "fill", "navigate", "hover"],
 							},
 						},
 					},
@@ -399,7 +552,7 @@ export const description: INodeProperties[] = [
 						description: "Time to wait after action in milliseconds",
 						displayOptions: {
 							show: {
-								action: ["click"],
+								action: ["click", "fill", "navigate", "hover"],
 								waitAfterAction: [true],
 							},
 						},
@@ -413,7 +566,7 @@ export const description: INodeProperties[] = [
 						description: "Selector to wait for after action (leave empty to wait for navigation to complete)",
 						displayOptions: {
 							show: {
-								action: ["click"],
+								action: ["click", "navigate"],
 								waitAfterAction: [true],
 							},
 						},
