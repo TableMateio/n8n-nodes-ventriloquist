@@ -24,6 +24,7 @@ import * as openOperation from './actions/open.operation';
 import * as authenticateOperation from './actions/authenticate.operation';
 import * as clickOperation from './actions/click.operation';
 import * as closeOperation from './actions/close.operation';
+import * as matcherOperation from './actions/matcher.operation';
 
 /**
  * Configure outputs for decision operation based on routing parameters
@@ -531,6 +532,12 @@ export class Ventriloquist implements INodeType {
 						description: 'Handle authentication (TOTP, etc.)',
 						action: 'Authenticate with credentials',
 					},
+					{
+						name: 'Entity Matcher',
+						value: 'matcher',
+						description: 'Match entities across data sources',
+						action: 'Match entities across data sources',
+					},
 				],
 				default: 'open',
 			},
@@ -935,6 +942,21 @@ export class Ventriloquist implements INodeType {
 
 					// Add execution duration to the result if not already added
 					if (result.json && !result.json.executionDuration) {
+						result.json.executionDuration = Date.now() - startTime;
+					}
+
+					returnData[0].push(result);
+				} else if (operation === 'matcher') {
+					// Execute matcher operation
+					const result = await matcherOperation.execute.call(
+						this,
+						i,
+						websocketEndpoint,
+						workflowId,
+					);
+
+					// Add execution duration to the result
+					if (result.json) {
 						result.json.executionDuration = Date.now() - startTime;
 					}
 
