@@ -692,6 +692,9 @@ export class Ventriloquist implements INodeType {
 			// Properties for 'authenticate' operation
 			...authenticateOperation.description,
 
+			// Properties for 'matcher' operation
+			...matcherOperation.description,
+
 			// Properties for 'close' operation
 			...closeOperation.description,
 		],
