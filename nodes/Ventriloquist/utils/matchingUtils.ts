@@ -1,6 +1,9 @@
 // Re-export text normalization utilities
 export * from './textUtils';
 
+// Re-export advanced text normalization utilities
+export * from './advancedTextUtils';
+
 // Re-export comparison utilities
 export * from './comparisonUtils';
 
