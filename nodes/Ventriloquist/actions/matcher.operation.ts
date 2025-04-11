@@ -42,14 +42,14 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Source Entity Configuration",
+		displayName: "Data to Match Against",
 		name: "sourceEntity",
 		type: "fixedCollection",
 		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
-		description: "Entity data to match against",
+		description: "Source data fields to match with content found on the page",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -66,7 +66,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						default: "",
 						placeholder: "e.g., name, id, price",
-						description: "Name of the field in the source entity",
+						description: "Name of the field in the source data",
 						required: true,
 					},
 					{
@@ -109,14 +109,14 @@ export const description: INodeProperties[] = [
 		],
 	},
 	{
-		displayName: "Results Configuration",
-		name: "extractionConfig",
+		displayName: "Matching Method",
+		name: "comparisonConfig",
 		type: "fixedCollection",
 		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
-		description: "Configure how to extract potential matches",
+		description: "How to compare and select matches",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -128,7 +128,85 @@ export const description: INodeProperties[] = [
 				displayName: "Configuration",
 				values: [
 					{
-						displayName: "Results Container Selector",
+						displayName: "Match Selection",
+						name: "matchMode",
+						type: "options",
+						options: [
+							{
+								name: "Best Match Only",
+								value: "best",
+								description: "Return only the best matching item",
+							},
+							{
+								name: "All Above Threshold",
+								value: "all",
+								description: "Return all items above the threshold",
+							},
+							{
+								name: "First Above Threshold",
+								value: "firstAboveThreshold",
+								description: "Return the first item that exceeds the threshold",
+							},
+						],
+						default: "best",
+						description: "How to select matches from the results",
+					},
+					{
+						displayName: "Similarity Threshold",
+						name: "threshold",
+						type: "number",
+						default: 0.7,
+						typeOptions: {
+							minValue: 0,
+							maxValue: 1,
+						},
+						description: "Minimum similarity score required to consider an item a match (0-1)",
+						required: true,
+					},
+					{
+						displayName: "Limit Results",
+						name: "limitResults",
+						type: "number",
+						default: 10,
+						description: "Maximum number of results to return when using 'All Above Threshold'",
+						displayOptions: {
+							show: {
+								matchMode: ["all"],
+							},
+						},
+					},
+					{
+						displayName: "Sort Results",
+						name: "sortResults",
+						type: "boolean",
+						default: true,
+						description: "Sort results by similarity score (highest first)",
+					},
+				],
+			},
+		],
+	},
+	{
+		displayName: "Target Entities",
+		name: "extractionConfig",
+		type: "fixedCollection",
+		default: {},
+		typeOptions: {
+			multipleValues: false,
+		},
+		description: "Configure how to locate and extract potential matches from the page",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+		options: [
+			{
+				name: "config",
+				displayName: "Configuration",
+				values: [
+					{
+						displayName: "Container Selector",
 						name: "resultsSelector",
 						type: "string",
 						default: "",
@@ -142,7 +220,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						default: "",
 						placeholder: ".result-item, .card",
-						description: "CSS selector for individual items within the results container",
+						description: "CSS selector for individual items within the container",
 						required: true,
 					},
 					{
@@ -150,10 +228,10 @@ export const description: INodeProperties[] = [
 						name: "waitForSelector",
 						type: "boolean",
 						default: true,
-						description: "Wait for the results selector to appear before attempting extraction",
+						description: "Wait for the container selector to appear before attempting extraction",
 					},
 					{
-						displayName: "Timeout (ms)",
+						displayName: "Timeout",
 						name: "selectorTimeout",
 						type: "number",
 						default: 10000,
@@ -177,7 +255,7 @@ export const description: INodeProperties[] = [
 			sortable: true,
 		},
 		default: {},
-		description: "Map fields to extract from each result item",
+		description: "Define which fields to extract from each target item and how to compare them",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -194,7 +272,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						default: "",
 						placeholder: "e.g., name, price, id",
-						description: "Name of the field to extract (should match source entity field names for comparison)",
+						description: "Name of the field to extract (should match source data field names for comparison)",
 						required: true,
 					},
 					{
@@ -234,92 +312,14 @@ export const description: INodeProperties[] = [
 		],
 	},
 	{
-		displayName: "Matching Configuration",
-		name: "comparisonConfig",
-		type: "fixedCollection",
-		default: {},
-		typeOptions: {
-			multipleValues: false,
-		},
-		description: "Configure how matching is performed",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-		options: [
-			{
-				name: "config",
-				displayName: "Configuration",
-				values: [
-					{
-						displayName: "Similarity Threshold",
-						name: "threshold",
-						type: "number",
-						default: 0.7,
-						typeOptions: {
-							minValue: 0,
-							maxValue: 1,
-						},
-						description: "Minimum similarity score required to consider an item a match (0-1)",
-						required: true,
-					},
-					{
-						displayName: "Match Mode",
-						name: "matchMode",
-						type: "options",
-						options: [
-							{
-								name: "Best Match Only",
-								value: "best",
-								description: "Return only the best matching item",
-							},
-							{
-								name: "All Above Threshold",
-								value: "all",
-								description: "Return all items above the threshold",
-							},
-							{
-								name: "First Above Threshold",
-								value: "firstAboveThreshold",
-								description: "Return the first item that exceeds the threshold",
-							},
-						],
-						default: "best",
-						description: "How to select matches from the results",
-					},
-					{
-						displayName: "Limit Results",
-						name: "limitResults",
-						type: "number",
-						default: 10,
-						description: "Maximum number of results to return when using 'All Above Threshold'",
-						displayOptions: {
-							show: {
-								matchMode: ["all"],
-							},
-						},
-					},
-					{
-						displayName: "Sort Results",
-						name: "sortResults",
-						type: "boolean",
-						default: true,
-						description: "Sort results by similarity score (highest first)",
-					},
-				],
-			},
-		],
-	},
-	{
-		displayName: "Action Configuration",
+		displayName: "Actions",
 		name: "actionConfig",
 		type: "fixedCollection",
 		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
-		description: "Configure what action to take on the best match",
+		description: "What to do with the matched items",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -331,12 +331,12 @@ export const description: INodeProperties[] = [
 				displayName: "Configuration",
 				values: [
 					{
-						displayName: "Action",
+						displayName: "Action Type",
 						name: "action",
 						type: "options",
 						options: [
 							{
-								name: "Click",
+								name: "Click on Element",
 								value: "click",
 								description: "Click on an element within or related to the matched item",
 							},
@@ -346,16 +346,15 @@ export const description: INodeProperties[] = [
 								description: "Extract additional data from the matched item",
 							},
 							{
-								name: "None",
+								name: "No Action (Return Match Only)",
 								value: "none",
 								description: "Just return the match without taking any action",
 							},
 						],
 						default: "none",
-						description: "Action to perform on the best match",
 					},
 					{
-						displayName: "Action Selector",
+						displayName: "Element Selector",
 						name: "actionSelector",
 						type: "string",
 						default: "",
@@ -368,7 +367,7 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
-						displayName: "Action Attribute",
+						displayName: "Extract Attribute",
 						name: "actionAttribute",
 						type: "string",
 						default: "",
@@ -393,7 +392,7 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
-						displayName: "Wait Time (ms)",
+						displayName: "Wait Time",
 						name: "waitTime",
 						type: "number",
 						default: 1000,
