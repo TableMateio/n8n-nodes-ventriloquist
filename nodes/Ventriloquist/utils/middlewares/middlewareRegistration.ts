@@ -1,6 +1,9 @@
 import type { Logger as ILogger } from 'n8n-workflow';
 import { MiddlewareRegistry, getMiddlewareRegistry } from './middlewareRegistry';
 import { createExtractionMiddlewareRegistration } from './extraction/extractionMiddleware';
+import { createEntityMatcherExtractionMiddlewareRegistration } from './matching/entityMatcherExtractionMiddleware';
+import { createEntityMatcherComparisonMiddlewareRegistration } from './matching/entityMatcherComparisonMiddleware';
+import { createEntityMatcherActionMiddlewareRegistration } from './matching/entityMatcherActionMiddleware';
 
 /**
  * Register all built-in middleware components
@@ -16,6 +19,18 @@ export function registerBuiltInMiddleware(logger?: ILogger): void {
   // Register extraction middleware
   const extractionMiddleware = createExtractionMiddlewareRegistration();
   registry.register(extractionMiddleware);
+
+  // Register entity matcher extraction middleware
+  const entityMatcherExtractionMiddleware = createEntityMatcherExtractionMiddlewareRegistration();
+  registry.register(entityMatcherExtractionMiddleware);
+
+  // Register entity matcher comparison middleware
+  const entityMatcherComparisonMiddleware = createEntityMatcherComparisonMiddlewareRegistration();
+  registry.register(entityMatcherComparisonMiddleware);
+
+  // Register entity matcher action middleware
+  const entityMatcherActionMiddleware = createEntityMatcherActionMiddlewareRegistration();
+  registry.register(entityMatcherActionMiddleware);
 
   // Additional middleware registrations will be added as they are implemented
 
