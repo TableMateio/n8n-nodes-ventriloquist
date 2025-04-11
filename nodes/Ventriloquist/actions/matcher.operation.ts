@@ -45,7 +45,14 @@ export const description: INodeProperties[] = [
 		displayName: "Target Entity Configuration",
 		name: "targetEntity",
 		type: "fixedCollection",
-		default: {},
+		default: {
+			selectors: {
+				resultsSelector: ".search-results",
+				itemSelector: ".result-item",
+				waitForSelector: true,
+				selectorTimeout: 10000
+			}
+		},
 		typeOptions: {
 			multipleValues: false,
 		},
@@ -64,7 +71,7 @@ export const description: INodeProperties[] = [
 						displayName: "Container Selector",
 						name: "resultsSelector",
 						type: "string",
-						default: "",
+						default: ".search-results",
 						placeholder: ".search-results, #results-list",
 						description: "CSS selector for the container holding all potential matches",
 						required: true,
@@ -73,7 +80,7 @@ export const description: INodeProperties[] = [
 						displayName: "Item Selector",
 						name: "itemSelector",
 						type: "string",
-						default: "",
+						default: ".result-item",
 						placeholder: ".result-item, .card",
 						description: "CSS selector for individual items within the container",
 						required: true,
@@ -216,6 +223,105 @@ export const description: INodeProperties[] = [
 						},
 					}
 				]
+			},
+			{
+				name: "fieldExtractors",
+				displayName: "Field Extractors",
+				values: [
+					{
+						displayName: "Field Extractors",
+						name: "extractors",
+						type: "fixedCollection",
+						typeOptions: {
+							multipleValues: true,
+							sortable: true,
+							multipleValueButtonText: "Add Field Extractor"
+						},
+						default: {
+							extractors: [
+								{
+									name: "name",
+									selector: ".product-name",
+									extractionType: "text"
+								},
+								{
+									name: "price",
+									selector: ".product-price",
+									extractionType: "text"
+								}
+							]
+						},
+						description: "Define which fields to extract from each potential match",
+						options: [
+							{
+								name: "extractors",
+								displayName: "Extractor",
+								values: [
+									{
+										displayName: "Field Name",
+										name: "name",
+										type: "string",
+										default: "",
+										placeholder: "e.g., name, price, ID",
+										description: "Name of the field to extract",
+										required: true,
+									},
+									{
+										displayName: "Selector",
+										name: "selector",
+										type: "string",
+										default: "",
+										placeholder: ".product-name, .price",
+										description: "CSS selector to extract this field (relative to each item)",
+										required: true,
+									},
+									{
+										displayName: "Extraction Type",
+										name: "extractionType",
+										type: "options",
+										options: [
+											{
+												name: "Text Content",
+												value: "text",
+												description: "Extract text content of the element",
+											},
+											{
+												name: "Attribute",
+												value: "attribute",
+												description: "Extract specific attribute value",
+											},
+											{
+												name: "HTML",
+												value: "html",
+												description: "Extract inner HTML of the element",
+											},
+											{
+												name: "Outer HTML",
+												value: "outerHtml",
+												description: "Extract outer HTML of the element",
+											},
+										],
+										default: "text",
+										description: "How to extract data from the selected element",
+									},
+									{
+										displayName: "Attribute Name",
+										name: "attributeName",
+										type: "string",
+										default: "",
+										placeholder: "href, data-id",
+										description: "Attribute to extract (only used with Attribute extraction type)",
+										displayOptions: {
+											show: {
+												extractionType: ["attribute"],
+											},
+										},
+									}
+								],
+							},
+						],
+					}
+				]
 			}
 		],
 	},
@@ -226,8 +332,20 @@ export const description: INodeProperties[] = [
 		typeOptions: {
 			multipleValues: true,
 			sortable: true,
+			multipleValueButtonText: "Add Field to Match"
 		},
-		default: {},
+		default: {
+			fields: [
+				{
+					name: "name",
+					value: "{{$json.name}}",
+					matchType: "fuzzy",
+					threshold: 0.7,
+					weight: 1,
+					required: true
+				}
+			]
+		},
 		description: "Define data fields you want to match against page content",
 		displayOptions: {
 			show: {
@@ -326,94 +444,14 @@ export const description: INodeProperties[] = [
 		],
 	},
 	{
-		displayName: "Field Extractors",
-		name: "fieldExtractors",
-		type: "fixedCollection",
-		typeOptions: {
-			multipleValues: true,
-			sortable: true,
-		},
-		default: {},
-		description: "Define which fields to extract from each potential match",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-		options: [
-			{
-				name: "extractors",
-				displayName: "Extractor",
-				values: [
-					{
-						displayName: "Field Name",
-						name: "name",
-						type: "string",
-						default: "",
-						placeholder: "e.g., name, price, ID",
-						description: "Name of the field to extract",
-						required: true,
-					},
-					{
-						displayName: "Selector",
-						name: "selector",
-						type: "string",
-						default: "",
-						placeholder: ".product-name, .price",
-						description: "CSS selector to extract this field (relative to each item)",
-						required: true,
-					},
-					{
-						displayName: "Extraction Type",
-						name: "extractionType",
-						type: "options",
-						options: [
-							{
-								name: "Text Content",
-								value: "text",
-								description: "Extract text content of the element",
-							},
-							{
-								name: "Attribute",
-								value: "attribute",
-								description: "Extract specific attribute value",
-							},
-							{
-								name: "HTML",
-								value: "html",
-								description: "Extract inner HTML of the element",
-							},
-							{
-								name: "Outer HTML",
-								value: "outerHtml",
-								description: "Extract outer HTML of the element",
-							},
-						],
-						default: "text",
-						description: "How to extract data from the selected element",
-					},
-					{
-						displayName: "Attribute Name",
-						name: "attributeName",
-						type: "string",
-						default: "",
-						placeholder: "href, data-id",
-						description: "Attribute to extract (only used with Attribute extraction type)",
-						displayOptions: {
-							show: {
-								extractionType: ["attribute"],
-							},
-						},
-					}
-				],
-			},
-		],
-	},
-	{
 		displayName: "Match Action",
 		name: "matchAction",
 		type: "fixedCollection",
-		default: {},
+		default: {
+			action: {
+				actionType: "none"
+			}
+		},
 		typeOptions: {
 			multipleValues: false,
 		},
@@ -570,7 +608,12 @@ export const description: INodeProperties[] = [
 		displayName: "Fallback Options",
 		name: "fallbackOptions",
 		type: "fixedCollection",
-		default: {},
+		default: {
+			options: {
+				fallbackAction: "error",
+				errorMessage: "No matching entity found"
+			}
+		},
 		typeOptions: {
 			multipleValues: false,
 		},
@@ -1019,5 +1062,6 @@ export async function execute(
 		return buildNodeResponse(errorResponse);
 	}
 }
+
 
 
