@@ -45,14 +45,7 @@ export const description: INodeProperties[] = [
 		displayName: "Source Entity Configuration",
 		name: "sourceEntity",
 		type: "fixedCollection",
-		default: {
-			fields: [
-				{
-					fieldName: "name",
-					value: "{{$node[\"Previous Node\"].json[\"name\"]}}"
-				}
-			]
-		},
+		default: {},
 		typeOptions: {
 			multipleValues: false,
 		},
