@@ -266,31 +266,6 @@ export const description: INodeProperties[] = [
 					},
 					// SIMILARITY METHOD FIELDS
 					{
-						displayName: "Reference Value",
-						name: "referenceValue",
-						type: "string",
-						default: "",
-						description: "Value to compare against (typically from input data)",
-						displayOptions: {
-							show: {
-								matchMethod: ["similarity"],
-							},
-						},
-					},
-					{
-						displayName: "Sub-Item Selector to Compare",
-						name: "selector",
-						type: "string",
-						default: "",
-						placeholder: "h3 a, .title, .name",
-						description: "CSS selector to extract data from within each item",
-						displayOptions: {
-							show: {
-								matchMethod: ["similarity"],
-							},
-						},
-					},
-					{
 						displayName: "Data Format",
 						name: "dataFormat",
 						type: "options",
@@ -354,6 +329,47 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
+						displayName: "Match Threshold",
+						name: "threshold",
+						type: "number",
+						typeOptions: {
+							minValue: 0,
+							maxValue: 1,
+						},
+						default: 0.7,
+						description: "Minimum similarity score required for this criterion (0-1)",
+						displayOptions: {
+							show: {
+								matchMethod: ["similarity"],
+							},
+						},
+					},
+					{
+						displayName: "Reference Value",
+						name: "referenceValue",
+						type: "string",
+						default: "",
+						description: "Value to compare against (typically from input data)",
+						displayOptions: {
+							show: {
+								matchMethod: ["similarity"],
+							},
+						},
+					},
+					{
+						displayName: "Sub-Item Selector to Compare",
+						name: "selector",
+						type: "string",
+						default: "",
+						placeholder: "h3 a, .title, .name",
+						description: "CSS selector to extract data from within each item",
+						displayOptions: {
+							show: {
+								matchMethod: ["similarity"],
+							},
+						},
+					},
+					{
 						displayName: "Output",
 						name: "outputFormat",
 						type: "options",
@@ -388,15 +404,27 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
-						displayName: "Match Threshold",
-						name: "threshold",
+						displayName: "Must Match",
+						name: "mustMatch",
+						type: "boolean",
+						default: false,
+						description: "Whether this criterion must match for an overall successful result",
+						displayOptions: {
+							show: {
+								matchMethod: ["similarity"],
+							},
+						},
+					},
+					{
+						displayName: "Weight",
+						name: "weight",
 						type: "number",
 						typeOptions: {
 							minValue: 0,
-							maxValue: 1,
+							maxValue: 10,
 						},
-						default: 0.7,
-						description: "Minimum similarity score required for this criterion (0-1)",
+						default: 1,
+						description: "How important this criterion is compared to others",
 						displayOptions: {
 							show: {
 								matchMethod: ["similarity"],
@@ -405,31 +433,6 @@ export const description: INodeProperties[] = [
 					},
 
 					// RULE-BASED METHOD FIELDS
-					{
-						displayName: "Reference Value",
-						name: "referenceValue",
-						type: "string",
-						default: "",
-						description: "Value to compare against (typically from input data)",
-						displayOptions: {
-							show: {
-								matchMethod: ["ruleBased"],
-							},
-						},
-					},
-					{
-						displayName: "Sub-Item Selector to Compare",
-						name: "selector",
-						type: "string",
-						default: "",
-						placeholder: "h3 a, .title, .name",
-						description: "CSS selector to extract data from within each item",
-						displayOptions: {
-							show: {
-								matchMethod: ["ruleBased"],
-							},
-						},
-					},
 					{
 						displayName: "Data Format",
 						name: "dataFormat",
@@ -458,6 +461,18 @@ export const description: INodeProperties[] = [
 						],
 						default: "text",
 						description: "Data format for comparison",
+						displayOptions: {
+							show: {
+								matchMethod: ["ruleBased"],
+							},
+						},
+					},
+					{
+						displayName: "Reference Value",
+						name: "referenceValue",
+						type: "string",
+						default: "",
+						description: "Value to compare against (typically from input data)",
 						displayOptions: {
 							show: {
 								matchMethod: ["ruleBased"],
@@ -585,6 +600,47 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
+						displayName: "Sub-Item Selector to Compare",
+						name: "selector",
+						type: "string",
+						default: "",
+						placeholder: "h3 a, .title, .name",
+						description: "CSS selector to extract data from within each item",
+						displayOptions: {
+							show: {
+								matchMethod: ["ruleBased"],
+							},
+						},
+					},
+					{
+						displayName: "Must Match",
+						name: "mustMatch",
+						type: "boolean",
+						default: false,
+						description: "Whether this criterion must match for an overall successful result",
+						displayOptions: {
+							show: {
+								matchMethod: ["ruleBased"],
+							},
+						},
+					},
+					{
+						displayName: "Weight",
+						name: "weight",
+						type: "number",
+						typeOptions: {
+							minValue: 0,
+							maxValue: 10,
+						},
+						default: 1,
+						description: "How important this criterion is compared to others",
+						displayOptions: {
+							show: {
+								matchMethod: ["ruleBased"],
+							},
+						},
+					},
+					{
 						displayName: "Numeric Tolerance",
 						name: "tolerance",
 						type: "number",
@@ -638,14 +694,17 @@ export const description: INodeProperties[] = [
 							},
 						},
 					},
-
-					// COMMON FIELDS FOR ALL METHODS
 					{
 						displayName: "Must Match",
 						name: "mustMatch",
 						type: "boolean",
 						default: false,
 						description: "Whether this criterion must match for an overall successful result",
+						displayOptions: {
+							show: {
+								matchMethod: ["ai"],
+							},
+						},
 					},
 					{
 						displayName: "Weight",
@@ -657,6 +716,11 @@ export const description: INodeProperties[] = [
 						},
 						default: 1,
 						description: "How important this criterion is compared to others",
+						displayOptions: {
+							show: {
+								matchMethod: ["ai"],
+							},
+						},
 					},
 				],
 			},
