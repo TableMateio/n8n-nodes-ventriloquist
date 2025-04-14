@@ -69,6 +69,35 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: "Scoring Mode",
+		name: "scoringMode",
+		type: "options",
+		options: [
+			{
+				name: "Combined Weighted Score",
+				value: "weighted",
+				description: "Calculate final score as weighted sum of all criteria",
+			},
+			{
+				name: "Rule-Based Priority",
+				value: "ruleBased",
+				description: "Return first candidate to pass highest-priority rules",
+			},
+			{
+				name: "AI Selected",
+				value: "aiSelected",
+				description: "Let AI choose from candidates based on all criteria",
+			},
+		],
+		default: "weighted",
+		description: "How to calculate the match quality score for candidates",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
 		displayName: "Multiple Match Selection",
 		name: "multipleMatchSelection",
 		type: "options",
@@ -204,40 +233,30 @@ export const description: INodeProperties[] = [
 	{
 		displayName: "Comparison Criteria",
 		name: "comparisonCriteria",
+		placeholder: "Add Comparison Criterion",
 		type: "fixedCollection",
 		typeOptions: {
 			multipleValues: true,
-			sortable: true,
 		},
-		default: { values: [] },
-		description: "Define how to compare reference values with content on the page",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
+		default: {},
 		options: [
 			{
 				name: "values",
-				displayName: "Criterion",
+				displayName: "Criteria",
 				values: [
 					{
 						displayName: "Reference Value",
 						name: "referenceValue",
 						type: "string",
 						default: "",
-						placeholder: "{{$json.name}} or static value",
-						description: "Value to match against content on the page (can use expressions)",
-						required: true,
+						description: "Value to compare against (typically from input data)",
 					},
 					{
 						displayName: "Target Selector",
 						name: "selector",
 						type: "string",
 						default: "",
-						placeholder: "h3 a, .address, .phone",
-						description: "CSS selector to extract this field from each item",
-						required: true,
+						description: "CSS selector for element to extract value from",
 					},
 					{
 						displayName: "Data Format",
@@ -247,39 +266,26 @@ export const description: INodeProperties[] = [
 							{
 								name: "Text",
 								value: "text",
-								description: "Plain text content",
-							},
-							{
-								name: "HTML",
-								value: "html",
-								description: "HTML content",
-							},
-							{
-								name: "Attribute",
-								value: "attribute",
-								description: "Specific attribute value",
+								description: "Plain text",
 							},
 							{
 								name: "Number",
 								value: "number",
 								description: "Numeric value",
 							},
+							{
+								name: "Date",
+								value: "date",
+								description: "Date value",
+							},
+							{
+								name: "Address",
+								value: "address",
+								description: "Address format",
+							},
 						],
 						default: "text",
-						description: "Format of the data to extract",
-					},
-					{
-						displayName: "Attribute Name",
-						name: "attribute",
-						type: "string",
-						default: "",
-						placeholder: "href, src, data-id",
-						description: "Name of the attribute to extract",
-						displayOptions: {
-							show: {
-								dataFormat: ["attribute"],
-							},
-						},
+						description: "Data format for comparison",
 					},
 					{
 						displayName: "Comparison Type",
@@ -287,41 +293,56 @@ export const description: INodeProperties[] = [
 						type: "options",
 						options: [
 							{
-								name: "Fuzzy Match",
+								name: "Levenshtein",
 								value: "levenshtein",
-								description: "Compare using string similarity (Levenshtein distance)",
-							},
-							{
-								name: "Contains",
-								value: "contains",
-								description: "Check if target contains the reference value",
+								description: "Edit distance (default)",
 							},
 							{
 								name: "Exact Match",
 								value: "exact",
-								description: "Check for exact string match (case sensitive)",
+								description: "Strings must match exactly",
 							},
 							{
-								name: "Case Insensitive Match",
-								value: "caseInsensitive",
-								description: "Check for exact string match (case insensitive)",
+								name: "Contains",
+								value: "contains",
+								description: "One string contains the other",
 							},
 							{
-								name: "Regular Expression",
-								value: "regex",
-								description: "Match using regular expression pattern",
+								name: "Starts With",
+								value: "startsWith",
+								description: "String starts with reference",
 							},
 							{
-								name: "Numeric Comparison",
+								name: "Ends With",
+								value: "endsWith",
+								description: "String ends with reference",
+							},
+							{
+								name: "Numeric Distance",
 								value: "numeric",
-								description: "Compare numeric values (within tolerance)",
+								description: "Numeric values comparison",
+							},
+							{
+								name: "Date Distance",
+								value: "date",
+								description: "Date comparison",
+							},
+							{
+								name: "Semantic Similarity",
+								value: "semantic",
+								description: "Meaning-based comparison",
+							},
+							{
+								name: "Regex",
+								value: "regex",
+								description: "Regular expression matching",
 							},
 						],
 						default: "levenshtein",
-						description: "How to compare the reference value with the extracted content",
+						description: "Algorithm to use for comparison",
 					},
 					{
-						displayName: "Similarity Threshold",
+						displayName: "Threshold",
 						name: "threshold",
 						type: "number",
 						typeOptions: {
@@ -329,24 +350,15 @@ export const description: INodeProperties[] = [
 							maxValue: 1,
 						},
 						default: 0.7,
-						description: "Minimum similarity score required for a match (0-1)",
-						displayOptions: {
-							show: {
-								comparisonType: ["levenshtein"],
-							},
-						},
+						description:
+							"Minimum similarity score required for this field (0-1)",
 					},
 					{
-						displayName: "Numeric Tolerance",
-						name: "tolerance",
-						type: "number",
-						default: 0.01,
-						description: "Tolerance for numeric comparison (e.g., 0.01 = ±1%)",
-						displayOptions: {
-							show: {
-								comparisonType: ["numeric"],
-							},
-						},
+						displayName: "Must Match",
+						name: "mustMatch",
+						type: "boolean",
+						default: false,
+						description: "Whether this criterion must match for a successful result",
 					},
 					{
 						displayName: "Weight",
@@ -357,29 +369,56 @@ export const description: INodeProperties[] = [
 							maxValue: 10,
 						},
 						default: 1,
-						description: "Importance of this criterion relative to others (0-10)",
+						description:
+							"How important this criterion is compared to others",
 					},
 					{
-						displayName: "Must Match",
-						name: "mustMatch",
-						type: "boolean",
-						default: false,
-						description: "If enabled, items that don't match this criterion will be excluded regardless of other criteria",
+						displayName: "Priority",
+						name: "priority",
+						type: "number",
+						typeOptions: {
+							minValue: 1,
+							maxValue: 10,
+						},
+						default: 1,
+						description: "Priority level for rule-based scoring (1=lowest, 10=highest)",
+						displayOptions: {
+							show: {
+								'/scoringMode': ["ruleBased"],
+							},
+						},
 					},
 					{
 						displayName: "Transformation",
 						name: "transformation",
 						type: "string",
-						typeOptions: {
-							rows: 2,
-						},
 						default: "",
-						placeholder: ".split(' ')[0] or .toLowerCase().trim()",
-						description: "Optional JavaScript expression to transform values before comparison (applied to both reference and target)",
+						description:
+							"Optional expression to transform the value before comparison",
+						placeholder: "$value.replace(/[^a-zA-Z0-9]/g, '')",
 					},
-				]
-			}
-		]
+					{
+						displayName: "Tolerance",
+						name: "tolerance",
+						type: "number",
+						default: 0.01,
+						description:
+							"Tolerance for numeric/date comparisons",
+						displayOptions: {
+							show: {
+								comparisonType: ["numeric", "date"],
+							},
+						},
+					},
+				],
+			},
+		],
+		description: "Fields to compare when evaluating matches",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
 	},
 
 	// ==================== 4. ACTION HANDLING ====================
@@ -610,10 +649,14 @@ function buildActionConfig(this: IExecuteFunctions, index: number): IEntityMatch
  * Get additional matcher configuration
  */
 function getAdditionalMatcherConfig(this: IExecuteFunctions, index: number): any {
-	const limitItemsToCompare = this.getNodeParameter('limitCandidatesCompared', index, false) as boolean;
-	const maxItemsToCompare = limitItemsToCompare
+	const limitCandidatesCompared = this.getNodeParameter('limitCandidatesCompared', index, false) as boolean;
+	const maxItemsToCompare = limitCandidatesCompared
 		? this.getNodeParameter('maxCandidates', index, 10) as number
 		: 0; // 0 means no limit
+
+	// Get scoring mode and details output flag
+	const scoringMode = this.getNodeParameter('scoringMode', index, 'weighted') as string;
+	const includeScoreDetails = true; // Always include scoring details
 
 	// Get criteria for custom configurations
 	const criteria = this.getNodeParameter('comparisonCriteria.values', index, []) as IDataObject[];
@@ -626,12 +669,16 @@ function getAdditionalMatcherConfig(this: IExecuteFunctions, index: number): any
 			transformation: criterion.transformation as string || '',
 			tolerance: criterion.tolerance as number || 0.01,
 			dataFormat: criterion.dataFormat as string || 'text',
+			priority: criterion.priority as number || 1, // For rule-based priority scoring
+			required: criterion.mustMatch as boolean || false, // For "must match" functionality
 		};
 	});
 
 	return {
 		maxItems: maxItemsToCompare,
 		fieldSettings,
+		scoringMode,
+		includeScoreDetails,
 	};
 }
 
@@ -832,6 +879,7 @@ export async function execute(
 		return buildNodeResponse(errorResponse);
 	}
 }
+
 
 
 
