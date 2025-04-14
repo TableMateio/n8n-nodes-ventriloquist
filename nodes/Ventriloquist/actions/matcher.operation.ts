@@ -46,7 +46,7 @@ export const description: INodeProperties[] = [
 
 	// ==================== 2. MATCH CONFIGURATION ====================
 	{
-		displayName: "Match Result Type",
+		displayName: "Results",
 		name: "matchResultType",
 		type: "options",
 		options: [
@@ -63,35 +63,6 @@ export const description: INodeProperties[] = [
 		],
 		default: "best",
 		description: "How many results to return from the matcher",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Scoring Mode",
-		name: "scoringMode",
-		type: "options",
-		options: [
-			{
-				name: "Combined Weighted Score",
-				value: "weighted",
-				description: "Calculate final score as weighted sum of all criteria",
-			},
-			{
-				name: "Rule-Based Priority",
-				value: "ruleBased",
-				description: "Return first candidate to pass highest-priority rules",
-			},
-			{
-				name: "AI Selected",
-				value: "aiSelected",
-				description: "Let AI choose from candidates based on all criteria",
-			},
-		],
-		default: "weighted",
-		description: "How to calculate the match quality score for candidates",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -134,22 +105,6 @@ export const description: INodeProperties[] = [
 				operation: ["matcher"],
 				matchResultType: ["multiple"],
 				multipleMatchSelection: ["topN"],
-			},
-		},
-	},
-	{
-		displayName: "Minimum Score Threshold",
-		name: "minimumScoreThreshold",
-		type: "number",
-		default: 0.5,
-		typeOptions: {
-			minValue: 0,
-			maxValue: 1,
-		},
-		description: "Minimum score required for a match (0-1)",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
 			},
 		},
 	},
@@ -258,22 +213,12 @@ export const description: INodeProperties[] = [
 							{
 								name: "Rule-Based",
 								value: "ruleBased",
-								description: "Use exact rules like contains, starts with, regex, etc.",
+								description: "Use exact rules like contains, starts with, regex, etc",
 							},
 							{
 								name: "AI-Powered",
 								value: "ai",
 								description: "Use AI to determine if items match semantically",
-							},
-							{
-								name: "Numeric",
-								value: "numeric",
-								description: "Compare numeric values with tolerance",
-							},
-							{
-								name: "Date",
-								value: "date",
-								description: "Compare dates with tolerance",
 							},
 						],
 						default: "similarity",
@@ -323,7 +268,7 @@ export const description: INodeProperties[] = [
 						description: "Data format for comparison",
 					},
 					{
-						displayName: "Comparison Algorithm",
+						displayName: "Similarity Algorithm",
 						name: "comparisonType",
 						type: "options",
 						options: [
@@ -381,6 +326,16 @@ export const description: INodeProperties[] = [
 								value: "regex",
 								description: "Regular expression matching",
 							},
+							{
+								name: "Numeric Comparison",
+								value: "numeric",
+								description: "Compare numeric values",
+							},
+							{
+								name: "Date Comparison",
+								value: "date",
+								description: "Compare dates",
+							},
 						],
 						default: "exact",
 						description: "Type of rule to apply",
@@ -391,7 +346,7 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
-						displayName: "Similarity Threshold",
+						displayName: "Threshold",
 						name: "threshold",
 						type: "number",
 						typeOptions: {
@@ -402,19 +357,33 @@ export const description: INodeProperties[] = [
 						description: "Minimum similarity score required for this criterion (0-1)",
 						displayOptions: {
 							show: {
-								matchMethod: ["similarity", "ai", "numeric", "date"],
+								matchMethod: ["similarity", "ai"],
 							},
 						},
 					},
 					{
-						displayName: "Tolerance",
+						displayName: "Numeric Tolerance",
 						name: "tolerance",
 						type: "number",
 						default: 0.01,
-						description: "Tolerance for numeric/date comparisons",
+						description: "Tolerance for numeric comparison (e.g., 0.01 = ±1%)",
 						displayOptions: {
 							show: {
-								matchMethod: ["numeric", "date"],
+								matchMethod: ["ruleBased"],
+								ruleType: ["numeric"],
+							},
+						},
+					},
+					{
+						displayName: "Date Tolerance (days)",
+						name: "dateTolerance",
+						type: "number",
+						default: 0,
+						description: "Tolerance in days for date comparison",
+						displayOptions: {
+							show: {
+								matchMethod: ["ruleBased"],
+								ruleType: ["date"],
 							},
 						},
 					},
@@ -652,11 +621,13 @@ function buildComparisonConfig(this: IExecuteFunctions, index: number): IEntityM
 		} else if (matchMethod === 'ruleBased') {
 			// Map rule types to comparison algorithms
 			const ruleType = criterion.ruleType as string || 'exact';
-			algorithm = ['exact', 'contains'].includes(ruleType)
-				? ruleType as ComparisonAlgorithm
-				: 'custom';
-		} else if (matchMethod === 'numeric' || matchMethod === 'date') {
-			algorithm = 'custom';
+			if (['exact', 'contains'].includes(ruleType)) {
+				algorithm = ruleType as ComparisonAlgorithm;
+			} else if (['numeric', 'date', 'startsWith', 'endsWith', 'regex'].includes(ruleType)) {
+				algorithm = 'custom';
+			} else {
+				algorithm = 'exact';
+			}
 		} else if (matchMethod === 'ai') {
 			algorithm = 'custom';
 		}
@@ -668,12 +639,12 @@ function buildComparisonConfig(this: IExecuteFunctions, index: number): IEntityM
 		};
 	});
 
-	// Get the threshold from UI
-	const threshold = this.getNodeParameter('minimumScoreThreshold', index, 0.5) as number;
+	// Use a default threshold since we removed the global threshold
+	const defaultThreshold = 0.5;
 
 	return {
 		fieldComparisons,
-		threshold,
+		threshold: defaultThreshold,
 		matchMode,
 		limitResults: matchesToReturn,
 		sortResults: true,
@@ -721,21 +692,30 @@ function getAdditionalMatcherConfig(this: IExecuteFunctions, index: number): any
 	const fieldSettings = criteria.map(criterion => {
 		const matchMethod = criterion.matchMethod as string || 'similarity';
 
-		// Determine actual comparison type based on match method
+		// Get comparison type based on match method
 		let comparisonType = '';
+		let tolerance = 0.01;
+
 		if (matchMethod === 'similarity') {
 			comparisonType = criterion.comparisonType as string || 'levenshtein';
 		} else if (matchMethod === 'ruleBased') {
 			comparisonType = criterion.ruleType as string || 'exact';
+
+			// Use appropriate tolerance based on rule type
+			if (comparisonType === 'numeric') {
+				tolerance = criterion.tolerance as number || 0.01;
+			} else if (comparisonType === 'date') {
+				tolerance = criterion.dateTolerance as number || 0;
+			}
 		} else {
-			comparisonType = matchMethod; // For 'numeric', 'date', 'ai'
+			comparisonType = matchMethod;
 		}
 
 		return {
 			field: criterion.selector as string,
 			threshold: criterion.threshold as number || 0.7,
 			transformation: criterion.transformation as string || '',
-			tolerance: criterion.tolerance as number || 0.01,
+			tolerance,
 			dataFormat: criterion.dataFormat as string || 'text',
 			required: criterion.mustMatch as boolean || false,
 			matchMethod,
