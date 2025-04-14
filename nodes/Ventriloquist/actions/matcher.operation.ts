@@ -134,6 +134,30 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: "Selection Method",
+		name: "selectionMethod",
+		type: "options",
+		options: [
+			{
+				name: "Container with Items",
+				value: "containerItems",
+				description: "Select a container element that contains multiple item elements",
+			},
+			{
+				name: "Direct Item Selection",
+				value: "directItems",
+				description: "Select items directly with a single selector",
+			},
+		],
+		default: "containerItems",
+		description: "How to select elements to compare on the page",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
 		displayName: "Results Container Selector",
 		name: "resultsSelector",
 		type: "string",
@@ -143,6 +167,21 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
+				selectionMethod: ["containerItems"],
+			},
+		},
+	},
+	{
+		displayName: "Item Selector",
+		name: "itemSelector",
+		type: "string",
+		default: "",
+		placeholder: "li",
+		description: "CSS selector for individual items within the container",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				selectionMethod: ["containerItems"],
 			},
 		},
 	},
@@ -152,19 +191,20 @@ export const description: INodeProperties[] = [
 		type: "string",
 		default: "",
 		placeholder: "ol.co_searchResult_list > li",
-		description: "CSS selector for individual items within the container",
+		description: "CSS selector that directly selects all items to compare",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
+				selectionMethod: ["directItems"],
 			},
 		},
 	},
 	{
-		displayName: "Wait for Container Selector",
+		displayName: "Wait for Elements",
 		name: "waitForSelector",
 		type: "boolean",
 		default: true,
-		description: "Wait for the container selector to appear before attempting extraction",
+		description: "Wait for the selectors to appear before attempting extraction",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -230,13 +270,32 @@ export const description: INodeProperties[] = [
 						type: "string",
 						default: "",
 						description: "Value to compare against (typically from input data)",
+						displayOptions: {
+							show: {
+								matchMethod: ["similarity", "ruleBased"],
+							},
+						},
 					},
 					{
-						displayName: "Target Selector",
+						displayName: "AI Question",
+						name: "referenceValue",
+						type: "string",
+						default: "",
+						placeholder: "Does this profile match {{$json.name}} who works at {{$json.company}}?",
+						description: "Question for AI to determine if items match (can include expressions)",
+						displayOptions: {
+							show: {
+								matchMethod: ["ai"],
+							},
+						},
+					},
+					{
+						displayName: "Item Sub-Selector",
 						name: "selector",
 						type: "string",
 						default: "",
-						description: "CSS selector for element to extract value from",
+						placeholder: "h3 a, .title, .name",
+						description: "CSS selector to extract data from within each item",
 					},
 					{
 						displayName: "Data Format",
@@ -304,37 +363,37 @@ export const description: INodeProperties[] = [
 							{
 								name: "Exact Match",
 								value: "exact",
-								description: "Strings must match exactly",
+								description: "Element text exactly matches reference value",
 							},
 							{
 								name: "Contains",
 								value: "contains",
-								description: "One string contains the other",
+								description: "Element text contains the reference value",
 							},
 							{
 								name: "Starts With",
 								value: "startsWith",
-								description: "String starts with reference",
+								description: "Element text starts with reference value",
 							},
 							{
 								name: "Ends With",
 								value: "endsWith",
-								description: "String ends with reference",
+								description: "Element text ends with reference value",
 							},
 							{
 								name: "Regex",
 								value: "regex",
-								description: "Regular expression matching",
+								description: "Reference value is a regex pattern to test against element text",
 							},
 							{
 								name: "Numeric Comparison",
 								value: "numeric",
-								description: "Compare numeric values",
+								description: "Compare numeric values with tolerance",
 							},
 							{
 								name: "Date Comparison",
 								value: "date",
-								description: "Compare dates",
+								description: "Compare dates with tolerance",
 							},
 						],
 						default: "exact",
@@ -554,9 +613,21 @@ function buildSourceEntity(this: IExecuteFunctions, index: number): ISourceEntit
  * Builds extraction configuration from input parameters
  */
 function buildExtractionConfig(this: IExecuteFunctions, index: number): IEntityMatcherExtractionConfig {
+	// Get selection method and selectors
+	const selectionMethod = this.getNodeParameter('selectionMethod', index, 'containerItems') as string;
+
 	// Get basic selector parameters
-	const resultsSelector = this.getNodeParameter('resultsSelector', index, '') as string;
-	const itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
+	let resultsSelector = '';
+	let itemSelector = '';
+
+	if (selectionMethod === 'containerItems') {
+		resultsSelector = this.getNodeParameter('resultsSelector', index, '') as string;
+		itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
+	} else {
+		// For direct item selection, we use the item selector directly
+		itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
+	}
+
 	const waitForSelector = this.getNodeParameter('waitForSelector', index, true) as boolean;
 	const selectorTimeout = this.getNodeParameter('selectorTimeout', index, 10000) as number;
 
