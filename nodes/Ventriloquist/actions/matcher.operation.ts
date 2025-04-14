@@ -264,6 +264,7 @@ export const description: INodeProperties[] = [
 						default: "similarity",
 						description: "Method to use for this match criterion",
 					},
+					// SIMILARITY METHOD FIELDS
 					{
 						displayName: "Reference Value",
 						name: "referenceValue",
@@ -272,30 +273,22 @@ export const description: INodeProperties[] = [
 						description: "Value to compare against (typically from input data)",
 						displayOptions: {
 							show: {
-								matchMethod: ["similarity", "ruleBased"],
+								matchMethod: ["similarity"],
 							},
 						},
 					},
 					{
-						displayName: "AI Question",
-						name: "referenceValue",
-						type: "string",
-						default: "",
-						placeholder: "Does this profile match {{$json.name}} who works at {{$json.company}}?",
-						description: "Question for AI to determine if items match (can include expressions)",
-						displayOptions: {
-							show: {
-								matchMethod: ["ai"],
-							},
-						},
-					},
-					{
-						displayName: "Item Sub-Selector",
+						displayName: "Sub-Item Selector to Compare",
 						name: "selector",
 						type: "string",
 						default: "",
 						placeholder: "h3 a, .title, .name",
 						description: "CSS selector to extract data from within each item",
+						displayOptions: {
+							show: {
+								matchMethod: ["similarity"],
+							},
+						},
 					},
 					{
 						displayName: "Data Format",
@@ -325,6 +318,11 @@ export const description: INodeProperties[] = [
 						],
 						default: "text",
 						description: "Data format for comparison",
+						displayOptions: {
+							show: {
+								matchMethod: ["similarity"],
+							},
+						},
 					},
 					{
 						displayName: "Similarity Algorithm",
@@ -352,6 +350,117 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								matchMethod: ["similarity"],
+							},
+						},
+					},
+					{
+						displayName: "Output",
+						name: "outputFormat",
+						type: "options",
+						options: [
+							{
+								name: "Smart Extraction",
+								value: "smart",
+								description: "Gets all text within HTML objects and child elements",
+							},
+							{
+								name: "Text",
+								value: "text",
+								description: "Extract plain text content",
+							},
+							{
+								name: "HTML Object",
+								value: "html",
+								description: "Extract HTML structure",
+							},
+							{
+								name: "JSON",
+								value: "json",
+								description: "Extract structured JSON data",
+							},
+						],
+						default: "smart",
+						description: "How to extract and process content from the element",
+						displayOptions: {
+							show: {
+								matchMethod: ["similarity"],
+							},
+						},
+					},
+					{
+						displayName: "Match Threshold",
+						name: "threshold",
+						type: "number",
+						typeOptions: {
+							minValue: 0,
+							maxValue: 1,
+						},
+						default: 0.7,
+						description: "Minimum similarity score required for this criterion (0-1)",
+						displayOptions: {
+							show: {
+								matchMethod: ["similarity"],
+							},
+						},
+					},
+
+					// RULE-BASED METHOD FIELDS
+					{
+						displayName: "Reference Value",
+						name: "referenceValue",
+						type: "string",
+						default: "",
+						description: "Value to compare against (typically from input data)",
+						displayOptions: {
+							show: {
+								matchMethod: ["ruleBased"],
+							},
+						},
+					},
+					{
+						displayName: "Sub-Item Selector to Compare",
+						name: "selector",
+						type: "string",
+						default: "",
+						placeholder: "h3 a, .title, .name",
+						description: "CSS selector to extract data from within each item",
+						displayOptions: {
+							show: {
+								matchMethod: ["ruleBased"],
+							},
+						},
+					},
+					{
+						displayName: "Data Format",
+						name: "dataFormat",
+						type: "options",
+						options: [
+							{
+								name: "Text",
+								value: "text",
+								description: "Plain text",
+							},
+							{
+								name: "Number",
+								value: "number",
+								description: "Numeric value",
+							},
+							{
+								name: "Date",
+								value: "date",
+								description: "Date value",
+							},
+							{
+								name: "Address",
+								value: "address",
+								description: "Address format",
+							},
+						],
+						default: "text",
+						description: "Data format for comparison",
+						displayOptions: {
+							show: {
+								matchMethod: ["ruleBased"],
 							},
 						},
 					},
@@ -385,38 +494,93 @@ export const description: INodeProperties[] = [
 								value: "regex",
 								description: "Reference value is a regex pattern to test against element text",
 							},
-							{
-								name: "Numeric Comparison",
-								value: "numeric",
-								description: "Compare numeric values with tolerance",
-							},
-							{
-								name: "Date Comparison",
-								value: "date",
-								description: "Compare dates with tolerance",
-							},
 						],
 						default: "exact",
 						description: "Type of rule to apply",
 						displayOptions: {
 							show: {
 								matchMethod: ["ruleBased"],
+								dataFormat: ["text", "address"],
 							},
 						},
 					},
 					{
-						displayName: "Threshold",
-						name: "threshold",
-						type: "number",
-						typeOptions: {
-							minValue: 0,
-							maxValue: 1,
-						},
-						default: 0.7,
-						description: "Minimum similarity score required for this criterion (0-1)",
+						displayName: "Rule Type",
+						name: "ruleType",
+						type: "options",
+						options: [
+							{
+								name: "Equal To",
+								value: "equal",
+								description: "Element value equals reference value",
+							},
+							{
+								name: "Greater Than",
+								value: "greaterThan",
+								description: "Element value is greater than reference value",
+							},
+							{
+								name: "Less Than",
+								value: "lessThan",
+								description: "Element value is less than reference value",
+							},
+							{
+								name: "Greater Than or Equal",
+								value: "greaterThanEqual",
+								description: "Element value is greater than or equal to reference value",
+							},
+							{
+								name: "Less Than or Equal",
+								value: "lessThanEqual",
+								description: "Element value is less than or equal to reference value",
+							},
+						],
+						default: "equal",
+						description: "Type of numeric comparison to apply",
 						displayOptions: {
 							show: {
-								matchMethod: ["similarity", "ai"],
+								matchMethod: ["ruleBased"],
+								dataFormat: ["number"],
+							},
+						},
+					},
+					{
+						displayName: "Rule Type",
+						name: "ruleType",
+						type: "options",
+						options: [
+							{
+								name: "Equal To",
+								value: "equal",
+								description: "Element date equals reference date",
+							},
+							{
+								name: "After",
+								value: "after",
+								description: "Element date is after reference date",
+							},
+							{
+								name: "Before",
+								value: "before",
+								description: "Element date is before reference date",
+							},
+							{
+								name: "Same or After",
+								value: "sameOrAfter",
+								description: "Element date is same as or after reference date",
+							},
+							{
+								name: "Same or Before",
+								value: "sameOrBefore",
+								description: "Element date is same as or before reference date",
+							},
+						],
+						default: "equal",
+						description: "Type of date comparison to apply",
+						displayOptions: {
+							show: {
+								matchMethod: ["ruleBased"],
+								dataFormat: ["date"],
 							},
 						},
 					},
@@ -429,7 +593,7 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								matchMethod: ["ruleBased"],
-								ruleType: ["numeric"],
+								dataFormat: ["number"],
 							},
 						},
 					},
@@ -442,10 +606,40 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								matchMethod: ["ruleBased"],
-								ruleType: ["date"],
+								dataFormat: ["date"],
 							},
 						},
 					},
+
+					// AI-POWERED METHOD FIELDS
+					{
+						displayName: "AI Question",
+						name: "referenceValue",
+						type: "string",
+						default: "",
+						placeholder: "Does the person work in {{ $json.industry }}?",
+						description: "Question for AI to determine if items match (can include expressions)",
+						displayOptions: {
+							show: {
+								matchMethod: ["ai"],
+							},
+						},
+					},
+					{
+						displayName: "Sub-Item Selector to Compare",
+						name: "selector",
+						type: "string",
+						default: "",
+						placeholder: "h3 a, .title, .name",
+						description: "CSS selector to extract data from within each item",
+						displayOptions: {
+							show: {
+								matchMethod: ["ai"],
+							},
+						},
+					},
+
+					// COMMON FIELDS FOR ALL METHODS
 					{
 						displayName: "Must Match",
 						name: "mustMatch",
@@ -463,14 +657,6 @@ export const description: INodeProperties[] = [
 						},
 						default: 1,
 						description: "How important this criterion is compared to others",
-					},
-					{
-						displayName: "Transformation",
-						name: "transformation",
-						type: "string",
-						default: "",
-						description: "Optional expression to transform the value before comparison",
-						placeholder: "$value.replace(/[^a-zA-Z0-9]/g, '')",
 					},
 				],
 			},
@@ -772,10 +958,11 @@ function getAdditionalMatcherConfig(this: IExecuteFunctions, index: number): any
 		} else if (matchMethod === 'ruleBased') {
 			comparisonType = criterion.ruleType as string || 'exact';
 
-			// Use appropriate tolerance based on rule type
-			if (comparisonType === 'numeric') {
+			// Use appropriate tolerance based on data format
+			const dataFormat = criterion.dataFormat as string || 'text';
+			if (dataFormat === 'number') {
 				tolerance = criterion.tolerance as number || 0.01;
-			} else if (comparisonType === 'date') {
+			} else if (dataFormat === 'date') {
 				tolerance = criterion.dateTolerance as number || 0;
 			}
 		} else {
@@ -785,12 +972,12 @@ function getAdditionalMatcherConfig(this: IExecuteFunctions, index: number): any
 		return {
 			field: criterion.selector as string,
 			threshold: criterion.threshold as number || 0.7,
-			transformation: criterion.transformation as string || '',
 			tolerance,
 			dataFormat: criterion.dataFormat as string || 'text',
 			required: criterion.mustMatch as boolean || false,
 			matchMethod,
 			comparisonType,
+			outputFormat: criterion.outputFormat as string || 'smart',
 		};
 	});
 
