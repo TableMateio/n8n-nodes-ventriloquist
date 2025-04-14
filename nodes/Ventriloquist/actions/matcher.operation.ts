@@ -28,6 +28,7 @@ import type {
  * Entity Matcher operation description
  */
 export const description: INodeProperties[] = [
+	// ==================== 1. SESSION CONFIGURATION ====================
 	{
 		displayName: "Session ID",
 		name: "explicitSessionId",
@@ -41,312 +42,175 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+
+	// ==================== 2. MATCH CONFIGURATION ====================
 	{
-		displayName: "Target Entity Configuration",
-		name: "targetEntity",
-		type: "fixedCollection",
-		default: {
-			selectors: {
-				resultsSelector: ".search-results",
-				itemSelector: ".result-item",
-				waitForSelector: true,
-				selectorTimeout: 10000
-			}
-		},
-		typeOptions: {
-			multipleValues: false,
-		},
-		description: "Configure how to find and extract entities from the page",
+		displayName: "Match Result Type",
+		name: "matchResultType",
+		type: "options",
+		options: [
+			{
+				name: "Best Match",
+				value: "best",
+				description: "Return only the top match"
+			},
+			{
+				name: "Multiple Matches",
+				value: "multiple",
+				description: "Return multiple matches based on configuration"
+			},
+		],
+		default: "best",
+		description: "How many results to return from the matcher",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
 			},
 		},
-		options: [
-			{
-				name: "selectors",
-				displayName: "Content Selection",
-				values: [
-					{
-						displayName: "Container Selector",
-						name: "resultsSelector",
-						type: "string",
-						default: ".search-results",
-						placeholder: ".search-results, #results-list",
-						description: "CSS selector for the container holding all potential matches",
-						required: true,
-					},
-					{
-						displayName: "Item Selector",
-						name: "itemSelector",
-						type: "string",
-						default: ".result-item",
-						placeholder: ".result-item, .card",
-						description: "CSS selector for individual items within the container",
-						required: true,
-					},
-					{
-						displayName: "Wait for Selector",
-						name: "waitForSelector",
-						type: "boolean",
-						default: true,
-						description: "Wait for the container selector to appear before attempting extraction",
-					},
-					{
-						displayName: "Timeout",
-						name: "selectorTimeout",
-						type: "number",
-						default: 10000,
-						description: "Maximum time to wait for selectors to appear (in milliseconds)",
-						displayOptions: {
-							show: {
-								waitForSelector: [true],
-							},
-						},
-					}
-				]
-			},
-			{
-				name: "matching",
-				displayName: "Matching Options",
-				values: [
-					{
-						displayName: "Match Selection",
-						name: "matchMode",
-						type: "options",
-						options: [
-							{
-								name: "Best Match Only",
-								value: "best",
-								description: "Return only the best matching item",
-							},
-							{
-								name: "All Above Threshold",
-								value: "all",
-								description: "Return all items above the threshold",
-							},
-							{
-								name: "First Above Threshold",
-								value: "first",
-								description: "Return the first item that exceeds the threshold",
-							},
-						],
-						default: "best",
-						description: "How to select matches from the results",
-					},
-					{
-						displayName: "Limit Results",
-						name: "limitResults",
-						type: "number",
-						default: 10,
-						description: "Maximum number of results to return when using 'All Above Threshold'",
-						displayOptions: {
-							show: {
-								matchMode: ["all"],
-							},
-						},
-					},
-					{
-						displayName: "Sort Results",
-						name: "sortResults",
-						type: "boolean",
-						default: true,
-						description: "Sort results by similarity score (highest first)",
-					}
-				]
-			},
-			{
-				name: "textProcessing",
-				displayName: "Text Processing",
-				values: [
-					{
-						displayName: "Text Normalization",
-						name: "textNormalization",
-						type: "options",
-						options: [
-							{
-								name: "None",
-								value: "none",
-								description: "No text normalization",
-							},
-							{
-								name: "Basic Cleanup",
-								value: "basic",
-								description: "Trim whitespace, normalize spaces",
-							},
-							{
-								name: "Company Names",
-								value: "company",
-								description: "Remove legal suffixes, standardize company terms",
-							},
-							{
-								name: "Product Identifiers",
-								value: "product",
-								description: "Standardize product IDs and codes",
-							},
-							{
-								name: "Addresses",
-								value: "address",
-								description: "Standardize address formats",
-							},
-							{
-								name: "Full Normalization",
-								value: "full",
-								description: "Apply all normalization techniques",
-							},
-							{
-								name: "Custom",
-								value: "custom",
-								description: "Define custom text normalization rules",
-							}
-						],
-						default: "basic",
-						description: "How to normalize text before comparison",
-					},
-					{
-						displayName: "Case Sensitivity",
-						name: "caseSensitive",
-						type: "boolean",
-						default: false,
-						description: "Whether text comparison should be case sensitive",
-					},
-					{
-						displayName: "Custom Normalization Expression",
-						name: "customNormalization",
-						type: "string",
-						default: "return text.trim().toLowerCase().replace(/\\s+/g, ' ');",
-						description: "JavaScript expression to normalize text (input: 'text', output: normalized text)",
-						displayOptions: {
-							show: {
-								textNormalization: ["custom"],
-							},
-						},
-					}
-				]
-			},
-			{
-				name: "fieldExtractors",
-				displayName: "Field Extractors",
-				values: [
-					{
-						displayName: "Field Extractors",
-						name: "extractors",
-						type: "fixedCollection",
-						typeOptions: {
-							multipleValues: true,
-							sortable: true,
-							multipleValueButtonText: "Add Field Extractor"
-						},
-						default: {
-							extractors: [
-								{
-									name: "name",
-									selector: ".product-name",
-									extractionType: "text"
-								},
-								{
-									name: "price",
-									selector: ".product-price",
-									extractionType: "text"
-								}
-							]
-						},
-						description: "Define which fields to extract from each potential match",
-						options: [
-							{
-								name: "extractors",
-								displayName: "Extractor",
-								values: [
-									{
-										displayName: "Field Name",
-										name: "name",
-										type: "string",
-										default: "",
-										placeholder: "e.g., name, price, ID",
-										description: "Name of the field to extract",
-										required: true,
-									},
-									{
-										displayName: "Selector",
-										name: "selector",
-										type: "string",
-										default: "",
-										placeholder: ".product-name, .price",
-										description: "CSS selector to extract this field (relative to each item)",
-										required: true,
-									},
-									{
-										displayName: "Extraction Type",
-										name: "extractionType",
-										type: "options",
-										options: [
-											{
-												name: "Text Content",
-												value: "text",
-												description: "Extract text content of the element",
-											},
-											{
-												name: "Attribute",
-												value: "attribute",
-												description: "Extract specific attribute value",
-											},
-											{
-												name: "HTML",
-												value: "html",
-												description: "Extract inner HTML of the element",
-											},
-											{
-												name: "Outer HTML",
-												value: "outerHtml",
-												description: "Extract outer HTML of the element",
-											},
-										],
-										default: "text",
-										description: "How to extract data from the selected element",
-									},
-									{
-										displayName: "Attribute Name",
-										name: "attributeName",
-										type: "string",
-										default: "",
-										placeholder: "href, data-id",
-										description: "Attribute to extract (only used with Attribute extraction type)",
-										displayOptions: {
-											show: {
-												extractionType: ["attribute"],
-											},
-										},
-									}
-								],
-							},
-						],
-					}
-				]
-			}
-		],
 	},
 	{
-		displayName: "Data to Match",
-		name: "dataToMatch",
+		displayName: "Multiple Match Selection",
+		name: "multipleMatchSelection",
+		type: "options",
+		options: [
+			{
+				name: "Top N Results",
+				value: "topN",
+				description: "Return a specific number of top matches"
+			},
+			{
+				name: "All Above Threshold",
+				value: "allAboveThreshold",
+				description: "Return all matches above a specified threshold"
+			},
+		],
+		default: "topN",
+		description: "How to select multiple matches",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				matchResultType: ["multiple"],
+			},
+		},
+	},
+	{
+		displayName: "Number of Results",
+		name: "topNResults",
+		type: "number",
+		default: 3,
+		description: "Maximum number of top matches to return",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				matchResultType: ["multiple"],
+				multipleMatchSelection: ["topN"],
+			},
+		},
+	},
+	{
+		displayName: "Minimum Score Threshold",
+		name: "minimumScoreThreshold",
+		type: "number",
+		default: 0.5,
+		typeOptions: {
+			minValue: 0,
+			maxValue: 1,
+		},
+		description: "Minimum score required for a match (0-1)",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Limit Candidates Compared",
+		name: "limitCandidatesCompared",
+		type: "boolean",
+		default: false,
+		description: "Whether to limit the number of candidates to compare",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Maximum Candidates",
+		name: "maxCandidates",
+		type: "number",
+		default: 10,
+		description: "Maximum number of candidates to evaluate for matches",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				limitCandidatesCompared: [true],
+			},
+		},
+	},
+	{
+		displayName: "Results Container Selector",
+		name: "resultsSelector",
+		type: "string",
+		default: "",
+		placeholder: "ol.co_searchResult_list",
+		description: "CSS selector for the container holding all potential matches",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Item Selector",
+		name: "itemSelector",
+		type: "string",
+		default: "",
+		placeholder: "ol.co_searchResult_list > li",
+		description: "CSS selector for individual items within the container",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Wait for Container Selector",
+		name: "waitForSelector",
+		type: "boolean",
+		default: true,
+		description: "Wait for the container selector to appear before attempting extraction",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Selector Timeout (ms)",
+		name: "selectorTimeout",
+		type: "number",
+		default: 10000,
+		description: "Maximum time to wait for selectors to appear (in milliseconds)",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				waitForSelector: [true],
+			},
+		},
+	},
+
+	// ==================== 3. COMPARISON CRITERIA ====================
+	{
+		displayName: "Comparison Criteria",
+		name: "comparisonCriteria",
 		type: "fixedCollection",
 		typeOptions: {
 			multipleValues: true,
 			sortable: true,
-			multipleValueButtonText: "Add Field to Match"
 		},
-		default: {
-			fields: [
-				{
-					name: "name",
-					value: "{{$json.name}}",
-					matchType: "fuzzy",
-					threshold: 0.7,
-					weight: 1,
-					required: true
-				}
-			]
-		},
-		description: "Define data fields you want to match against page content",
+		default: { values: [] },
+		description: "Define how to compare reference values with content on the page",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -354,73 +218,133 @@ export const description: INodeProperties[] = [
 		},
 		options: [
 			{
-				name: "fields",
-				displayName: "Field",
+				name: "values",
+				displayName: "Criterion",
 				values: [
 					{
-						displayName: "Field Name",
-						name: "name",
+						displayName: "Reference Value",
+						name: "referenceValue",
 						type: "string",
-						default: "name",
-						placeholder: "e.g., name, price, ID",
-						description: "Name of the field to match",
+						default: "",
+						placeholder: "{{$json.name}} or static value",
+						description: "Value to match against content on the page (can use expressions)",
 						required: true,
 					},
 					{
-						displayName: "Value",
-						name: "value",
+						displayName: "Target Selector",
+						name: "selector",
 						type: "string",
-						default: "{{$json.name}}",
-						description: "Value to match against",
+						default: "",
+						placeholder: "h3 a, .address, .phone",
+						description: "CSS selector to extract this field from each item",
 						required: true,
 					},
 					{
-						displayName: "Match Type",
-						name: "matchType",
+						displayName: "Data Format",
+						name: "dataFormat",
+						type: "options",
+						options: [
+							{
+								name: "Text",
+								value: "text",
+								description: "Plain text content",
+							},
+							{
+								name: "HTML",
+								value: "html",
+								description: "HTML content",
+							},
+							{
+								name: "Attribute",
+								value: "attribute",
+								description: "Specific attribute value",
+							},
+							{
+								name: "Number",
+								value: "number",
+								description: "Numeric value",
+							},
+						],
+						default: "text",
+						description: "Format of the data to extract",
+					},
+					{
+						displayName: "Attribute Name",
+						name: "attribute",
+						type: "string",
+						default: "",
+						placeholder: "href, src, data-id",
+						description: "Name of the attribute to extract",
+						displayOptions: {
+							show: {
+								dataFormat: ["attribute"],
+							},
+						},
+					},
+					{
+						displayName: "Comparison Type",
+						name: "comparisonType",
 						type: "options",
 						options: [
 							{
 								name: "Fuzzy Match",
-								value: "fuzzy",
-								description: "Find closest matches using string similarity",
+								value: "levenshtein",
+								description: "Compare using string similarity (Levenshtein distance)",
 							},
 							{
 								name: "Contains",
 								value: "contains",
-								description: "Check if text contains this value",
+								description: "Check if target contains the reference value",
 							},
 							{
 								name: "Exact Match",
 								value: "exact",
-								description: "Match exactly (case sensitive)",
+								description: "Check for exact string match (case sensitive)",
 							},
 							{
 								name: "Case Insensitive Match",
 								value: "caseInsensitive",
-								description: "Match exactly but ignore case",
+								description: "Check for exact string match (case insensitive)",
 							},
 							{
 								name: "Regular Expression",
 								value: "regex",
 								description: "Match using regular expression pattern",
 							},
+							{
+								name: "Numeric Comparison",
+								value: "numeric",
+								description: "Compare numeric values (within tolerance)",
+							},
 						],
-						default: "fuzzy",
-						description: "How to compare this value with target values",
+						default: "levenshtein",
+						description: "How to compare the reference value with the extracted content",
 					},
 					{
-						displayName: "Minimum Match Score",
+						displayName: "Similarity Threshold",
 						name: "threshold",
 						type: "number",
-						default: 0.7,
 						typeOptions: {
 							minValue: 0,
 							maxValue: 1,
 						},
-						description: "Minimum similarity score required (0-1)",
+						default: 0.7,
+						description: "Minimum similarity score required for a match (0-1)",
 						displayOptions: {
 							show: {
-								matchType: ["fuzzy"],
+								comparisonType: ["levenshtein"],
+							},
+						},
+					},
+					{
+						displayName: "Numeric Tolerance",
+						name: "tolerance",
+						type: "number",
+						default: 0.01,
+						description: "Tolerance for numeric comparison (e.g., 0.01 = ±1%)",
+						displayOptions: {
+							show: {
+								comparisonType: ["numeric"],
 							},
 						},
 					},
@@ -428,462 +352,298 @@ export const description: INodeProperties[] = [
 						displayName: "Weight",
 						name: "weight",
 						type: "number",
+						typeOptions: {
+							minValue: 0,
+							maxValue: 10,
+						},
 						default: 1,
-						description: "Importance of this field when calculating match score (higher = more important)",
-						required: true,
+						description: "Importance of this criterion relative to others (0-10)",
 					},
 					{
-						displayName: "Required Field",
-						name: "required",
+						displayName: "Must Match",
+						name: "mustMatch",
 						type: "boolean",
 						default: false,
-						description: "Whether this field must be present for an item to be considered a match",
-					}
-				],
+						description: "If enabled, items that don't match this criterion will be excluded regardless of other criteria",
+					},
+					{
+						displayName: "Transformation",
+						name: "transformation",
+						type: "string",
+						typeOptions: {
+							rows: 2,
+						},
+						default: "",
+						placeholder: ".split(' ')[0] or .toLowerCase().trim()",
+						description: "Optional JavaScript expression to transform values before comparison (applied to both reference and target)",
+					},
+				]
+			}
+		]
+	},
+
+	// ==================== 4. ACTION HANDLING ====================
+	{
+		displayName: "Action Type",
+		name: "actionType",
+		type: "options",
+		options: [
+			{
+				name: "Click",
+				value: "click",
+				description: "Click on an element within the matched item",
+			},
+			{
+				name: "Extract",
+				value: "extract",
+				description: "Extract additional data from the matched item",
+			},
+			{
+				name: "None",
+				value: "none",
+				description: "Just identify matches without taking action",
 			},
 		],
-	},
-	{
-		displayName: "Match Action",
-		name: "matchAction",
-		type: "fixedCollection",
-		default: {
-			action: {
-				actionType: "none"
-			}
-		},
-		typeOptions: {
-			multipleValues: false,
-		},
-		description: "What to do with matched items",
+		default: "click",
+		description: "Action to perform on matched items",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
 			},
 		},
-		options: [
-			{
-				name: "action",
-				displayName: "Action Configuration",
-				values: [
-					{
-						displayName: "Action Type",
-						name: "actionType",
-						type: "options",
-						options: [
-							{
-								name: "No Action (Return Match Only)",
-								value: "none",
-								description: "Just return the match without taking any action",
-							},
-							{
-								name: "Click Element",
-								value: "click",
-								description: "Click on an element within or related to the matched item",
-							},
-							{
-								name: "Extract Additional Data",
-								value: "extract",
-								description: "Extract additional data from the matched item",
-							},
-							{
-								name: "Fill Form Field",
-								value: "fill",
-								description: "Fill a form field within the matched item",
-							},
-							{
-								name: "Navigate to URL",
-								value: "navigate",
-								description: "Navigate to a URL found in the matched item",
-							}
-						],
-						default: "none",
-					},
-					{
-						displayName: "Element Selector",
-						name: "actionSelector",
-						type: "string",
-						default: "",
-						placeholder: ".view-details, .add-to-cart",
-						description: "CSS selector for the element to interact with (relative to the matched item)",
-						displayOptions: {
-							show: {
-								actionType: ["click", "extract", "fill"],
-							},
-						},
-					},
-					{
-						displayName: "Wait After Action",
-						name: "waitAfterAction",
-						type: "boolean",
-						default: false,
-						description: "Wait after performing the action",
-						displayOptions: {
-							show: {
-								actionType: ["click", "fill", "navigate"],
-							},
-						},
-					},
-					{
-						displayName: "Wait Type",
-						name: "waitType",
-						type: "options",
-						options: [
-							{
-								name: "Fixed Time",
-								value: "fixed",
-								description: "Wait a fixed amount of time",
-							},
-							{
-								name: "Wait For Navigation",
-								value: "navigation",
-								description: "Wait for page navigation to complete",
-							},
-							{
-								name: "Wait For Selector",
-								value: "selector",
-								description: "Wait for a specific selector to appear",
-							},
-							{
-								name: "Wait For URL Change",
-								value: "urlChange",
-								description: "Wait for the URL to change",
-							},
-						],
-						default: "fixed",
-						description: "How to wait after the action",
-						displayOptions: {
-							show: {
-								actionType: ["click", "fill", "navigate"],
-								waitAfterAction: [true],
-							},
-						},
-					},
-					{
-						displayName: "Wait Time",
-						name: "waitTime",
-						type: "number",
-						default: 1000,
-						description: "Time to wait after action in milliseconds",
-						displayOptions: {
-							show: {
-								actionType: ["click", "fill", "navigate"],
-								waitAfterAction: [true],
-								waitType: ["fixed"],
-							},
-						},
-					},
-					{
-						displayName: "Wait Selector",
-						name: "waitSelector",
-						type: "string",
-						default: "",
-						placeholder: "#details-content, .loading-complete",
-						description: "Selector to wait for after action",
-						displayOptions: {
-							show: {
-								actionType: ["click", "navigate"],
-								waitAfterAction: [true],
-								waitType: ["selector"],
-							},
-						},
-					},
-					{
-						displayName: "Field Value",
-						name: "fieldValue",
-						type: "string",
-						default: "",
-						description: "Value to fill in the form field",
-						displayOptions: {
-							show: {
-								actionType: ["fill"],
-							},
-						},
-					},
-				],
-			},
-		],
 	},
 	{
-		displayName: "Fallback Options",
-		name: "fallbackOptions",
-		type: "fixedCollection",
-		default: {
-			options: {
-				fallbackAction: "error",
-				errorMessage: "No matching entity found"
-			}
-		},
-		typeOptions: {
-			multipleValues: false,
-		},
-		description: "What to do if no match is found",
+		displayName: "Action Selector",
+		name: "actionSelector",
+		type: "string",
+		default: "",
+		placeholder: "input.pr_createReport, .view-details",
+		description: "CSS selector for the element to interact with",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
+				actionType: ["click", "extract"],
 			},
 		},
-		options: [
-			{
-				name: "options",
-				displayName: "Fallback Configuration",
-				values: [
-					{
-						displayName: "Fallback Action",
-						name: "fallbackAction",
-						type: "options",
-						options: [
-							{
-								name: "Return Error",
-								value: "error",
-								description: "Return an error if no match is found",
-							},
-							{
-								name: "Return Empty Result",
-								value: "empty",
-								description: "Return an empty result if no match is found",
-							},
-							{
-								name: "Use Default Values",
-								value: "default",
-								description: "Use default values if no match is found",
-							},
-							{
-								name: "Take Specific Action",
-								value: "action",
-								description: "Take a specific action if no match is found",
-							},
-						],
-						default: "error",
-					},
-					{
-						displayName: "Error Message",
-						name: "errorMessage",
-						type: "string",
-						default: "No matching entity found",
-						description: "Error message to return if no match is found",
-						displayOptions: {
-							show: {
-								fallbackAction: ["error"],
-							},
-						},
-					},
-					{
-						displayName: "Fallback Action Type",
-						name: "fallbackActionType",
-						type: "options",
-						options: [
-							{
-								name: "Click Element",
-								value: "click",
-								description: "Click on an element as fallback",
-							},
-							{
-								name: "Navigate to URL",
-								value: "navigate",
-								description: "Navigate to a URL as fallback",
-							},
-							{
-								name: "Execute JavaScript",
-								value: "javascript",
-								description: "Execute custom JavaScript as fallback",
-							},
-						],
-						default: "click",
-						description: "Action to take if no match is found",
-						displayOptions: {
-							show: {
-								fallbackAction: ["action"],
-							},
-						},
-					},
-					{
-						displayName: "Fallback Selector",
-						name: "fallbackSelector",
-						type: "string",
-						default: "",
-						description: "Selector for fallback action",
-						displayOptions: {
-							show: {
-								fallbackAction: ["action"],
-								fallbackActionType: ["click"],
-							},
-						},
-					},
-					{
-						displayName: "Fallback URL",
-						name: "fallbackUrl",
-						type: "string",
-						default: "",
-						description: "URL to navigate to as fallback",
-						displayOptions: {
-							show: {
-								fallbackAction: ["action"],
-								fallbackActionType: ["navigate"],
-							},
-						},
-					},
-					{
-						displayName: "JavaScript Code",
-						name: "javascriptCode",
-						type: "string",
-						default: "",
-						description: "JavaScript code to execute as fallback",
-						displayOptions: {
-							show: {
-								fallbackAction: ["action"],
-								fallbackActionType: ["javascript"],
-							},
-						},
-					},
-				],
+	},
+	{
+		displayName: "Attribute to Extract",
+		name: "actionAttribute",
+		type: "string",
+		default: "",
+		placeholder: "href, data-value",
+		description: "Attribute to extract (leave empty for text content)",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				actionType: ["extract"],
 			},
-		],
+		},
+	},
+	{
+		displayName: "Wait After Action",
+		name: "waitAfterAction",
+		type: "boolean",
+		default: true,
+		description: "Wait for navigation or new element to appear after action",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				actionType: ["click"],
+			},
+		},
+	},
+	{
+		displayName: "Wait Time (milliseconds)",
+		name: "waitTime",
+		type: "number",
+		default: 5000,
+		description: "Time to wait after action (in milliseconds)",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				actionType: ["click"],
+				waitAfterAction: [true],
+			},
+		},
+	},
+	{
+		displayName: "Wait for Selector",
+		name: "waitSelector",
+		type: "string",
+		default: "",
+		placeholder: ".confirmation, #details-content",
+		description: "Wait for this selector to appear after action (leave empty to just wait for timeout)",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				actionType: ["click"],
+				waitAfterAction: [true],
+			},
+		},
 	},
 ];
 
 /**
- * Convert input data to source entity configuration
+ * Builds a source entity from comparison criteria
  */
-function buildSourceEntity(input: IDataObject): ISourceEntity {
-	const sourceEntity: ISourceEntity = {
-		fields: {},
-	};
+function buildSourceEntity(this: IExecuteFunctions, index: number): ISourceEntity {
+	const sourceFields: Record<string, string | null | undefined> = {};
 
-	// Process source entity fields
-	if (input.sourceEntity && (input.sourceEntity as IDataObject).fields) {
-		const fields = (input.sourceEntity as IDataObject).fields as IDataObject[];
+	// Extract fields from the comparisonCriteria parameter
+	const criteria = this.getNodeParameter('comparisonCriteria.values', index, []) as IDataObject[];
 
-		for (const field of fields) {
-			const fieldName = field.fieldName as string;
-			const value = field.value as string;
-
-			if (fieldName && value !== undefined) {
-				sourceEntity.fields[fieldName] = value;
-			}
+	for (const criterion of criteria) {
+		const name = criterion.selector as string;
+		const value = criterion.referenceValue as string;
+		if (name && value !== undefined) {
+			// Use the selector as the field name to maintain traceability
+			sourceFields[name] = value;
 		}
 	}
 
-	// Process normalization options
-	if (input.sourceEntity && (input.sourceEntity as IDataObject).normalizationOptions) {
-		const options = (input.sourceEntity as IDataObject).normalizationOptions as IDataObject[];
+	return {
+		fields: sourceFields,
+		normalizationOptions: {},
+	};
+}
 
-		if (options.length > 0) {
-			sourceEntity.normalizationOptions = {
-				normalizeCompanyNames: options[0].normalizeCompanyNames as boolean,
-				normalizeProductIdentifiers: options[0].normalizeProductIdentifiers as boolean,
-				normalizeAddresses: options[0].normalizeAddresses as boolean,
-			};
+/**
+ * Builds extraction configuration from input parameters
+ */
+function buildExtractionConfig(this: IExecuteFunctions, index: number): IEntityMatcherExtractionConfig {
+	// Get basic selector parameters
+	const resultsSelector = this.getNodeParameter('resultsSelector', index, '') as string;
+	const itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
+	const waitForSelector = this.getNodeParameter('waitForSelector', index, true) as boolean;
+	const selectorTimeout = this.getNodeParameter('selectorTimeout', index, 10000) as number;
+
+	// Get field extraction configurations from comparison criteria
+	const criteria = this.getNodeParameter('comparisonCriteria.values', index, []) as IDataObject[];
+
+	return {
+		resultsSelector,
+		itemSelector,
+		waitForSelector,
+		selectorTimeout,
+		fields: criteria.map(criterion => ({
+			name: criterion.selector as string,
+			selector: criterion.selector as string,
+			attribute: criterion.dataFormat === 'attribute' ? criterion.attribute as string : undefined,
+			weight: criterion.weight as number || 1,
+			required: criterion.mustMatch as boolean,
+		})),
+	};
+}
+
+/**
+ * Builds comparison configuration from input parameters
+ */
+function buildComparisonConfig(this: IExecuteFunctions, index: number): IEntityMatcherComparisonConfig {
+	// Get comparison parameters
+	const matchResultType = this.getNodeParameter('matchResultType', index, 'best') as 'best' | 'multiple';
+
+	// Determine actual match mode based on match type and selection
+	let matchMode: 'best' | 'all' | 'firstAboveThreshold';
+	let matchesToReturn = 1;
+
+	if (matchResultType === 'best') {
+		matchMode = 'best';
+	} else {
+		const multipleMatchSelection = this.getNodeParameter('multipleMatchSelection', index, 'topN') as 'topN' | 'allAboveThreshold';
+		if (multipleMatchSelection === 'topN') {
+			matchMode = 'all'; // Use 'all' but limit the results count
+			matchesToReturn = this.getNodeParameter('topNResults', index, 3) as number;
+		} else {
+			matchMode = 'all';
+			matchesToReturn = 0; // 0 means return all that pass threshold
 		}
 	}
 
-	return sourceEntity;
-}
+	// Get comparison criteria
+	const criteria = this.getNodeParameter('comparisonCriteria.values', index, []) as IDataObject[];
 
-/**
- * Convert input data to extraction configuration
- */
-function buildExtractionConfig(input: IDataObject): IEntityMatcherExtractionConfig {
-	const extractionConfig: IEntityMatcherExtractionConfig = {
-		resultsSelector: "",
-		itemSelector: "",
-		fields: [],
+	// Build field comparisons
+	const fieldComparisons = criteria.map(criterion => {
+		return {
+			field: criterion.selector as string,
+			algorithm: criterion.comparisonType as any || 'levenshtein',
+			weight: criterion.weight as number || 1,
+		};
+	});
+
+	// Get the threshold from UI
+	const threshold = this.getNodeParameter('minimumScoreThreshold', index, 0.5) as number;
+
+	return {
+		fieldComparisons,
+		threshold,
+		matchMode,
+		limitResults: matchesToReturn,
+		sortResults: true,
 	};
-
-	// Process extraction config
-	if (input.extractionConfig && (input.extractionConfig as IDataObject).config) {
-		const config = ((input.extractionConfig as IDataObject).config as IDataObject[])[0];
-
-		extractionConfig.resultsSelector = config.resultsSelector as string;
-		extractionConfig.itemSelector = config.itemSelector as string;
-		extractionConfig.waitForSelector = config.waitForSelector as boolean;
-		extractionConfig.selectorTimeout = config.selectorTimeout as number;
-	}
-
-	// Process field mapping
-	if (input.fieldMapping && (input.fieldMapping as IDataObject).fields) {
-		const fields = (input.fieldMapping as IDataObject).fields as IDataObject[];
-
-		for (const field of fields) {
-			extractionConfig.fields.push({
-				name: field.name as string,
-				selector: field.selector as string,
-				attribute: field.attribute as string,
-				weight: field.weight as number || 1,
-				required: field.required as boolean,
-			});
-		}
-	}
-
-	return extractionConfig;
 }
 
 /**
- * Convert input data to comparison configuration
+ * Builds action configuration from input parameters
  */
-function buildComparisonConfig(input: IDataObject): IEntityMatcherComparisonConfig {
-	const comparisonConfig: IEntityMatcherComparisonConfig = {
-		fieldComparisons: [],
-		threshold: 0.7,
+function buildActionConfig(this: IExecuteFunctions, index: number): IEntityMatcherActionConfig {
+	// Get action parameters
+	const actionType = this.getNodeParameter('actionType', index, 'click') as 'click' | 'extract' | 'none';
+	const actionSelector = this.getNodeParameter('actionSelector', index, '') as string;
+	const actionAttribute = this.getNodeParameter('actionAttribute', index, '') as string;
+	const waitAfterAction = this.getNodeParameter('waitAfterAction', index, true) as boolean;
+	const waitTime = this.getNodeParameter('waitTime', index, 5000) as number;
+	const waitSelector = this.getNodeParameter('waitSelector', index, '') as string;
+
+	return {
+		action: actionType,
+		actionSelector,
+		actionAttribute,
+		waitAfterAction,
+		waitTime,
+		waitSelector,
 	};
-
-	// Process comparison config
-	if (input.comparisonConfig && (input.comparisonConfig as IDataObject).config) {
-		const config = ((input.comparisonConfig as IDataObject).config as IDataObject[])[0];
-
-		comparisonConfig.threshold = config.threshold as number;
-		comparisonConfig.matchMode = config.matchMode as 'best' | 'all' | 'firstAboveThreshold';
-		comparisonConfig.limitResults = config.limitResults as number;
-		comparisonConfig.sortResults = config.sortResults as boolean;
-	}
-
-	// Build field comparisons based on extraction fields
-	if (input.fieldMapping && (input.fieldMapping as IDataObject).fields) {
-		const fields = (input.fieldMapping as IDataObject).fields as IDataObject[];
-
-		for (const field of fields) {
-			comparisonConfig.fieldComparisons.push({
-				field: field.name as string,
-				algorithm: 'levenshtein', // Default algorithm for now
-				weight: field.weight as number || 1,
-			});
-		}
-	}
-
-	return comparisonConfig;
 }
 
 /**
- * Convert input data to action configuration
+ * Get additional matcher configuration
  */
-function buildActionConfig(input: IDataObject): IEntityMatcherActionConfig {
-	const actionConfig: IEntityMatcherActionConfig = {
-		action: 'none',
+function getAdditionalMatcherConfig(this: IExecuteFunctions, index: number): any {
+	const limitItemsToCompare = this.getNodeParameter('limitCandidatesCompared', index, false) as boolean;
+	const maxItemsToCompare = limitItemsToCompare
+		? this.getNodeParameter('maxCandidates', index, 10) as number
+		: 0; // 0 means no limit
+
+	// Get criteria for custom configurations
+	const criteria = this.getNodeParameter('comparisonCriteria.values', index, []) as IDataObject[];
+
+	// Extract per-field settings that don't fit in the standard interfaces
+	const fieldSettings = criteria.map(criterion => {
+		return {
+			field: criterion.selector as string,
+			threshold: criterion.threshold as number || 0.7,
+			transformation: criterion.transformation as string || '',
+			tolerance: criterion.tolerance as number || 0.01,
+			dataFormat: criterion.dataFormat as string || 'text',
+		};
+	});
+
+	return {
+		maxItems: maxItemsToCompare,
+		fieldSettings,
 	};
-
-	// Process action config
-	if (input.actionConfig && (input.actionConfig as IDataObject).config) {
-		const config = ((input.actionConfig as IDataObject).config as IDataObject[])[0];
-
-		actionConfig.action = config.action as 'click' | 'extract' | 'none';
-		actionConfig.actionSelector = config.actionSelector as string;
-		actionConfig.actionAttribute = config.actionAttribute as string;
-		actionConfig.waitAfterAction = config.waitAfterAction as boolean;
-		actionConfig.waitTime = config.waitTime as number;
-		actionConfig.waitSelector = config.waitSelector as string;
-	}
-
-	return actionConfig;
 }
 
 /**
- * Build a complete entity matcher config object from the individual config objects
+ * Build the complete entity matcher configuration
  */
 function buildEntityMatcherConfig(
 	sourceEntity: ISourceEntity,
 	extractionConfig: IEntityMatcherExtractionConfig,
 	comparisonConfig: IEntityMatcherComparisonConfig,
-	actionConfig: IEntityMatcherActionConfig
+	actionConfig: IEntityMatcherActionConfig,
+	additionalConfig: any
 ) {
 	return {
 		// Source entity data
@@ -895,15 +655,19 @@ function buildEntityMatcherConfig(
 		itemSelector: extractionConfig.itemSelector,
 
 		// Field extraction configuration
-		fields: extractionConfig.fields.map(field => ({
-			name: field.name,
-			selector: field.selector,
-			attribute: field.attribute,
-			weight: field.weight,
-			required: field.required,
-			comparisonAlgorithm: 'levenshtein', // Default for now
-			normalizationOptions: field.normalizationOptions,
-		})),
+		fields: extractionConfig.fields.map((field, index) => {
+			// Merge with additional field settings
+			const additionalField = additionalConfig.fieldSettings[index] || {};
+
+			return {
+				name: field.name,
+				selector: field.selector,
+				attribute: field.attribute,
+				weight: field.weight,
+				required: field.required,
+				comparisonAlgorithm: additionalField.dataFormat === 'attribute' ? 'exact' : 'levenshtein',
+			};
+		}),
 
 		// Matching configuration
 		threshold: comparisonConfig.threshold,
@@ -922,6 +686,10 @@ function buildEntityMatcherConfig(
 		// Timing configuration
 		waitForSelector: extractionConfig.waitForSelector,
 		selectorTimeout: extractionConfig.selectorTimeout,
+
+		// Additional settings (handled by our custom implementation)
+		maxItems: additionalConfig.maxItems,
+		fieldSettings: additionalConfig.fieldSettings,
 	};
 }
 
@@ -991,17 +759,19 @@ export async function execute(
 		);
 
 		// Build configuration objects
-		const sourceEntity = buildSourceEntity(this.getNodeParameter('sourceEntity', index, {}) as IDataObject);
-		const extractionConfig = buildExtractionConfig(this.getNodeParameter('extractionConfig', index, {}) as IDataObject);
-		const comparisonConfig = buildComparisonConfig(this.getNodeParameter('comparisonConfig', index, {}) as IDataObject);
-		const actionConfig = buildActionConfig(this.getNodeParameter('actionConfig', index, {}) as IDataObject);
+		const sourceEntity = buildSourceEntity.call(this, index);
+		const extractionConfig = buildExtractionConfig.call(this, index);
+		const comparisonConfig = buildComparisonConfig.call(this, index);
+		const actionConfig = buildActionConfig.call(this, index);
+		const additionalConfig = getAdditionalMatcherConfig.call(this, index);
 
 		// Build combined config for the entity matcher
 		const entityMatcherConfig = buildEntityMatcherConfig(
 			sourceEntity,
 			extractionConfig,
 			comparisonConfig,
-			actionConfig
+			actionConfig,
+			additionalConfig
 		);
 
 		// Create entity matcher using the static factory method
