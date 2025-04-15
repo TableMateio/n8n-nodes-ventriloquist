@@ -1423,6 +1423,102 @@ export function applyResultTransformations(
 	const startTime = additionalConfig.startTime || now.getTime();
 	const executionDuration = now.getTime() - startTime;
 
+	// Get source entity data for comparison details
+	const sourceEntity = additionalConfig.sourceEntity || {};
+	const fieldSettings = additionalConfig.fieldSettings || [];
+
+	// Create detailed comparison information
+	const comparisonDetails: IDataObject = {
+		criteria: [] as IDataObject[],
+		itemsFound: results?.itemsFound || results?.totalExtracted || 0,
+		itemsCompared: results?.extractedItems?.length || 0,
+		comparisonMethod: additionalConfig.comparisonMethod || 'smart',
+		threshold: additionalConfig.threshold || 0.7,
+		format: additionalConfig.outputFormat || 'smart',
+		executionDuration
+	};
+
+	// Add all criteria used for comparison
+	if (fieldSettings && fieldSettings.length > 0) {
+		fieldSettings.forEach((setting: any) => {
+			(comparisonDetails.criteria as IDataObject[]).push({
+				field: setting.field,
+				referenceValue: sourceEntity[setting.field] || '',
+				matchMethod: setting.matchMethod || 'similarity',
+				comparisonType: setting.comparisonType || 'levenshtein',
+				weight: setting.weight || 1,
+				required: setting.required || false,
+				dataFormat: setting.dataFormat || 'text',
+				outputFormat: setting.outputFormat || 'smart'
+			});
+		});
+	}
+
+	// Extract all comparison objects
+	const comparisonObjects: IDataObject[] = [];
+
+	// If we have extracted items, add them all to the comparison objects
+	if (results?.extractedItems && results.extractedItems.length > 0) {
+		results.extractedItems.forEach((item: any, index: number) => {
+			// Create a comparison object with all details
+			const compObj: IDataObject = {
+				index,
+				content: {
+					fullText: item.fields?.__fullText?.substring(0, 300) || "No text content",
+					fullHtml: item.fields?.__fullHtml?.substring(0, 300) || "No HTML content",
+					outerHtml: item.fields?.__outerHtml?.substring(0, 300) || "No outer HTML"
+				},
+				extractedFields: {} as IDataObject,
+				wasCompared: true
+			};
+
+			// Add all extracted fields except internal ones
+			if (item.fields) {
+				Object.entries(item.fields).forEach(([key, value]) => {
+					if (!key.startsWith('__')) {
+						(compObj.extractedFields as IDataObject)[key] = value as string | number | boolean | IDataObject | IDataObject[] | null;
+					}
+				});
+			}
+
+			// Add similarity scores if available
+			if (results.matches && results.matches.find((m: any) => m.index === index)) {
+				const match = results.matches.find((m: any) => m.index === index);
+				compObj.similarity = match.overallSimilarity;
+				compObj.fieldSimilarities = match.similarities || {};
+				compObj.aboveThreshold = (match.overallSimilarity >= (additionalConfig.threshold || 0.7));
+				compObj.selected = match.selected || false;
+			} else {
+				compObj.similarity = 0;
+				compObj.aboveThreshold = false;
+				compObj.selected = false;
+			}
+
+			comparisonObjects.push(compObj);
+		});
+	}
+	// If we have additionalConfig.extractedItemsData, use that as fallback
+	else if (additionalConfig.extractedItemsData && additionalConfig.extractedItemsData.length > 0) {
+		additionalConfig.extractedItemsData.forEach((item: any, index: number) => {
+			const compObj: IDataObject = {
+				index,
+				content: {
+					textPreview: item.textPreview || "No text preview available",
+					fields: item.fields || {}
+				},
+				similarity: item.similarity || 0,
+				aboveThreshold: item.similarity >= (additionalConfig.threshold || 0.7),
+				selected: false
+			};
+
+			if (item.similarities) {
+				compObj.fieldSimilarities = item.similarities;
+			}
+
+			comparisonObjects.push(compObj);
+		});
+	}
+
 	// If no results or matches, handle accordingly
 	if (!results || !results.success) {
 		outputObj.found = false;
@@ -1433,6 +1529,10 @@ export function applyResultTransformations(
 		outputObj.similarity = 0;
 		outputObj.count = 0;
 		outputObj.reason = results?.error || 'No matching items found';
+
+		// Add detailed comparison information
+		outputObj.comparisonDetails = comparisonDetails;
+		outputObj.comparisonObjects = comparisonObjects;
 
 		// Add diagnostic information
 		outputObj.matchDetails = {
@@ -1464,6 +1564,9 @@ export function applyResultTransformations(
 			(outputObj.matchDetails as IDataObject).pageInfo = additionalConfig.pageInfo;
 		}
 
+		// Add execution duration
+		outputObj.executionDuration = executionDuration;
+
 		return {
 			json: outputObj
 		};
@@ -1476,7 +1579,6 @@ export function applyResultTransformations(
 	if (matches.length > 0) {
 		// Process the best match (highest similarity)
 		const bestMatch = matches[0];
-		const fieldSettings = additionalConfig.fieldSettings || [];
 
 		// Process the best match with type conversions
 		const processedMatch = processMatchResult(bestMatch, fieldSettings, logger, logPrefix);
@@ -1493,6 +1595,10 @@ export function applyResultTransformations(
 		outputObj.allMatches = processedMatches;
 		outputObj.similarity = bestMatch.overallSimilarity;
 		outputObj.count = matches.length;
+
+		// Add detailed comparison information
+		outputObj.comparisonDetails = comparisonDetails;
+		outputObj.comparisonObjects = comparisonObjects;
 
 		// Add match details
 		outputObj.matchDetails = {
@@ -1515,6 +1621,10 @@ export function applyResultTransformations(
 		outputObj.similarity = 0;
 		outputObj.count = 0;
 		outputObj.reason = 'Items were found but none matched the comparison criteria';
+
+		// Add detailed comparison information
+		outputObj.comparisonDetails = comparisonDetails;
+		outputObj.comparisonObjects = comparisonObjects;
 
 		// Add diagnostic information
 		outputObj.matchDetails = {
@@ -1548,6 +1658,9 @@ export function applyResultTransformations(
 	if (additionalConfig.pageInfo) {
 		(outputObj.matchDetails as IDataObject).pageInfo = additionalConfig.pageInfo;
 	}
+
+	// Add execution duration
+	outputObj.executionDuration = executionDuration;
 
 	return {
 		json: outputObj
