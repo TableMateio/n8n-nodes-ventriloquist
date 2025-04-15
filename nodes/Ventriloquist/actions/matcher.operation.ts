@@ -172,12 +172,12 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Item Selector",
+		displayName: "Items Selector",
 		name: "itemSelector",
 		type: "string",
 		default: "",
 		placeholder: "li",
-		description: "CSS selector for individual items within the container",
+		description: "CSS selector for individual items within the container (optional - child elements will be used if not specified)",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -186,8 +186,8 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Item Selector",
-		name: "itemSelector",
+		displayName: "Items Selector",
+		name: "directItemSelector",
 		type: "string",
 		default: "",
 		placeholder: "ol.co_searchResult_list > li",
@@ -251,12 +251,12 @@ export const description: INodeProperties[] = [
 								description: "Compare using text similarity algorithms",
 							},
 							{
-								name: "Rule-Based",
+								name: "Rule",
 								value: "ruleBased",
 								description: "Use exact rules like contains, starts with, regex, etc",
 							},
 							{
-								name: "AI-Powered",
+								name: "AI",
 								value: "ai",
 								description: "Use AI to determine if items match semantically",
 							},
@@ -265,6 +265,35 @@ export const description: INodeProperties[] = [
 						description: "Method to use for this match criterion",
 					},
 					// SIMILARITY METHOD FIELDS
+					{
+						displayName: "Matching Approach",
+						name: "matchingApproach",
+						type: "options",
+						options: [
+							{
+								name: "Smart Match (All Text)",
+								value: "smart",
+								description: "Automatically extract all text from the element and match intelligently",
+							},
+							{
+								name: "Match All Element Text",
+								value: "all",
+								description: "Use all text from the element with specific format handling",
+							},
+							{
+								name: "Select Specific Element",
+								value: "specific",
+								description: "Choose a specific sub-element to extract text from",
+							},
+						],
+						default: "smart",
+						description: "How to extract text from the element for comparison",
+						displayOptions: {
+							show: {
+								matchMethod: ["similarity"],
+							},
+						},
+					},
 					{
 						displayName: "Data Format",
 						name: "dataFormat",
@@ -296,51 +325,7 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								matchMethod: ["similarity"],
-							},
-						},
-					},
-					{
-						displayName: "Similarity Algorithm",
-						name: "comparisonType",
-						type: "options",
-						options: [
-							{
-								name: "Levenshtein",
-								value: "levenshtein",
-								description: "Edit distance (default)",
-							},
-							{
-								name: "Fuzzy",
-								value: "fuzzy",
-								description: "Fuzzy string matching",
-							},
-							{
-								name: "Semantic",
-								value: "semantic",
-								description: "Meaning-based comparison",
-							},
-						],
-						default: "levenshtein",
-						description: "Algorithm to use for similarity comparison",
-						displayOptions: {
-							show: {
-								matchMethod: ["similarity"],
-							},
-						},
-					},
-					{
-						displayName: "Match Threshold",
-						name: "threshold",
-						type: "number",
-						typeOptions: {
-							minValue: 0,
-							maxValue: 1,
-						},
-						default: 0.7,
-						description: "Minimum similarity score required for this criterion (0-1)",
-						displayOptions: {
-							show: {
-								matchMethod: ["similarity"],
+								matchingApproach: ["all", "specific"],
 							},
 						},
 					},
@@ -366,6 +351,7 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								matchMethod: ["similarity"],
+								matchingApproach: ["specific"],
 							},
 						},
 					},
@@ -400,6 +386,52 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								matchMethod: ["similarity"],
+								matchingApproach: ["specific"],
+							},
+						},
+					},
+					{
+						displayName: "Similarity Algorithm",
+						name: "comparisonType",
+						type: "options",
+						options: [
+							{
+								name: "Basic Text Comparison (Levenshtein)",
+								value: "levenshtein",
+								description: "Standard text comparison based on character differences",
+							},
+							{
+								name: "Flexible Matching (Fuzzy)",
+								value: "fuzzy",
+								description: "Finds similar text even with typos or small variations",
+							},
+							{
+								name: "Meaning-Based Matching (Semantic)",
+								value: "semantic",
+								description: "Compares the meaning of text rather than exact characters",
+							},
+						],
+						default: "levenshtein",
+						description: "Algorithm to use for similarity comparison",
+						displayOptions: {
+							show: {
+								matchMethod: ["similarity"],
+							},
+						},
+					},
+					{
+						displayName: "Match Threshold",
+						name: "threshold",
+						type: "number",
+						typeOptions: {
+							minValue: 0,
+							maxValue: 1,
+						},
+						default: 0.7,
+						description: "Minimum similarity score required for this criterion (0-1)",
+						displayOptions: {
+							show: {
+								matchMethod: ["similarity"],
 							},
 						},
 					},
@@ -416,15 +448,15 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
-						displayName: "Weight",
+						displayName: "Importance",
 						name: "weight",
 						type: "number",
 						typeOptions: {
 							minValue: 0,
-							maxValue: 10,
+							maxValue: 1,
 						},
-						default: 1,
-						description: "How important this criterion is compared to others",
+						default: 0.5,
+						description: "How important this criterion is (0 = least important, 1 = most important)",
 						displayOptions: {
 							show: {
 								matchMethod: ["similarity"],
@@ -625,15 +657,15 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
-						displayName: "Weight",
+						displayName: "Importance",
 						name: "weight",
 						type: "number",
 						typeOptions: {
 							minValue: 0,
-							maxValue: 10,
+							maxValue: 1,
 						},
-						default: 1,
-						description: "How important this criterion is compared to others",
+						default: 0.5,
+						description: "How important this criterion is (0 = least important, 1 = most important)",
 						displayOptions: {
 							show: {
 								matchMethod: ["ruleBased"],
@@ -668,6 +700,40 @@ export const description: INodeProperties[] = [
 					},
 
 					// AI-POWERED METHOD FIELDS
+					{
+						displayName: "Data Format",
+						name: "dataFormat",
+						type: "options",
+						options: [
+							{
+								name: "Text",
+								value: "text",
+								description: "Plain text",
+							},
+							{
+								name: "Number",
+								value: "number",
+								description: "Numeric value",
+							},
+							{
+								name: "Date",
+								value: "date",
+								description: "Date value",
+							},
+							{
+								name: "Address",
+								value: "address",
+								description: "Address format",
+							},
+						],
+						default: "text",
+						description: "Data format for reference value",
+						displayOptions: {
+							show: {
+								matchMethod: ["ai"],
+							},
+						},
+					},
 					{
 						displayName: "AI Question",
 						name: "referenceValue",
@@ -707,15 +773,15 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
-						displayName: "Weight",
+						displayName: "Importance",
 						name: "weight",
 						type: "number",
 						typeOptions: {
 							minValue: 0,
-							maxValue: 10,
+							maxValue: 1,
 						},
-						default: 1,
-						description: "How important this criterion is compared to others",
+						default: 0.5,
+						description: "How important this criterion is (0 = least important, 1 = most important)",
 						displayOptions: {
 							show: {
 								matchMethod: ["ai"],
@@ -875,7 +941,7 @@ function buildExtractionConfig(this: IExecuteFunctions, index: number): IEntityM
 		itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
 	} else {
 		// For direct item selection, we use the item selector directly
-		itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
+		itemSelector = this.getNodeParameter('directItemSelector', index, '') as string;
 	}
 
 	const waitForSelector = this.getNodeParameter('waitForSelector', index, true) as boolean;
@@ -889,13 +955,38 @@ function buildExtractionConfig(this: IExecuteFunctions, index: number): IEntityM
 		itemSelector,
 		waitForSelector,
 		selectorTimeout,
-		fields: criteria.map(criterion => ({
-			name: criterion.selector as string,
-			selector: criterion.selector as string,
-			attribute: criterion.dataFormat === 'attribute' ? criterion.attribute as string : undefined,
-			weight: criterion.weight as number || 1,
-			required: criterion.mustMatch as boolean,
-		})),
+		fields: criteria.map(criterion => {
+			const matchMethod = criterion.matchMethod as string;
+			let selector = criterion.selector as string;
+			let attribute: string | undefined = undefined;
+
+			// For similarity with smart approach, we don't need a selector
+			if (matchMethod === 'similarity') {
+				const matchingApproach = criterion.matchingApproach as string || 'smart';
+
+				if (matchingApproach === 'smart' || matchingApproach === 'all') {
+					// For smart and all approaches, we don't use a specific selector
+					selector = '';
+				}
+
+				// For dataFormat=number or dataFormat=date, we need to convert the value
+				const dataFormat = criterion.dataFormat as string;
+				if ((dataFormat === 'number' || dataFormat === 'date') &&
+				    (matchingApproach === 'all' || matchingApproach === 'specific')) {
+					attribute = dataFormat;
+				}
+			} else if (criterion.dataFormat === 'attribute') {
+				attribute = criterion.attribute as string;
+			}
+
+			return {
+				name: selector || 'fullItem', // Use 'fullItem' as a fallback name
+				selector,
+				attribute,
+				weight: criterion.weight as number || 1,
+				required: criterion.mustMatch as boolean,
+			};
+		}),
 	};
 }
 
@@ -1016,9 +1107,21 @@ function getAdditionalMatcherConfig(this: IExecuteFunctions, index: number): any
 		// Get comparison type based on match method
 		let comparisonType = '';
 		let tolerance = 0.01;
+		let outputFormat = 'smart';
 
 		if (matchMethod === 'similarity') {
 			comparisonType = criterion.comparisonType as string || 'levenshtein';
+
+			// Set appropriate output format based on matching approach
+			const matchingApproach = criterion.matchingApproach as string || 'smart';
+			if (matchingApproach === 'smart') {
+				outputFormat = 'smart';
+			} else if (matchingApproach === 'all') {
+				outputFormat = 'text';
+			} else if (matchingApproach === 'specific') {
+				outputFormat = criterion.outputFormat as string || 'smart';
+			}
+
 		} else if (matchMethod === 'ruleBased') {
 			comparisonType = criterion.ruleType as string || 'exact';
 
@@ -1034,14 +1137,15 @@ function getAdditionalMatcherConfig(this: IExecuteFunctions, index: number): any
 		}
 
 		return {
-			field: criterion.selector as string,
+			field: criterion.selector as string || 'fullItem',
 			threshold: criterion.threshold as number || 0.7,
 			tolerance,
 			dataFormat: criterion.dataFormat as string || 'text',
 			required: criterion.mustMatch as boolean || false,
 			matchMethod,
 			comparisonType,
-			outputFormat: criterion.outputFormat as string || 'smart',
+			outputFormat,
+			matchingApproach: criterion.matchingApproach as string || 'smart',
 		};
 	});
 
