@@ -14,6 +14,7 @@ export interface IEntityField {
   comparisonAlgorithm?: string;
   normalizationOptions?: Partial<IAdvancedTextNormalizationOptions>;
   required?: boolean;
+  dataFormat?: 'text' | 'number' | 'date' | 'address' | 'boolean' | 'attribute';
 }
 
 /**

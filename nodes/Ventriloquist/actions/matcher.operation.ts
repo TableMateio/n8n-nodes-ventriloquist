@@ -959,6 +959,8 @@ function buildExtractionConfig(this: IExecuteFunctions, index: number): IEntityM
 			const matchMethod = criterion.matchMethod as string;
 			let selector = criterion.selector as string;
 			let attribute: string | undefined = undefined;
+			// Get data format with proper type casting
+			const dataFormat = (criterion.dataFormat as string || 'text') as 'text' | 'number' | 'date' | 'address' | 'boolean' | 'attribute';
 
 			// For similarity with smart approach, we don't need a selector
 			if (matchMethod === 'similarity') {
@@ -970,12 +972,11 @@ function buildExtractionConfig(this: IExecuteFunctions, index: number): IEntityM
 				}
 
 				// For dataFormat=number or dataFormat=date, we need to convert the value
-				const dataFormat = criterion.dataFormat as string;
 				if ((dataFormat === 'number' || dataFormat === 'date') &&
 				    (matchingApproach === 'all' || matchingApproach === 'specific')) {
 					attribute = dataFormat;
 				}
-			} else if (criterion.dataFormat === 'attribute') {
+			} else if (dataFormat === 'attribute') {
 				attribute = criterion.attribute as string;
 			}
 
@@ -985,6 +986,7 @@ function buildExtractionConfig(this: IExecuteFunctions, index: number): IEntityM
 				attribute,
 				weight: criterion.weight as number || 1,
 				required: criterion.mustMatch as boolean,
+				dataFormat, // Pass the data format to the field configuration
 			};
 		}),
 	};
@@ -1187,6 +1189,7 @@ function buildEntityMatcherConfig(
 				weight: field.weight,
 				required: field.required,
 				comparisonAlgorithm: additionalField.dataFormat === 'attribute' ? 'exact' : 'levenshtein',
+				dataFormat: field.dataFormat,
 			};
 		}),
 
