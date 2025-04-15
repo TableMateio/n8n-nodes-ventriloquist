@@ -301,9 +301,15 @@ export class EntityMatcherFactory {
             let totalWeight = 0;
             let weightedSimilarity = 0;
 
+            // Log source entity for debugging
+            context.logger.info(`[EntityMatcherFactory] Source entity to match against: ${JSON.stringify(sourceEntity)}`);
+
             for (const comparison of config.fieldComparisons || []) {
               const sourceValue = sourceEntity[comparison.field] || '';
               const fieldName = comparison.field;
+
+              // Add improved logging of source values for debugging
+              context.logger.info(`[EntityMatcherFactory] Source field value for "${fieldName}": "${sourceValue}"`);
 
               // Try using the field directly, then fallback to fullText for Smart Match
               const itemValue = item.fields[fieldName] ||
@@ -319,6 +325,8 @@ export class EntityMatcherFactory {
                 // Simple contains check as fallback
                 const normalizedSourceValue = sourceValue.toLowerCase();
                 const normalizedItemValue = itemValue.toLowerCase();
+
+                context.logger.info(`[EntityMatcherFactory] Comparing field "${fieldName}" - "${normalizedSourceValue}" vs item text "${normalizedItemValue.substring(0, 50)}..."`);
 
                 // For text comparison, check contains first (higher similarity score)
                 if (normalizedItemValue.includes(normalizedSourceValue)) {
@@ -380,14 +388,16 @@ export class EntityMatcherFactory {
 
           context.logger.info(`[EntityMatcherFactory] Found ${matches.length} matches above threshold`);
 
-          // Return the result
+          // Return the result with all extracted items
           return {
             success: matches.length > 0,
             matches,
             selectedMatch: matches.length > 0 ? matches[0] : undefined,
             containerFound: true,
             itemsFound: extractedItems.length,
-            totalExtracted: extractedItems.length
+            totalExtracted: extractedItems.length,
+            containerSelector: config.resultsSelector,
+            extractedItems: extractedItems // Make sure to include all extracted items in the result
           };
 
         } catch (error) {

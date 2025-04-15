@@ -1438,12 +1438,18 @@ export function applyResultTransformations(
 		executionDuration
 	};
 
+	// Log the source entity values for debugging
+	logger.info(`${logPrefix} Source entity values: ${JSON.stringify(sourceEntity)}`);
+
 	// Add all criteria used for comparison
 	if (fieldSettings && fieldSettings.length > 0) {
 		fieldSettings.forEach((setting: any) => {
+			const refValue = sourceEntity[setting.field] || '';
+			logger.info(`${logPrefix} Adding comparison criterion: field=${setting.field}, referenceValue="${refValue}"`);
+
 			(comparisonDetails.criteria as IDataObject[]).push({
 				field: setting.field,
-				referenceValue: sourceEntity[setting.field] || '',
+				referenceValue: refValue,
 				matchMethod: setting.matchMethod || 'similarity',
 				comparisonType: setting.comparisonType || 'levenshtein',
 				weight: setting.weight || 1,
@@ -1457,8 +1463,10 @@ export function applyResultTransformations(
 	// Extract all comparison objects
 	const comparisonObjects: IDataObject[] = [];
 
-	// If we have extracted items, add them all to the comparison objects
+	// If we have extracted items directly from the results, use them first
 	if (results?.extractedItems && results.extractedItems.length > 0) {
+		logger.info(`${logPrefix} Processing ${results.extractedItems.length} items directly from results`);
+
 		results.extractedItems.forEach((item: any, index: number) => {
 			// Create a comparison object with all details
 			const compObj: IDataObject = {
@@ -1471,6 +1479,10 @@ export function applyResultTransformations(
 				extractedFields: {} as IDataObject,
 				wasCompared: true
 			};
+
+			// Log what we're extracting
+			const previewText = ((compObj.content as IDataObject).fullText as string || '').substring(0, 50);
+			logger.info(`${logPrefix} Extracted item ${index} with content: ${previewText}...`);
 
 			// Add all extracted fields except internal ones
 			if (item.fields) {
@@ -1488,10 +1500,14 @@ export function applyResultTransformations(
 				compObj.fieldSimilarities = match.similarities || {};
 				compObj.aboveThreshold = (match.overallSimilarity >= (additionalConfig.threshold || 0.7));
 				compObj.selected = match.selected || false;
+
+				logger.info(`${logPrefix} Item ${index} matched with similarity ${match.overallSimilarity}`);
 			} else {
 				compObj.similarity = 0;
 				compObj.aboveThreshold = false;
 				compObj.selected = false;
+
+				logger.info(`${logPrefix} Item ${index} did not match any criteria`);
 			}
 
 			comparisonObjects.push(compObj);
@@ -1499,6 +1515,8 @@ export function applyResultTransformations(
 	}
 	// If we have additionalConfig.extractedItemsData, use that as fallback
 	else if (additionalConfig.extractedItemsData && additionalConfig.extractedItemsData.length > 0) {
+		logger.info(`${logPrefix} Processing ${additionalConfig.extractedItemsData.length} items from additional config`);
+
 		additionalConfig.extractedItemsData.forEach((item: any, index: number) => {
 			const compObj: IDataObject = {
 				index,
