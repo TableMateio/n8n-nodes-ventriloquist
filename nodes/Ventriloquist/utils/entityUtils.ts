@@ -3,7 +3,7 @@ import type * as puppeteer from 'puppeteer-core';
 import { createEntityMatcher, type IEntityMatcherConfig } from './middlewares/matching/entityMatcherFactory';
 import { createExtraction, type IExtractionConfig } from './middlewares/extraction/extractionFactory';
 import { normalizeText, formatPersonName, formatAddress } from './textUtils';
-import { compareStrings, compareEntities, type IFieldComparisonConfig } from './comparisonUtils';
+import { compareStrings, compareEntities, type IFieldComparisonConfig, type ComparisonAlgorithm } from './comparisonUtils';
 import { extractWithPattern, extractAllWithPattern } from './extractionPatterns';
 
 /**
@@ -60,6 +60,11 @@ export async function extractAndMatchEntities(
         attribute: extractionConfig.attribute,
         weight: extractionConfig.weight,
         comparisonAlgorithm: extractionConfig.comparisonAlgorithm,
+      })),
+      fieldComparisons: config.extractionConfigs.map(extractionConfig => ({
+        field: extractionConfig.field,
+        weight: extractionConfig.weight,
+        algorithm: (extractionConfig.comparisonAlgorithm || 'levenshtein') as ComparisonAlgorithm,
       })),
       threshold: config.threshold,
       limitResults: config.limitResults,

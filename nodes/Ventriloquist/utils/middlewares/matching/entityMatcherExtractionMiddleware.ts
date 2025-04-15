@@ -10,7 +10,13 @@ import {
   type IEntityField
 } from '../types/entityMatcherTypes';
 import { normalizeText } from '../../textUtils';
-import { smartWaitForSelector } from '../../detectionUtils';
+import {
+  smartWaitForSelector,
+  detectElement,
+  IDetectionOptions,
+  IDetectionResult
+} from '../../detectionUtils';
+import { elementExists, isElementVisible } from '../../navigationUtils';
 
 /**
  * Entity Matcher Extraction Middleware
@@ -25,10 +31,48 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
     context: IMiddlewareContext
   ): Promise<IEntityMatcherExtractionOutput> {
     const { logger, nodeName, nodeId, index = 0 } = context;
-    const { page, extractionConfig } = input;
     const logPrefix = `[EntityMatcherExtraction][${nodeName}][${nodeId}]`;
 
     try {
+      // Validate extraction config existence
+      if (!input) {
+        logger.error(`${logPrefix} Missing input object completely`);
+        return {
+          success: false,
+          items: [],
+          error: 'Missing input object completely',
+          containerFound: false,
+          itemsFound: 0,
+        };
+      }
+
+      const { page, extractionConfig } = input;
+
+      // Validate extraction config
+      if (!extractionConfig) {
+        logger.error(`${logPrefix} Missing extraction configuration`);
+        return {
+          success: false,
+          items: [],
+          error: 'Missing extraction configuration',
+          containerFound: false,
+          itemsFound: 0,
+        };
+      }
+
+      // Check the critical properties with more detail
+      if (!extractionConfig.resultsSelector) {
+        logger.error(`${logPrefix} Missing resultsSelector in extraction configuration`);
+        logger.error(`${logPrefix} Full extraction config: ${JSON.stringify(extractionConfig)}`);
+        return {
+          success: false,
+          items: [],
+          error: 'Missing resultsSelector in extraction configuration',
+          containerFound: false,
+          itemsFound: 0,
+        };
+      }
+
       logger.info(`${logPrefix} Starting entity extraction with config: ${JSON.stringify({
         resultsSelector: extractionConfig.resultsSelector,
         itemSelector: extractionConfig.itemSelector || '(auto-detect)',
@@ -36,46 +80,64 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
         autoDetect: extractionConfig.autoDetectChildren
       })}`);
 
-      // Wait for selectors if configured
-      if (extractionConfig.waitForSelector !== false) {
-        const timeout = extractionConfig.selectorTimeout || 10000;
+      // Create detection options for smart element detection
+      const detectionOptions: IDetectionOptions = {
+        waitForSelectors: extractionConfig.waitForSelectors ?? true,
+        selectorTimeout: extractionConfig.timeout ?? 10000,
+        detectionMethod: 'smart',
+        earlyExitDelay: 500,
+        nodeName,
+        nodeId,
+        index,
+      };
 
-        logger.info(`${logPrefix} Waiting for container selector: ${extractionConfig.resultsSelector} (timeout: ${timeout}ms)`);
+      // Use the improved detection utility to find the container
+      const containerDetectionResult = await detectElement(
+        page,
+        extractionConfig.resultsSelector,
+        detectionOptions,
+        logger
+      );
 
-        try {
-          await page.waitForSelector(extractionConfig.resultsSelector, {
-            timeout,
-            visible: true
-          });
+      // Log detection result
+      logger.info(`${logPrefix} Container detection result: ${containerDetectionResult.success ? 'FOUND' : 'NOT FOUND'}`);
 
-          logger.debug(`${logPrefix} Container selector found: ${extractionConfig.resultsSelector}`);
-        } catch (error) {
-          logger.warn(`${logPrefix} Timeout waiting for container selector: ${extractionConfig.resultsSelector}`);
-          return {
-            success: false,
-            items: [],
-            error: `Timeout waiting for container selector: ${extractionConfig.resultsSelector}`,
-          };
-        }
+      if (!containerDetectionResult.success) {
+        logger.warn(`${logPrefix} Container element not found with selector: ${extractionConfig.resultsSelector}`);
+        return {
+          success: false,
+          items: [],
+          error: `Container element not found with selector: ${extractionConfig.resultsSelector}`,
+          containerFound: false,
+          itemsFound: 0,
+          containerSelector: extractionConfig.resultsSelector,
+          itemSelector: extractionConfig.itemSelector || '(auto-detect)'
+        };
       }
 
       // Extract items from the page
       const items = await this.extractItems(
         page,
         extractionConfig,
+        detectionOptions,
         logger,
         logPrefix
       );
 
-      logger.info(`${logPrefix} Extraction completed. Found ${items.length} items`);
+      // Be very explicit about what was found
+      logger.info(`${logPrefix} Extraction completed. Container found: ${containerDetectionResult.success}, Items found: ${items.length}`);
+
+      if (containerDetectionResult.success && items.length === 0) {
+        logger.warn(`${logPrefix} Container was found but no items were extracted. This may indicate an issue with the item selector or auto-detection.`);
+      }
 
       return {
-        success: true,
+        success: items.length > 0,
         items,
-        containerFound: true,
+        containerFound: containerDetectionResult.success,
         itemsFound: items.length,
         containerSelector: extractionConfig.resultsSelector,
-        itemSelector: extractionConfig.itemSelector,
+        itemSelector: extractionConfig.itemSelector || '(auto-detected)',
       };
     } catch (error) {
       const errorMessage = (error as Error).message;
@@ -85,6 +147,10 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
         success: false,
         items: [],
         error: errorMessage,
+        containerFound: false,
+        itemsFound: 0,
+        containerSelector: input?.extractionConfig?.resultsSelector || 'unknown',
+        itemSelector: input?.extractionConfig?.itemSelector || '(auto-detect)',
       };
     }
   }
@@ -95,13 +161,16 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
   private async extractItems(
     page: Page,
     config: IEntityMatcherExtractionInput['extractionConfig'],
+    detectionOptions: IDetectionOptions,
     logger: ILogger,
     logPrefix: string
   ): Promise<IExtractedItem[]> {
-    // Find the container element
+    // Container should be found at this point since we already checked in execute
     const containerElement = await page.$(config.resultsSelector);
+
     if (!containerElement) {
-      throw new Error(`Container element not found: ${config.resultsSelector}`);
+      logger.warn(`${logPrefix} Container element not accessible even though detection passed: ${config.resultsSelector}`);
+      return [];
     }
 
     // Log container details for debugging
@@ -112,87 +181,53 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
     let itemElements: ElementHandle<Element>[] = [];
 
     if (config.itemSelector && config.itemSelector.trim() !== '') {
-      // Use the provided selector
-      itemElements = await containerElement.$$(`${config.itemSelector}`);
-      logger.info(`${logPrefix} Found ${itemElements.length} items using selector: ${config.itemSelector}`);
-    } else if (config.autoDetectChildren === true) {
-      // Get direct children of the container as a first option
-      const directChildren = await containerElement.$$(':scope > *');
-      logger.debug(`${logPrefix} Container has ${directChildren.length} direct children`);
+      // Use the provided selector with improved detection
+      try {
+        // Try to detect items using detection utilities
+        const combinedSelector = `${config.resultsSelector} ${config.itemSelector}`;
+        logger.info(`${logPrefix} Detecting items with combined selector: ${combinedSelector}`);
 
-      // Debug log for direct children
-      for (let i = 0; i < Math.min(3, directChildren.length); i++) {
-        const childDetails = await this.getElementDetails(page, directChildren[i]);
-        logger.debug(`${logPrefix} Child ${i} details: ${JSON.stringify(childDetails)}`);
-      }
+        const itemsDetectionResult = await detectElement(
+          page,
+          combinedSelector,
+          detectionOptions,
+          logger
+        );
 
-      // If we have a reasonable number of direct children, use them
-      if (directChildren.length >= 2 && directChildren.length <= 100) {
-        itemElements = directChildren;
-        logger.info(`${logPrefix} Using ${itemElements.length} direct children of container`);
-      }
-      // Otherwise try more specific auto-detection approaches
-      else {
-        logger.debug(`${logPrefix} Attempting to auto-detect item elements`);
+        if (itemsDetectionResult.success) {
+          logger.info(`${logPrefix} Items found with combined selector: ${combinedSelector}`);
+          itemElements = await page.$$(combinedSelector);
+          logger.info(`${logPrefix} Found ${itemElements.length} items using combined selector detection`);
+        } else {
+          logger.warn(`${logPrefix} No items found with combined selector: ${combinedSelector}`);
 
-        // Try to find lists first
-        const listItems = await containerElement.$$('li');
-        const rows = await containerElement.$$('tr');
-        const divs = await containerElement.$$('div[class]');
+          // Try with container scope for better targeting
+          logger.info(`${logPrefix} Trying to find items within container scope using: ${config.itemSelector}`);
 
-        // Check for nested lists
-        if (listItems.length >= 2) {
-          itemElements = listItems;
-          logger.info(`${logPrefix} Using ${itemElements.length} list items`);
-        }
-        // Check for table rows
-        else if (rows.length >= 2) {
-          itemElements = rows;
-          logger.info(`${logPrefix} Using ${itemElements.length} table rows`);
-        }
-        // Check for repeated class patterns on divs
-        else if (divs.length >= 2) {
-          // Get class names for divs to check for patterns
-          const divClasses = await Promise.all(
-            divs.map((div: ElementHandle<Element>) => page.evaluate(el => el.className, div))
-          );
+          // Check if there are items within the container first
+          const hasItems = await containerElement.evaluate((container, selector) => {
+            return container.querySelectorAll(selector).length > 0;
+          }, config.itemSelector);
 
-          // Count occurrences of each class
-          const classCount: Record<string, number> = {};
-          divClasses.forEach((className: string) => {
-            if (!className) return;
-
-            className.split(' ').forEach((cls: string) => {
-              if (!cls) return;
-              classCount[cls] = (classCount[cls] || 0) + 1;
-            });
-          });
-
-          // Find classes that appear multiple times
-          const repeatedClasses = Object.entries(classCount)
-            .filter(([_, count]) => count >= 2)
-            .map(([cls]) => cls);
-
-          if (repeatedClasses.length > 0) {
-            // Use the most common class
-            const mostCommonClass = repeatedClasses.sort(
-              (a, b) => classCount[b] - classCount[a]
-            )[0];
-
-            itemElements = await containerElement.$$(`.${mostCommonClass}`);
-            logger.info(`${logPrefix} Using ${itemElements.length} elements with repeated class: ${mostCommonClass}`);
+          if (hasItems) {
+            logger.info(`${logPrefix} Items found within container using selector: ${config.itemSelector}`);
+            itemElements = await containerElement.$$(config.itemSelector);
+            logger.info(`${logPrefix} Found ${itemElements.length} items within container scope`);
           } else {
-            // Fallback to all divs
-            itemElements = divs;
-            logger.info(`${logPrefix} Using ${itemElements.length} div elements (fallback)`);
+            logger.warn(`${logPrefix} No items found within container using selector: ${config.itemSelector}`);
           }
         }
-        // Final fallback - use any elements that might be containers
-        else {
-          itemElements = await containerElement.$$('div, section, article, li, tr');
-          logger.info(`${logPrefix} Using ${itemElements.length} potential container elements (fallback)`);
-        }
+      } catch (itemDetectionError) {
+        logger.warn(`${logPrefix} Error in item detection: ${(itemDetectionError as Error).message}, falling back to standard method`);
+        itemElements = await containerElement.$$(config.itemSelector);
       }
+    } else if (config.autoDetectChildren === true) {
+      // Get direct children of the container for auto-detection
+      const directChildren = await containerElement.$$(':scope > *');
+      logger.debug(`${logPrefix} Container has ${directChildren.length} direct children for auto-detection`);
+
+      // Use the direct children as item elements
+      itemElements = directChildren;
     }
 
     // If no items found, return empty array

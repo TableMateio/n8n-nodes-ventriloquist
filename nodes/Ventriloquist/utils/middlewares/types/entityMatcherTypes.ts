@@ -32,8 +32,8 @@ export interface IEntityMatcherExtractionConfig {
   resultsSelector: string;
   itemSelector: string;
   fields: IEntityField[];
-  waitForSelector?: boolean;
-  selectorTimeout?: number;
+  waitForSelectors?: boolean;
+  timeout?: number;
   autoDetectChildren?: boolean;
 }
 

@@ -3,6 +3,7 @@ import type { Page } from 'puppeteer-core';
 import { compareEntities, type IFieldComparisonConfig } from '../../comparisonUtils';
 import { type IMiddleware, type IMiddlewareContext } from '../middleware';
 import { normalizeText, type ITextNormalizationOptions } from '../../textUtils';
+import { smartWaitForSelector, detectElement, IDetectionOptions } from '../../detectionUtils';
 
 /**
  * Entity matcher input parameters
@@ -18,6 +19,8 @@ export interface IEntityMatcherInput {
       selector: string;
       attribute?: string;
     }>;
+    waitForSelectors?: boolean;
+    timeout?: number;
   };
   matchingConfig: {
     fieldComparisons: IFieldComparisonConfig[];
@@ -150,11 +153,66 @@ export class EntityMatcherMiddleware implements IMiddleware<IEntityMatcherInput,
     const { page, resultsSelector, itemSelector, extractionConfig, matchingConfig } = input;
 
     try {
-      // Wait for the results container to be available
-      await page.waitForSelector(resultsSelector, { timeout: 30000 });
+      // Create detection options for smart element detection
+      const detectionOptions: IDetectionOptions = {
+        waitForSelectors: extractionConfig.waitForSelectors ?? true,
+        selectorTimeout: extractionConfig.timeout ?? 30000,
+        detectionMethod: 'smart',
+        earlyExitDelay: 500,
+        nodeName: logPrefix.split('[')[1]?.split(']')[0] || 'EntityMatcher',
+        nodeId: logPrefix.split('[')[2]?.split(']')[0] || '',
+        index: 0,
+      };
 
-      // Get all item elements
-      const elements = await page.$$(`${resultsSelector} ${itemSelector}`);
+      // Use smarter element detection from detectionUtils
+      const containerDetectionResult = await detectElement(
+        page,
+        resultsSelector,
+        detectionOptions,
+        logger
+      );
+
+      if (!containerDetectionResult.success) {
+        logger.warn(`${logPrefix} Container element not found with selector: ${resultsSelector}`);
+        return [];
+      }
+
+      logger.info(`${logPrefix} Container element found successfully with selector: ${resultsSelector}`);
+
+      // Get all item elements using improved detection
+      let elements: any[] = [];
+
+      if (itemSelector && itemSelector.trim() !== '') {
+        // Use the combined selector approach for better reliability
+        const combinedSelector = `${resultsSelector} ${itemSelector}`;
+
+        // First check if items exist
+        const itemsDetectionResult = await detectElement(
+          page,
+          combinedSelector,
+          detectionOptions,
+          logger
+        );
+
+        if (!itemsDetectionResult.success) {
+          logger.warn(`${logPrefix} No items found with combined selector: ${combinedSelector}`);
+          return [];
+        }
+
+        // Get all elements matching the selector
+        elements = await page.$$(combinedSelector);
+      } else {
+        // If no item selector provided, get direct children of container
+        const containerElement = await page.$(resultsSelector);
+        if (!containerElement) {
+          logger.warn(`${logPrefix} Container element no longer available: ${resultsSelector}`);
+          return [];
+        }
+
+        // Get direct children
+        elements = await containerElement.$$(':scope > *');
+      }
+
       logger.debug(`${logPrefix} Found ${elements.length} elements matching selector`);
 
       // Limit the number of results if configured

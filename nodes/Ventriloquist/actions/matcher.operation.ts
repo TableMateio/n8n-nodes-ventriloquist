@@ -30,7 +30,13 @@ import { IBrowserSession } from '../utils/sessionManager';
 import { EntityMatcherMiddleware } from '../utils/middlewares/matching/entityMatcherMiddleware';
 import { INodeType } from 'n8n-workflow';
 import type { Page } from 'puppeteer-core';
-import { smartWaitForSelector, detectElement } from '../utils/detectionUtils';
+import {
+	smartWaitForSelector,
+	detectElement,
+	IDetectionOptions,
+	IDetectionResult
+} from '../utils/detectionUtils';
+import { elementExists } from '../utils/navigationUtils';
 
 // Add this interface near the top of the file with the other interfaces
 interface IContainerInfo {
@@ -992,91 +998,80 @@ function buildSourceEntity(this: IExecuteFunctions, index: number): ISourceEntit
 }
 
 /**
+ * Helper function to build extraction fields from comparison criteria
+ */
+function buildExtractionFields(this: IExecuteFunctions, index: number): Array<any> {
+	// Get field extraction configurations from comparison criteria
+	const criteria = this.getNodeParameter('comparisonCriteria.values', index, []) as IDataObject[];
+
+	return criteria.map(criterion => {
+		const matchMethod = criterion.matchMethod as string;
+		let selector = criterion.selector as string;
+		let attribute: string | undefined = undefined;
+
+		// For similarity with smart approach, we don't need a selector
+		if (matchMethod === 'similarity') {
+			const matchingApproach = criterion.matchingApproach as string || 'smart';
+
+			if (matchingApproach === 'smart' || matchingApproach === 'all') {
+				// For smart and all approaches, we don't use a specific selector
+				selector = '';
+			}
+
+			// For dataFormat=number or dataFormat=date, we need to convert the value
+			const dataFormat = criterion.dataFormat as string;
+			if ((dataFormat === 'number' || dataFormat === 'date') &&
+				(matchingApproach === 'all' || matchingApproach === 'specific')) {
+				attribute = dataFormat;
+			}
+		} else if (criterion.dataFormat === 'attribute') {
+			attribute = criterion.attribute as string;
+		}
+
+		return {
+			name: selector || 'fullItem', // Use 'fullItem' as a fallback name
+			selector,
+			attribute,
+			weight: criterion.weight as number || 1,
+			required: criterion.mustMatch as boolean,
+		};
+	});
+}
+
+/**
  * Builds extraction configuration from input parameters
  */
 function buildExtractionConfig(this: IExecuteFunctions, index: number): IEntityMatcherExtractionConfig {
-	// Get selection method and selectors
+	// Get parameters for extraction
 	const selectionMethod = this.getNodeParameter('selectionMethod', index, 'containerItems') as string;
+	const autoDetectChildren = this.getNodeParameter('autoDetectChildren', index, false) as boolean;
+	const waitForSelector = this.getNodeParameter('waitForSelector', index, true) as boolean;
+	const timeout = this.getNodeParameter('timeout', index, 10000) as number;
 
-	// Get basic selector parameters
-	let resultsSelector = '';
-	let itemSelector = '';
-	let autoDetectChildren = false;
+	let resultsSelector: string;
+	let itemSelector: string;
 
+	// Get the appropriate selectors based on selection method
 	if (selectionMethod === 'containerItems') {
-		// Get container selector
 		resultsSelector = this.getNodeParameter('resultsSelector', index, '') as string;
-
-		// Get auto-detect parameter explicitly
-		autoDetectChildren = this.getNodeParameter('autoDetectChildren', index, true) as boolean;
-		this.logger.info(`[Matcher] Auto-detect children parameter value: ${autoDetectChildren}`);
-
-		// Direct debug log of the raw selector value
-		this.logger.info(`[Matcher] Raw container selector value: "${resultsSelector}"`);
-
-		// Check if the selector is empty
-		if (!resultsSelector) {
-			this.logger.warn(`[Matcher] Warning: Empty results container selector. This will cause matching to fail.`);
-		}
-
-		// Only get itemSelector if not auto-detecting
-		if (!autoDetectChildren) {
-			itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
-		}
-
-		// Log the selectors for debugging
-		this.logger.info(`Using container selector: "${resultsSelector}" with ${autoDetectChildren ? 'auto-detection' : `item selector: "${itemSelector}"`}`);
+		itemSelector = autoDetectChildren ? '' : this.getNodeParameter('itemSelector', index, '') as string;
 	} else {
-		// For direct item selection, we use the item selector directly
+		// For direct item selection, we'll use a dummy container selector (html or body)
+		// and put the full selector in the itemSelector
+		resultsSelector = 'body';
 		itemSelector = this.getNodeParameter('directItemSelector', index, '') as string;
-		this.logger.info(`Using direct item selector: "${itemSelector}"`);
 	}
 
-	const waitForSelector = this.getNodeParameter('waitForSelector', index, true) as boolean;
-	const selectorTimeout = this.getNodeParameter('selectorTimeout', index, 10000) as number;
-
-	// Get field extraction configurations from comparison criteria
-	const criteria = this.getNodeParameter('comparisonCriteria.values', index, []) as IDataObject[];
+	// Get comparison fields for extraction configuration
+	const fields = buildExtractionFields.call(this, index);
 
 	return {
 		resultsSelector,
 		itemSelector,
-		waitForSelector,
-		selectorTimeout,
-		fields: criteria.map(criterion => {
-			const matchMethod = criterion.matchMethod as string;
-			let selector = criterion.selector as string;
-			let attribute: string | undefined = undefined;
-
-			// For similarity with smart approach, we don't need a selector
-			if (matchMethod === 'similarity') {
-				const matchingApproach = criterion.matchingApproach as string || 'smart';
-
-				if (matchingApproach === 'smart' || matchingApproach === 'all') {
-					// For smart and all approaches, we don't use a specific selector
-					selector = '';
-				}
-
-				// For dataFormat=number or dataFormat=date, we need to convert the value
-				const dataFormat = criterion.dataFormat as string;
-				if ((dataFormat === 'number' || dataFormat === 'date') &&
-				    (matchingApproach === 'all' || matchingApproach === 'specific')) {
-					attribute = dataFormat;
-				}
-			} else if (criterion.dataFormat === 'attribute') {
-				attribute = criterion.attribute as string;
-			}
-
-			return {
-				name: selector || 'fullItem', // Use 'fullItem' as a fallback name
-				selector,
-				attribute,
-				weight: criterion.weight as number || 1,
-				required: criterion.mustMatch as boolean,
-			};
-		}),
-		// Add auto-detection flag for children when only container is specified
-		autoDetectChildren: selectionMethod === 'containerItems' && autoDetectChildren,
+		fields,
+		autoDetectChildren,
+		waitForSelectors: waitForSelector,
+		timeout,
 	};
 }
 
@@ -1257,58 +1252,26 @@ function buildEntityMatcherConfig(
 	additionalConfig: any
 ) {
 	return {
-		// Source entity data
-		sourceEntity: sourceEntity.fields,
-		normalizationOptions: sourceEntity.normalizationOptions,
-
-		// Selectors for finding results
+		// Settings from input parameters
 		resultsSelector: extractionConfig.resultsSelector,
 		itemSelector: extractionConfig.itemSelector,
-
-		// Field extraction configuration
-		fields: extractionConfig.fields.map((field, index) => {
-			// Merge with additional field settings
-			const additionalField = additionalConfig.fieldSettings[index] || {};
-
-			// Use the data format from either the extraction config or additional settings
-			const dataFormat = field.dataFormat || additionalField.dataFormat || 'text';
-
-			return {
-				name: field.name,
-				selector: field.selector,
-				attribute: field.attribute,
-				weight: field.weight,
-				required: field.required,
-				comparisonAlgorithm: dataFormat === 'attribute' ? 'exact' : 'levenshtein',
-				// Ensure data format is properly passed through to the entity matcher
-				dataFormat,
-			};
-		}),
-
-		// Matching configuration
+		waitForSelectors: extractionConfig.waitForSelectors,
+		timeout: extractionConfig.timeout,
+		autoDetectChildren: extractionConfig.autoDetectChildren,
+		fields: extractionConfig.fields,
+		sourceEntity: sourceEntity.fields,
+		normalizationOptions: sourceEntity.normalizationOptions,
+		fieldComparisons: comparisonConfig.fieldComparisons,
 		threshold: comparisonConfig.threshold,
-		matchMode: comparisonConfig.matchMode || 'best',
-		limitResults: comparisonConfig.limitResults,
-		sortResults: comparisonConfig.sortResults,
-
-		// Auto-detect children (explicitly setting this)
-		autoDetectChildren: extractionConfig.autoDetectChildren === true,
-
-		// Action configuration
-		action: actionConfig.action,
+		sortResults: comparisonConfig.sortResults !== false,
+		action: actionConfig.action || 'none',
 		actionSelector: actionConfig.actionSelector,
 		actionAttribute: actionConfig.actionAttribute,
 		waitAfterAction: actionConfig.waitAfterAction,
 		waitTime: actionConfig.waitTime,
-		waitSelector: actionConfig.waitSelector,
 
-		// Timing configuration
-		waitForSelector: extractionConfig.waitForSelector,
-		selectorTimeout: extractionConfig.selectorTimeout,
-
-		// Additional settings (handled by our custom implementation)
-		maxItems: additionalConfig.maxItems,
-		fieldSettings: additionalConfig.fieldSettings,
+		// Advanced items from additional config
+		...additionalConfig,
 	};
 }
 
@@ -1403,6 +1366,10 @@ function applyResultTransformations(
 	const logPrefix = `[Matcher][${nodeName}][${nodeId}]`;
 	const returnData: IDataObject = {};
 
+	// Set detection status explicitly based on extraction results
+	returnData.containerFound = results.containerFound === true;
+	returnData.itemsFound = results.itemsFound || 0;
+
 	// Process the selected match with type conversions
 	if (results.selectedMatch) {
 		const processedMatch = processMatchResult(
@@ -1434,17 +1401,46 @@ function applyResultTransformations(
 		returnData.count = 0;
 	}
 
-	// Add debugging info if requested
-	if (additionalConfig.includeScoreDetails) {
-		// Create detailed info about the matching process
-		returnData.matchDetails = {
-			threshold: additionalConfig.threshold,
-			matchMode: additionalConfig.matchMode,
-			containerSelector: results.containerSelector,
-			itemSelector: results.itemSelector,
-			containerFound: results.containerFound,
-			totalExtracted: results.itemsFound
-		};
+	// If the container was found but no items matched, log it clearly
+	if (returnData.containerFound && returnData.itemsFound > 0 && returnData.count === 0) {
+		logger.info(`${logPrefix} Container found and ${returnData.itemsFound} items extracted, but none matched the criteria`);
+		returnData.reason = 'Items were found but none matched the criteria';
+	}
+
+	// If the container was found but no items were found, log it clearly
+	if (returnData.containerFound && returnData.itemsFound === 0) {
+		logger.warn(`${logPrefix} Container found but no items were found within it`);
+		returnData.reason = 'Container was found but no items were detected within it';
+	}
+
+	// If the container wasn't found, log it clearly
+	if (!returnData.containerFound) {
+		logger.warn(`${logPrefix} Container not found: ${results.containerSelector}`);
+		returnData.reason = 'Container element was not found on the page';
+	}
+
+	// Always include debugging info for now
+	// Create detailed info about the matching process
+	returnData.matchDetails = {
+		threshold: additionalConfig.threshold,
+		matchMode: additionalConfig.matchMode,
+		containerSelector: results.containerSelector,
+		itemSelector: results.itemSelector,
+		containerFound: returnData.containerFound,
+		totalExtracted: returnData.itemsFound,
+		error: results.error,
+		success: results.success,
+		executionDuration: Date.now() - Date.now(), // Will be updated below
+	};
+
+	// Add execution duration
+	if (!returnData.executionDuration) {
+		returnData.executionDuration = Date.now() - (additionalConfig.startTime || Date.now());
+	}
+
+	// Add page diagnostics
+	if (additionalConfig.pageInfo) {
+		returnData.pageInfo = additionalConfig.pageInfo;
 	}
 
 	return {
@@ -1474,6 +1470,8 @@ export async function execute(
 		const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
 		const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
 		const continueOnFail = this.getNodeParameter('continueOnFail', index, false) as boolean;
+		const waitForSelector = this.getNodeParameter('waitForSelector', index, true) as boolean;
+		const timeout = this.getNodeParameter('timeout', index, 10000) as number;
 
 		// Use the centralized session management
 		const sessionResult = await SessionManager.getOrCreatePageSession(
@@ -1523,6 +1521,11 @@ export async function execute(
 		const sourceEntity = buildSourceEntity.call(this, index);
 		const extractionConfig = buildExtractionConfig.call(this, index);
 
+		// Verify container selector exists and is non-empty
+		if (!extractionConfig.resultsSelector || extractionConfig.resultsSelector.trim() === '') {
+			throw new Error("Container selector is empty. Please provide a valid CSS selector for the results container.");
+		}
+
 		// Add debug logging for extraction config
 		this.logger.debug(
 			`[Matcher][${nodeName}][${nodeId}] Extraction config:
@@ -1534,9 +1537,62 @@ export async function execute(
 			`
 		);
 
+		// Create detection options like in detect operation
+		const detectionOptions: IDetectionOptions = {
+			waitForSelectors: waitForSelector,
+			selectorTimeout: timeout,
+			detectionMethod: 'smart',
+			earlyExitDelay: 500,
+			nodeName,
+			nodeId,
+			index,
+		};
+
+		// Pre-check if container exists on the page using detection middleware
+		const containerDetectionResult = await detectElement(
+			page,
+			extractionConfig.resultsSelector,
+			detectionOptions,
+			this.logger
+		);
+
+		this.logger.info(`[Matcher][${nodeName}][${nodeId}] Pre-check for container selector "${extractionConfig.resultsSelector}": ${containerDetectionResult.success ? 'FOUND' : 'NOT FOUND'}`);
+
+		if (!containerDetectionResult.success) {
+			// Let's try to get all available selectors on the page for diagnostic purposes
+			const topSelectors = await page.evaluate(() => {
+				const elements = Array.from(document.querySelectorAll('body > *'));
+				return elements.slice(0, 5).map(el => {
+					const tag = el.tagName.toLowerCase();
+					const id = el.id ? `#${el.id}` : '';
+					const classes = Array.from(el.classList).map(c => `.${c}`).join('');
+					return `${tag}${id}${classes}`;
+				});
+			});
+
+			this.logger.info(`[Matcher][${nodeName}][${nodeId}] Top-level selectors on the page that might help: ${JSON.stringify(topSelectors)}`);
+		}
+
 		const comparisonConfig = buildComparisonConfig.call(this, index);
 		const actionConfig = buildActionConfig.call(this, index);
 		const additionalConfig = getAdditionalMatcherConfig.call(this, index);
+
+		// Add startTime to additionalConfig for accurate timing
+		additionalConfig.startTime = startTime;
+
+		// Store detection result in additionalConfig for use by the matcher
+		additionalConfig.containerDetectionResult = containerDetectionResult;
+
+		// Add page info for diagnostics
+		try {
+			additionalConfig.pageInfo = {
+				url: await page.url(),
+				title: await page.title(),
+				contentSnapshot: await page.evaluate(() => document.body.innerHTML.substring(0, 500) + '...')
+			};
+		} catch (infoError) {
+			this.logger.warn(`[Matcher][${nodeName}] Could not gather page info: ${(infoError as Error).message}`);
+		}
 
 		// Build combined config for the entity matcher
 		const entityMatcherConfig = buildEntityMatcherConfig(
@@ -1546,6 +1602,9 @@ export async function execute(
 			actionConfig,
 			additionalConfig
 		);
+
+		// Log complete configuration for debugging
+		this.logger.debug(`[Matcher][${nodeName}][${nodeId}] Complete entityMatcherConfig: ${JSON.stringify(entityMatcherConfig)}`);
 
 		// Add detailed logging for debugging
 		this.logger.debug(
@@ -1561,116 +1620,6 @@ export async function execute(
 		// Verify selectors before execution
 		this.logger.info(`[Matcher][${nodeName}] Starting match operation with container selector: ${entityMatcherConfig.resultsSelector}`);
 
-		// Add enhanced selector verification
-		try {
-			const selectorInfo: IContainerInfo = await page.evaluate((containerSelector, itemSelector, autoDetect) => {
-				console.log(`[Selector Verification] Checking container: ${containerSelector}`);
-
-				const container = document.querySelector(containerSelector);
-				if (!container) {
-					console.log(`[Selector Verification] Container not found: ${containerSelector}`);
-
-					// Get document diagnostics
-					const docState = {
-						readyState: document.readyState,
-						bodyChildCount: document.body.childElementCount
-					};
-
-					// Get sample of available classes
-					const classes = new Set();
-					document.querySelectorAll('[class]').forEach(el => {
-						el.className.split(/\s+/).forEach(cls => {
-							if (cls) classes.add(cls);
-						});
-					});
-
-					return {
-						containerFound: false,
-						documentState: docState,
-						availableClasses: Array.from(classes).slice(0, 20), // limit to 20
-						listElements: document.querySelectorAll('ul, ol').length,
-						tables: document.querySelectorAll('table').length,
-						itemContainers: document.querySelectorAll('.item, .items, .result, .results, .list, .product').length
-					};
-				}
-
-				// Container exists, check details
-				const containerInfo: IContainerInfo = {
-					containerFound: true,
-					tagName: container.tagName,
-					className: container.className,
-					childCount: container.children.length,
-					itemsFound: 0
-				};
-
-				// Check item selector if provided
-				if (itemSelector && !autoDetect) {
-					const items = container.querySelectorAll(itemSelector);
-					containerInfo.itemsFound = items.length;
-
-					// If no items found but selector provided, suggest alternatives
-					if (items.length === 0) {
-						const suggestions = [];
-
-						// Check for list items
-						const listItems = container.querySelectorAll('li');
-						if (listItems.length > 0) {
-							suggestions.push({ selector: 'li', count: listItems.length });
-						}
-
-						// Check for other common patterns
-						['item', 'result', 'card', 'row', 'product'].forEach(cls => {
-							const elements = container.querySelectorAll(`[class*="${cls}"]`);
-							if (elements.length > 0) {
-								suggestions.push({ selector: `[class*="${cls}"]`, count: elements.length });
-							}
-						});
-
-						containerInfo.suggestions = suggestions;
-					}
-				} else if (autoDetect) {
-					containerInfo.autoDetectEnabled = true;
-				}
-
-				return containerInfo;
-			}, entityMatcherConfig.resultsSelector, entityMatcherConfig.itemSelector, entityMatcherConfig.autoDetectChildren);
-
-			// Log selector verification results
-			if (!selectorInfo.containerFound) {
-				this.logger.warn(`[Matcher][${nodeName}] Container selector not found: ${entityMatcherConfig.resultsSelector}`);
-				// Log additional details about the selector state
-				if (selectorInfo.documentState) {
-					this.logger.info(`[Matcher][${nodeName}] Page state: ${selectorInfo.documentState.readyState}, Body child elements: ${selectorInfo.documentState.bodyChildCount}`);
-				}
-
-				if (selectorInfo.listElements && selectorInfo.tables && selectorInfo.itemContainers) {
-					this.logger.info(`[Matcher][${nodeName}] Found ${selectorInfo.listElements} list elements, ${selectorInfo.tables} tables, ${selectorInfo.itemContainers} item containers`);
-				}
-
-				if (selectorInfo.availableClasses) {
-					this.logger.info(`[Matcher][${nodeName}] Sample classes: ${selectorInfo.availableClasses.join(', ')}`);
-				}
-			} else {
-				this.logger.info(`[Matcher][${nodeName}] Container found: ${entityMatcherConfig.resultsSelector} ${selectorInfo.tagName ? `(${selectorInfo.tagName}, class="${selectorInfo.className || ''}")` : ''} ${selectorInfo.childCount ? `with ${selectorInfo.childCount} direct children` : ''}`);
-
-				if (selectorInfo.itemsFound !== undefined && selectorInfo.itemsFound > 0) {
-					this.logger.info(`[Matcher][${nodeName}] Found ${selectorInfo.itemsFound} items using selector: ${entityMatcherConfig.itemSelector}`);
-				} else {
-					this.logger.warn(`[Matcher][${nodeName}] No items found with selector: ${entityMatcherConfig.itemSelector}`);
-				}
-
-				if (selectorInfo.suggestions && selectorInfo.suggestions.length > 0) {
-					this.logger.info(`[Matcher][${nodeName}] Selector suggestions available: ${selectorInfo.suggestions.length}`);
-
-					selectorInfo.suggestions.forEach(s => {
-						this.logger.info(`[Matcher][${nodeName}] Suggested selector: ${s}`);
-					});
-				}
-			}
-		} catch (error) {
-			this.logger.warn(`[Matcher][${nodeName}] Error during selector verification: ${(error as Error).message}`);
-		}
-
 		// Create entity matcher using the static factory method
 		const entityMatcher = EntityMatcherFactory.create(
 			page,
@@ -1685,28 +1634,44 @@ export async function execute(
 		);
 
 		// Execute the entity matcher
-		const result = await entityMatcher.execute();
+		try {
+			this.logger.debug(`[Matcher][${nodeName}][${nodeId}] About to execute entity matcher`);
+			const result = await entityMatcher.execute();
+			this.logger.debug(`[Matcher][${nodeName}][${nodeId}] Entity matcher execution completed: success=${result.success}, matches=${result.matches?.length || 0}`);
 
-		// Apply transformations to the results
-		const returnData = applyResultTransformations(
-			result,
-			additionalConfig,
-			this.logger,
-			nodeName,
-			nodeId
-		);
+			// Add explicit detection logs here
+			if (result.containerFound) {
+				this.logger.info(`[Matcher][${nodeName}][${nodeId}] Container found with selector: ${result.containerSelector}`);
 
-		// Log timing information
-		createTimingLog(
-			"Matcher",
-			startTime,
-			this.logger,
-			nodeName,
-			nodeId,
-			index
-		);
+				if (result.itemsFound && result.itemsFound > 0) {
+					this.logger.info(`[Matcher][${nodeName}][${nodeId}] Extracted ${result.itemsFound} items`);
 
-		return returnData;
+					if (result.matches && result.matches.length > 0) {
+						this.logger.info(`[Matcher][${nodeName}][${nodeId}] Found ${result.matches.length} matches above threshold`);
+					} else {
+						this.logger.warn(`[Matcher][${nodeName}][${nodeId}] No items matched the comparison criteria`);
+					}
+				} else {
+					this.logger.warn(`[Matcher][${nodeName}][${nodeId}] Container found but no items could be extracted from it`);
+				}
+			} else {
+				this.logger.warn(`[Matcher][${nodeName}][${nodeId}] Container not found with selector: ${result.containerSelector}`);
+			}
+
+			// Apply transformations to the results
+			const returnData = applyResultTransformations(
+				result,
+				additionalConfig,
+				this.logger,
+				nodeName,
+				nodeId
+			);
+
+			return returnData;
+		} catch (error) {
+			this.logger.error(`[Matcher][${nodeName}][${nodeId}] Error executing entity matcher: ${(error as Error).message}`);
+			throw error;
+		}
 	} catch (error) {
 		// Get operation parameters used in error handling
 		const continueOnFail = this.getNodeParameter("continueOnFail", index, true) as boolean;
@@ -1749,7 +1714,3 @@ export async function execute(
 		};
 	}
 }
-
-
-
-
