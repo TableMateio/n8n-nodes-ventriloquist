@@ -44,6 +44,9 @@ export interface IEntityMatcherConfig {
   // Additional configuration
   maxItems?: number;
   fieldSettings?: any[];
+
+  // Output format
+  outputFormat?: 'text' | 'html' | 'smart';
 }
 
 /**
@@ -214,13 +217,37 @@ export class EntityMatcherFactory {
             const itemElement = limitedItems[i];
             const extractedFields: Record<string, string> = {};
 
+            // Extract the full HTML of the item for debugging
+            const itemHtml = await page.evaluate(el => el.outerHTML, itemElement);
+            // Get both textContent and innerHTML for comprehensive matching
+            const itemText = await page.evaluate(el => el.textContent?.trim() || '', itemElement);
+            const itemInnerHtml = await page.evaluate(el => el.innerHTML || '', itemElement);
+
+            // Add debug logging for each item
+            context.logger.info(`[EntityMatcherFactory] Item ${i+1} HTML preview: ${itemHtml.substring(0, 200)}...`);
+            context.logger.info(`[EntityMatcherFactory] Item ${i+1} text content: ${itemText.substring(0, 200)}...`);
+            context.logger.info(`[EntityMatcherFactory] Item ${i+1} inner HTML: ${itemInnerHtml.substring(0, 200)}...`);
+
+            // Store both full text and HTML in special fields for Smart Match
+            extractedFields['__fullText'] = itemText;
+            extractedFields['__fullHtml'] = itemInnerHtml;
+            extractedFields['__outerHtml'] = itemHtml;
+            extractedFields['__itemIndex'] = `${i+1}`;
+
             // Process each field from the configuration
             for (const field of config.fields || []) {
               try {
                 // Find the element for this field
                 let fieldValue = '';
 
-                if (field.selector) {
+                // Smart Match implementation - use full text content by default
+                if (field.name === 'fullItem' || !field.selector || field.selector.trim() === '') {
+                  // For smart extraction, use the innerHTML content which contains all the formatting
+                  // If outputFormat is explicitly set to 'text', use textContent instead
+                  const useHtmlForSmartMatch = !field.outputFormat || field.outputFormat === 'html' || field.outputFormat === 'smart';
+                  fieldValue = useHtmlForSmartMatch ? itemInnerHtml : itemText;
+                  context.logger.debug(`[EntityMatcherFactory] Using Smart Match with ${useHtmlForSmartMatch ? 'HTML' : 'text'} for field: ${field.name}`);
+                } else if (field.selector) {
                   // Get element using the selector relative to the item
                   const fieldElement = await itemElement.$(field.selector);
 
@@ -232,9 +259,13 @@ export class EntityMatcherFactory {
                         fieldElement,
                         field.attribute
                       );
+                      context.logger.debug(`[EntityMatcherFactory] Extracted attribute '${field.attribute}' value: ${fieldValue.substring(0, 50)}...`);
                     } else {
                       fieldValue = await page.evaluate(el => el.textContent || '', fieldElement);
+                      context.logger.debug(`[EntityMatcherFactory] Extracted text from selector '${field.selector}': ${fieldValue.substring(0, 50)}...`);
                     }
+                  } else {
+                    context.logger.warn(`[EntityMatcherFactory] Selector '${field.selector}' not found in item ${i+1}`);
                   }
                 } else {
                   // If no selector, use the item element's text
@@ -261,6 +292,9 @@ export class EntityMatcherFactory {
           const sourceEntity = config.sourceEntity || {};
           const matches = [];
 
+          // Log the source entity for debugging comparison
+          context.logger.info(`[EntityMatcherFactory] Source entity to match against: ${JSON.stringify(sourceEntity)}`);
+
           for (const item of extractedItems) {
             // Calculate similarity between source entity and this item
             const similarities: Record<string, number> = {};
@@ -269,25 +303,60 @@ export class EntityMatcherFactory {
 
             for (const comparison of config.fieldComparisons || []) {
               const sourceValue = sourceEntity[comparison.field] || '';
-              const itemValue = item.fields[comparison.field] || '';
+              const fieldName = comparison.field;
+
+              // Try using the field directly, then fallback to fullText for Smart Match
+              const itemValue = item.fields[fieldName] ||
+                                // Use either HTML or text depending on outputFormat
+                                (config.outputFormat === 'text' ? item.fields['__fullText'] :
+                                 config.outputFormat === 'html' ? item.fields['__fullHtml'] :
+                                 item.fields['__fullText']) || '';
               const weight = comparison.weight || 1;
 
               // Calculate similarity based on algorithm
               let similarity = 0;
               if (sourceValue && itemValue) {
                 // Simple contains check as fallback
-                similarity = itemValue.toLowerCase().includes(sourceValue.toLowerCase()) ? 0.8 : 0;
+                const normalizedSourceValue = sourceValue.toLowerCase();
+                const normalizedItemValue = itemValue.toLowerCase();
 
-                // More sophisticated comparison can be added here
+                // For text comparison, check contains first (higher similarity score)
+                if (normalizedItemValue.includes(normalizedSourceValue)) {
+                  similarity = 0.9; // 90% match for contains
+                  context.logger.debug(`[EntityMatcherFactory] High similarity (contains): ${fieldName} = ${similarity}`);
+                } else if (normalizedSourceValue.includes(normalizedItemValue)) {
+                  similarity = 0.7; // 70% match if source contains item
+                  context.logger.debug(`[EntityMatcherFactory] Medium similarity (partial): ${fieldName} = ${similarity}`);
+                } else {
+                  // Calculate word-based similarity for more fuzzy matching
+                  const sourceWords = normalizedSourceValue.split(/\s+/);
+                  const itemWords = normalizedItemValue.split(/\s+/);
+                  let wordMatches = 0;
+
+                  for (const word of sourceWords) {
+                    if (word.length <= 2) continue; // Skip very short words
+                    if (itemWords.some(itemWord => itemWord.includes(word) || word.includes(itemWord))) {
+                      wordMatches++;
+                    }
+                  }
+
+                  similarity = sourceWords.length > 0 ? wordMatches / sourceWords.length : 0;
+                  context.logger.debug(`[EntityMatcherFactory] Word-based similarity: ${fieldName} = ${similarity} (${wordMatches}/${sourceWords.length} words)`);
+                }
               }
 
-              similarities[comparison.field] = similarity;
+              // Log the comparison for debugging
+              context.logger.info(`[EntityMatcherFactory] Field comparison - ${fieldName}: '${sourceValue}' vs '${itemValue.substring(0, 50)}...' = ${similarity}`);
+
+              similarities[fieldName] = similarity;
               totalWeight += weight;
               weightedSimilarity += similarity * weight;
             }
 
             // Calculate overall similarity
             const overallSimilarity = totalWeight > 0 ? weightedSimilarity / totalWeight : 0;
+
+            context.logger.info(`[EntityMatcherFactory] Item ${item.index+1} overall similarity: ${overallSimilarity} (threshold: ${config.threshold || 0.6})`);
 
             // Add to matches if above threshold
             if (overallSimilarity >= (config.threshold || 0.6)) {

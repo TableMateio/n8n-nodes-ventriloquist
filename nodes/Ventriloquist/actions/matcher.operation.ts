@@ -57,6 +57,30 @@ interface IContainerInfo {
 	itemContainers?: number;
 }
 
+// Simple string similarity function to replace the external dependency
+const stringSimilarity = (a: string, b: string): number => {
+	if (a === b) return 1.0;
+	if (a.length === 0 || b.length === 0) return 0.0;
+
+	// Simple contains check
+	if (a.toLowerCase().includes(b.toLowerCase())) return 0.9;
+	if (b.toLowerCase().includes(a.toLowerCase())) return 0.7;
+
+	// Count matching words
+	const aWords = a.toLowerCase().split(/\s+/);
+	const bWords = b.toLowerCase().split(/\s+/);
+	let matches = 0;
+
+	for (const word of aWords) {
+		if (word.length <= 2) continue; // Skip very short words
+		if (bWords.some(bWord => bWord.includes(word) || word.includes(bWord))) {
+			matches++;
+		}
+	}
+
+	return aWords.length > 0 ? matches / aWords.length : 0;
+};
+
 /**
  * Entity Matcher operation description
  */
@@ -260,7 +284,7 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Selector Timeout (ms)",
+		displayName: "Selector Timeout (Ms)",
 		name: "selectorTimeout",
 		type: "number",
 		default: 10000,
@@ -734,7 +758,7 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
-						displayName: "Date Tolerance (days)",
+						displayName: "Date Tolerance (Days)",
 						name: "dateTolerance",
 						type: "number",
 						default: 0,
@@ -870,7 +894,6 @@ export const description: INodeProperties[] = [
 			},
 		],
 		default: "click",
-		description: "Action to perform on matched items",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -919,7 +942,7 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Wait Time (milliseconds)",
+		displayName: "Wait Time (Milliseconds)",
 		name: "waitTime",
 		type: "number",
 		default: 5000,
@@ -965,6 +988,35 @@ export const description: INodeProperties[] = [
 		type: "boolean",
 		default: true,
 		description: "Whether to continue workflow execution even when the operation fails",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: 'Match Output Format',
+		name: 'outputFormat',
+		type: 'options',
+		default: 'smart',
+		description: 'Format to use for the extracted content when matching',
+		options: [
+			{
+				name: 'Smart Extraction',
+				value: 'smart',
+				description: 'Use HTML for better matching but return cleaner text in results',
+			},
+			{
+				name: 'Text',
+				value: 'text',
+				description: 'Extract plain text content only (textContent)',
+			},
+			{
+				name: 'HTML',
+				value: 'html',
+				description: 'Extract HTML content (innerHTML)',
+			},
+		],
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -1279,7 +1331,7 @@ function buildEntityMatcherConfig(
  * Process match results to ensure proper data type conversion
  */
 function processMatchResult(
-	matchResult: IEntityMatchResult | null,
+	matchResult: any,
 	fieldSettings: any[],
 	logger: ILogger,
 	logPrefix: string
@@ -1354,111 +1406,151 @@ function processMatchResult(
 }
 
 /**
- * Apply transformations to the entity matcher results
+ * Current version of applyResultTransformations function called by execute
  */
-function applyResultTransformations(
-	results: IEntityMatcherOutput,
+export function applyResultTransformations(
+	results: any,
 	additionalConfig: any,
 	logger: ILogger,
 	nodeName: string,
 	nodeId: string
 ): INodeExecutionData {
-	// Start with an empty output object
-	const output: IDataObject = {
-		containerFound: results.containerFound || false,
-		itemsFound: results.itemsFound || 0,
-		found: results.success || false,
-		match: null,
-		similarity: 0,
-		allMatches: [],
-		count: 0,
-		reason: results.success ? 'Match found' : results.error || 'No match found',
-		matchDetails: {
-			containerFound: results.containerFound || false,
-			totalExtracted: results.itemsFound || 0,
-			error: results.error || null,
-			success: results.success || false,
-			executionDuration: Date.now() - (additionalConfig.startTime || Date.now()),
-			containerHtml: results.containerHtml || null,
-		}
-	};
+	const now = new Date();
+	const outputObj: IDataObject = {};
+	const logPrefix = `[Matcher][${nodeName}][${nodeId}]`;
 
-	// Add debugging information if no items found
-	if (results.containerFound && (!results.itemsFound || results.itemsFound === 0)) {
-		output.diagnosticInfo = {
-			message: "Container found but no items were extracted",
-			possibleCauses: [
-				"The item selector might be incorrect",
-				"The container might be empty",
-				"The elements might be loaded dynamically after initial page load",
-				"The elements might be inside an iframe",
-				"CSS specificity issues might be preventing selector from matching"
-			],
-			suggestions: [
-				"Try using the Detect operation to check if elements exist",
-				"Try using auto-detection of children (if not already)",
-				"Try a different item selector more specific to the page structure",
-				"Check if a wait is needed before attempting extraction",
-				"Inspect the container HTML in the logs"
-			]
+	// Calculate execution duration
+	const startTime = additionalConfig.startTime || now.getTime();
+	const executionDuration = now.getTime() - startTime;
+
+	// If no results or matches, handle accordingly
+	if (!results || !results.success) {
+		outputObj.found = false;
+		outputObj.containerFound = results?.containerFound || false;
+		outputObj.itemsFound = results?.itemsFound || 0;
+		outputObj.match = null;
+		outputObj.allMatches = [];
+		outputObj.similarity = 0;
+		outputObj.count = 0;
+		outputObj.reason = results?.error || 'No matching items found';
+
+		// Add diagnostic information
+		outputObj.matchDetails = {
+			executionDuration,
+			executedAt: now.toISOString(),
+			containerFound: results?.containerFound || false,
+			containerHtml: results?.containerHtml || '',
+			diagnostics: {
+				possibleIssues: [
+					results?.containerFound ? 'No items matched the comparison criteria' : 'The container element was not found',
+					'The selectors may be incorrect',
+					'The page structure may have changed'
+				],
+				suggestions: [
+					'Check the container and item selectors',
+					'Try a more general selector',
+					'Lower the match threshold'
+				]
+			}
+		};
+
+		// Add extracted items data if available for diagnostics
+		if (additionalConfig.extractedItemsData) {
+			(outputObj.matchDetails as IDataObject).extractedItems = additionalConfig.extractedItemsData;
+		}
+
+		// Add page info for diagnostics if available
+		if (additionalConfig.pageInfo) {
+			(outputObj.matchDetails as IDataObject).pageInfo = additionalConfig.pageInfo;
+		}
+
+		return {
+			json: outputObj
 		};
 	}
 
-	// If container HTML is available, add it to the output
-	if (results.containerHtml) {
-		output.containerHtml = results.containerHtml;
+	// Extract matches
+	const matches = results.matches || [];
+
+	// Process matches and add to output
+	if (matches.length > 0) {
+		// Process the best match (highest similarity)
+		const bestMatch = matches[0];
+		const fieldSettings = additionalConfig.fieldSettings || [];
+
+		// Process the best match with type conversions
+		const processedMatch = processMatchResult(bestMatch, fieldSettings, logger, logPrefix);
+
+		// Build all matches for output
+		const processedMatches = matches.map((match: any) =>
+			processMatchResult(match, fieldSettings, logger, logPrefix)
+		);
+
+		outputObj.found = true;
+		outputObj.containerFound = true;
+		outputObj.itemsFound = results.itemsFound || results.totalExtracted || matches.length;
+		outputObj.match = processedMatch;
+		outputObj.allMatches = processedMatches;
+		outputObj.similarity = bestMatch.overallSimilarity;
+		outputObj.count = matches.length;
+
+		// Add match details
+		outputObj.matchDetails = {
+			executionDuration,
+			executedAt: now.toISOString(),
+			containerFound: true,
+			matchCount: matches.length,
+			bestMatchSimilarity: bestMatch.overallSimilarity,
+			itemsExtracted: results.itemsFound || results.totalExtracted || 0
+		};
+
+		logger.info(`${logPrefix} Successfully found ${matches.length} matches. Best match similarity: ${bestMatch.overallSimilarity}`);
+	} else {
+		// No matches found but container was found
+		outputObj.found = false;
+		outputObj.containerFound = true;
+		outputObj.itemsFound = results.itemsFound || results.totalExtracted || 0;
+		outputObj.match = null;
+		outputObj.allMatches = [];
+		outputObj.similarity = 0;
+		outputObj.count = 0;
+		outputObj.reason = 'Items were found but none matched the comparison criteria';
+
+		// Add diagnostic information
+		outputObj.matchDetails = {
+			executionDuration,
+			executedAt: now.toISOString(),
+			containerFound: true,
+			itemsExtracted: results.itemsFound || results.totalExtracted || 0,
+			diagnostics: {
+				possibleIssues: [
+					'The threshold may be too high',
+					'The comparison criteria may not match the content structure',
+					'The extracted items may not contain the expected content'
+				],
+				suggestions: [
+					'Lower the match threshold',
+					'Check the comparison criteria fields',
+					'Inspect the extracted items to verify content'
+				]
+			}
+		};
+
+		// Add extracted items data if available for diagnostics
+		if (additionalConfig.extractedItemsData) {
+			(outputObj.matchDetails as IDataObject).extractedItems = additionalConfig.extractedItemsData;
+		}
+
+		logger.warn(`${logPrefix} No matches found among ${results.itemsFound || results.totalExtracted || 0} extracted items`);
 	}
 
-	// Add timing information
-	output.executionDuration = Date.now() - (additionalConfig.startTime || Date.now());
-
-	// Add page info if available
+	// Add page info for diagnostics if available
 	if (additionalConfig.pageInfo) {
-		output.pageInfo = additionalConfig.pageInfo;
+		(outputObj.matchDetails as IDataObject).pageInfo = additionalConfig.pageInfo;
 	}
 
-	// If we have items but no matches, add diagnostic information
-	if ((results.itemsFound ?? 0) > 0 && (!results.matches || results.matches.length === 0)) {
-		output.reason = "Items were found but none matched the comparison criteria";
-		output.diagnosticInfo = {
-			message: "Items were found but none matched the comparison criteria",
-			possibleCauses: [
-				"Threshold might be too high",
-				"Source data might not match the expected format",
-				"Field selectors might not be extracting the right data"
-			],
-			suggestions: [
-				"Lower the similarity threshold",
-				"Check the comparison fields configuration",
-				"Try different field selectors",
-				"Ensure reference data matches expected format on the page"
-			]
-		};
-	}
-
-	// If we have matches, add the match and similarity
-	if (results.success && results.matches && results.matches.length > 0) {
-		// If we have a selected match, add it
-		if (results.selectedMatch) {
-			output.match = results.selectedMatch.fields;
-			output.similarity = results.selectedMatch.overallSimilarity;
-		}
-
-		// Add all matches
-		output.allMatches = results.matches.map(match => ({
-			fields: match.fields,
-			similarity: match.overallSimilarity,
-			similarities: match.similarities,
-			selected: match.selected
-		}));
-
-		// Add match count
-		output.count = results.matches.length;
-	}
-
-	// Create the return data structure
 	return {
-		json: output
+		json: outputObj
 	};
 }
 
@@ -1660,11 +1752,38 @@ export async function execute(
 				if (result.itemsFound && result.itemsFound > 0) {
 					this.logger.info(`[Matcher][${nodeName}][${nodeId}] Extracted ${result.itemsFound} items`);
 
+					// Collect extracted items data for debug output
+					const extractedItemsData = [];
 					if (result.matches && result.matches.length > 0) {
 						this.logger.info(`[Matcher][${nodeName}][${nodeId}] Found ${result.matches.length} matches above threshold`);
+
+						// Add match data to extracted items
+						for (const match of result.matches) {
+							extractedItemsData.push({
+								index: match.index,
+								textPreview: match.fields.__fullText?.substring(0, 100) || "No text preview available",
+								fields: match.fields,
+								similarity: match.overallSimilarity,
+								similarities: match.similarities
+							});
+						}
 					} else {
 						this.logger.warn(`[Matcher][${nodeName}][${nodeId}] No items matched the comparison criteria`);
+
+						// Try to collect text from the items even if no matches
+						if (result.extractedItems && result.extractedItems.length > 0) {
+							for (const item of result.extractedItems) {
+								extractedItemsData.push({
+									index: item.index,
+									textPreview: item.fields?.__fullText?.substring(0, 100) || "No text preview available",
+									fields: item.fields
+								});
+							}
+						}
 					}
+
+					// Add to additionalConfig for output
+					additionalConfig.extractedItemsData = extractedItemsData;
 				} else {
 					this.logger.warn(`[Matcher][${nodeName}][${nodeId}] Container found but no items could be extracted from it`);
 				}
