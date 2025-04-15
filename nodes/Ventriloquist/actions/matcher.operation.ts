@@ -1363,88 +1363,102 @@ function applyResultTransformations(
 	nodeName: string,
 	nodeId: string
 ): INodeExecutionData {
-	const logPrefix = `[Matcher][${nodeName}][${nodeId}]`;
-	const returnData: IDataObject = {};
-
-	// Set detection status explicitly based on extraction results
-	returnData.containerFound = results.containerFound === true;
-	returnData.itemsFound = results.itemsFound || 0;
-
-	// Process the selected match with type conversions
-	if (results.selectedMatch) {
-		const processedMatch = processMatchResult(
-			results.selectedMatch,
-			additionalConfig.fieldSettings || [],
-			logger,
-			logPrefix
-		);
-
-		if (processedMatch) {
-			returnData.match = processedMatch;
-			returnData.found = true;
-			returnData.similarity = processedMatch._similarity;
+	// Start with an empty output object
+	const output: IDataObject = {
+		containerFound: results.containerFound || false,
+		itemsFound: results.itemsFound || 0,
+		found: results.success || false,
+		match: null,
+		similarity: 0,
+		allMatches: [],
+		count: 0,
+		reason: results.success ? 'Match found' : results.error || 'No match found',
+		matchDetails: {
+			containerFound: results.containerFound || false,
+			totalExtracted: results.itemsFound || 0,
+			error: results.error || null,
+			success: results.success || false,
+			executionDuration: Date.now() - (additionalConfig.startTime || Date.now()),
+			containerHtml: results.containerHtml || null,
 		}
-	} else {
-		returnData.found = false;
-		returnData.match = null;
-		returnData.similarity = 0;
-	}
-
-	// Process all matches if needed
-	if (results.matches && results.matches.length > 0) {
-		returnData.allMatches = results.matches.map(match =>
-			processMatchResult(match, additionalConfig.fieldSettings || [], logger, logPrefix)
-		);
-		returnData.count = results.matches.length;
-	} else {
-		returnData.allMatches = [];
-		returnData.count = 0;
-	}
-
-	// If the container was found but no items matched, log it clearly
-	if (returnData.containerFound && returnData.itemsFound > 0 && returnData.count === 0) {
-		logger.info(`${logPrefix} Container found and ${returnData.itemsFound} items extracted, but none matched the criteria`);
-		returnData.reason = 'Items were found but none matched the criteria';
-	}
-
-	// If the container was found but no items were found, log it clearly
-	if (returnData.containerFound && returnData.itemsFound === 0) {
-		logger.warn(`${logPrefix} Container found but no items were found within it`);
-		returnData.reason = 'Container was found but no items were detected within it';
-	}
-
-	// If the container wasn't found, log it clearly
-	if (!returnData.containerFound) {
-		logger.warn(`${logPrefix} Container not found: ${results.containerSelector}`);
-		returnData.reason = 'Container element was not found on the page';
-	}
-
-	// Always include debugging info for now
-	// Create detailed info about the matching process
-	returnData.matchDetails = {
-		threshold: additionalConfig.threshold,
-		matchMode: additionalConfig.matchMode,
-		containerSelector: results.containerSelector,
-		itemSelector: results.itemSelector,
-		containerFound: returnData.containerFound,
-		totalExtracted: returnData.itemsFound,
-		error: results.error,
-		success: results.success,
-		executionDuration: Date.now() - Date.now(), // Will be updated below
 	};
 
-	// Add execution duration
-	if (!returnData.executionDuration) {
-		returnData.executionDuration = Date.now() - (additionalConfig.startTime || Date.now());
+	// Add debugging information if no items found
+	if (results.containerFound && (!results.itemsFound || results.itemsFound === 0)) {
+		output.diagnosticInfo = {
+			message: "Container found but no items were extracted",
+			possibleCauses: [
+				"The item selector might be incorrect",
+				"The container might be empty",
+				"The elements might be loaded dynamically after initial page load",
+				"The elements might be inside an iframe",
+				"CSS specificity issues might be preventing selector from matching"
+			],
+			suggestions: [
+				"Try using the Detect operation to check if elements exist",
+				"Try using auto-detection of children (if not already)",
+				"Try a different item selector more specific to the page structure",
+				"Check if a wait is needed before attempting extraction",
+				"Inspect the container HTML in the logs"
+			]
+		};
 	}
 
-	// Add page diagnostics
+	// If container HTML is available, add it to the output
+	if (results.containerHtml) {
+		output.containerHtml = results.containerHtml;
+	}
+
+	// Add timing information
+	output.executionDuration = Date.now() - (additionalConfig.startTime || Date.now());
+
+	// Add page info if available
 	if (additionalConfig.pageInfo) {
-		returnData.pageInfo = additionalConfig.pageInfo;
+		output.pageInfo = additionalConfig.pageInfo;
 	}
 
+	// If we have items but no matches, add diagnostic information
+	if ((results.itemsFound ?? 0) > 0 && (!results.matches || results.matches.length === 0)) {
+		output.reason = "Items were found but none matched the comparison criteria";
+		output.diagnosticInfo = {
+			message: "Items were found but none matched the comparison criteria",
+			possibleCauses: [
+				"Threshold might be too high",
+				"Source data might not match the expected format",
+				"Field selectors might not be extracting the right data"
+			],
+			suggestions: [
+				"Lower the similarity threshold",
+				"Check the comparison fields configuration",
+				"Try different field selectors",
+				"Ensure reference data matches expected format on the page"
+			]
+		};
+	}
+
+	// If we have matches, add the match and similarity
+	if (results.success && results.matches && results.matches.length > 0) {
+		// If we have a selected match, add it
+		if (results.selectedMatch) {
+			output.match = results.selectedMatch.fields;
+			output.similarity = results.selectedMatch.overallSimilarity;
+		}
+
+		// Add all matches
+		output.allMatches = results.matches.map(match => ({
+			fields: match.fields,
+			similarity: match.overallSimilarity,
+			similarities: match.similarities,
+			selected: match.selected
+		}));
+
+		// Add match count
+		output.count = results.matches.length;
+	}
+
+	// Create the return data structure
 	return {
-		json: returnData,
+		json: output
 	};
 }
 

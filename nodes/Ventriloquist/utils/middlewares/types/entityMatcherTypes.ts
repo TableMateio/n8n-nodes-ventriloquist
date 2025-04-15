@@ -179,4 +179,5 @@ export interface IEntityMatcherOutput {
   itemSelector?: string;
   containerFound?: boolean;
   itemsFound?: number;
+  containerHtml?: string;
 }
