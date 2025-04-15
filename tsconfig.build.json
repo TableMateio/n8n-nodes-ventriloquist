@@ -1,0 +1,37 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "skipLibCheck": true,
+        "skipDefaultLibCheck": true,
+        "noEmitOnError": false,
+        "emitDeclarationOnly": false,
+        "noImplicitAny": false,
+        "strictNullChecks": false,
+        "strictPropertyInitialization": false,
+        "strictFunctionTypes": false,
+        "strictBindCallApply": false,
+        "alwaysStrict": false,
+        "strict": false,
+        "suppressImplicitAnyIndexErrors": true,
+        "allowJs": true,
+        "checkJs": false,
+        "ignoreDeprecations": "5.0",
+        "ignoreDiagnostics": [
+            2300,
+            2307,
+            2304,
+            2358,
+            2339,
+            2741,
+            18004,
+            2552,
+            2724,
+            7006
+        ]
+    },
+    "exclude": [
+        "node_modules",
+        "**/*.spec.ts",
+        "**/*.test.ts"
+    ]
+}

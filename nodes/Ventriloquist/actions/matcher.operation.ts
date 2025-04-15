@@ -1,29 +1,55 @@
-import type {
-	IExecuteFunctions,
+import {
 	IDataObject,
+	IExecuteFunctions,
 	INodeExecutionData,
 	INodeProperties,
+	IWebhookResponseData,
+	Logger as ILogger,
 } from "n8n-workflow";
-import type * as puppeteer from "puppeteer-core";
+import puppeteer from 'puppeteer-core';
 import { SessionManager } from "../utils/sessionManager";
-import { getActivePage } from "../utils/sessionUtils";
+import { getActivePage as getActivePageFunc } from "../utils/sessionUtils";
 import {
 	formatOperationLog,
 	createSuccessResponse,
 	createTimingLog,
-	buildNodeResponse,
 } from "../utils/resultUtils";
 import { createErrorResponse } from "../utils/errorUtils";
 import { logPageDebugInfo } from "../utils/debugUtils";
 import { EntityMatcherFactory } from "../utils/middlewares/matching/entityMatcherFactory";
-import type {
-	ISourceEntity,
+import {
+	IEntityMatchResult,
 	IEntityMatcherExtractionConfig,
 	IEntityMatcherComparisonConfig,
 	IEntityMatcherActionConfig,
-	IEntityMatcherOutput,
+	ISourceEntity,
+	IEntityMatcherOutput
 } from "../utils/middlewares/types/entityMatcherTypes";
 import { ComparisonAlgorithm } from '../utils/comparisonUtils';
+import { IBrowserSession } from '../utils/sessionManager';
+import { EntityMatcherMiddleware } from '../utils/middlewares/matching/entityMatcherMiddleware';
+import { INodeType } from 'n8n-workflow';
+import type { Page } from 'puppeteer-core';
+import { smartWaitForSelector, detectElement } from '../utils/detectionUtils';
+
+// Add this interface near the top of the file with the other interfaces
+interface IContainerInfo {
+	containerFound: boolean;
+	tagName?: string;
+	className?: string;
+	childCount?: number;
+	itemsFound?: number;
+	suggestions?: any[];
+	autoDetectEnabled?: boolean;
+	documentState?: {
+		readyState: DocumentReadyState;
+		bodyChildCount: number;
+	};
+	availableClasses?: unknown[];
+	listElements?: number;
+	tables?: number;
+	itemContainers?: number;
+}
 
 /**
  * Entity Matcher operation description
@@ -177,7 +203,23 @@ export const description: INodeProperties[] = [
 		type: "string",
 		default: "",
 		placeholder: "li",
-		description: "CSS selector for individual items within the container (optional - child elements will be used if not specified)",
+		description: "CSS selector for individual items within the container (leave empty to auto-detect children)",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				selectionMethod: ["containerItems"],
+			},
+			hide: {
+				autoDetectChildren: [true],
+			},
+		},
+	},
+	{
+		displayName: "Auto-Detect Children",
+		name: "autoDetectChildren",
+		type: "boolean",
+		default: true,
+		description: "Automatically detect children of the container element",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -899,6 +941,30 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: "Take Screenshot",
+		name: "takeScreenshot",
+		type: "boolean",
+		default: false,
+		description: "Whether to take a screenshot during the matcher operation to help debug",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Continue On Fail",
+		name: "continueOnFail",
+		type: "boolean",
+		default: true,
+		description: "Whether to continue workflow execution even when the operation fails",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
 ];
 
 /**
@@ -935,13 +1001,35 @@ function buildExtractionConfig(this: IExecuteFunctions, index: number): IEntityM
 	// Get basic selector parameters
 	let resultsSelector = '';
 	let itemSelector = '';
+	let autoDetectChildren = false;
 
 	if (selectionMethod === 'containerItems') {
+		// Get container selector
 		resultsSelector = this.getNodeParameter('resultsSelector', index, '') as string;
-		itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
+
+		// Get auto-detect parameter explicitly
+		autoDetectChildren = this.getNodeParameter('autoDetectChildren', index, true) as boolean;
+		this.logger.info(`[Matcher] Auto-detect children parameter value: ${autoDetectChildren}`);
+
+		// Direct debug log of the raw selector value
+		this.logger.info(`[Matcher] Raw container selector value: "${resultsSelector}"`);
+
+		// Check if the selector is empty
+		if (!resultsSelector) {
+			this.logger.warn(`[Matcher] Warning: Empty results container selector. This will cause matching to fail.`);
+		}
+
+		// Only get itemSelector if not auto-detecting
+		if (!autoDetectChildren) {
+			itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
+		}
+
+		// Log the selectors for debugging
+		this.logger.info(`Using container selector: "${resultsSelector}" with ${autoDetectChildren ? 'auto-detection' : `item selector: "${itemSelector}"`}`);
 	} else {
 		// For direct item selection, we use the item selector directly
 		itemSelector = this.getNodeParameter('directItemSelector', index, '') as string;
+		this.logger.info(`Using direct item selector: "${itemSelector}"`);
 	}
 
 	const waitForSelector = this.getNodeParameter('waitForSelector', index, true) as boolean;
@@ -959,8 +1047,6 @@ function buildExtractionConfig(this: IExecuteFunctions, index: number): IEntityM
 			const matchMethod = criterion.matchMethod as string;
 			let selector = criterion.selector as string;
 			let attribute: string | undefined = undefined;
-			// Get data format with proper type casting
-			const dataFormat = (criterion.dataFormat as string || 'text') as 'text' | 'number' | 'date' | 'address' | 'boolean' | 'attribute';
 
 			// For similarity with smart approach, we don't need a selector
 			if (matchMethod === 'similarity') {
@@ -972,11 +1058,12 @@ function buildExtractionConfig(this: IExecuteFunctions, index: number): IEntityM
 				}
 
 				// For dataFormat=number or dataFormat=date, we need to convert the value
+				const dataFormat = criterion.dataFormat as string;
 				if ((dataFormat === 'number' || dataFormat === 'date') &&
 				    (matchingApproach === 'all' || matchingApproach === 'specific')) {
 					attribute = dataFormat;
 				}
-			} else if (dataFormat === 'attribute') {
+			} else if (criterion.dataFormat === 'attribute') {
 				attribute = criterion.attribute as string;
 			}
 
@@ -986,9 +1073,10 @@ function buildExtractionConfig(this: IExecuteFunctions, index: number): IEntityM
 				attribute,
 				weight: criterion.weight as number || 1,
 				required: criterion.mustMatch as boolean,
-				dataFormat, // Pass the data format to the field configuration
 			};
 		}),
+		// Add auto-detection flag for children when only container is specified
+		autoDetectChildren: selectionMethod === 'containerItems' && autoDetectChildren,
 	};
 }
 
@@ -1182,14 +1270,18 @@ function buildEntityMatcherConfig(
 			// Merge with additional field settings
 			const additionalField = additionalConfig.fieldSettings[index] || {};
 
+			// Use the data format from either the extraction config or additional settings
+			const dataFormat = field.dataFormat || additionalField.dataFormat || 'text';
+
 			return {
 				name: field.name,
 				selector: field.selector,
 				attribute: field.attribute,
 				weight: field.weight,
 				required: field.required,
-				comparisonAlgorithm: additionalField.dataFormat === 'attribute' ? 'exact' : 'levenshtein',
-				dataFormat: field.dataFormat,
+				comparisonAlgorithm: dataFormat === 'attribute' ? 'exact' : 'levenshtein',
+				// Ensure data format is properly passed through to the entity matcher
+				dataFormat,
 			};
 		}),
 
@@ -1198,6 +1290,9 @@ function buildEntityMatcherConfig(
 		matchMode: comparisonConfig.matchMode || 'best',
 		limitResults: comparisonConfig.limitResults,
 		sortResults: comparisonConfig.sortResults,
+
+		// Auto-detect children (explicitly setting this)
+		autoDetectChildren: extractionConfig.autoDetectChildren === true,
 
 		// Action configuration
 		action: actionConfig.action,
@@ -1214,6 +1309,146 @@ function buildEntityMatcherConfig(
 		// Additional settings (handled by our custom implementation)
 		maxItems: additionalConfig.maxItems,
 		fieldSettings: additionalConfig.fieldSettings,
+	};
+}
+
+/**
+ * Process match results to ensure proper data type conversion
+ */
+function processMatchResult(
+	matchResult: IEntityMatchResult | null,
+	fieldSettings: any[],
+	logger: ILogger,
+	logPrefix: string
+): any {
+	// If no match, return empty object
+	if (!matchResult) {
+		return null;
+	}
+
+	// Start with the regular fields
+	const result: Record<string, any> = { ...matchResult.fields };
+
+	// Add metadata about the match
+	result._similarity = matchResult.overallSimilarity;
+	result._matchIndex = matchResult.index;
+
+	// Set the proper type for each field based on fieldSettings
+	for (const setting of fieldSettings) {
+		const fieldName = setting.field;
+		const dataFormat = setting.dataFormat || 'text';
+
+		// Skip if field is not present
+		if (!(fieldName in result)) {
+			continue;
+		}
+
+		// Get the raw value
+		const rawValue = matchResult.fields[fieldName];
+
+		// Convert based on data format
+		try {
+			if (dataFormat === 'number') {
+				// Try to convert to number if not already a number
+				if (typeof rawValue !== 'number') {
+					// Use a more robust number extraction regex that handles different formats
+					const numValue = rawValue !== undefined && rawValue !== null ?
+						Number(String(rawValue).replace(/[^\d.-]/g, '')) : null;
+
+					if (!isNaN(numValue as number)) {
+						result[fieldName] = numValue;
+						logger.debug(`${logPrefix} Converted field ${fieldName} to number: ${numValue}`);
+					}
+				}
+			} else if (dataFormat === 'date') {
+				// Try to convert to date if not already a Date
+				if (typeof rawValue === 'string') {
+					try {
+						// Check if it's a date string
+						const parsedDate = new Date(rawValue);
+						// Check if the parsed date is valid (not Invalid Date)
+						if (!isNaN(parsedDate.getTime())) {
+							result[fieldName] = parsedDate.toISOString();
+						}
+					} catch (e) {
+						// If conversion fails, return as is
+						result[fieldName] = rawValue;
+					}
+				}
+			} else if (dataFormat === 'boolean') {
+				// Convert to boolean
+				if (typeof rawValue !== 'boolean') {
+					const strValue = String(rawValue).toLowerCase().trim();
+					result[fieldName] = ['true', 'yes', '1', 'y', 'on'].includes(strValue);
+				}
+			}
+		} catch (error) {
+			logger.warn(`${logPrefix} Error converting field ${fieldName}: ${(error as Error).message}`);
+		}
+	}
+
+	return result;
+}
+
+/**
+ * Apply transformations to the entity matcher results
+ */
+function applyResultTransformations(
+	results: IEntityMatcherOutput,
+	additionalConfig: any,
+	logger: ILogger,
+	nodeName: string,
+	nodeId: string
+): INodeExecutionData {
+	const logPrefix = `[Matcher][${nodeName}][${nodeId}]`;
+	const returnData: IDataObject = {};
+
+	// Process the selected match with type conversions
+	if (results.selectedMatch) {
+		const processedMatch = processMatchResult(
+			results.selectedMatch,
+			additionalConfig.fieldSettings || [],
+			logger,
+			logPrefix
+		);
+
+		if (processedMatch) {
+			returnData.match = processedMatch;
+			returnData.found = true;
+			returnData.similarity = processedMatch._similarity;
+		}
+	} else {
+		returnData.found = false;
+		returnData.match = null;
+		returnData.similarity = 0;
+	}
+
+	// Process all matches if needed
+	if (results.matches && results.matches.length > 0) {
+		returnData.allMatches = results.matches.map(match =>
+			processMatchResult(match, additionalConfig.fieldSettings || [], logger, logPrefix)
+		);
+		returnData.count = results.matches.length;
+	} else {
+		returnData.allMatches = [];
+		returnData.count = 0;
+	}
+
+	// Add debugging info if requested
+	if (additionalConfig.includeScoreDetails) {
+		// Create detailed info about the matching process
+		returnData.matchDetails = {
+			threshold: additionalConfig.threshold,
+			matchMode: additionalConfig.matchMode,
+			containerSelector: results.containerSelector,
+			itemSelector: results.itemSelector,
+			containerFound: results.containerFound,
+			totalExtracted: results.itemsFound
+		};
+	}
+
+	return {
+		json: returnData,
 	};
 }
 
@@ -1237,6 +1472,8 @@ export async function execute(
 	try {
 		// Get parameters
 		const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
+		const takeScreenshot = this.getNodeParameter('takeScreenshot', index, false) as boolean;
+		const continueOnFail = this.getNodeParameter('continueOnFail', index, false) as boolean;
 
 		// Use the centralized session management
 		const sessionResult = await SessionManager.getOrCreatePageSession(
@@ -1253,15 +1490,15 @@ export async function execute(
 		);
 		sessionId = sessionResult.sessionId;
 
-		// Get the page
+		// Try to get the page
 		let page = sessionResult.page;
 		if (!page) {
 			const currentSession = SessionManager.getSession(sessionId);
 			if (currentSession?.browser?.isConnected()) {
-				page = await getActivePage(currentSession.browser, this.logger);
+				page = await getActivePageFunc(currentSession.browser, this.logger) as unknown as Page;
 			} else {
 				throw new Error(
-					"Failed to get session or browser is disconnected after getOrCreatePageSession",
+					"Could not get browser session or connection is closed"
 				);
 			}
 		}
@@ -1285,6 +1522,18 @@ export async function execute(
 		// Build configuration objects
 		const sourceEntity = buildSourceEntity.call(this, index);
 		const extractionConfig = buildExtractionConfig.call(this, index);
+
+		// Add debug logging for extraction config
+		this.logger.debug(
+			`[Matcher][${nodeName}][${nodeId}] Extraction config:
+			- Container selector: ${extractionConfig.resultsSelector}
+			- Item selector: ${extractionConfig.itemSelector || '(None)'}
+			- Auto-detect children: ${!!extractionConfig.autoDetectChildren}
+			- Field count: ${extractionConfig.fields?.length || 0}
+			- First field: ${extractionConfig.fields?.length > 0 ? JSON.stringify(extractionConfig.fields[0]) : 'N/A'}
+			`
+		);
+
 		const comparisonConfig = buildComparisonConfig.call(this, index);
 		const actionConfig = buildActionConfig.call(this, index);
 		const additionalConfig = getAdditionalMatcherConfig.call(this, index);
@@ -1297,6 +1546,130 @@ export async function execute(
 			actionConfig,
 			additionalConfig
 		);
+
+		// Add detailed logging for debugging
+		this.logger.debug(
+			`[Matcher][${nodeName}][${nodeId}] Entity matcher config:
+			- Container selector: ${entityMatcherConfig.resultsSelector}
+			- Item selector: ${entityMatcherConfig.itemSelector || '(None - using auto-detection)'}
+			- Auto-detect children: ${!!(extractionConfig?.autoDetectChildren)}
+			- Field count: ${entityMatcherConfig.fields?.length || 0}
+			- Source entity fields: ${JSON.stringify(Object.keys(entityMatcherConfig.sourceEntity || {}))}
+			`
+		);
+
+		// Verify selectors before execution
+		this.logger.info(`[Matcher][${nodeName}] Starting match operation with container selector: ${entityMatcherConfig.resultsSelector}`);
+
+		// Add enhanced selector verification
+		try {
+			const selectorInfo: IContainerInfo = await page.evaluate((containerSelector, itemSelector, autoDetect) => {
+				console.log(`[Selector Verification] Checking container: ${containerSelector}`);
+
+				const container = document.querySelector(containerSelector);
+				if (!container) {
+					console.log(`[Selector Verification] Container not found: ${containerSelector}`);
+
+					// Get document diagnostics
+					const docState = {
+						readyState: document.readyState,
+						bodyChildCount: document.body.childElementCount
+					};
+
+					// Get sample of available classes
+					const classes = new Set();
+					document.querySelectorAll('[class]').forEach(el => {
+						el.className.split(/\s+/).forEach(cls => {
+							if (cls) classes.add(cls);
+						});
+					});
+
+					return {
+						containerFound: false,
+						documentState: docState,
+						availableClasses: Array.from(classes).slice(0, 20), // limit to 20
+						listElements: document.querySelectorAll('ul, ol').length,
+						tables: document.querySelectorAll('table').length,
+						itemContainers: document.querySelectorAll('.item, .items, .result, .results, .list, .product').length
+					};
+				}
+
+				// Container exists, check details
+				const containerInfo: IContainerInfo = {
+					containerFound: true,
+					tagName: container.tagName,
+					className: container.className,
+					childCount: container.children.length,
+					itemsFound: 0
+				};
+
+				// Check item selector if provided
+				if (itemSelector && !autoDetect) {
+					const items = container.querySelectorAll(itemSelector);
+					containerInfo.itemsFound = items.length;
+
+					// If no items found but selector provided, suggest alternatives
+					if (items.length === 0) {
+						const suggestions = [];
+
+						// Check for list items
+						const listItems = container.querySelectorAll('li');
+						if (listItems.length > 0) {
+							suggestions.push({ selector: 'li', count: listItems.length });
+						}
+
+						// Check for other common patterns
+						['item', 'result', 'card', 'row', 'product'].forEach(cls => {
+							const elements = container.querySelectorAll(`[class*="${cls}"]`);
+							if (elements.length > 0) {
+								suggestions.push({ selector: `[class*="${cls}"]`, count: elements.length });
+							}
+						});
+
+						containerInfo.suggestions = suggestions;
+					}
+				} else if (autoDetect) {
+					containerInfo.autoDetectEnabled = true;
+				}
+
+				return containerInfo;
+			}, entityMatcherConfig.resultsSelector, entityMatcherConfig.itemSelector, entityMatcherConfig.autoDetectChildren);
+
+			// Log selector verification results
+			if (!selectorInfo.containerFound) {
+				this.logger.warn(`[Matcher][${nodeName}] Container selector not found: ${entityMatcherConfig.resultsSelector}`);
+				// Log additional details about the selector state
+				if (selectorInfo.documentState) {
+					this.logger.info(`[Matcher][${nodeName}] Page state: ${selectorInfo.documentState.readyState}, Body child elements: ${selectorInfo.documentState.bodyChildCount}`);
+				}
+
+				if (selectorInfo.listElements && selectorInfo.tables && selectorInfo.itemContainers) {
+					this.logger.info(`[Matcher][${nodeName}] Found ${selectorInfo.listElements} list elements, ${selectorInfo.tables} tables, ${selectorInfo.itemContainers} item containers`);
+				}
+
+				if (selectorInfo.availableClasses) {
+					this.logger.info(`[Matcher][${nodeName}] Sample classes: ${selectorInfo.availableClasses.join(', ')}`);
+				}
+			} else {
+				this.logger.info(`[Matcher][${nodeName}] Container found: ${entityMatcherConfig.resultsSelector} ${selectorInfo.tagName ? `(${selectorInfo.tagName}, class="${selectorInfo.className || ''}")` : ''} ${selectorInfo.childCount ? `with ${selectorInfo.childCount} direct children` : ''}`);
+
+				if (selectorInfo.itemsFound !== undefined && selectorInfo.itemsFound > 0) {
+					this.logger.info(`[Matcher][${nodeName}] Found ${selectorInfo.itemsFound} items using selector: ${entityMatcherConfig.itemSelector}`);
+				} else {
+					this.logger.warn(`[Matcher][${nodeName}] No items found with selector: ${entityMatcherConfig.itemSelector}`);
+				}
+
+				if (selectorInfo.suggestions && selectorInfo.suggestions.length > 0) {
+					this.logger.info(`[Matcher][${nodeName}] Selector suggestions available: ${selectorInfo.suggestions.length}`);
+
+					selectorInfo.suggestions.forEach(s => {
+						this.logger.info(`[Matcher][${nodeName}] Suggested selector: ${s}`);
+					});
+				}
+			}
+		} catch (error) {
+			this.logger.warn(`[Matcher][${nodeName}] Error during selector verification: ${(error as Error).message}`);
+		}
 
 		// Create entity matcher using the static factory method
 		const entityMatcher = EntityMatcherFactory.create(
@@ -1312,7 +1685,16 @@ export async function execute(
 		);
 
 		// Execute the entity matcher
-		const matcherResult = await entityMatcher.execute();
+		const result = await entityMatcher.execute();
+
+		// Apply transformations to the results
+		const returnData = applyResultTransformations(
+			result,
+			additionalConfig,
+			this.logger,
+			nodeName,
+			nodeId
+		);
 
 		// Log timing information
 		createTimingLog(
@@ -1324,36 +1706,47 @@ export async function execute(
 			index
 		);
 
-		// Create success response
-		const successResponse = await createSuccessResponse({
-			operation: "matcher",
-			sessionId,
-			page,
-			logger: this.logger,
-			startTime,
-			additionalData: {
-				matches: matcherResult.matches,
-				selectedMatch: matcherResult.selectedMatch,
-				matchCount: matcherResult.matches.length,
-				hasMatch: !!matcherResult.selectedMatch,
-				actionPerformed: matcherResult.actionPerformed || false,
-				actionResult: matcherResult.actionResult,
-			},
-			inputData: items[index].json,
-		});
-
-		return buildNodeResponse(successResponse);
+		return returnData;
 	} catch (error) {
+		// Get operation parameters used in error handling
+		const continueOnFail = this.getNodeParameter("continueOnFail", index, true) as boolean;
+		const takeScreenshot = this.getNodeParameter("captureScreenshot", index, true) as boolean;
+
+		// Try to get a page for error screenshot if possible
+		let errorPage: Page | null = null;
+		try {
+			const currentSession = SessionManager.getSession(sessionId);
+			if (currentSession?.browser?.isConnected()) {
+				errorPage = await getActivePageFunc(currentSession.browser, this.logger) as unknown as Page;
+			}
+		} catch (getPageError) {
+			this.logger.warn(
+				`Could not get page for error screenshot: ${(getPageError as Error).message}`,
+			);
+		}
+
 		// Use the standardized error response utility
 		const errorResponse = await createErrorResponse({
 			error: error as Error,
-			operation: "matcher",
+			operation: 'Matcher',
 			sessionId,
+			nodeId,
+			nodeName,
+			page: errorPage,
 			logger: this.logger,
+			takeScreenshot,
 			startTime,
+			additionalData: {}
 		});
 
-		return buildNodeResponse(errorResponse);
+		if (!continueOnFail) {
+			throw error;
+		}
+
+		// Return error as response with continue on fail
+		return {
+			json: errorResponse,
+		};
 	}
 }
 

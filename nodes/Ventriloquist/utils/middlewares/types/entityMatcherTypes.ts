@@ -34,6 +34,7 @@ export interface IEntityMatcherExtractionConfig {
   fields: IEntityField[];
   waitForSelector?: boolean;
   selectorTimeout?: number;
+  autoDetectChildren?: boolean;
 }
 
 /**
@@ -109,6 +110,10 @@ export interface IEntityMatcherExtractionOutput {
   success: boolean;
   items: IExtractedItem[];
   error?: string;
+  containerFound?: boolean;
+  itemsFound?: number;
+  containerSelector?: string;
+  itemSelector?: string;
 }
 
 /**
@@ -170,4 +175,8 @@ export interface IEntityMatcherOutput {
   actionPerformed?: boolean;
   actionResult?: any;
   error?: string;
+  containerSelector?: string;
+  itemSelector?: string;
+  containerFound?: boolean;
+  itemsFound?: number;
 }

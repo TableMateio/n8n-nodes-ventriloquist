@@ -1260,9 +1260,7 @@ export async function execute(
 		);
 		this.logger.info("============ NODE EXECUTION COMPLETE ============");
 
-		return this.helpers.returnJsonArray([
-			resultData,
-		]) as unknown as INodeExecutionData;
+		return { json: resultData };
 	} catch (error) {
 		// Handle any errors
 		this.logger.error(
@@ -1295,9 +1293,7 @@ export async function execute(
 
 		if (continueOnFail) {
 			// Return partial results if continue on fail is enabled
-			return this.helpers.returnJsonArray([
-				errorResponseData,
-			]) as unknown as INodeExecutionData;
+			return { json: errorResponseData };
 		}
 
 		// If not continuing on fail, re-throw the original error

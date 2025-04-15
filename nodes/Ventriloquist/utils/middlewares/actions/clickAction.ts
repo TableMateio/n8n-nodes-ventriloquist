@@ -7,7 +7,6 @@ import {
 } from "../../navigationUtils";
 import { SessionManager } from "../../sessionManager";
 import type { Page } from "puppeteer-core";
-import { getActivePage } from "../../sessionUtils";
 
 /**
  * Interface for click action parameters
@@ -97,167 +96,411 @@ export async function executeClickAction(
 			waitAfterAction === "navigationComplete";
 
 		if (shouldWaitForNav) {
-			logger.info(
-				formatOperationLog(
-					"ClickAction",
-					nodeName,
-					nodeId,
-					index,
-					`${logPrefix} Using Click-Then-Wait-For-Selector strategy for: ${waitAfterAction}`,
-				),
-			);
-
-			// Use a sensible default timeout if not provided, ensure it's reasonable
-			const waitTimeout = Math.max(waitTime || 30000, 10000); // Min 10s
-
-			// Define the target selector we expect after navigation (Hardcoded for testing)
-			const targetSelectorAfterNav = "#co_clientIDContinueButton";
-
-			logger.info(
-				formatOperationLog(
-					"ClickAction",
-					nodeName,
-					nodeId,
-					index,
-					`${logPrefix} Handling click on selector: "${selector}", then waiting for "${targetSelectorAfterNav}" (timeout: ${waitTimeout}ms)`,
-				),
-			);
-
-			try {
-				// Find element first
-				const element = await page.$(selector);
-				if (!element) {
-					// Add debug info for complex selectors
-					if (selector.includes(':nth-') || selector.includes('nth-of-type') || selector.includes('nth-child')) {
-						logger.info(`${logPrefix} [Debug] Attempting to evaluate complex selector: "${selector}"`);
-						// Try to debug the selector by counting matching elements
-						const debugInfo = await page.evaluate((sel) => {
-							const elements = document.querySelectorAll(sel.split(':')[0]); // Get base selector without pseudo
-							const allMatches = document.querySelectorAll(sel);
-							return {
-								baseCount: elements.length,
-								matchCount: allMatches.length,
-								baseSelText: Array.from(elements).map(el => el.outerHTML.slice(0, 100)).join('\n'),
-								matchSelText: Array.from(allMatches).map(el => el.outerHTML.slice(0, 100)).join('\n')
-							};
-						}, selector);
-						logger.info(`${logPrefix} [Debug] Selector "${selector}": Base elements: ${debugInfo.baseCount}, Matches: ${debugInfo.matchCount}`);
-						logger.info(`${logPrefix} [Debug] Base elements sample: ${debugInfo.baseSelText.substring(0, 500)}`);
-						logger.info(`${logPrefix} [Debug] Matching elements sample: ${debugInfo.matchSelText.substring(0, 500)}`);
-					}
-
-					throw new Error(`Element not found: ${selector}`);
-				}
-
-				// --- Initiate Click Non-Blockingly --- //
-				logger.info(`${logPrefix} Initiating click on ${selector} (non-blocking)...`);
-				element.click().catch((err) => {
-					// Log potential errors during click initiation, but don't block the wait
-					logger.warn(
-						`${logPrefix} Non-blocking click initiation error: ${(err as Error).message}`,
-					);
-				});
-
-				// --- Then Wait for Target Selector --- //
-				logger.info(`${logPrefix} Waiting for target selector "${targetSelectorAfterNav}"...`);
-				await page.waitForSelector(targetSelectorAfterNav, { timeout: waitTimeout });
-
-				// --- Success: Target Selector Found --- //
+			// Special handling for URL change detection
+			if (
+				waitAfterAction === "urlChanged" ||
+				waitAfterAction === "anyUrlChange"
+			) {
+				// Also apply to anyUrlChange for consistency
 				logger.info(
-					`${logPrefix} Target selector "${targetSelectorAfterNav}" found. Navigation presumed successful and stable.`,
+					formatOperationLog(
+						"ClickAction",
+						nodeName,
+						nodeId,
+						index,
+						`${logPrefix} Using Promise.all with networkidle2 wait for navigation. Timeout: ${waitTime || 30000}ms`,
+					),
 				);
 
-				let finalPage = page;
 				try {
-					// Attempt to get the potentially new page reference
-					const session = SessionManager.getSession(sessionId);
-					if (session?.browser?.isConnected()) {
-						const activePage = await getActivePage(session.browser, logger);
-						if (activePage) {
-							finalPage = activePage;
-							logger.info(`${logPrefix} Got potentially new active page reference.`);
-						} else {
-							logger.warn(
-								`${logPrefix} Could not get active page after wait, using original page reference.`,
-							);
-						}
-					} else {
-						logger.warn(
-							`${logPrefix} Session/Browser disconnected after wait, using original page reference.`,
-						);
+					const element = await page.$(selector);
+					if (!element) {
+						logger.warn(`${logPrefix} Element ${selector} not found.`);
+						return {
+							success: false,
+							details: {
+								error: `Element not found: ${selector}`,
+								selector,
+							},
+							error: new Error(`Element not found: ${selector}`),
+						};
 					}
-				} catch (getPageError) {
-					logger.warn(
-						`${logPrefix} Error getting active page after wait: ${(getPageError as Error).message}, using original page reference.`,
+
+					// Set up navigation detection BEFORE initiating the click - critical for reliability
+					logger.info(
+						`${logPrefix} Setting up navigation detection BEFORE initiating click...`,
 					);
-				}
 
-				const finalUrl = await finalPage.url();
-				const finalTitle = await finalPage.title();
+					// Different strategy based on specific waitAfterAction type
+					if (waitAfterAction === "anyUrlChange") {
+						// For anyUrlChange, we set up the navigation monitor first, then perform the click
+						// without awaiting it first, to avoid blocking when context gets destroyed
+						logger.info(
+							`${logPrefix} Using anyUrlChange strategy - setting up navigation monitor first`,
+						);
 
-				return {
-					success: true,
-					urlChanged: beforeUrl !== finalUrl,
-					navigationSuccessful: true,
-					contextDestroyed: page.isClosed(),
-					details: {
-						selector,
-						waitAfterAction,
-						waitTime: waitTimeout,
-						waitedForSelector: targetSelectorAfterNav,
-						beforeUrl,
-						finalUrl,
-						beforeTitle,
-						finalTitle,
-						urlChanged: beforeUrl !== finalUrl,
-						navigationSuccessful: true,
-						contextDestroyed: page.isClosed(),
-					},
-				};
-			} catch (error) {
-				// --- Handle Non-Blocking Click + waitForSelector Failure --- //
-				const errorMessage = (error as Error).message;
-				logger.warn(
-					`${logPrefix} Error during non-blocking click + waitForSelector: ${errorMessage}`,
-				);
+						// Store initial URL
+						const initialUrl = await page.url();
 
-				const isContextDestroyedError =
-					errorMessage.includes("context was destroyed") ||
-					errorMessage.includes("Execution context") ||
-					errorMessage.includes("Target closed");
+						// Set up navigation promise but don't await yet
+						const navigationPromise = page
+							.waitForNavigation({
+								waitUntil: "networkidle2",
+								timeout: waitTime || 30000,
+							})
+							.catch((err) => {
+								logger.warn(
+									`${logPrefix} Navigation promise rejected (expected for context destruction): ${err.message}`,
+								);
+								// Intentionally not rejecting to allow Promise.race to continue
+								return { navigationError: true };
+							});
 
-				// If target selector wasn't found (timeout error)
-				// Puppeteer throws TimeoutError for waitForSelector timeouts
-				if (error.constructor.name === 'TimeoutError' || errorMessage.includes("waiting for selector")) {
+						// Set up URL change detection
+						const urlChangePromise = waitForUrlChange(
+							sessionId,
+							initialUrl,
+							waitTime || 30000,
+							logger,
+						).catch((err) => {
+							logger.warn(
+								`${logPrefix} URL change monitoring error: ${err.message}`,
+							);
+							return false;
+						});
+
+						// Set up timeout promise
+						const timeoutPromise = new Promise((resolve) =>
+							setTimeout(() => resolve({ timeout: true }), waitTime || 30000),
+						);
+
+						// Initiate click but do NOT await it
+						logger.info(
+							`${logPrefix} Initiating click without awaiting completion...`,
+						);
+						page
+							.evaluate((el) => {
+								(el as HTMLElement).click();
+							}, element)
+							.catch((err) => {
+								logger.warn(
+									`${logPrefix} Click error (non-blocking): ${err.message}`,
+								);
+							});
+
+						// Now race the promises to see which resolves first
+						logger.info(
+							`${logPrefix} Click initiated, now waiting for navigation or timeout...`,
+						);
+						const raceResult = await Promise.race([
+							navigationPromise,
+							urlChangePromise,
+							timeoutPromise,
+						]);
+
+						// Determine what happened
+						interface NavigationResult {
+							navigationError?: boolean;
+							timeout?: boolean;
+						}
+						const isNavError = !!(raceResult as NavigationResult)
+							?.navigationError;
+						const isTimeout = !!(raceResult as NavigationResult)?.timeout;
+						const isUrlChanged = raceResult === true; // Direct result from urlChangePromise
+
+						logger.info(
+							`${logPrefix} Navigation race completed - URL changed: ${isUrlChanged}, Timeout: ${isTimeout}, Nav Error: ${isNavError}`,
+						);
+
+						// Get final state if possible
+						let finalUrl = "[Unknown]";
+						let finalTitle = "[Unknown]";
+						try {
+							finalUrl = await page.url();
+							finalTitle = await page.title();
+							logger.info(
+								`${logPrefix} Final state - URL: ${finalUrl}, Title: ${finalTitle}`,
+							);
+						} catch (pageError) {
+							logger.warn(
+								`${logPrefix} Could not get final page state: ${(pageError as Error).message}`,
+							);
+							// Assume context destroyed, which is often a sign of successful navigation
+							return {
+								success: true,
+								urlChanged: true,
+								navigationSuccessful: true,
+								contextDestroyed: true,
+								details: {
+									selector,
+									waitAfterAction,
+									waitTime,
+									beforeUrl: initialUrl,
+									contextDestroyed: true,
+									urlChanged: true,
+									navigationSuccessful: true,
+								},
+							};
+						}
+
+						return {
+							success: true,
+							urlChanged: initialUrl !== finalUrl || isUrlChanged,
+							navigationSuccessful:
+								initialUrl !== finalUrl || isUrlChanged || isNavError,
+							contextDestroyed: isNavError,
+							details: {
+								selector,
+								waitAfterAction,
+								waitTime,
+								beforeUrl: initialUrl,
+								finalUrl,
+								beforeTitle,
+								finalTitle,
+								urlChanged: initialUrl !== finalUrl || isUrlChanged,
+								navigationSuccessful:
+									initialUrl !== finalUrl || isUrlChanged || isNavError,
+								contextDestroyed: isNavError,
+							},
+						};
+					} else {
+						// For regular urlChanged, we use Promise.all approach - this is NOT in an else block
+						logger.info(
+							`${logPrefix} Setting up Promise.all for click and networkidle2 wait...`,
+						);
+						const navigationPromise = page.waitForNavigation({
+							waitUntil: "networkidle2", // Try networkidle2
+							timeout: waitTime || 30000,
+						});
+						const clickPromise = page.evaluate((el) => {
+							(el as HTMLElement).click();
+						}, element);
+
+						await Promise.all([navigationPromise, clickPromise]);
+						logger.info(
+							`${logPrefix} Promise.all for click/networkidle2 wait resolved successfully.`,
+						);
+
+						// Navigation likely successful
+						let finalUrl = "[Unknown]";
+						let finalTitle = "[Unknown]";
+						try {
+							finalUrl = await page.url();
+							finalTitle = await page.title();
+							logger.info(
+								`${logPrefix} Navigation successful. Final URL: ${finalUrl}`,
+							);
+						} catch (pageError) {
+							logger.warn(
+								`${logPrefix} Could not get final page state after navigation: ${(pageError as Error).message}`,
+							);
+							// Assume success based on Promise.all resolving
+							return {
+								success: true,
+								urlChanged: true, // Assume changed
+								navigationSuccessful: true,
+								contextDestroyed: true, // Likely if we error here
+								details: {
+									selector,
+									waitAfterAction,
+									waitTime,
+									beforeUrl,
+									contextDestroyed: true,
+									urlChanged: true,
+									navigationSuccessful: true,
+								},
+							};
+						}
+
+						return {
+							success: true,
+							urlChanged: beforeUrl !== finalUrl,
+							navigationSuccessful: true,
+							details: {
+								selector,
+								waitAfterAction,
+								waitTime,
+								beforeUrl,
+								finalUrl,
+								beforeTitle,
+								finalTitle,
+								urlChanged: beforeUrl !== finalUrl,
+								navigationSuccessful: true,
+							},
+						};
+					}
+				} catch (error) {
+					// Handle errors from Promise.all (e.g., timeout, context destruction)
+					const errorMessage = (error as Error).message;
+					const isContextDestroyed =
+						errorMessage.includes("context was destroyed") ||
+						errorMessage.includes("Execution context") ||
+						errorMessage.includes("Target closed");
+
 					logger.warn(
-						`${logPrefix} Target selector "${targetSelectorAfterNav}" not found after click within timeout. Navigation failed or page did not load correctly.`,
+						formatOperationLog(
+							"ClickAction",
+							nodeName,
+							nodeId,
+							index,
+							`${logPrefix} Error during click/networkidle2 wait: ${errorMessage}. Context destroyed: ${isContextDestroyed}`,
+						),
 					);
+
+					// If context was destroyed, consider it potentially successful navigation
+					if (isContextDestroyed) {
+						return {
+							success: true, // Click likely initiated nav
+							urlChanged: true,
+							navigationSuccessful: true,
+							contextDestroyed: true,
+							details: {
+								selector,
+								waitAfterAction,
+								waitTime,
+								beforeUrl,
+								contextDestroyed: true,
+								urlChanged: true,
+								navigationSuccessful: true,
+							},
+						};
+					}
+
+					// Otherwise, return error
 					return {
-						success: true, // Click initiation succeeded
-						urlChanged: false, // Assume URL didn't change if target element didn't appear
-						navigationSuccessful: false,
-						contextDestroyed: isContextDestroyedError || page.isClosed(),
+						success: false,
 						details: {
+							error: errorMessage,
 							selector,
 							waitAfterAction,
-							waitTime: waitTimeout,
-							waitedForSelector: targetSelectorAfterNav,
-							beforeUrl,
-							beforeTitle,
-							error: `Navigation failed: Target element "${targetSelectorAfterNav}" not found after click within ${waitTimeout}ms.`,
-							navigationSuccessful: false,
-							contextDestroyed: isContextDestroyedError || page.isClosed(),
+							waitTime,
 						},
 						error: error as Error,
 					};
 				}
-
-				// For other errors (e.g. element not found initially, context destroyed during wait),
-				// re-throw to indicate a more fundamental action failure.
-				logger.error(
-					`${logPrefix} Unhandled error during click/wait: ${errorMessage}. Re-throwing.`,
+			} else {
+				// Restore waitUntil definition for other cases
+				let waitUntil: puppeteer.PuppeteerLifeCycleEvent = "domcontentloaded";
+				if (waitAfterAction === "navigationComplete") {
+					waitUntil = "networkidle0";
+				}
+				// For regular navigation (e.g., navigationComplete)
+				logger.info(
+					formatOperationLog(
+						"ClickAction",
+						nodeName,
+						nodeId,
+						index,
+						`${logPrefix} Directly handling click and navigation on selector: "${selector}", timeout: ${waitTime}ms, waitUntil: ${waitUntil}`,
+					),
 				);
-				throw error;
+
+				// Use our simplified navigation utility with proper timeout
+				logger.info(
+					formatOperationLog(
+						"ClickAction",
+						nodeName,
+						nodeId,
+						index,
+						`${logPrefix} Directly handling click and navigation on selector: "${selector}", timeout: ${waitTime}ms, waitUntil: ${waitUntil}`,
+					),
+				);
+
+				// Instead of calling clickAndWaitForNavigation, implement directly
+				const element = await page.$(selector);
+				if (!element) {
+					return {
+						success: false,
+						details: {
+							error: `Element not found: ${selector}`,
+							selector,
+						},
+						error: new Error(`Element not found: ${selector}`),
+					};
+				}
+
+				try {
+					// Set up navigation promise
+					const navigationPromise = page.waitForNavigation({
+						waitUntil: [waitUntil],
+						timeout: waitTime,
+					});
+
+					// Click the element
+					await page.evaluate((el) => {
+						(el as HTMLElement).click();
+					}, element);
+
+					// Wait for navigation to complete
+					await navigationPromise;
+
+					// Navigation was successful
+					const finalUrl = await page.url();
+					const finalTitle = await page.title();
+
+					logger.info(
+						formatOperationLog(
+							"ClickAction",
+							nodeName,
+							nodeId,
+							index,
+							`${logPrefix} Click with navigation successful - Final URL: ${finalUrl}`,
+						),
+					);
+
+					return {
+						success: true,
+						urlChanged: beforeUrl !== finalUrl,
+						navigationSuccessful: true,
+						details: {
+							selector,
+							waitAfterAction,
+							waitTime,
+							beforeUrl,
+							finalUrl,
+							beforeTitle,
+							finalTitle,
+							urlChanged: beforeUrl !== finalUrl,
+							navigationSuccessful: true,
+						},
+					};
+				} catch (navigationError) {
+					// Handle navigation errors
+					const errorMessage = (navigationError as Error).message;
+					const isContextDestroyed =
+						errorMessage.includes("context was destroyed") ||
+						errorMessage.includes("Execution context") ||
+						errorMessage.includes("Target closed");
+
+					logger.warn(
+						formatOperationLog(
+							"ClickAction",
+							nodeName,
+							nodeId,
+							index,
+							`${logPrefix} Navigation error: ${errorMessage}`,
+						),
+					);
+
+					// Return with context destroyed flag if applicable
+					return {
+						success: true, // The click itself may have succeeded
+						urlChanged: false,
+						navigationSuccessful: false,
+						contextDestroyed: isContextDestroyed,
+						details: {
+							selector,
+							waitAfterAction,
+							waitTime,
+							beforeUrl,
+							beforeTitle,
+							error: errorMessage,
+							navigationSuccessful: false,
+							contextDestroyed: isContextDestroyed,
+						},
+						error: navigationError as Error,
+					};
+				}
 			}
 		} else {
 			// Simple click without waiting for navigation
@@ -267,32 +510,13 @@ export async function executeClickAction(
 					nodeName,
 					nodeId,
 					index,
-					`${logPrefix} Performing simple click logic (shouldWaitForNav was false) on selector: "${selector}"`,
+					`${logPrefix} Performing simple click without navigation wait on selector: "${selector}"`,
 				),
 			);
 
 			// Find the element
 			const element = await page.$(selector);
 			if (!element) {
-				// Add debug info for complex selectors
-				if (selector.includes(':nth-') || selector.includes('nth-of-type') || selector.includes('nth-child')) {
-					logger.info(`${logPrefix} [Debug] Attempting to evaluate complex selector: "${selector}"`);
-					// Try to debug the selector by counting matching elements
-					const debugInfo = await page.evaluate((sel) => {
-						const elements = document.querySelectorAll(sel.split(':')[0]); // Get base selector without pseudo
-						const allMatches = document.querySelectorAll(sel);
-						return {
-							baseCount: elements.length,
-							matchCount: allMatches.length,
-							baseSelText: Array.from(elements).map(el => el.outerHTML.slice(0, 100)).join('\n'),
-							matchSelText: Array.from(allMatches).map(el => el.outerHTML.slice(0, 100)).join('\n')
-						};
-					}, selector);
-					logger.info(`${logPrefix} [Debug] Selector "${selector}": Base elements: ${debugInfo.baseCount}, Matches: ${debugInfo.matchCount}`);
-					logger.info(`${logPrefix} [Debug] Base elements sample: ${debugInfo.baseSelText.substring(0, 500)}`);
-					logger.info(`${logPrefix} [Debug] Matching elements sample: ${debugInfo.matchSelText.substring(0, 500)}`);
-				}
-
 				return {
 					success: false,
 					details: {
@@ -303,8 +527,26 @@ export async function executeClickAction(
 				};
 			}
 
-			// Click the element and wait if needed based on the strategy
+			// Click the element using page.evaluate with HTMLElement cast
+			logger.info(
+				`${logPrefix} Performing simple click via page.evaluate on selector: "${selector}"`,
+			);
+			await page.evaluate((el) => {
+				(el as HTMLElement).click();
+			}, element);
+
+			// Wait if specified
 			if (waitAfterAction === "fixedTime" && waitTime) {
+				logger.info(
+					formatOperationLog(
+						"ClickAction",
+						nodeName,
+						nodeId,
+						index,
+						`${logPrefix} Performing simple click with ${waitTime}ms fixed wait`,
+					),
+				);
+
 				// CRUCIAL CHANGE: Initiate click without await, then start timer immediately
 				logger.info(
 					formatOperationLog(
@@ -312,11 +554,13 @@ export async function executeClickAction(
 						nodeName,
 						nodeId,
 						index,
-						`${logPrefix} Initiating click on selector: "${selector}" (fixedTime wait)`,
+						`${logPrefix} Initiating click on selector: "${selector}" and starting fixed time wait without awaiting click completion`,
 					),
 				);
+
+				// Start click but don't await its completion
 				element.click().catch((err) => {
-					// Log potential click errors occurring after the wait started, but don't block
+					// Log errors but don't block execution
 					logger.warn(
 						formatOperationLog(
 							"ClickAction",
@@ -328,6 +572,7 @@ export async function executeClickAction(
 					);
 				});
 
+				// Immediately start the timer without waiting for click to complete
 				logger.info(
 					formatOperationLog(
 						"ClickAction",
@@ -338,81 +583,68 @@ export async function executeClickAction(
 					),
 				);
 				await new Promise((resolve) => setTimeout(resolve, waitTime));
-			} else if (waitAfterAction === "selector") {
-				// New logic for selector wait
-				logger.info(
-					formatOperationLog(
-						"ClickAction",
-						nodeName,
-						nodeId,
-						index,
-						`${logPrefix} Awaiting click on selector: "${selector}" (selector wait)`,
-					),
-				);
-				await element.click(); // Await the click first for this simple case
 
-				if (waitSelector) {
-					const effectiveWaitTime = waitTime || 10000; // Use waitTime if provided, else default
-					logger.info(
-						formatOperationLog(
-							"ClickAction",
-							nodeName,
-							nodeId,
-							index,
-							`${logPrefix} Waiting for selector: "${waitSelector}" (timeout: ${effectiveWaitTime}ms)`,
-						),
-					);
-					try {
-						await page.waitForSelector(waitSelector, {
-							timeout: effectiveWaitTime,
-						});
-						logger.info(
-							formatOperationLog(
-								"ClickAction",
-								nodeName,
-								nodeId,
-								index,
-								`${logPrefix} Selector "${waitSelector}" found.`,
-							),
-						);
-					} catch (selectorError) {
-						logger.warn(
-							formatOperationLog(
-								"ClickAction",
-								nodeName,
-								nodeId,
-								index,
-								`${logPrefix} Wait for selector "${waitSelector}" failed or timed out: ${(selectorError as Error).message}`,
-							),
-						);
-						// Don't fail the overall action, just log the warning
-					}
-				} else {
+				// Get current state after wait
+				let finalUrl = beforeUrl;
+				let finalTitle = beforeTitle;
+				try {
+					finalUrl = await page.url();
+					finalTitle = await page.title();
+				} catch (pageError) {
 					logger.warn(
 						formatOperationLog(
 							"ClickAction",
 							nodeName,
 							nodeId,
 							index,
-							`${logPrefix} waitAfterAction is 'selector' but no waitSelector parameter provided. Skipping wait.`,
+							`${logPrefix} Could not get page state after fixed time wait: ${(pageError as Error).message}`,
 						),
 					);
+					// Return with success but note the context destruction
+					return {
+						success: true,
+						contextDestroyed: true,
+						urlChanged: true, // Assume changed if context destroyed
+						details: {
+							selector,
+							waitAfterAction,
+							waitTime,
+							beforeUrl,
+							contextDestroyed: true,
+						},
+					};
 				}
-			} else {
-				// For 'noWait', await the click normally first
+
+				return {
+					success: true,
+					urlChanged: finalUrl !== beforeUrl,
+					details: {
+						selector,
+						waitAfterAction,
+						waitTime,
+						beforeUrl,
+						finalUrl,
+						beforeTitle,
+						finalTitle,
+						urlChanged: finalUrl !== beforeUrl,
+					},
+				};
+			}
+
+			if (waitAfterAction === "selector" && waitSelector) {
 				logger.info(
 					formatOperationLog(
 						"ClickAction",
 						nodeName,
 						nodeId,
 						index,
-						`${logPrefix} Awaiting click on selector: "${selector}" (noWait)`,
+						`${logPrefix} Waiting for selector: "${waitSelector}"`,
 					),
 				);
-				await element.click(); // Await click here for noWait case
+				await page.waitForSelector(waitSelector, { timeout: waitTime });
 			}
 
-			// Get final state and return success (common for all simple click paths)
+			// Get current URL for comparison
 			const currentUrl = await page.url();
 			const currentTitle = await page.title();
 
