@@ -15,6 +15,7 @@ import {
 import { MiddlewareComposer } from '../middlewareRegistry';
 import { type IMiddlewareContext } from '../middleware';
 import { type IFieldComparisonConfig } from '../../comparisonUtils';
+import { initializeMiddlewareRegistry } from '../middlewareRegistration';
 
 /**
  * Simplified configuration for entity matcher factory
@@ -78,6 +79,9 @@ export class EntityMatcherFactory {
   ): {
     execute: () => Promise<IEntityMatcherOutput>;
   } {
+    // Initialize middleware registry to ensure middleware is registered
+    initializeMiddlewareRegistry(context.logger);
+
     // Create the middleware context
     const middlewareContext: IMiddlewareContext = {
       logger: context.logger,
@@ -335,6 +339,9 @@ export function createEntityMatcher(
 ): {
   execute: () => Promise<IEntityMatcherOutput>;
 } {
+  // Initialize middleware registry to ensure middleware is registered
+  initializeMiddlewareRegistry(context.logger);
+
   return EntityMatcherFactory.create(page, config, context);
 }
 
