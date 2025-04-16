@@ -4,38 +4,103 @@ import { IMiddleware, IMiddlewareContext, createPipeline, MiddlewarePipeline } f
 /**
  * Types of middleware supported by the registry
  */
-export type MiddlewareType =
-  | 'extraction'   // For data extraction
-  | 'matching'     // For entity matching
-  | 'transformation' // For data transformation
-  | 'validation'   // For data validation
-  | 'ai'           // For AI integrations
-  | 'action'       // For page actions
-  | 'fallback'     // For error handling
-  | 'custom';      // For custom middleware
-
-/**
- * Middleware registration info
- */
-export interface IMiddlewareRegistration<T = any, R = any> {
-  id: string;
-  type: MiddlewareType;
-  name: string;
-  description: string;
-  middleware: IMiddleware<T, R>;
-  dependencies?: string[];
-  configSchema?: object;
-  version?: string;
-  tags?: string[];
+export enum MiddlewareType {
+  EXTRACTION = 'extraction',
+  MATCHING = 'matching',
+  TRANSFORMATION = 'transformation',
+  VALIDATION = 'validation',
+  AI = 'ai',
+  ACTION = 'action',
+  FALLBACK = 'fallback',
+  CUSTOM = 'custom'
 }
 
 /**
- * Middleware registry for managing all middleware components
+ * Interface for registering a middleware with metadata
  */
-export class MiddlewareRegistry {
+export interface IMiddlewareRegistration<TInput = any, TOutput = any> {
+  /**
+   * Unique identifier for the middleware
+   */
+  id: string;
+
+  /**
+   * Type of middleware for categorization
+   */
+  type: MiddlewareType;
+
+  /**
+   * Display name for the middleware
+   */
+  name: string;
+
+  /**
+   * Description of what the middleware does
+   */
+  description?: string;
+
+  /**
+   * The actual middleware implementation
+   */
+  middleware: IMiddleware<TInput, TOutput>;
+
+  /**
+   * Dependencies on other middleware components
+   */
+  dependencies?: string[];
+
+  /**
+   * Optional schema for configuration validation
+   */
+  configSchema?: object;
+
+  /**
+   * Version of the middleware
+   */
+  version?: string;
+
+  /**
+   * Tags for categorizing this middleware
+   */
+  tags?: string[];
+
+  /**
+   * Optional function to validate the input
+   */
+  validateInput?: (input: TInput) => boolean | Promise<boolean>;
+
+  /**
+   * Optional function to determine if this middleware can handle the given input
+   */
+  canHandle?: (input: TInput) => boolean | Promise<boolean>;
+}
+
+/**
+ * Interface for the middleware registry
+ */
+export interface IMiddlewareRegistry {
+  register<TInput, TOutput>(registration: IMiddlewareRegistration<TInput, TOutput>): void;
+  unregister(id: string): boolean;
+  getRegistration<TInput, TOutput>(id: string): IMiddlewareRegistration<TInput, TOutput> | undefined;
+  getAllRegistrations(): IMiddlewareRegistration[];
+  getRegistrationsByType(type: MiddlewareType): IMiddlewareRegistration[];
+  createMiddleware<TInput, TOutput>(id: string): IMiddleware<TInput, TOutput>;
+  createPipeline<TInput, TOutput>(middlewareIds: string[]): MiddlewarePipeline<TInput, TOutput>;
+  clear(): void;
+}
+
+/**
+ * Registry for middleware components
+ */
+export class MiddlewareRegistry implements IMiddlewareRegistry {
   private static instance: MiddlewareRegistry;
   private middlewares: Map<string, IMiddlewareRegistration> = new Map();
   private logger?: ILogger;
+
+  /**
+   * Private constructor for singleton pattern
+   */
+  private constructor() {}
 
   /**
    * Get the singleton instance
@@ -55,23 +120,21 @@ export class MiddlewareRegistry {
   }
 
   /**
-   * Register a middleware component
+   * Register a middleware
    */
-  public register<T, R>(registration: IMiddlewareRegistration<T, R>): void {
+  public register<TInput, TOutput>(registration: IMiddlewareRegistration<TInput, TOutput>): void {
     if (this.middlewares.has(registration.id)) {
-      const message = `Middleware with ID ${registration.id} already registered`;
-      this.logger?.warn(`[MiddlewareRegistry] ${message}`);
-      throw new Error(message);
+      const errorMessage = `Middleware with ID '${registration.id}' is already registered`;
+      this.logger?.warn(`[MiddlewareRegistry] ${errorMessage}`);
+      throw new Error(errorMessage);
     }
 
     this.middlewares.set(registration.id, registration);
-    this.logger?.debug(
-      `[MiddlewareRegistry] Registered middleware: ${registration.id} (${registration.type})`
-    );
+    this.logger?.debug(`[MiddlewareRegistry] Registered middleware: ${registration.name} (${registration.id})`);
   }
 
   /**
-   * Unregister a middleware component
+   * Unregister a middleware
    */
   public unregister(id: string): boolean {
     const result = this.middlewares.delete(id);
@@ -86,12 +149,33 @@ export class MiddlewareRegistry {
   /**
    * Get a middleware registration by ID
    */
-  public getRegistration(id: string): IMiddlewareRegistration | undefined {
-    return this.middlewares.get(id);
+  public getRegistration<TInput, TOutput>(id: string): IMiddlewareRegistration<TInput, TOutput> | undefined {
+    return this.middlewares.get(id) as IMiddlewareRegistration<TInput, TOutput> | undefined;
   }
 
   /**
-   * Get all middleware registrations
+   * Create a middleware instance by ID
+   */
+  public createMiddleware<TInput, TOutput>(id: string): IMiddleware<TInput, TOutput> {
+    const registration = this.middlewares.get(id);
+    if (!registration) {
+      const message = `Middleware with ID ${id} not found`;
+      this.logger?.error(`[MiddlewareRegistry] ${message}`);
+      throw new Error(message);
+    }
+
+    return registration.middleware as IMiddleware<TInput, TOutput>;
+  }
+
+  /**
+   * Check if a middleware is registered
+   */
+  public has(id: string): boolean {
+    return this.middlewares.has(id);
+  }
+
+  /**
+   * Get all registered middlewares
    */
   public getAllRegistrations(): IMiddlewareRegistration[] {
     return Array.from(this.middlewares.values());
@@ -107,33 +191,31 @@ export class MiddlewareRegistry {
   }
 
   /**
-   * Get all middleware registrations with specific tags
+   * Find middlewares by tag
    */
-  public getRegistrationsByTags(tags: string[]): IMiddlewareRegistration[] {
-    return Array.from(this.middlewares.values()).filter(
-      registration => registration.tags && tags.some(tag => registration.tags!.includes(tag))
-    );
+  public findByTag(tag: string): IMiddlewareRegistration[] {
+    return this.getAllRegistrations().filter((m) => m.tags?.includes(tag));
   }
 
   /**
-   * Create a middleware instance by ID
+   * Find a middleware that can handle the given input
    */
-  public createMiddleware<T, R>(id: string): IMiddleware<T, R> {
-    const registration = this.middlewares.get(id);
-    if (!registration) {
-      const message = `Middleware with ID ${id} not found`;
-      this.logger?.error(`[MiddlewareRegistry] ${message}`);
-      throw new Error(message);
+  public async findHandler<TInput, TOutput>(
+    input: TInput
+  ): Promise<IMiddlewareRegistration<TInput, TOutput> | undefined> {
+    for (const middleware of this.middlewares.values()) {
+      if (middleware.canHandle && (await middleware.canHandle(input))) {
+        return middleware as IMiddlewareRegistration<TInput, TOutput>;
+      }
     }
-
-    return registration.middleware as IMiddleware<T, R>;
+    return undefined;
   }
 
   /**
    * Create a pipeline from a list of middleware IDs
    */
-  public createPipeline<T, R>(middlewareIds: string[]): MiddlewarePipeline<T, R> {
-    const pipeline = createPipeline<T, R>();
+  public createPipeline<TInput, TOutput>(middlewareIds: string[]): MiddlewarePipeline<TInput, TOutput> {
+    const pipeline = createPipeline<TInput, TOutput>();
 
     // Check dependencies and build ordered middleware list
     const orderedIds = this.resolveDependencies(middlewareIds);
@@ -226,21 +308,76 @@ export class MiddlewareRegistry {
 }
 
 /**
- * Convenience function to get the middleware registry instance
+ * Initialize the middleware registry with a logger
+ */
+export function initializeMiddlewareRegistry(logger: ILogger): MiddlewareRegistry {
+  const registry = MiddlewareRegistry.getInstance();
+  registry.setLogger(logger);
+  logger.info('[MiddlewareRegistry] Middleware registry initialized');
+  return registry;
+}
+
+/**
+ * Get the middleware registry instance
  */
 export function getMiddlewareRegistry(): MiddlewareRegistry {
   return MiddlewareRegistry.getInstance();
 }
 
 /**
+ * Helper function to create middleware execution context
+ */
+export function createExecutionContext(
+  logger: ILogger,
+  nodeName: string,
+  nodeId: string,
+  sessionId: string,
+  index?: number
+): IMiddlewareContext {
+  return {
+    logger,
+    nodeName,
+    nodeId,
+    sessionId,
+    index
+  };
+}
+
+/**
+ * Execute a specific middleware by its ID
+ */
+export async function executeMiddleware<TInput, TOutput>(
+  middlewareId: string,
+  input: TInput,
+  context: IMiddlewareContext
+): Promise<TOutput> {
+  const registry = getMiddlewareRegistry();
+  const registration = registry.getRegistration<TInput, TOutput>(middlewareId);
+
+  if (!registration) {
+    throw new Error(`Middleware with ID '${middlewareId}' not found`);
+  }
+
+  if (registration.validateInput) {
+    const isValid = await registration.validateInput(input);
+    if (!isValid) {
+      throw new Error(`Input validation failed for middleware '${middlewareId}'`);
+    }
+  }
+
+  context.logger.debug(`[MiddlewareRegistry] Executing middleware: ${registration.name} (${middlewareId})`);
+  return registration.middleware.execute(input, context);
+}
+
+/**
  * Middleware composer for creating reusable pipeline configurations
  */
-export class MiddlewareComposer<T, R> {
+export class MiddlewareComposer<TInput, TOutput> {
   private registry: MiddlewareRegistry;
   private middlewareIds: string[] = [];
-  private beforeHooks: Array<(input: T, context: IMiddlewareContext) => Promise<void>> = [];
-  private afterHooks: Array<(result: R, context: IMiddlewareContext) => Promise<void>> = [];
-  private errorHandlers: Array<(error: Error, context: IMiddlewareContext) => Promise<R>> = [];
+  private beforeHooks: Array<(input: TInput, context: IMiddlewareContext) => Promise<void>> = [];
+  private afterHooks: Array<(result: TOutput, context: IMiddlewareContext) => Promise<void>> = [];
+  private errorHandlers: Array<(error: Error, context: IMiddlewareContext) => Promise<TOutput>> = [];
 
   /**
    * Create a new middleware composer
@@ -258,7 +395,7 @@ export class MiddlewareComposer<T, R> {
   }
 
   /**
-   * Add multiple middleware components
+   * Add multiple middlewares to the pipeline
    */
   public useMany(middlewareIds: string[]): this {
     this.middlewareIds.push(...middlewareIds);
@@ -266,17 +403,17 @@ export class MiddlewareComposer<T, R> {
   }
 
   /**
-   * Add a before hook
+   * Add a hook to run before execution
    */
-  public before(hook: (input: T, context: IMiddlewareContext) => Promise<void>): this {
+  public before(hook: (input: TInput, context: IMiddlewareContext) => Promise<void>): this {
     this.beforeHooks.push(hook);
     return this;
   }
 
   /**
-   * Add an after hook
+   * Add a hook to run after execution
    */
-  public after(hook: (result: R, context: IMiddlewareContext) => Promise<void>): this {
+  public after(hook: (result: TOutput, context: IMiddlewareContext) => Promise<void>): this {
     this.afterHooks.push(hook);
     return this;
   }
@@ -284,16 +421,16 @@ export class MiddlewareComposer<T, R> {
   /**
    * Add an error handler
    */
-  public catch(handler: (error: Error, context: IMiddlewareContext) => Promise<R>): this {
+  public catch(handler: (error: Error, context: IMiddlewareContext) => Promise<TOutput>): this {
     this.errorHandlers.push(handler);
     return this;
   }
 
   /**
-   * Build the pipeline
+   * Build the pipeline with all configured middlewares and hooks
    */
-  public build(): MiddlewarePipeline<T, R> {
-    const pipeline = this.registry.createPipeline<T, R>(this.middlewareIds);
+  public build(): MiddlewarePipeline<TInput, TOutput> {
+    const pipeline = this.registry.createPipeline<TInput, TOutput>(this.middlewareIds);
 
     // Add hooks and error handlers
     for (const hook of this.beforeHooks) {
@@ -312,15 +449,15 @@ export class MiddlewareComposer<T, R> {
   }
 
   /**
-   * Create a middleware executor that wraps the pipeline execution
+   * Create an executor function that wraps the pipeline
    */
   public createExecutor(): {
-    execute: (input: T, context: IMiddlewareContext) => Promise<R>;
+    execute: (input: TInput, context: IMiddlewareContext) => Promise<TOutput>;
   } {
     const pipeline = this.build();
 
     return {
-      execute: async (input: T, context: IMiddlewareContext) => {
+      execute: async (input: TInput, context: IMiddlewareContext): Promise<TOutput> => {
         return pipeline.execute(input, context);
       },
     };
