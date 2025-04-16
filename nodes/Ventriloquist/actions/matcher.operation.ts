@@ -110,128 +110,123 @@ export const description: INodeProperties[] = [
 
 	// ==================== 2. MATCH CONFIGURATION ====================
 	{
-		displayName: "Match Type",
-		name: "matchMode",
-		type: "options",
+		displayName: "Match Configuration",
+		name: "matchConfig",
+		type: "fixedCollection",
+		default: {},
 		options: [
 			{
-				name: "Find Best Match",
-				value: "best",
-				description: "Return only the best matching result",
-			},
-			{
-				name: "Find All Matches",
-				value: "all",
-				description: "Return all results above their similarity thresholds",
-			},
-			{
-				name: "Find First Match",
-				value: "firstAboveThreshold",
-				description: "Return the first result above its threshold",
-			},
-			{
-				name: "Find N Matches",
-				value: "nMatches",
-				description: "Return a specific number of top matches",
+				name: "config",
+				displayName: "Match Configuration",
+				values: [
+					{
+						displayName: "Results Container Selector",
+						name: "resultsSelector",
+						type: "string",
+						default: "",
+						placeholder: "ul.results, #search-results, table tbody",
+						description: "CSS selector for container with all results",
+						required: true,
+					},
+					{
+						displayName: "Item Selector",
+						name: "itemSelector",
+						type: "string",
+						default: "",
+						placeholder: "li, .result, tr",
+						description: "CSS selector for individual result items (leave empty to auto-detect)",
+					},
+					{
+						displayName: "Auto-detect Children",
+						name: "autoDetectChildren",
+						type: "boolean",
+						default: true,
+						description: "Automatically detect child elements for extraction",
+					},
+					{
+						displayName: "Maximum Items to Compare",
+						name: "maxItems",
+						type: "number",
+						typeOptions: {
+							minValue: 1,
+							maxValue: 100,
+						},
+						default: 10,
+						description: "Maximum number of items to extract for comparison",
+					},
+					{
+						displayName: "Similarity Threshold",
+						name: "threshold",
+						type: "number",
+						typeOptions: {
+							minValue: 0,
+							maxValue: 1,
+						},
+						default: 0.3,
+						description: "Minimum similarity score (0-1) required for an overall match. Matches below this threshold will be ignored.",
+					},
+					{
+						displayName: "Match Mode",
+						name: "matchMode",
+						type: "options",
+						options: [
+							{
+								name: "Best Match",
+								value: "best",
+								description: "Select only the best match above threshold",
+							},
+							{
+								name: "All Matches",
+								value: "all",
+								description: "Return all matches above threshold",
+							},
+							{
+								name: "First Match Above Threshold",
+								value: "firstAboveThreshold",
+								description: "Select first match that meets threshold",
+							},
+						],
+						default: "best",
+						description: "How to select matches from the results",
+					},
+					{
+						displayName: "Limit Results",
+						name: "limitResults",
+						type: "number",
+						typeOptions: {
+							minValue: 1,
+							maxValue: 100,
+						},
+						default: 3,
+						description: "Maximum number of matches to return",
+						displayOptions: {
+							show: {
+								matchMode: ["all"],
+							},
+						},
+					},
+					{
+						displayName: "Wait For Container",
+						name: "waitForSelectors",
+						type: "boolean",
+						default: true,
+						description: "Wait for results container to appear in the page",
+					},
+					{
+						displayName: "Timeout (ms)",
+						name: "timeout",
+						type: "number",
+						default: 10000,
+						description: "Maximum wait time in milliseconds",
+						displayOptions: {
+							show: {
+								waitForSelectors: [true],
+							},
+						},
+					},
+				],
 			},
 		],
-		default: "best",
-		description: "How to select and return matches",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Number of Matches to Find",
-		name: "maxMatches",
-		type: "number",
-		default: 5,
-		description: "Maximum number of matches to return",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				matchMode: ["nMatches"],
-			},
-		},
-	},
-	{
-		displayName: "Selection Method",
-		name: "selectionMethod",
-		type: "options",
-		options: [
-			{
-				name: "Container with Items",
-				value: "containerItems",
-				description: "Select a container element that contains multiple item elements",
-			},
-			{
-				name: "Direct Item Selection",
-				value: "directItems",
-				description: "Select items directly with a single selector",
-			},
-		],
-		default: "containerItems",
-		description: "How to select elements to compare on the page",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Results Container Selector",
-		name: "resultsSelector",
-		type: "string",
-		default: "",
-		placeholder: "#search-results, .results-container",
-		description: "CSS selector for the container holding all potential matches. Children will be auto-detected.",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				selectionMethod: ["containerItems"],
-			},
-		},
-	},
-	{
-		displayName: "Direct Items Selector",
-		name: "directItemSelector",
-		type: "string",
-		default: "",
-		placeholder: "#search-results li, .results-container .result-item",
-		description: "CSS selector that directly targets all items to compare",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				selectionMethod: ["directItems"],
-			},
-		},
-	},
-	{
-		displayName: "Wait for Elements",
-		name: "waitForSelectors",
-		type: "boolean",
-		default: true,
-		description: "Wait for selectors to be present in DOM before processing",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Selector Timeout (Ms)",
-		name: "timeout",
-		type: "number",
-		default: 10000,
-		description: "Maximum time to wait for selectors in milliseconds",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				waitForSelectors: [true],
-			},
-		},
 	},
 
 	// ==================== 3. CRITERIA COLLECTION ====================
@@ -947,288 +942,191 @@ export const description: INodeProperties[] = [
 export async function execute(
 	this: IExecuteFunctions,
 	index: number,
-	websocketEndpoint: string,
 	workflowId: string,
 ): Promise<INodeExecutionData> {
-	// Record start time for execution duration tracking
+	// Get operation start time for performance logging
 	const startTime = Date.now();
 
-	// Get parameters
-	const selectionMethod = this.getNodeParameter('selectionMethod', index, 'containerItems') as string;
-	const matchMode = this.getNodeParameter('matchMode', index, 'best') as string;
+	// Get the browser from session
+	const browser = await this.getNodeParameter('browser', index) as any;
 
-	// Handle different match modes
-	let maxResults: number | undefined;
-	if (matchMode === 'nMatches') {
-		maxResults = this.getNodeParameter('maxMatches', index, 5) as number;
-	}
+	// Get active page using the function from sessionUtils
+	const page = await getActivePageFunc.call(this, browser, this.logger);
+	if (!page) throw new Error("No active page found");
 
-	const performanceMode = this.getNodeParameter('performanceMode', index, 'balanced') as string;
-	const enableDetailedLogs = this.getNodeParameter('enableDetailedLogs', index, false) as boolean;
+	// Get session ID or use empty string if not available
+	const sessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
 
-	// Get match criteria
-	const matchCriteria = this.getNodeParameter('matchCriteria.criteria', index, []) as IDataObject[];
-	if (matchCriteria.length === 0) {
-		throw new Error('At least one match criterion is required');
-	}
-
-	let resultsSelector = '';
-	let itemSelector = '';
-	let autoDetectChildren = true; // Always auto-detect children for container
-	let directItemSelector = '';
-
-	if (selectionMethod === 'containerItems') {
-		resultsSelector = this.getNodeParameter('resultsSelector', index, '') as string;
-	} else {
-		directItemSelector = this.getNodeParameter('directItemSelector', index, '') as string;
-	}
-
-	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
-	const timeout = waitForSelectors ? this.getNodeParameter('timeout', index, 10000) as number : 0;
-
-	// Added for better logging
+	const nodeId = this.getNode().id || "unknown";
 	const nodeName = this.getNode().name;
-	const nodeId = this.getNode().id;
-
-	// Visual marker to clearly indicate a new node is starting
-	this.logger.info("============ STARTING NODE EXECUTION ============");
-	this.logger.info(
-		`[Ventriloquist][${nodeName}#${index}][Matcher][${nodeId}] Starting execution`,
-	);
-
-	// Check if an explicit session ID was provided
-	const explicitSessionId = this.getNodeParameter(
-		"explicitSessionId",
-		index,
-		"",
-	) as string;
-
-	// Get or create browser session
-	let page: Page | null = null;
-	let sessionId = "";
+	this.logger.info(`[Matcher][${nodeId}] Starting matcher operation on: ${await page.url()}`);
 
 	try {
-		// Use the centralized session management instead of duplicating code
-		const sessionResult = await SessionManager.getOrCreatePageSession(
-			this.logger,
-			{
-				explicitSessionId,
-				websocketEndpoint,
-				workflowId,
-				operationName: "Matcher",
-				nodeId,
-				nodeName,
-				index,
-			},
-		);
+		// Get configuration values
+		const matchConfig = this.getNodeParameter('matchConfig.config', index) as IDataObject;
+		this.logger.debug(`[Matcher] Match configuration: ${JSON.stringify(matchConfig)}`);
 
-		page = sessionResult.page;
-		sessionId = sessionResult.sessionId;
+		const matchCriteria = this.getNodeParameter('matchCriteria.criteria', index, []) as IDataObject[];
+		this.logger.debug(`[Matcher] Match criteria: ${JSON.stringify(matchCriteria)}`);
 
-		if (!page) {
-			throw new Error("Failed to get or create a page");
+		if (!matchCriteria || matchCriteria.length === 0) {
+			throw new Error('No match criteria specified. Please add at least one criterion.');
 		}
 
-		this.logger.info(
-			`[Ventriloquist][${nodeName}#${index}][Matcher][${nodeId}] Starting matcher operation with method: ${selectionMethod}, match mode: ${matchMode}`,
-		);
+		// Build source entity from criteria
+		const sourceEntity: Record<string, string> = {};
 
-		// Initialize container info for debugging
-		let containerInfo: IContainerInfo = {
-			containerFound: false
-		};
+		for (let i = 0; i < matchCriteria.length; i++) {
+			const criterion = matchCriteria[i];
 
-		// Wait for selectors if required
+			if (criterion.comparisonApproach === 'smartAll' || criterion.comparisonApproach === 'matchAll') {
+				// For Smart Match (All) and Match All, use criterion name as field name and reference value as value
+				const fieldName = criterion.name as string || `criterion_${i}`;
+				const refValue = criterion.referenceValue as string || '';
+
+				if (!refValue || refValue.trim() === '') {
+					this.logger.warn(`[Matcher] Empty reference value for criterion "${fieldName}"`);
+				}
+
+				sourceEntity[fieldName] = refValue;
+			} else if (criterion.comparisonApproach === 'fieldByField') {
+				// For Field by Field, get field comparisons
+				const fieldComparisons = (criterion.fieldComparisons as IDataObject)?.fields as IDataObject[] || [];
+
+				for (const field of fieldComparisons) {
+					const fieldName = field.name as string;
+					const refValue = field.referenceValue as string || '';
+
+					if (!refValue || refValue.trim() === '') {
+						this.logger.warn(`[Matcher] Empty reference value for field "${fieldName}"`);
+					}
+
+					sourceEntity[fieldName] = refValue;
+				}
+			}
+		}
+
+		// Validate we have at least one non-empty reference value
+		const nonEmptyValues = Object.values(sourceEntity).filter(value => value && value.trim() !== '');
+		if (nonEmptyValues.length === 0) {
+			throw new Error('All reference values are empty. Please provide at least one non-empty reference value to match against.');
+		}
+
+		// Get parameters
+		const selectionMethod = this.getNodeParameter('selectionMethod', index, 'containerItems') as string;
+		let resultsSelector = '';
+		let itemSelector = '';
+		let directItemSelector = '';
+
+		if (selectionMethod === 'containerItems') {
+			resultsSelector = this.getNodeParameter('resultsSelector', index, '') as string;
+		} else {
+			directItemSelector = this.getNodeParameter('directItemSelector', index, '') as string;
+		}
+
+		const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
+		const timeout = this.getNodeParameter('timeout', index, 10000) as number;
+		const matchMode = this.getNodeParameter('matchMode', index, 'best') as string;
+		const actionOnMatch = this.getNodeParameter('actionOnMatch', index, 'none') as string;
+		const performanceMode = this.getNodeParameter('performanceMode', index, 'balanced') as string;
+		const enableDetailedLogs = this.getNodeParameter('enableDetailedLogs', index, false) as boolean;
+
+		// Visual marker to clearly indicate a new node is starting
+		this.logger.info(`${'='.repeat(40)}`);
+		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Matcher] Starting operation`);
+
+		// Set up matcher configuration
+		let containerInfo: IContainerInfo = { containerFound: false };
+
+		// Wait for elements if requested
 		if (waitForSelectors) {
-			this.logger.info(
-				`[Ventriloquist][${nodeName}#${index}][Matcher][${nodeId}] Waiting for selectors with timeout: ${timeout}ms`,
-			);
+			if (selectionMethod === 'containerItems') {
+				if (resultsSelector) {
+					this.logger.info(`[Matcher] Waiting for results container: ${resultsSelector}`);
+					try {
+						await smartWaitForSelector(
+							page,
+							resultsSelector,
+							timeout,
+							250, // Use a reasonable default early exit delay
+							this.logger,
+							nodeName,
+							nodeId
+						);
 
-			// Apply appropriate early exit delay based on performance mode
-			const earlyExitDelay = performanceMode === 'speed' ? 100 :
-				(performanceMode === 'accuracy' ? 500 : 250);
+						// Get additional info about the container
+						containerInfo = await page.evaluate((selector: string) => {
+							const container = document.querySelector(selector);
+							if (!container) return { containerFound: false };
 
-			if (selectionMethod === 'containerItems' && resultsSelector) {
-				try {
-					await smartWaitForSelector(
-						page,
-						resultsSelector,
-						timeout,
-						earlyExitDelay,
-						this.logger,
-						nodeName,
-						nodeId
-					);
-					containerInfo.containerFound = true;
+							return {
+								containerFound: true,
+								tagName: container.tagName,
+								className: container.className,
+								childCount: container.childElementCount,
+								documentState: {
+									readyState: document.readyState,
+									bodyChildCount: document.body.childElementCount,
+								}
+							};
+						}, resultsSelector);
 
-					// Get additional info about the container
-					containerInfo = await page.evaluate((selector) => {
-						const container = document.querySelector(selector);
-						if (!container) return { containerFound: false };
-
-						return {
-							containerFound: true,
-							tagName: container.tagName,
-							className: container.className,
-							childCount: container.childElementCount,
-							documentState: {
-								readyState: document.readyState,
-								bodyChildCount: document.body.childElementCount
-							}
-						};
-					}, resultsSelector);
-
-					this.logger.info(
-						`[Ventriloquist][${nodeName}#${index}][Matcher][${nodeId}] Container found: ${JSON.stringify(containerInfo)}`,
-					);
-				} catch (error) {
-					this.logger.warn(
-						`[Ventriloquist][${nodeName}#${index}][Matcher][${nodeId}] Error waiting for container: ${(error as Error).message}`,
-					);
-					containerInfo.containerFound = false;
+						this.logger.info(`[Matcher] Found container: ${JSON.stringify(containerInfo)}`);
+					} catch (error) {
+						this.logger.warn(`[Matcher] Container selector timed out: ${(error as Error).message}`);
+						containerInfo.containerFound = false;
+					}
 				}
 			} else if (selectionMethod === 'directItems' && directItemSelector) {
+				this.logger.info(`[Matcher] Waiting for direct item selector: ${directItemSelector}`);
 				try {
 					await smartWaitForSelector(
 						page,
 						directItemSelector,
 						timeout,
-						earlyExitDelay,
+						250, // Use a reasonable default early exit delay
 						this.logger,
 						nodeName,
 						nodeId
 					);
-					containerInfo.containerFound = true;
 				} catch (error) {
-					this.logger.warn(
-						`[Ventriloquist][${nodeName}#${index}][Matcher][${nodeId}] Error waiting for direct items: ${(error as Error).message}`,
-					);
-					containerInfo.containerFound = false;
+					this.logger.warn(`[Matcher] Direct item selector timed out: ${(error as Error).message}`);
 				}
 			}
 		}
 
-		// Create entity matcher configuration based on criteria
-		let matcherConfig: IEntityMatcherConfig = {
-			// Common configuration for all methods
-			resultsSelector: selectionMethod === 'containerItems' ? resultsSelector : '',
-			itemSelector: selectionMethod === 'containerItems' ? itemSelector : directItemSelector,
-			autoDetectChildren,
-			outputFormat: 'smart', // Default output format
-			waitForSelectors,
-			timeout,
-			performanceMode: performanceMode as 'balanced' | 'speed' | 'accuracy',
-			debugMode: enableDetailedLogs,
-			threshold: 0.7, // Default threshold, will be overridden by criteria
-			matchMode: matchMode === 'nMatches' ? 'best' : matchMode as 'best' | 'all' | 'firstAboveThreshold',
+		// Create match configuration object
+		const maxResults = matchMode === 'all' ? 10 : 1;
+
+		// Create entity matcher configuration
+		const matcherConfig: IEntityMatcherConfig = {
+			resultsSelector: selectionMethod === 'containerItems' ? resultsSelector : directItemSelector,
+			itemSelector,
+			autoDetectChildren: true,
+			threshold: Number(matchConfig.threshold) || 0.3,
+			matchMode: matchMode as 'best' | 'all' | 'firstAboveThreshold',
 			limitResults: maxResults,
-			sourceEntity: {},
+			sourceEntity,
 			fieldComparisons: [],
 			fields: [],
+			performanceMode: performanceMode as 'balanced' | 'speed' | 'accuracy',
+			debugMode: enableDetailedLogs,
+			action: actionOnMatch as 'click' | 'extract' | 'none',
+			waitForSelectors,
+			timeout,
 		};
 
-		// Process the first criterion for basic info
-		// More advanced handling for multiple criteria can be added
-		if (matchCriteria.length > 0) {
-			const firstCriterion = matchCriteria[0];
-			const comparisonApproach = firstCriterion.comparisonApproach as string;
-			const matchMethod = firstCriterion.matchMethod as string || 'similarity';
-
-			// For field-by-field approach, get output format from the criterion
-			if (comparisonApproach === 'fieldByField') {
-				const outputFormat = firstCriterion.outputFormat as string || 'smart';
-				matcherConfig.outputFormat = outputFormat as 'text' | 'html' | 'smart';
-			}
-
-			if (matchMethod === 'similarity') {
-				if (comparisonApproach === 'smartAll' || comparisonApproach === 'matchAll') {
-					const referenceValue = firstCriterion.referenceValue as string;
-					const similarityAlgorithm = firstCriterion.similarityAlgorithm as ComparisonAlgorithm || 'smart';
-					const matchThreshold = firstCriterion.matchThreshold as number || 0.7;
-					const mustMatch = firstCriterion.mustMatch as boolean || false;
-					const importance = firstCriterion.importance as number || 0.5;
-
-					// Configure for smart all-text comparison
-					matcherConfig.sourceEntity = { text: referenceValue };
-					matcherConfig.fieldComparisons = [{
-						field: 'text',
-						algorithm: similarityAlgorithm,
-						weight: importance,
-						mustMatch,
-						threshold: matchThreshold
-					}];
-
-					// Use the criterion threshold as the main threshold
-					matcherConfig.threshold = matchThreshold;
-				} else if (comparisonApproach === 'fieldByField') {
-					// Field by field comparison
-					const fieldComparisonData = firstCriterion.fieldComparisons as IDataObject;
-					const fieldComparisons = fieldComparisonData && typeof fieldComparisonData === 'object' &&
-						fieldComparisonData.fields ? fieldComparisonData.fields as IDataObject[] : [];
-
-					// Convert each field configuration
-					matcherConfig.fieldComparisons = fieldComparisons.map(field => {
-						// Create the field configuration with only valid properties
-						const fieldConfig: IFieldComparisonConfig = {
-							field: field.name as string,
-							weight: (field.weight as number) || 0.5,
-							algorithm: field.algorithm as ComparisonAlgorithm || 'smart',
-							threshold: (field.threshold as number) || 0.7,
-							mustMatch: (field.mustMatch as boolean) || false
-						};
-						return fieldConfig;
-					});
-
-					// Also store additional field metadata in the source entity
-					const sourceEntityFields: Record<string, string> = {};
-					fieldComparisons.forEach(field => {
-						sourceEntityFields[field.name as string] = field.referenceValue as string;
-					});
-					matcherConfig.sourceEntity = sourceEntityFields;
-				}
-			} else if (matchMethod === 'rules') {
-				// Rules-based matching
-				const rulesConfigData = firstCriterion.rulesConfig as IDataObject;
-				const rulesConfig = rulesConfigData && typeof rulesConfigData === 'object' &&
-					rulesConfigData.rules ? rulesConfigData.rules as IDataObject[] : [];
-
-				// Convert rule configurations and set fields
-				matcherConfig.fields = rulesConfig.map(rule => ({
-					name: rule.field as string,
-					selector: rule.selector as string,
-					operation: rule.operation as string,
-					value: rule.value as string,
-					caseSensitive: (rule.caseSensitive as boolean) || false,
-					required: (rule.required as boolean) || false,
-				}));
-			}
-		}
-
-		// Handle action configuration if specified
-		const actionOnMatch = this.getNodeParameter('actionOnMatch', index, 'none') as string;
+		// Configure additional action parameters if an action is selected
 		if (actionOnMatch !== 'none') {
-			matcherConfig.action = actionOnMatch as 'click' | 'extract' | 'none';
 			matcherConfig.actionSelector = this.getNodeParameter('actionSelector', index, '') as string;
+			matcherConfig.waitAfterAction = this.getNodeParameter('waitAfterAction', index, true) as boolean;
 
-			if (actionOnMatch === 'click') {
-				const waitAfterAction = this.getNodeParameter('waitAfterAction', index, true) as boolean;
-				matcherConfig.waitAfterAction = waitAfterAction;
-
-				if (waitAfterAction) {
-					// Add custom wait parameters to the config (not in the interface)
-					const waitForValue = this.getNodeParameter('waitFor', index, 'navigation') as string;
-					const waitTimeValue = this.getNodeParameter('waitTime', index, 2000) as number;
-
-					// Set waitTime from interface
-					matcherConfig.waitTime = waitTimeValue;
-
-					// Handle waitSelector if needed
-					if (waitForValue === 'element') {
-						matcherConfig.waitSelector = this.getNodeParameter('waitSelector', index, '') as string;
-					}
-
-					// Add additional properties for custom handling in the execution
-					(matcherConfig as any).waitFor = waitForValue;
+			if (matcherConfig.waitAfterAction) {
+				const waitFor = this.getNodeParameter('waitFor', index, 'navigation') as string;
+				if (waitFor === 'element') {
+					matcherConfig.waitSelector = this.getNodeParameter('waitSelector', index, '') as string;
+				} else if (waitFor === 'delay') {
+					matcherConfig.waitTime = this.getNodeParameter('waitTime', index, 2000) as number;
 				}
 			}
 		}
@@ -1246,30 +1144,20 @@ export async function execute(
 			}
 		);
 
-		const matchResults = await entityMatcher.execute();
+		const matchResult = await entityMatcher.execute();
 
-		// Format results
-		this.logger.info(
-			`[Ventriloquist][${nodeName}#${index}][Matcher][${nodeId}] Operation completed with ${matchResults?.matches?.length || 0} matches`
-		);
-
-		// Return results
-		return {
-			json: {
-				success: true,
-				sessionId,
-				containerInfo,
-				results: matchResults,
-				executionDuration: Date.now() - startTime,
+		// Log the match result
+		if (matchResult.success) {
+			this.logger.info(`[Matcher] Found ${matchResult.matches?.length || 0} matches`);
+			if (matchResult.selectedMatch) {
+				this.logger.info(`[Matcher] Selected match with score: ${matchResult.selectedMatch.overallSimilarity}`);
 			}
-		};
+		} else {
+			this.logger.warn(`[Matcher] No matches found: ${matchResult.error || 'Unknown error'}`);
+		}
 
-	} catch (error: any) {
-		this.logger.error(
-			`[Ventriloquist][${nodeName}#${index}][Matcher][${nodeId}] Error: ${error.message}`,
-		);
-
-		if (page) {
+		// Log additional debug info if enabled
+		if (enableDetailedLogs) {
 			try {
 				// Log additional page debug info
 				await logPageDebugInfo(page, this.logger, {
@@ -1278,10 +1166,24 @@ export async function execute(
 					nodeId,
 					index
 				});
-			} catch (debugError) {
-				// Ignore debug errors
+			} catch (error) {
+				this.logger.error(`[Matcher] Debug logging error: ${(error as Error).message}`);
 			}
 		}
+
+		// Create output item
+		const item = {
+			json: {
+				...matchResult,
+				duration: Date.now() - startTime,
+			}
+		};
+
+		return item;
+	} catch (error: any) {
+		this.logger.error(
+			`[Ventriloquist][${nodeName}#${index}][Matcher][${nodeId}] Error: ${error.message}`,
+		);
 
 		// Return error response
 		return {
@@ -1298,3 +1200,4 @@ export async function execute(
 		};
 	}
 }
+
