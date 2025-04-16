@@ -10,9 +10,28 @@ export * from './types';
 // Re-export extraction middleware
 export * from './extraction';
 
-// Selective import from matching to avoid name conflicts
-import { createEntityMatcher } from './matching/entityMatcherFactory';
-export { createEntityMatcher };
+// Selective import and export from matching to avoid name conflicts
+import {
+    createEntityMatcher,
+    EntityMatcherExtractionMiddleware,
+    EntityMatcherComparisonMiddleware,
+    EntityMatcherActionMiddleware,
+    createEntityMatcherExtractionMiddleware,
+    createEntityMatcherExtractionMiddlewareRegistration,
+    createEntityMatcherComparisonMiddlewareRegistration,
+    createEntityMatcherActionMiddlewareRegistration
+} from './matching';
+
+export {
+    createEntityMatcher,
+    EntityMatcherExtractionMiddleware,
+    EntityMatcherComparisonMiddleware,
+    EntityMatcherActionMiddleware,
+    createEntityMatcherExtractionMiddleware,
+    createEntityMatcherExtractionMiddlewareRegistration,
+    createEntityMatcherComparisonMiddlewareRegistration,
+    createEntityMatcherActionMiddlewareRegistration
+};
 
 // TODO: Add action middleware exports once implemented
 // export * from './actions';

@@ -892,8 +892,16 @@ async function buildEntityMatcherConfig(this: IExecuteFunctions, index: number):
 			}
 		];
 
-		// For smart matching, no specific field extraction needed
-		fields = [];
+		// For smart matching, create a field definition for extraction
+		fields = [
+			{
+				name: 'text',
+				selector: '',
+				weight: importance,
+				required: mustMatch,
+				dataFormat: 'text'
+			}
+		];
 	} else {
 		// For field-by-field matching, get all field configurations
 		const fieldComparisonsList = this.getNodeParameter('fieldComparisons.fields', index, []) as IDataObject[];
@@ -925,12 +933,14 @@ async function buildEntityMatcherConfig(this: IExecuteFunctions, index: number):
 				mustMatch,
 			});
 
-			// Add to fields for extraction
+			// Add to fields for extraction (separate from fieldComparisons)
 			fields.push({
 				name: fieldName,
 				selector,
 				attribute: attribute || undefined,
 				weight,
+				required: mustMatch,
+				dataFormat: 'text'
 			});
 		}
 	}
@@ -952,7 +962,7 @@ async function buildEntityMatcherConfig(this: IExecuteFunctions, index: number):
 		threshold,
 		limitResults,
 		matchMode,
-		sortResults: true,
+		maxItems,
 
 		// Auto-detection
 		autoDetectChildren,
@@ -968,11 +978,5 @@ async function buildEntityMatcherConfig(this: IExecuteFunctions, index: number):
 		// Timing configuration
 		waitForSelectors,
 		timeout,
-
-		// Additional configuration
-		maxItems,
-
-		// Output format
-		outputFormat,
 	};
 }

@@ -1,7 +1,7 @@
 import type { Logger as ILogger } from 'n8n-workflow';
 import type { Page, ElementHandle } from 'puppeteer-core';
 import { type IMiddleware, type IMiddlewareContext } from '../middleware';
-import { MiddlewareType, type IMiddlewareRegistration } from '../middlewareRegistration';
+import { IMiddlewareRegistration, MiddlewareType } from '../middlewareRegistry';
 import {
     type IEntityMatcherExtractionInput,
     type IEntityMatcherExtractionOutput,
@@ -17,7 +17,7 @@ import {
     IDetectionResult
 } from '../../detectionUtils';
 import { elementExists, isElementVisible } from '../../navigationUtils';
-import { extractTextFromHtml, getVisibleTextFromHtml } from '../../comparisonUtils';
+import { extractTextFromHtml } from '../../comparisonUtils';
 
 /**
  * Entity Matcher Extraction Middleware
@@ -130,6 +130,17 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
 
             if (containerDetectionResult.success && items.length === 0) {
                 logger.warn(`${logPrefix} Container was found but no items were extracted. This may indicate an issue with the item selector or auto-detection.`);
+
+                // Log container details for debugging
+                try {
+                    const containerElement = await page.$(extractionConfig.resultsSelector);
+                    if (containerElement) {
+                        const containerHTML = await page.evaluate(el => el.outerHTML, containerElement);
+                        logger.debug(`${logPrefix} Container HTML: ${containerHTML.substring(0, 1000)}${containerHTML.length > 1000 ? '...(truncated)' : ''}`);
+                    }
+                } catch (error) {
+                    logger.debug(`${logPrefix} Could not log container HTML: ${(error as Error).message}`);
+                }
             }
 
             return {
@@ -227,8 +238,57 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
             const directChildren = await containerElement.$$(':scope > *');
             logger.debug(`${logPrefix} Container has ${directChildren.length} direct children for auto-detection`);
 
-            // Use the direct children as item elements
-            itemElements = directChildren;
+            // Try intelligent auto-detection of repeating elements
+            if (directChildren.length > 0) {
+                // Check if there's a single wrapper element that contains multiple children
+                if (directChildren.length === 1) {
+                    logger.debug(`${logPrefix} Container has a single direct child, checking for grandchildren...`);
+                    const grandChildren = await directChildren[0].$$(':scope > *');
+                    if (grandChildren.length > 1) {
+                        logger.info(`${logPrefix} Using ${grandChildren.length} grandchild elements as items`);
+                        itemElements = grandChildren;
+                    } else {
+                        logger.info(`${logPrefix} Using single direct child as item`);
+                        itemElements = directChildren;
+                    }
+                } else {
+                    // Check if the children are of the same tag type (indicating repeating items)
+                    const tagNames = await Promise.all(directChildren.map(
+                        child => page.evaluate(el => el.tagName.toLowerCase(), child)
+                    ));
+
+                    const tagCounts = tagNames.reduce((acc, tag) => {
+                        acc[tag] = (acc[tag] || 0) + 1;
+                        return acc;
+                    }, {} as Record<string, number>);
+
+                    const mostCommonTag = Object.entries(tagCounts)
+                        .sort((a, b) => b[1] - a[1])[0];
+
+                    if (mostCommonTag && mostCommonTag[1] > 1) {
+                        // Use elements with the most common tag
+                        logger.info(`${logPrefix} Auto-detected repeating tag '${mostCommonTag[0]}' (${mostCommonTag[1]} instances)`);
+
+                        // Filter direct children to only include those with the most common tag
+                        itemElements = await Promise.all(
+                            directChildren.map(async (child, i) => {
+                                if (tagNames[i] === mostCommonTag[0]) {
+                                    return child;
+                                }
+                                return null;
+                            })
+                        ).then(results => results.filter(Boolean) as ElementHandle<Element>[]);
+
+                        logger.info(`${logPrefix} Using ${itemElements.length} elements with tag '${mostCommonTag[0]}' as items`);
+                    } else {
+                        // Use all direct children as they don't have a clear pattern
+                        logger.info(`${logPrefix} No repeating tag pattern found, using all ${directChildren.length} direct children as items`);
+                        itemElements = directChildren;
+                    }
+                }
+            } else {
+                logger.warn(`${logPrefix} Container has no direct children for auto-detection`);
+            }
         }
 
         // If no items found, return empty array
@@ -244,31 +304,36 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
             try {
                 const element = itemElements[i];
 
+                // Log item details for debugging
+                const itemDetails = await this.getElementDetails(page, element);
+                logger.debug(`${logPrefix} Item #${i} details: ${JSON.stringify(itemDetails)}`);
+
                 // Extract fields from the item element
                 const fields = await this.extractFields(
                     page,
                     element,
                     config.fields,
                     logger,
-                    `${logPrefix} [Item ${i}]`
+                    logPrefix
                 );
 
-                // Add to items array
+                // Add the extracted item
                 items.push({
                     index: i,
-                    element: element,
-                    fields,
+                    element,
+                    fields
                 });
             } catch (error) {
-                logger.warn(`${logPrefix} Error extracting item ${i}: ${(error as Error).message}`);
+                logger.warn(`${logPrefix} Error extracting item #${i}: ${(error as Error).message}`);
             }
         }
 
+        logger.info(`${logPrefix} Successfully extracted ${items.length} items out of ${itemElements.length} elements`);
         return items;
     }
 
     /**
-     * Extract fields from an item element
+     * Extract fields from an item element based on field configuration
      */
     private async extractFields(
         page: Page,
@@ -387,6 +452,15 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
         if (!value) return value;
 
         switch (format) {
+            case 'text':
+                // For text format, extract only text from HTML if present
+                try {
+                    return extractTextFromHtml(value);
+                } catch (error) {
+                    logger.debug(`${logPrefix} Error extracting text from HTML: ${(error as Error).message}`);
+                    return value;
+                }
+
             case 'number':
                 // Extract numeric value, handling currency, etc.
                 try {
@@ -445,7 +519,7 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
                     logger.debug(`${logPrefix} Could not convert to number: ${value}`);
                     return value;
                 } catch (error) {
-                    logger.debug(`${logPrefix} Error converting to number: ${error.message}`);
+                    logger.debug(`${logPrefix} Error converting to number: ${(error as Error).message}`);
                     return value;
                 }
 
@@ -470,84 +544,115 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
                         const fullYear = year.length === 2 ? `20${year}` : year;
 
                         // Try both MM/DD/YYYY and DD/MM/YYYY interpretations
-                        const mmddDate = new Date(`${part1}/${part2}/${fullYear}`);
-                        if (!isNaN(mmddDate.getTime())) {
-                            logger.debug(`${logPrefix} Converted to date (MM/DD/YYYY): ${value} → ${mmddDate.toISOString()}`);
-                            return mmddDate;
+                        // MM/DD/YYYY
+                        const usDate = new Date(`${part1}/${part2}/${fullYear}`);
+                        if (!isNaN(usDate.getTime())) {
+                            logger.debug(`${logPrefix} Converted to date (US format): ${value} → ${usDate.toISOString()}`);
+                            return usDate;
                         }
 
-                        const ddmmDate = new Date(`${part2}/${part1}/${fullYear}`);
-                        if (!isNaN(ddmmDate.getTime())) {
-                            logger.debug(`${logPrefix} Converted to date (DD/MM/YYYY): ${value} → ${ddmmDate.toISOString()}`);
-                            return ddmmDate;
+                        // DD/MM/YYYY
+                        const euDate = new Date(`${part2}/${part1}/${fullYear}`);
+                        if (!isNaN(euDate.getTime())) {
+                            logger.debug(`${logPrefix} Converted to date (EU format): ${value} → ${euDate.toISOString()}`);
+                            return euDate;
                         }
                     }
 
-                    // MM-DD-YYYY or DD-MM-YYYY with dashes
+                    // DD-MM-YYYY or MM-DD-YYYY
                     const dashMatch = dateString.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/);
                     if (dashMatch) {
                         const [_, part1, part2, year] = dashMatch;
                         const fullYear = year.length === 2 ? `20${year}` : year;
 
-                        // Try both MM-DD-YYYY and DD-MM-YYYY interpretations
-                        const mmddDate = new Date(`${part1}-${part2}-${fullYear}`);
-                        if (!isNaN(mmddDate.getTime())) {
-                            logger.debug(`${logPrefix} Converted to date (MM-DD-YYYY): ${value} → ${mmddDate.toISOString()}`);
-                            return mmddDate;
+                        // Try both interpretations
+                        const usDate = new Date(`${part1}-${part2}-${fullYear}`);
+                        if (!isNaN(usDate.getTime())) {
+                            logger.debug(`${logPrefix} Converted to date (US dash format): ${value} → ${usDate.toISOString()}`);
+                            return usDate;
                         }
 
-                        const ddmmDate = new Date(`${part2}-${part1}-${fullYear}`);
-                        if (!isNaN(ddmmDate.getTime())) {
-                            logger.debug(`${logPrefix} Converted to date (DD-MM-YYYY): ${value} → ${ddmmDate.toISOString()}`);
-                            return ddmmDate;
-                        }
-                    }
-
-                    // YYYY-MM-DD (ISO format)
-                    const isoMatch = dateString.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-                    if (isoMatch) {
-                        const [_, year, month, day] = isoMatch;
-                        const isoDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
-                        if (!isNaN(isoDate.getTime())) {
-                            logger.debug(`${logPrefix} Converted to date (ISO): ${value} → ${isoDate.toISOString()}`);
-                            return isoDate;
+                        const euDate = new Date(`${part2}-${part1}-${fullYear}`);
+                        if (!isNaN(euDate.getTime())) {
+                            logger.debug(`${logPrefix} Converted to date (EU dash format): ${value} → ${euDate.toISOString()}`);
+                            return euDate;
                         }
                     }
 
-                    // Month name formats (e.g., "January 1, 2023" or "1 Jan 2023")
-                    const monthNames = [
-                        'january', 'february', 'march', 'april', 'may', 'june',
-                        'july', 'august', 'september', 'october', 'november', 'december',
-                        'jan', 'feb', 'mar', 'apr', 'may', 'jun',
-                        'jul', 'aug', 'sep', 'oct', 'nov', 'dec'
-                    ];
+                    // Month name formats: "Jan 5, 2022" or "5 Jan 2022"
+                    const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+                    const monthPattern = monthNames.join('|');
 
-                    const lowercaseDate = dateString.toLowerCase();
-                    for (const monthName of monthNames) {
-                        if (lowercaseDate.includes(monthName)) {
-                            const textDate = new Date(dateString);
-                            if (!isNaN(textDate.getTime())) {
-                                logger.debug(`${logPrefix} Converted to date (text format): ${value} → ${textDate.toISOString()}`);
-                                return textDate;
-                            }
+                    // US format: MMM DD, YYYY
+                    const usMonthMatch = dateString.toLowerCase().match(new RegExp(`(${monthPattern})\\s+(\\d{1,2})(?:,|\\s)\\s*(\\d{2,4})`, 'i'));
+                    if (usMonthMatch) {
+                        const [_, month, day, year] = usMonthMatch;
+                        const monthIndex = monthNames.indexOf(month.toLowerCase());
+                        const fullYear = year.length === 2 ? 2000 + parseInt(year) : parseInt(year);
+
+                        const date = new Date(fullYear, monthIndex, parseInt(day));
+                        if (!isNaN(date.getTime())) {
+                            logger.debug(`${logPrefix} Converted to date (US month name): ${value} → ${date.toISOString()}`);
+                            return date;
+                        }
+                    }
+
+                    // EU format: DD MMM YYYY
+                    const euMonthMatch = dateString.toLowerCase().match(new RegExp(`(\\d{1,2})\\s+(${monthPattern})\\s+(\\d{2,4})`, 'i'));
+                    if (euMonthMatch) {
+                        const [_, day, month, year] = euMonthMatch;
+                        const monthIndex = monthNames.indexOf(month.toLowerCase());
+                        const fullYear = year.length === 2 ? 2000 + parseInt(year) : parseInt(year);
+
+                        const date = new Date(fullYear, monthIndex, parseInt(day));
+                        if (!isNaN(date.getTime())) {
+                            logger.debug(`${logPrefix} Converted to date (EU month name): ${value} → ${date.toISOString()}`);
+                            return date;
                         }
                     }
 
                     logger.debug(`${logPrefix} Could not convert to date: ${value}`);
                     return value;
                 } catch (error) {
-                    logger.debug(`${logPrefix} Error converting to date: ${error.message}`);
+                    logger.debug(`${logPrefix} Error converting to date: ${(error as Error).message}`);
                     return value;
                 }
 
             case 'boolean':
                 // Convert to boolean
-                const boolStr = value.toLowerCase().trim();
-                if (['true', 'yes', '1', 'y', 'on'].includes(boolStr)) {
-                    return true;
-                } else if (['false', 'no', '0', 'n', 'off'].includes(boolStr)) {
-                    return false;
+                try {
+                    const normalized = value.trim().toLowerCase();
+                    // Check for common truthy values
+                    if (['true', 'yes', '1', 'on', 'checked', 'enabled', 'selected'].includes(normalized)) {
+                        return true;
+                    }
+                    // Check for common falsy values
+                    if (['false', 'no', '0', 'off', 'unchecked', 'disabled', 'not selected'].includes(normalized)) {
+                        return false;
+                    }
+                    // Default to the string value if not explicitly true/false
+                    return value;
+                } catch (error) {
+                    logger.debug(`${logPrefix} Error converting to boolean: ${(error as Error).message}`);
+                    return value;
                 }
+
+            case 'address':
+                // Basic address normalization
+                try {
+                    return value
+                        .replace(/\s+/g, ' ')
+                        .replace(/[\n\r]+/g, ', ')
+                        .replace(/,\s*,/g, ',')
+                        .replace(/,\s*$/g, '')
+                        .trim();
+                } catch (error) {
+                    logger.debug(`${logPrefix} Error normalizing address: ${(error as Error).message}`);
+                    return value;
+                }
+
+            case 'attribute':
+                // Already handled during extraction
                 return value;
 
             default:
@@ -562,10 +667,18 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
         page: Page,
         element: ElementHandle<Element>
     ): Promise<string> {
-        return page.evaluate(el => {
-            // Get all text content, including from child elements
-            return el.textContent || '';
-        }, element);
+        // Use page.evaluate to get innerText in a safe way
+        let text = await page.evaluate((el) => {
+            // Check if innerText is available (it should be for most elements)
+            return (el as HTMLElement).innerText || el.textContent || '';
+        }, element).catch(() => '');
+
+        // If empty, fallback to textContent
+        if (!text) {
+            text = await page.evaluate(el => el.textContent || '', element);
+        }
+
+        return text.trim();
     }
 
     /**
@@ -575,25 +688,51 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
         page: Page,
         element: ElementHandle<Element>
     ): Promise<any> {
-        return page.evaluate(el => {
-            return {
-                tagName: el.tagName.toLowerCase(),
-                id: el.id || null,
-                className: el.className || null,
-                childCount: el.childElementCount,
-                html: el.outerHTML.substring(0, 100) + (el.outerHTML.length > 100 ? '...' : ''),
-            };
-        }, element);
+        try {
+            return await page.evaluate((el) => {
+                // Cast to HTMLElement to access properties like offsetWidth
+                const htmlEl = el as HTMLElement;
+
+                // Create a safe array from attributes collection
+                const attributes: {name: string, value: string}[] = [];
+                if (el.attributes) {
+                    for (let i = 0; i < el.attributes.length; i++) {
+                        const attr = el.attributes[i];
+                        attributes.push({ name: attr.name, value: attr.value });
+                    }
+                }
+
+                return {
+                    tagName: el.tagName.toLowerCase(),
+                    className: el.className,
+                    id: el.id,
+                    textLength: el.textContent?.length || 0,
+                    childElementCount: el.childElementCount,
+                    isVisible: htmlEl.offsetWidth > 0 && htmlEl.offsetHeight > 0,
+                    attrs: attributes
+                };
+            }, element);
+        } catch (error) {
+            return { error: (error as Error).message };
+        }
     }
 }
 
 /**
- * Create middleware registration for entity matcher extraction middleware
+ * Create registration for this middleware
  */
 export function createEntityMatcherExtractionMiddlewareRegistration(): Omit<IMiddlewareRegistration<IEntityMatcherExtractionInput, IEntityMatcherExtractionOutput>, 'middleware'> {
     return {
-        id: 'entityMatcherExtraction',
-        type: MiddlewareType.EXTRACTION,
-        description: 'Extract entity data for matching',
+        type: MiddlewareType.ENTITY_MATCHER_EXTRACTION,
+        name: 'entityMatcherExtraction',
+        description: 'Extracts items from a webpage for entity matching',
+        version: 1,
     };
+}
+
+/**
+ * Helper factory function
+ */
+export function createEntityMatcherExtractionMiddleware(): EntityMatcherExtractionMiddleware {
+    return new EntityMatcherExtractionMiddleware();
 }

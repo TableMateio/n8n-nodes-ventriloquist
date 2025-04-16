@@ -384,7 +384,7 @@ export function createExtractionMiddlewareRegistration(): IMiddlewareRegistratio
     name: 'Extraction Middleware',
     description: 'Middleware for extracting data from web pages',
     middleware: new ExtractionMiddleware(),
-    version: '1.0.0',
+    version: 1,
     tags: ['extraction', 'content', 'data'],
     configSchema: {
       type: 'object',
