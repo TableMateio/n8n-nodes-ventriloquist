@@ -84,6 +84,22 @@ function sanitizeOutput(output: IEntityMatcherOutput): IEntityMatcherOutput {
         });
     }
 
+    // Sanitize comparisons list if present
+    if (sanitized.comparisons && Array.isArray(sanitized.comparisons)) {
+        sanitized.comparisons = sanitized.comparisons.map(match => {
+            const { element, ...rest } = match;
+            return { ...rest };
+        });
+    }
+
+    // Sanitize actual matches list if present
+    if (sanitized.actualMatches && Array.isArray(sanitized.actualMatches)) {
+        sanitized.actualMatches = sanitized.actualMatches.map(match => {
+            const { element, ...rest } = match;
+            return { ...rest };
+        });
+    }
+
     // Sanitize selectedMatch
     if (sanitized.selectedMatch) {
         const { element, ...rest } = sanitized.selectedMatch;

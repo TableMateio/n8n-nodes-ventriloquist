@@ -19,14 +19,14 @@ import { createErrorResponse } from "../utils/errorUtils";
 import { logPageDebugInfo } from "../utils/debugUtils";
 import { EntityMatcherFactory } from "../utils/middlewares/matching/entityMatcherFactory";
 import {
-	IEntityMatchResult,
-	IEntityMatcherExtractionConfig,
-	IEntityMatcherComparisonConfig,
-	IEntityMatcherActionConfig,
-	ISourceEntity,
-	IEntityMatcherOutput,
-	IExtractedItem,
-	IExtractedField,
+	type IEntityMatchResult,
+	type IEntityMatcherExtractionConfig,
+	type IEntityMatcherComparisonConfig,
+	type IEntityMatcherActionConfig,
+	type ISourceEntity,
+	type IEntityMatcherOutput,
+	type IExtractedItem,
+	type IExtractedField,
 } from "../utils/middlewares/types/entityMatcherTypes";
 import { ComparisonAlgorithm, IFieldComparisonConfig } from '../utils/comparisonUtils';
 import { IBrowserSession } from '../utils/sessionManager';
@@ -1029,6 +1029,21 @@ export async function execute(
 				// Add standardized formatting to match counts
 				matchCount: matchResult.matchCount || matchResult.matches?.length || 0,
 				totalCompared: matchResult.totalCompared || matchResult.comparisons?.length || matchResult.itemsFound || 0,
+				// Add information about matches that helps explain the selection
+				matchDetails: {
+					richestMatch: matchResult.comparisons?.sort((a: IEntityMatchResult, b: IEntityMatchResult) =>
+						(b.informationRichness || 0) - (a.informationRichness || 0)
+					)[0] || null,
+					selectedReason: matchResult.selectedMatch ?
+						`Best overall similarity (${matchResult.selectedMatch.overallSimilarity.toFixed(4)}) with information richness ${(matchResult.selectedMatch.informationRichness || 0).toFixed(4)}` :
+						'No match selected',
+					scoringFactors: [
+						'Overall similarity score (primary factor)',
+						'Information richness (secondary factor, breaks ties)',
+						'Matching of key identifiers and numeric values',
+						'Word overlap and sequence matching'
+					]
+				},
 				duration: Date.now() - startTime,
 			}
 		};

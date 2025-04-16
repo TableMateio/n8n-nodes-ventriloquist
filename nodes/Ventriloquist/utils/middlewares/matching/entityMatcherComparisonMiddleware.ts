@@ -12,7 +12,8 @@ import {
   compareEntities,
   IStringComparisonOptions,
   containmentSimilarity,
-  smartSimilarity
+  smartSimilarity,
+  calculateInformationRichness
 } from '../../comparisonUtils';
 
 /**
@@ -217,10 +218,43 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
     // Log initial matches count
     logger.debug(`${logPrefix} Processing ${matches.length} matches`);
 
+    // Add information richness scores to help differentiate similar matches
+    for (const match of matches) {
+      // Calculate information richness for the concatenated fields
+      const allText = Object.values(match.fields).join(' ');
+      match.informationRichness = calculateInformationRichness(allText);
+
+      // Adjust overall similarity slightly based on information richness
+      // This will help break ties between otherwise identical matches
+      if (match.informationRichness > 0.5) {
+        // Only adjust if there's significant richness
+        const adjustedSimilarity = Math.min(1, match.overallSimilarity + (match.informationRichness * 0.02));
+
+        // Log the adjustment
+        if (adjustedSimilarity > match.overallSimilarity) {
+          logger.debug(`${logPrefix} Match #${match.index} adjusted for richness: ${match.overallSimilarity.toFixed(4)} → ${adjustedSimilarity.toFixed(4)} (richness: ${match.informationRichness.toFixed(4)})`);
+          match.overallSimilarity = adjustedSimilarity;
+        }
+      }
+    }
+
     // Sort results if needed
     if (comparisonConfig.sortResults !== false) {
-      matches.sort((a, b) => b.overallSimilarity - a.overallSimilarity);
-      logger.debug(`${logPrefix} Sorted matches by similarity score`);
+      matches.sort((a, b) => {
+        // First sort by overall similarity
+        const similarityDiff = b.overallSimilarity - a.overallSimilarity;
+
+        // If similarities are very close, use information richness as a tiebreaker
+        if (Math.abs(similarityDiff) < 0.02) {
+          const richnessA = a.informationRichness || 0;
+          const richnessB = b.informationRichness || 0;
+          return richnessB - richnessA;
+        }
+
+        return similarityDiff;
+      });
+
+      logger.debug(`${logPrefix} Sorted matches by similarity score and information richness`);
     }
 
     // Apply limit if specified
@@ -262,7 +296,7 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
         for (const match of limitedMatches) {
           if (match.overallSimilarity >= threshold) {
             match.selected = true;
-            logger.debug(`${logPrefix} Selected match #${match.index} with score: ${match.overallSimilarity.toFixed(4)}`);
+            logger.debug(`${logPrefix} Selected match #${match.index} with score: ${match.overallSimilarity.toFixed(4)}, richness: ${(match.informationRichness || 0).toFixed(4)}`);
           }
         }
         break;
@@ -272,7 +306,7 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
         if (matchesAboveThresholdArray.length > 0) {
           matchesAboveThresholdArray[0].selected = true;
           logger.debug(
-            `${logPrefix} Selected first match #${matchesAboveThresholdArray[0].index} with score: ${matchesAboveThresholdArray[0].overallSimilarity.toFixed(4)}`
+            `${logPrefix} Selected first match #${matchesAboveThresholdArray[0].index} with score: ${matchesAboveThresholdArray[0].overallSimilarity.toFixed(4)}, richness: ${(matchesAboveThresholdArray[0].informationRichness || 0).toFixed(4)}`
           );
         }
         break;
@@ -284,7 +318,7 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
           // Since we already sorted, the best match is the first one above threshold
           matchesAboveThresholdArray[0].selected = true;
           logger.debug(
-            `${logPrefix} Selected best match #${matchesAboveThresholdArray[0].index} with score: ${matchesAboveThresholdArray[0].overallSimilarity.toFixed(4)}`
+            `${logPrefix} Selected best match #${matchesAboveThresholdArray[0].index} with score: ${matchesAboveThresholdArray[0].overallSimilarity.toFixed(4)}, richness: ${(matchesAboveThresholdArray[0].informationRichness || 0).toFixed(4)}`
           );
         } else {
           logger.debug(`${logPrefix} No matches above threshold, not selecting any match`);

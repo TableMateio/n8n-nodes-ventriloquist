@@ -72,6 +72,7 @@ export interface IEntityMatchResult {
   similarities: Record<string, number>;
   overallSimilarity: number;
   selected: boolean;
+  informationRichness?: number;
 }
 
 /**

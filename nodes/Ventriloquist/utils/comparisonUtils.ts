@@ -180,6 +180,64 @@ export function jaccardSimilarity(a: string, b: string): number {
 }
 
 /**
+ * Calculate information richness score - measures how much valuable data is in a string
+ * This helps differentiate between similar matches by favoring the one with more information
+ */
+export function calculateInformationRichness(text: string): number {
+    if (!text || typeof text !== 'string') return 0;
+
+    const normalizedText = text.toLowerCase().trim();
+    if (normalizedText.length === 0) return 0;
+
+    // Calculate metrics that indicate rich information
+    const metrics = {
+        // Length is a basic indicator of more information
+        length: Math.min(1, normalizedText.length / 500),
+
+        // Count distinct numeric sequences (IDs, phone numbers, etc.)
+        numericValues: 0,
+
+        // Count potential identifiers (alphanumeric sequences that could be IDs)
+        identifiers: 0,
+
+        // Count field labels that indicate structured data
+        dataLabels: 0,
+
+        // Measure information density (ratio of unique words to total words)
+        uniqueWordRatio: 0
+    };
+
+    // Extract words for analysis
+    const words = normalizedText.split(/\s+/).filter(Boolean);
+    const uniqueWords = new Set(words);
+
+    // Calculate unique word ratio (information density)
+    metrics.uniqueWordRatio = words.length > 0 ? uniqueWords.size / words.length : 0;
+
+    // Count numeric sequences (like dates, IDs, etc.)
+    const numericMatches = normalizedText.match(/\d+/g) || [];
+    metrics.numericValues = Math.min(1, numericMatches.length / 10);
+
+    // Count potential data labels (field names followed by data)
+    const labelMatches = normalizedText.match(/\b(id|name|phone|address|email|ssn|dob|age|date|number|identifier)[\s\:]+/gi) || [];
+    metrics.dataLabels = Math.min(1, labelMatches.length / 5);
+
+    // Count alphanumeric identifiers (like "p239872868")
+    const identifierMatches = normalizedText.match(/\b[a-z0-9]{6,}\b/gi) || [];
+    metrics.identifiers = Math.min(1, identifierMatches.length / 3);
+
+    // Calculate overall richness score with weights
+    const richness =
+        (metrics.length * 0.2) +
+        (metrics.numericValues * 0.25) +
+        (metrics.dataLabels * 0.25) +
+        (metrics.identifiers * 0.15) +
+        (metrics.uniqueWordRatio * 0.15);
+
+    return Math.min(1, richness);
+}
+
+/**
  * Calculate containment similarity - how much of reference is contained in target
  * This is especially useful for "Smart all" matching where we want to see if the
  * reference text is fully contained within a possibly much larger target text
@@ -205,29 +263,49 @@ export function containmentSimilarity(reference: string, target: string): number
         return 0.95; // Almost perfect
     }
 
-    // Extract potential name entities from reference (2-3 word sequences)
+    // Extract potential key identifiers from reference (proper nouns, identifiers, etc.)
     const refWords = normalizedRef.split(/\s+/).filter(Boolean);
-    const nameSegments: string[] = [];
+    const keySegments: string[] = [];
 
-    // Look for potential name patterns (2-3 consecutive words)
+    // Look for potential key patterns (consecutive words, especially with capital letters)
     for (let i = 0; i < refWords.length - 1; i++) {
-        // Check for 2-word names
+        // Check for 2-word combinations
         if (refWords[i].length > 1 && refWords[i+1].length > 1) {
-            nameSegments.push(`${refWords[i]} ${refWords[i+1]}`);
+            keySegments.push(`${refWords[i]} ${refWords[i+1]}`);
         }
 
-        // Check for 3-word names if possible
+        // Check for 3-word combinations if possible
         if (i < refWords.length - 2 && refWords[i].length > 1 &&
             refWords[i+1].length > 1 && refWords[i+2].length > 1) {
-            nameSegments.push(`${refWords[i]} ${refWords[i+1]} ${refWords[i+2]}`);
+            keySegments.push(`${refWords[i]} ${refWords[i+1]} ${refWords[i+2]}`);
         }
     }
 
-    // Check for entity matches (names, etc.)
-    for (const segment of nameSegments) {
+    // Special handling for numeric values - match them exactly
+    const refNumerics = normalizedRef.match(/\d+/g) || [];
+
+    // Check for key segment matches
+    for (const segment of keySegments) {
         if (normalizedTarget.includes(segment)) {
-            // Award high score for matching name entities
-            return 0.90; // Very good match - found entity name
+            // Award high score for matching key segments
+            return 0.9; // Very good match - found key segment
+        }
+    }
+
+    // Check exact numeric matches
+    let numericMatches = 0;
+    for (const num of refNumerics) {
+        // Only consider numbers longer than 3 digits as significant
+        if (num.length > 3 && normalizedTarget.includes(num)) {
+            numericMatches++;
+        }
+    }
+
+    // If we found significant numeric matches, increase score
+    if (numericMatches > 0 && refNumerics.length > 0) {
+        const numericMatchRatio = numericMatches / refNumerics.length;
+        if (numericMatchRatio > 0.5) {
+            return 0.85; // Good match - found significant numeric identifiers
         }
     }
 
@@ -282,7 +360,7 @@ export function containmentSimilarity(reference: string, target: string): number
         }
     }
 
-    // Cap at 0.85 - not as good as direct containment or entity match
+    // Cap at 0.85 - not as good as direct containment or segment match
     return Math.min(0.85, matchRatio);
 }
 
@@ -316,7 +394,9 @@ export function smartSimilarity(reference: string, target: string): number {
     // 1. Check for direct containment (highest priority)
     if (normalizedTarget.includes(normalizedRef)) {
         // Target fully contains reference - this is ideal
-        return 0.95;
+        // Add a small richness bonus to differentiate between similar matches
+        const richness = calculateInformationRichness(target);
+        return 0.95 + (richness * 0.05); // Between 0.95 and 1.0 based on richness
     }
 
     // 2. Calculate advanced containment score (most important)
@@ -331,17 +411,27 @@ export function smartSimilarity(reference: string, target: string): number {
         levenshteinScore = levenshteinSimilarity(reference, target);
     }
 
+    // 5. Calculate information richness to break ties between similar items
+    const richness = calculateInformationRichness(target);
+
+    // Base score from our standard algorithms
+    let baseScore = 0;
+
     // Prioritize containment heavily
     if (containmentScore > 0.7) {
         // High containment - reference is mostly contained in target
-        return Math.max(containmentScore, 0.7);
+        baseScore = Math.max(containmentScore, 0.7);
     } else if (jaccardScore > 0.6) {
         // Good word overlap - use a balanced approach favoring containment
-        return Math.max((containmentScore * 0.7) + (jaccardScore * 0.3), 0.6);
+        baseScore = Math.max((containmentScore * 0.7) + (jaccardScore * 0.3), 0.6);
     } else {
         // Lower match quality - still prioritize containment but consider other factors
-        return (containmentScore * 0.7) + (jaccardScore * 0.2) + (levenshteinScore * 0.1);
+        baseScore = (containmentScore * 0.7) + (jaccardScore * 0.2) + (levenshteinScore * 0.1);
     }
+
+    // Add a small richness bonus to differentiate between similar matches
+    // This will add 0-0.05 to the score based on information richness
+    return Math.min(1, baseScore + (richness * 0.05));
 }
 
 /**
