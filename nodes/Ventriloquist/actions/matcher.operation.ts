@@ -95,17 +95,6 @@ const stringSimilarity = (a: string, b: string): number => {
 export const description: INodeProperties[] = [
 	// ==================== 1. SESSION CONFIGURATION ====================
 	{
-		displayName: "Session Configuration",
-		name: "sessionConfigSection",
-		type: "notice",
-		default: "",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
 		displayName: "Session ID",
 		name: "explicitSessionId",
 		type: "string",
@@ -121,13 +110,63 @@ export const description: INodeProperties[] = [
 
 	// ==================== 2. MATCH CONFIGURATION ====================
 	{
-		displayName: "Match Configuration",
-		name: "matchConfigSection",
-		type: "notice",
-		default: "",
+		displayName: "Match Type",
+		name: "matchMode",
+		type: "options",
+		options: [
+			{
+				name: "Find Best Match",
+				value: "best",
+				description: "Return only the best matching result",
+			},
+			{
+				name: "Find All Matches",
+				value: "all",
+				description: "Return all results above their similarity thresholds",
+			},
+			{
+				name: "Find First Match",
+				value: "firstAboveThreshold",
+				description: "Return the first result above its threshold",
+			},
+			{
+				name: "Find N Matches",
+				value: "nMatches",
+				description: "Return a specific number of top matches",
+			},
+		],
+		default: "best",
+		description: "How to select and return matches",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Limit Number of Matches",
+		name: "limitMatches",
+		type: "boolean",
+		default: false,
+		description: "Whether to limit the number of matches to return",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				matchMode: ["nMatches"],
+			},
+		},
+	},
+	{
+		displayName: "Number of Matches to Find",
+		name: "maxMatches",
+		type: "number",
+		default: 5,
+		description: "Maximum number of matches to return",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				matchMode: ["nMatches"],
+				limitMatches: [true],
 			},
 		},
 	},
@@ -161,34 +200,7 @@ export const description: INodeProperties[] = [
 		type: "string",
 		default: "",
 		placeholder: "#search-results, .results-container",
-		description: "CSS selector for the container holding all potential matches",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				selectionMethod: ["containerItems"],
-			},
-		},
-	},
-	{
-		displayName: "Item Selector",
-		name: "itemSelector",
-		type: "string",
-		default: "",
-		placeholder: "li, .result-item",
-		description: "CSS selector for individual items within the container (leave empty for auto-detection)",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				selectionMethod: ["containerItems"],
-			},
-		},
-	},
-	{
-		displayName: "Auto-Detect Children",
-		name: "autoDetectChildren",
-		type: "boolean",
-		default: true,
-		description: "Automatically detect repeating child elements if no item selector is provided",
+		description: "CSS selector for the container holding all potential matches. Children will be auto-detected.",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -207,6 +219,18 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ["matcher"],
 				selectionMethod: ["directItems"],
+			},
+		},
+	},
+	{
+		displayName: "Maximum Items to Process",
+		name: "maxItemsToProcess",
+		type: "number",
+		default: 0,
+		description: "Maximum number of items to process from the page (0 for all items)",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
 			},
 		},
 	},
@@ -232,63 +256,6 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ["matcher"],
 				waitForSelectors: [true],
-			},
-		},
-	},
-	{
-		displayName: "Match Results Mode",
-		name: "matchMode",
-		type: "options",
-		options: [
-			{
-				name: "Best Match",
-				value: "best",
-				description: "Return only the best matching result",
-			},
-			{
-				name: "All Above Threshold",
-				value: "all",
-				description: "Return all results above the similarity threshold",
-			},
-			{
-				name: "First Above Threshold",
-				value: "firstAboveThreshold",
-				description: "Return the first result above the threshold",
-			},
-		],
-		default: "best",
-		description: "How to select and return matches",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Similarity Threshold",
-		name: "threshold",
-		type: "number",
-		typeOptions: {
-			minValue: 0,
-			maxValue: 1,
-		},
-		default: 0.7,
-		description: "Minimum similarity score (0-1) required for a match",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Maximum Items to Process",
-		name: "maxItemsToProcess",
-		type: "number",
-		default: 0,
-		description: "Maximum number of items to process (0 for all items)",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
 			},
 		},
 	},
@@ -363,277 +330,117 @@ export const description: INodeProperties[] = [
 		},
 	},
 
-	// ==================== 3. COMPARISON CRITERIA ====================
+	// ==================== 3. CRITERIA COLLECTION ====================
 	{
-		displayName: "Comparison Criteria",
-		name: "comparisonCriteriaSection",
-		type: "notice",
-		default: "",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Match Method",
-		name: "matchMethod",
-		type: "options",
-		options: [
-			{
-				name: "Similarity",
-				value: "similarity",
-				description: "Compare using text similarity algorithms",
-			},
-			{
-				name: "Rules",
-				value: "rules",
-				description: "Compare using exact rule-based methods",
-			},
-		],
-		default: "similarity",
-		description: "Method to use for matching entities",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Matching Approach",
-		name: "matchingApproach",
-		type: "options",
-		options: [
-			{
-				name: "Smart Match (All Text)",
-				value: "smartAll",
-				description: "Compare using all visible text in the element",
-			},
-			{
-				name: "Field by Field",
-				value: "fieldByField",
-				description: "Compare specific fields",
-			},
-		],
-		default: "smartAll",
-		description: "Approach to use for matching entities",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				matchMethod: ["similarity"],
-			},
-		},
-	},
-
-	// Smart Match approach fields
-	{
-		displayName: "Reference Value",
-		name: "referenceValue",
-		type: "string",
-		default: "",
-		description: "The reference value to match against (usually from a previous node)",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				matchMethod: ["similarity"],
-				matchingApproach: ["smartAll"],
-			},
-		},
-	},
-	{
-		displayName: "Similarity Algorithm",
-		name: "similarityAlgorithm",
-		type: "options",
-		options: [
-			{
-				name: "Smart (Combines Multiple Algorithms)",
-				value: "smart",
-				description: "Uses a combined approach for best results",
-			},
-			{
-				name: "Containment (Reference in Target)",
-				value: "containment",
-				description: "Check if reference is contained within target",
-			},
-			{
-				name: "Word Overlap (Jaccard)",
-				value: "jaccard",
-				description: "Best for comparing sets of keywords or terms",
-			},
-			{
-				name: "Edit Distance (Levenshtein)",
-				value: "levenshtein",
-				description: "Best for comparing similar texts with small variations",
-			},
-			{
-				name: "Exact Match",
-				value: "exact",
-				description: "Requires exact match between texts",
-			},
-			{
-				name: "Flexible Matching (Fuzzy)",
-				value: "fuzzy",
-				description: "Flexible matching with fuzzy logic",
-			},
-		],
-		default: "smart",
-		description: "Algorithm to use for calculating similarity",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				matchMethod: ["similarity"],
-				matchingApproach: ["smartAll"],
-			},
-		},
-	},
-	{
-		displayName: "Match Threshold",
-		name: "matchThreshold",
-		type: "number",
-		typeOptions: {
-			minValue: 0,
-			maxValue: 1,
-		},
-		default: 0.1,
-		description: "Minimum score required for this specific match",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				matchMethod: ["similarity"],
-				matchingApproach: ["smartAll"],
-			},
-		},
-	},
-	{
-		displayName: "Must Match",
-		name: "mustMatch",
-		type: "boolean",
-		default: false,
-		description: "If this criterion must match for the overall match to be valid",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				matchMethod: ["similarity"],
-				matchingApproach: ["smartAll"],
-			},
-		},
-	},
-	{
-		displayName: "Importance",
-		name: "importance",
-		type: "number",
-		typeOptions: {
-			minValue: 0,
-			maxValue: 1,
-		},
-		default: 0.5,
-		description: "How important this criterion is in the overall match (0-1)",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				matchMethod: ["similarity"],
-				matchingApproach: ["smartAll"],
-			},
-		},
-	},
-
-	// Field by Field approach fields
-	{
-		displayName: "Field Comparisons",
-		name: "fieldComparisons",
+		displayName: "Match Criteria",
+		name: "matchCriteria",
 		type: "fixedCollection",
 		typeOptions: {
 			multipleValues: true,
 			sortable: true,
 		},
 		default: {
-			fields: [
+			criteria: [
 				{
-					name: "field1",
+					name: "Default Criterion",
+					comparisonApproach: "smartAll",
 					referenceValue: "",
-					selector: "",
-					algorithm: "smart",
-					weight: 0.5,
+					matchMethod: "similarity",
+					similarityAlgorithm: "smart",
+					matchThreshold: 0.7,
 					mustMatch: false,
+					importance: 0.5,
 				}
 			]
 		},
-		description: "Define field-by-field comparison criteria",
+		description: "Define criteria to match items against",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
-				matchMethod: ["similarity"],
-				matchingApproach: ["fieldByField"],
 			},
 		},
 		options: [
 			{
-				name: "fields",
-				displayName: "Fields",
+				name: "criteria",
+				displayName: "Criteria",
 				values: [
 					{
-						displayName: "Field Name",
+						displayName: "Criterion Name",
 						name: "name",
 						type: "string",
 						default: "",
-						placeholder: "e.g., name, price, location",
-						description: "Name for this field comparison",
-						required: true,
+						description: "A name to identify this criterion",
 					},
+					{
+						displayName: "Comparison Approach",
+						name: "comparisonApproach",
+						type: "options",
+						options: [
+							{
+								name: "Smart Match (All Text)",
+								value: "smartAll",
+								description: "Intelligently compare using all visible text (best for simple matching)",
+							},
+							{
+								name: "Match All",
+								value: "matchAll",
+								description: "Compare whole item using selected method",
+							},
+							{
+								name: "Field by Field",
+								value: "fieldByField",
+								description: "Compare specific fields",
+							},
+						],
+						default: "smartAll",
+						description: "Approach to use for matching entities",
+					},
+					// Only show method for Match All and Field by Field
+					{
+						displayName: "Match Method",
+						name: "matchMethod",
+						type: "options",
+						options: [
+							{
+								name: "Similarity",
+								value: "similarity",
+								description: "Compare using text similarity algorithms",
+							},
+							{
+								name: "Rules",
+								value: "rules",
+								description: "Compare using exact rule-based methods",
+							},
+							{
+								name: "AI (Coming Soon)",
+								value: "ai",
+								description: "Use AI to compare elements intelligently",
+							},
+						],
+						default: "similarity",
+						description: "Method to use for matching entities",
+						displayOptions: {
+							show: {
+								comparisonApproach: ["matchAll", "fieldByField"],
+							},
+						},
+					},
+					// Smart Match (All) and Match All approach fields
 					{
 						displayName: "Reference Value",
 						name: "referenceValue",
 						type: "string",
 						default: "",
-						description: "The reference value to match (usually from previous node)",
-						required: true,
+						description: "The reference value to match against (usually from a previous node)",
+						displayOptions: {
+							show: {
+								comparisonApproach: ["smartAll", "matchAll"],
+							},
+						},
 					},
 					{
-						displayName: "Target Selector",
-						name: "selector",
-						type: "string",
-						default: "",
-						placeholder: "h3 a, .price, span.location",
-						description: "CSS selector to extract the value to compare against",
-						required: true,
-					},
-					{
-						displayName: "Data Format",
-						name: "dataFormat",
-						type: "options",
-						options: [
-							{
-								name: "Text",
-								value: "text",
-								description: "Plain text",
-							},
-							{
-								name: "Number",
-								value: "number",
-								description: "Numeric value",
-							},
-							{
-								name: "Date",
-								value: "date",
-								description: "Date value",
-							},
-							{
-								name: "Address",
-								value: "address",
-								description: "Physical address",
-							},
-							{
-								name: "Boolean",
-								value: "boolean",
-								description: "True/false value",
-							},
-						],
-						default: "text",
-						description: "The data type for this field",
-					},
-					{
-						displayName: "Comparison Algorithm",
-						name: "algorithm",
+						displayName: "Similarity Algorithm",
+						name: "similarityAlgorithm",
 						type: "options",
 						options: [
 							{
@@ -669,166 +476,490 @@ export const description: INodeProperties[] = [
 						],
 						default: "smart",
 						description: "Algorithm to use for calculating similarity",
-					},
-					{
-						displayName: "Attribute",
-						name: "attribute",
-						type: "string",
-						default: "",
-						placeholder: "href, textContent, value",
-						description: "Element attribute to extract (leave empty for text content)",
-					},
-					{
-						displayName: "Weight",
-						name: "weight",
-						type: "number",
-						typeOptions: {
-							minValue: 0,
-							maxValue: 1,
+						displayOptions: {
+							show: {
+								comparisonApproach: ["smartAll", "matchAll"],
+								matchMethod: ["similarity"],
+							},
 						},
-						default: 0.5,
-						description: "How important this field is in the overall match (0-1)",
 					},
 					{
-						displayName: "Must Match",
-						name: "mustMatch",
-						type: "boolean",
-						default: false,
-						description: "If this field must match for the overall match to be valid",
-					},
-					{
-						displayName: "Field Threshold",
-						name: "threshold",
+						displayName: "Similarity Threshold",
+						name: "matchThreshold",
 						type: "number",
 						typeOptions: {
 							minValue: 0,
 							maxValue: 1,
 						},
 						default: 0.7,
-						description: "Minimum similarity for this specific field to be considered a match",
-					},
-				],
-			},
-		],
-	},
-
-	// Rules-based matching approach
-	{
-		displayName: "Rules Configuration",
-		name: "rulesConfig",
-		type: "fixedCollection",
-		typeOptions: {
-			multipleValues: true,
-			sortable: true,
-		},
-		default: {
-			rules: [
-				{
-					field: "field1",
-					operation: "contains",
-					value: "",
-					caseSensitive: false,
-				}
-			]
-		},
-		description: "Define rules for matching",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				matchMethod: ["rules"],
-			},
-		},
-		options: [
-			{
-				name: "rules",
-				displayName: "Rules",
-				values: [
-					{
-						displayName: "Field",
-						name: "field",
-						type: "string",
-						default: "",
-						description: "Field name to check",
-						required: true,
+						description: "Minimum similarity score (0-1) required for this match criterion",
+						displayOptions: {
+							show: {
+								comparisonApproach: ["smartAll", "matchAll"],
+								matchMethod: ["similarity"],
+							},
+						},
 					},
 					{
-						displayName: "Selector",
-						name: "selector",
-						type: "string",
-						default: "",
-						description: "CSS selector to target element",
-						required: true,
+						displayName: "Must Match",
+						name: "mustMatch",
+						type: "boolean",
+						default: false,
+						description: "If this criterion must match for the overall match to be valid",
+						displayOptions: {
+							show: {
+								comparisonApproach: ["smartAll", "matchAll"],
+								matchMethod: ["similarity"],
+							},
+						},
 					},
 					{
-						displayName: "Operation",
-						name: "operation",
-						type: "options",
+						displayName: "Importance",
+						name: "importance",
+						type: "number",
+						typeOptions: {
+							minValue: 0,
+							maxValue: 1,
+						},
+						default: 0.5,
+						description: "How important this criterion is in the overall match (0-1)",
+						displayOptions: {
+							show: {
+								comparisonApproach: ["smartAll", "matchAll"],
+								matchMethod: ["similarity"],
+							},
+						},
+					},
+					// Field by Field comparisons
+					{
+						displayName: "Field Comparisons",
+						name: "fieldComparisons",
+						type: "fixedCollection",
+						typeOptions: {
+							multipleValues: true,
+							sortable: true,
+						},
+						default: {
+							fields: [
+								{
+									name: "field1",
+									referenceValue: "",
+									selector: "",
+									algorithm: "smart",
+									weight: 0.5,
+									mustMatch: false,
+								}
+							]
+						},
+						description: "Define field-by-field comparison criteria",
+						displayOptions: {
+							show: {
+								comparisonApproach: ["fieldByField"],
+								matchMethod: ["similarity"],
+							},
+						},
 						options: [
 							{
-								name: "Contains",
-								value: "contains",
-								description: "Field contains the specified value",
-							},
-							{
-								name: "Equals",
-								value: "equals",
-								description: "Field exactly equals the value",
-							},
-							{
-								name: "Starts With",
-								value: "startsWith",
-								description: "Field starts with the value",
-							},
-							{
-								name: "Ends With",
-								value: "endsWith",
-								description: "Field ends with the value",
-							},
-							{
-								name: "Regex Match",
-								value: "regex",
-								description: "Field matches the regex pattern",
+								name: "fields",
+								displayName: "Fields",
+								values: [
+									{
+										displayName: "Field Name",
+										name: "name",
+										type: "string",
+										default: "",
+										placeholder: "e.g., name, price, location",
+										description: "Name for this field comparison",
+										required: true,
+									},
+									{
+										displayName: "Reference Value",
+										name: "referenceValue",
+										type: "string",
+										default: "",
+										description: "The reference value to match (usually from previous node)",
+										required: true,
+									},
+									{
+										displayName: "Target Selector",
+										name: "selector",
+										type: "string",
+										default: "",
+										placeholder: "h3 a, .price, span.location",
+										description: "CSS selector to extract the value to compare against",
+										required: true,
+									},
+									{
+										displayName: "Data Format",
+										name: "dataFormat",
+										type: "options",
+										options: [
+											{
+												name: "Text",
+												value: "text",
+												description: "Plain text",
+											},
+											{
+												name: "Number",
+												value: "number",
+												description: "Numeric value",
+											},
+											{
+												name: "Date",
+												value: "date",
+												description: "Date value",
+											},
+											{
+												name: "Address",
+												value: "address",
+												description: "Physical address",
+											},
+											{
+												name: "Boolean",
+												value: "boolean",
+												description: "True/false value",
+											},
+										],
+										default: "text",
+										description: "The data type for this field",
+									},
+									{
+										displayName: "Comparison Algorithm",
+										name: "algorithm",
+										type: "options",
+										options: [
+											{
+												name: "Smart (Combines Multiple Algorithms)",
+												value: "smart",
+												description: "Uses a combined approach for best results",
+											},
+											{
+												name: "Containment (Reference in Target)",
+												value: "containment",
+												description: "Check if reference is contained within target",
+											},
+											{
+												name: "Word Overlap (Jaccard)",
+												value: "jaccard",
+												description: "Best for comparing sets of keywords or terms",
+											},
+											{
+												name: "Edit Distance (Levenshtein)",
+												value: "levenshtein",
+												description: "Best for comparing similar texts with small variations",
+											},
+											{
+												name: "Exact Match",
+												value: "exact",
+												description: "Requires exact match between texts",
+											},
+											{
+												name: "Flexible Matching (Fuzzy)",
+												value: "fuzzy",
+												description: "Flexible matching with fuzzy logic",
+											},
+										],
+										default: "smart",
+										description: "Algorithm to use for calculating similarity",
+									},
+									{
+										displayName: "Attribute",
+										name: "attribute",
+										type: "string",
+										default: "",
+										placeholder: "href, textContent, value",
+										description: "Element attribute to extract (leave empty for text content)",
+									},
+									{
+										displayName: "Weight",
+										name: "weight",
+										type: "number",
+										typeOptions: {
+											minValue: 0,
+											maxValue: 1,
+										},
+										default: 0.5,
+										description: "How important this field is in the overall match (0-1)",
+									},
+									{
+										displayName: "Must Match",
+										name: "mustMatch",
+										type: "boolean",
+										default: false,
+										description: "If this field must match for the overall match to be valid",
+									},
+									{
+										displayName: "Field Threshold",
+										name: "threshold",
+										type: "number",
+										typeOptions: {
+											minValue: 0,
+											maxValue: 1,
+										},
+										default: 0.7,
+										description: "Minimum similarity for this specific field to be considered a match",
+									},
+								],
 							},
 						],
-						default: "contains",
-						description: "Operation to perform",
 					},
+					// Rule-based matching
 					{
-						displayName: "Value",
-						name: "value",
-						type: "string",
-						default: "",
-						description: "Value to compare against",
-						required: true,
+						displayName: "Rules Configuration",
+						name: "rulesConfig",
+						type: "fixedCollection",
+						typeOptions: {
+							multipleValues: true,
+							sortable: true,
+						},
+						default: {
+							rules: [
+								{
+									field: "field1",
+									operation: "contains",
+									value: "",
+									caseSensitive: false,
+								}
+							]
+						},
+						description: "Define rules for matching",
+						displayOptions: {
+							show: {
+								comparisonApproach: ["matchAll", "fieldByField"],
+								matchMethod: ["rules"],
+							},
+						},
+						options: [
+							{
+								name: "rules",
+								displayName: "Rules",
+								values: [
+									{
+										displayName: "Field",
+										name: "field",
+										type: "string",
+										default: "",
+										description: "Field name to check",
+										required: true,
+									},
+									{
+										displayName: "Selector",
+										name: "selector",
+										type: "string",
+										default: "",
+										description: "CSS selector to target element",
+										required: true,
+									},
+									{
+										displayName: "Operation",
+										name: "operation",
+										type: "options",
+										noDataExpression: true,
+										options: [
+											{
+												name: "Contains",
+												value: "contains",
+												description: "Field contains the specified value",
+											},
+											{
+												name: "Equals",
+												value: "equals",
+												description: "Field exactly equals the value",
+											},
+											{
+												name: "Starts With",
+												value: "startsWith",
+												description: "Field starts with the value",
+											},
+											{
+												name: "Ends With",
+												value: "endsWith",
+												description: "Field ends with the value",
+											},
+											{
+												name: "Regex Match",
+												value: "regex",
+												description: "Field matches the regex pattern",
+											},
+										],
+										default: "contains",
+									},
+									{
+										displayName: "Value",
+										name: "value",
+										type: "string",
+										default: "",
+										description: "Value to compare against",
+										required: true,
+									},
+									{
+										displayName: "Case Sensitive",
+										name: "caseSensitive",
+										type: "boolean",
+										default: false,
+										description: "Match is case sensitive",
+									},
+									{
+										displayName: "Required",
+										name: "required",
+										type: "boolean",
+										default: false,
+										description: "This rule must match for the overall match to be valid",
+									},
+								],
+							},
+						],
 					},
-					{
-						displayName: "Case Sensitive",
-						name: "caseSensitive",
-						type: "boolean",
-						default: false,
-						description: "Match is case sensitive",
-					},
-					{
-						displayName: "Required",
-						name: "required",
-						type: "boolean",
-						default: false,
-						description: "This rule must match for the overall match to be valid",
-					},
-				],
-			},
-		],
+				]
+			}
+		]
 	},
 
-	// ==================== 4. ACTION HANDLING ====================
+	// Action Configuration section
 	{
-		displayName: "Action Configuration",
-		name: "actionConfigSection",
-		type: "notice",
-		default: "",
+		displayName: "Action on Match",
+		name: "actionOnMatch",
+		type: "options",
+		options: [
+			{
+				name: "None",
+				value: "none",
+				description: "Don't perform any action on matches",
+			},
+			{
+				name: "Click",
+				value: "click",
+				description: "Click on the matched element",
+			},
+			{
+				name: "Extract Additional Data",
+				value: "extract",
+				description: "Extract additional data from the matched element",
+			},
+		],
+		default: "none",
+		description: "Action to perform on matched elements",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Action Selector",
+		name: "actionSelector",
+		type: "string",
+		default: "",
+		placeholder: "button.details, a.view-more",
+		description: "CSS selector for the element to interact with (leave empty to use the matched element)",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				actionOnMatch: ["click", "extract"],
+			},
+		},
+	},
+	{
+		displayName: "Wait After Action",
+		name: "waitAfterAction",
+		type: "boolean",
+		default: true,
+		description: "Whether to wait after performing the action",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				actionOnMatch: ["click"],
+			},
+		},
+	},
+	{
+		displayName: "Wait For",
+		name: "waitFor",
+		type: "options",
+		options: [
+			{
+				name: "Navigation",
+				value: "navigation",
+				description: "Wait for navigation to complete",
+			},
+			{
+				name: "DOM Content Loaded",
+				value: "domContentLoaded",
+				description: "Wait for DOM content loaded event",
+			},
+			{
+				name: "Load Event",
+				value: "load",
+				description: "Wait for page load event",
+			},
+			{
+				name: "Specific Element",
+				value: "element",
+				description: "Wait for a specific element to appear",
+			},
+			{
+				name: "Network Idle",
+				value: "networkIdle",
+				description: "Wait for network to be idle",
+			},
+			{
+				name: "Time Delay",
+				value: "delay",
+				description: "Wait for a specific time period",
+			},
+		],
+		default: "navigation",
+		description: "What to wait for after the action",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				actionOnMatch: ["click"],
+				waitAfterAction: [true],
+			},
+		},
+	},
+	{
+		displayName: "Wait Selector",
+		name: "waitSelector",
+		type: "string",
+		default: "",
+		placeholder: "#content, .results-loaded",
+		description: "CSS selector to wait for (if waiting for element)",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				actionOnMatch: ["click"],
+				waitAfterAction: [true],
+				waitFor: ["element"],
+			},
+		},
+	},
+	{
+		displayName: "Wait Timeout (ms)",
+		name: "waitTimeout",
+		type: "number",
+		default: 30000,
+		description: "Maximum wait time in milliseconds",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				actionOnMatch: ["click"],
+				waitAfterAction: [true],
+			},
+		},
+	},
+	{
+		displayName: "Wait Time (ms)",
+		name: "waitTime",
+		type: "number",
+		default: 2000,
+		description: "Time to wait in milliseconds",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				actionOnMatch: ["click"],
+				waitAfterAction: [true],
+				waitFor: ["delay"],
 			},
 		},
 	},
@@ -849,22 +980,36 @@ export async function execute(
 	// Get parameters
 	const selectionMethod = this.getNodeParameter('selectionMethod', index, 'containerItems') as string;
 	const matchMode = this.getNodeParameter('matchMode', index, 'best') as string;
-	const threshold = this.getNodeParameter('threshold', index, 0.7) as number;
+
+	// Handle different match modes
+	let maxResults: number | undefined;
+	if (matchMode === 'nMatches') {
+		maxResults = this.getNodeParameter('maxMatches', index, 5) as number;
+	} else if (matchMode === 'all') {
+		const limitMatches = this.getNodeParameter('limitMatches', index, false) as boolean;
+		if (limitMatches) {
+			maxResults = this.getNodeParameter('maxMatches', index, 5) as number;
+		}
+	}
+
 	const maxItemsToProcess = this.getNodeParameter('maxItemsToProcess', index, 0) as number;
 	const outputFormat = this.getNodeParameter('outputFormat', index, 'smart') as string;
 	const performanceMode = this.getNodeParameter('performanceMode', index, 'balanced') as string;
 	const enableDetailedLogs = this.getNodeParameter('enableDetailedLogs', index, false) as boolean;
-	const matchMethod = this.getNodeParameter('matchMethod', index, 'similarity') as string;
+
+	// Get match criteria
+	const matchCriteria = this.getNodeParameter('matchCriteria.criteria', index, []) as IDataObject[];
+	if (matchCriteria.length === 0) {
+		throw new Error('At least one match criterion is required');
+	}
 
 	let resultsSelector = '';
 	let itemSelector = '';
-	let autoDetectChildren = false;
+	let autoDetectChildren = true; // Always auto-detect children for container
 	let directItemSelector = '';
 
 	if (selectionMethod === 'containerItems') {
 		resultsSelector = this.getNodeParameter('resultsSelector', index, '') as string;
-		itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
-		autoDetectChildren = this.getNodeParameter('autoDetectChildren', index, true) as boolean;
 	} else {
 		directItemSelector = this.getNodeParameter('directItemSelector', index, '') as string;
 	}
@@ -994,7 +1139,7 @@ export async function execute(
 			}
 		}
 
-		// Create entity matcher configuration based on match method
+		// Create entity matcher configuration based on criteria
 		let matcherConfig: IEntityMatcherConfig = {
 			// Common configuration for all methods
 			resultsSelector: selectionMethod === 'containerItems' ? resultsSelector : '',
@@ -1006,69 +1151,112 @@ export async function execute(
 			timeout,
 			performanceMode: performanceMode as 'balanced' | 'speed' | 'accuracy',
 			debugMode: enableDetailedLogs,
-			threshold,
-			matchMode: matchMode as 'best' | 'all' | 'firstAboveThreshold',
-			sourceEntity: {},  // Will be filled based on match method
-			fieldComparisons: [],  // Will be filled based on match method
-			fields: [],  // Will be filled based on match method
+			threshold: 0.7, // Default threshold, will be overridden by criteria
+			matchMode: matchMode === 'nMatches' ? 'best' : matchMode as 'best' | 'all' | 'firstAboveThreshold',
+			limitResults: maxResults,
+			sourceEntity: {},
+			fieldComparisons: [],
+			fields: [],
 		};
 
-		if (matchMethod === 'similarity') {
-			const matchingApproach = this.getNodeParameter('matchingApproach', index, 'smartAll') as string;
+		// Process the first criterion for basic info
+		// More advanced handling for multiple criteria can be added
+		if (matchCriteria.length > 0) {
+			const firstCriterion = matchCriteria[0];
+			const comparisonApproach = firstCriterion.comparisonApproach as string;
+			const matchMethod = firstCriterion.matchMethod as string || 'similarity';
 
-			if (matchingApproach === 'smartAll') {
-				const referenceValue = this.getNodeParameter('referenceValue', index, '') as string;
-				const similarityAlgorithm = this.getNodeParameter('similarityAlgorithm', index, 'smart') as ComparisonAlgorithm;
-				const matchThreshold = this.getNodeParameter('matchThreshold', index, 0.1) as number;
-				const mustMatch = this.getNodeParameter('mustMatch', index, false) as boolean;
-				const importance = this.getNodeParameter('importance', index, 0.5) as number;
+			if (matchMethod === 'similarity') {
+				if (comparisonApproach === 'smartAll' || comparisonApproach === 'matchAll') {
+					const referenceValue = firstCriterion.referenceValue as string;
+					const similarityAlgorithm = firstCriterion.similarityAlgorithm as ComparisonAlgorithm || 'smart';
+					const matchThreshold = firstCriterion.matchThreshold as number || 0.7;
+					const mustMatch = firstCriterion.mustMatch as boolean || false;
+					const importance = firstCriterion.importance as number || 0.5;
 
-				// Configure for smart all-text comparison
-				matcherConfig.sourceEntity = { text: referenceValue };
-				matcherConfig.fieldComparisons = [{
-					field: 'text',
-					algorithm: similarityAlgorithm,
-					weight: importance,
-					mustMatch,
-					threshold: matchThreshold
-				}];
-			} else {
-				// Field by field comparison
-				const fieldComparisons = this.getNodeParameter('fieldComparisons.fields', index, []) as IDataObject[];
+					// Configure for smart all-text comparison
+					matcherConfig.sourceEntity = { text: referenceValue };
+					matcherConfig.fieldComparisons = [{
+						field: 'text',
+						algorithm: similarityAlgorithm,
+						weight: importance,
+						mustMatch,
+						threshold: matchThreshold
+					}];
 
-				// Convert each field configuration
-				matcherConfig.fieldComparisons = fieldComparisons.map(field => {
-					// Create the field configuration with only valid properties
-					const fieldConfig: IFieldComparisonConfig = {
-						field: field.name as string,
-						weight: (field.weight as number) || 0.5,
-						algorithm: field.algorithm as ComparisonAlgorithm || 'smart',
-						threshold: (field.threshold as number) || 0.7,
-						mustMatch: (field.mustMatch as boolean) || false
-					};
-					return fieldConfig;
-				});
+					// Use the criterion threshold as the main threshold
+					matcherConfig.threshold = matchThreshold;
+				} else if (comparisonApproach === 'fieldByField') {
+					// Field by field comparison
+					const fieldComparisonData = firstCriterion.fieldComparisons as IDataObject;
+					const fieldComparisons = fieldComparisonData && typeof fieldComparisonData === 'object' &&
+						fieldComparisonData.fields ? fieldComparisonData.fields as IDataObject[] : [];
 
-				// Also store additional field metadata in the source entity
-				const sourceEntityFields: Record<string, string> = {};
-				fieldComparisons.forEach(field => {
-					sourceEntityFields[field.name as string] = field.referenceValue as string;
-				});
-				matcherConfig.sourceEntity = sourceEntityFields;
+					// Convert each field configuration
+					matcherConfig.fieldComparisons = fieldComparisons.map(field => {
+						// Create the field configuration with only valid properties
+						const fieldConfig: IFieldComparisonConfig = {
+							field: field.name as string,
+							weight: (field.weight as number) || 0.5,
+							algorithm: field.algorithm as ComparisonAlgorithm || 'smart',
+							threshold: (field.threshold as number) || 0.7,
+							mustMatch: (field.mustMatch as boolean) || false
+						};
+						return fieldConfig;
+					});
+
+					// Also store additional field metadata in the source entity
+					const sourceEntityFields: Record<string, string> = {};
+					fieldComparisons.forEach(field => {
+						sourceEntityFields[field.name as string] = field.referenceValue as string;
+					});
+					matcherConfig.sourceEntity = sourceEntityFields;
+				}
+			} else if (matchMethod === 'rules') {
+				// Rules-based matching
+				const rulesConfigData = firstCriterion.rulesConfig as IDataObject;
+				const rulesConfig = rulesConfigData && typeof rulesConfigData === 'object' &&
+					rulesConfigData.rules ? rulesConfigData.rules as IDataObject[] : [];
+
+				// Convert rule configurations and set fields
+				matcherConfig.fields = rulesConfig.map(rule => ({
+					name: rule.field as string,
+					selector: rule.selector as string,
+					operation: rule.operation as string,
+					value: rule.value as string,
+					caseSensitive: (rule.caseSensitive as boolean) || false,
+					required: (rule.required as boolean) || false,
+				}));
 			}
-		} else {
-			// Rules-based matching
-			const rulesConfig = this.getNodeParameter('rulesConfig.rules', index, []) as IDataObject[];
+		}
 
-			// Convert rule configurations and set fields
-			matcherConfig.fields = rulesConfig.map(rule => ({
-				name: rule.field as string,
-				selector: rule.selector as string,
-				operation: rule.operation as string,
-				value: rule.value as string,
-				caseSensitive: (rule.caseSensitive as boolean) || false,
-				required: (rule.required as boolean) || false,
-			}));
+		// Handle action configuration if specified
+		const actionOnMatch = this.getNodeParameter('actionOnMatch', index, 'none') as string;
+		if (actionOnMatch !== 'none') {
+			matcherConfig.action = actionOnMatch as 'click' | 'extract' | 'none';
+			matcherConfig.actionSelector = this.getNodeParameter('actionSelector', index, '') as string;
+
+			if (actionOnMatch === 'click') {
+				const waitAfterAction = this.getNodeParameter('waitAfterAction', index, true) as boolean;
+				matcherConfig.waitAfterAction = waitAfterAction;
+
+				if (waitAfterAction) {
+					// Add custom wait parameters to the config (not in the interface)
+					const waitForValue = this.getNodeParameter('waitFor', index, 'navigation') as string;
+					const waitTimeValue = this.getNodeParameter('waitTime', index, 2000) as number;
+
+					// Set waitTime from interface
+					matcherConfig.waitTime = waitTimeValue;
+
+					// Handle waitSelector if needed
+					if (waitForValue === 'element') {
+						matcherConfig.waitSelector = this.getNodeParameter('waitSelector', index, '') as string;
+					}
+
+					// Add additional properties for custom handling in the execution
+					(matcherConfig as any).waitFor = waitForValue;
+				}
+			}
 		}
 
 		// Create and execute entity matcher
