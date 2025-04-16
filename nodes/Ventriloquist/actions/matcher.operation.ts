@@ -110,6 +110,140 @@ export const description: INodeProperties[] = [
 
 	// ==================== 2. MATCH CONFIGURATION ====================
 	{
+		displayName: "Selection Method",
+		name: "selectionMethod",
+		type: "options",
+		options: [
+			{
+				name: "Container with Items",
+				value: "containerItems",
+				description: "Select a container of multiple items to compare against",
+			},
+			{
+				name: "Direct Items",
+				value: "directItems",
+				description: "Select items directly with a single selector",
+			},
+		],
+		default: "containerItems",
+		description: "How to select elements to match against",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Results Container Selector",
+		name: "resultsSelector",
+		type: "string",
+		default: "",
+		placeholder: "ul.results, #search-results, table tbody",
+		description: "CSS selector for container with all results",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				selectionMethod: ["containerItems"],
+			},
+		},
+	},
+	{
+		displayName: "Direct Item Selector",
+		name: "directItemSelector",
+		type: "string",
+		default: "",
+		placeholder: "li, .result, tr",
+		description: "CSS selector for items to match",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				selectionMethod: ["directItems"],
+			},
+		},
+	},
+	{
+		displayName: "Auto-detect Children",
+		name: "autoDetectChildren",
+		type: "boolean",
+		default: true,
+		description: "Automatically detect child elements for extraction",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Maximum Items to Compare",
+		name: "maxItems",
+		type: "number",
+		typeOptions: {
+			minValue: 1,
+			maxValue: 100,
+		},
+		default: 10,
+		description: "Maximum number of items to extract for comparison",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Match Mode",
+		name: "matchMode",
+		type: "options",
+		options: [
+			{
+				name: "Best Match",
+				value: "best",
+				description: "Select only the best match above threshold",
+			},
+			{
+				name: "All Matches",
+				value: "all",
+				description: "Return all matches above threshold",
+			},
+			{
+				name: "First Match Above Threshold",
+				value: "firstAboveThreshold",
+				description: "Select first match that meets threshold",
+			},
+		],
+		default: "best",
+		description: "How to select matches from the results",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Wait For Selectors",
+		name: "waitForSelectors",
+		type: "boolean",
+		default: true,
+		description: "Wait for selectors to appear before processing",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Timeout (ms)",
+		name: "timeout",
+		type: "number",
+		default: 10000,
+		description: "How long to wait for selectors in milliseconds",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				waitForSelectors: [true],
+			},
+		},
+	},
+	{
 		displayName: "Match Configuration",
 		name: "matchConfig",
 		type: "fixedCollection",
@@ -120,116 +254,40 @@ export const description: INodeProperties[] = [
 				displayName: "Match Configuration",
 				values: [
 					{
-						displayName: "Results Container Selector",
-						name: "resultsSelector",
-						type: "string",
-						default: "",
-						placeholder: "ul.results, #search-results, table tbody",
-						description: "CSS selector for container with all results",
-						required: true,
-					},
-					{
-						displayName: "Item Selector",
-						name: "itemSelector",
-						type: "string",
-						default: "",
-						placeholder: "li, .result, tr",
-						description: "CSS selector for individual result items (leave empty to auto-detect)",
-					},
-					{
-						displayName: "Auto-detect Children",
-						name: "autoDetectChildren",
-						type: "boolean",
-						default: true,
-						description: "Automatically detect child elements for extraction",
-					},
-					{
-						displayName: "Maximum Items to Compare",
-						name: "maxItems",
-						type: "number",
-						typeOptions: {
-							minValue: 1,
-							maxValue: 100,
-						},
-						default: 10,
-						description: "Maximum number of items to extract for comparison",
-					},
-					{
-						displayName: "Similarity Threshold",
-						name: "threshold",
-						type: "number",
-						typeOptions: {
-							minValue: 0,
-							maxValue: 1,
-						},
-						default: 0.3,
-						description: "Minimum similarity score (0-1) required for an overall match. Matches below this threshold will be ignored.",
-					},
-					{
-						displayName: "Match Mode",
-						name: "matchMode",
+						displayName: "Performance Mode",
+						name: "performanceMode",
 						type: "options",
 						options: [
 							{
-								name: "Best Match",
-								value: "best",
-								description: "Select only the best match above threshold",
+								name: "Balanced",
+								value: "balanced",
+								description: "Balance between accuracy and performance"
 							},
 							{
-								name: "All Matches",
-								value: "all",
-								description: "Return all matches above threshold",
+								name: "Speed",
+								value: "speed",
+								description: "Faster but may be less accurate (useful for large pages)"
 							},
 							{
-								name: "First Match Above Threshold",
-								value: "firstAboveThreshold",
-								description: "Select first match that meets threshold",
-							},
+								name: "Accuracy",
+								value: "accuracy",
+								description: "More thorough matching but may be slower"
+							}
 						],
-						default: "best",
-						description: "How to select matches from the results",
-					},
-					{
-						displayName: "Limit Results",
-						name: "limitResults",
-						type: "number",
-						typeOptions: {
-							minValue: 1,
-							maxValue: 100,
-						},
-						default: 3,
-						description: "Maximum number of matches to return",
-						displayOptions: {
-							show: {
-								matchMode: ["all"],
-							},
-						},
-					},
-					{
-						displayName: "Wait For Container",
-						name: "waitForSelectors",
-						type: "boolean",
-						default: true,
-						description: "Wait for results container to appear in the page",
-					},
-					{
-						displayName: "Timeout (ms)",
-						name: "timeout",
-						type: "number",
-						default: 10000,
-						description: "Maximum wait time in milliseconds",
-						displayOptions: {
-							show: {
-								waitForSelectors: [true],
-							},
-						},
+						default: "balanced",
+						description: "Controls the performance vs. accuracy tradeoff",
 					},
 				],
 			},
 		],
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
 	},
 
-	// ==================== 3. CRITERIA COLLECTION ====================
+	// ==================== 3. COMPARISON CRITERIA ====================
 	{
 		displayName: "Match Criteria",
 		name: "matchCriteria",
@@ -237,23 +295,9 @@ export const description: INodeProperties[] = [
 		typeOptions: {
 			multipleValues: true,
 			sortable: true,
-			multipleValueButtonText: "Add Criterion",
 		},
-		default: {
-			criteria: [
-				{
-					name: "Default Criterion",
-					comparisonApproach: "smartAll",
-					referenceValue: "",
-					matchMethod: "similarity",
-					similarityAlgorithm: "smart",
-					matchThreshold: 0.7,
-					mustMatch: false,
-					importance: 0.5,
-				}
-			]
-		},
-		description: "Define criteria to match items against",
+		default: { criteria: [{ name: "criterion1", comparisonApproach: "smartAll", referenceValue: "" }] },
+		description: "Define criteria for matching",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -265,11 +309,12 @@ export const description: INodeProperties[] = [
 				displayName: "Criteria",
 				values: [
 					{
-						displayName: "Criterion Name",
+						displayName: "Name",
 						name: "name",
 						type: "string",
 						default: "",
-						description: "A name to identify this criterion",
+						description: "Name to identify this criterion",
+						required: true,
 					},
 					{
 						displayName: "Comparison Approach",
@@ -277,126 +322,51 @@ export const description: INodeProperties[] = [
 						type: "options",
 						options: [
 							{
-								name: "Smart Match (All Text)",
+								name: "Smart Match (All)",
 								value: "smartAll",
-								description: "Intelligently compare using all visible text (best for simple matching)",
+								description: "Smart comparison of the entire content (handles auto-extracted text)",
 							},
 							{
 								name: "Match All",
 								value: "matchAll",
-								description: "Compare whole item using selected method",
+								description: "Compare with the entire visible content of items",
 							},
 							{
 								name: "Field by Field",
 								value: "fieldByField",
-								description: "Compare specific fields",
+								description: "Compare specific fields individually",
 							},
 						],
 						default: "smartAll",
-						description: "Approach to use for matching entities",
 					},
-					// Only show method for Match All and Field by Field
-					{
-						displayName: "Match Method",
-						name: "matchMethod",
-						type: "options",
-						options: [
-							{
-								name: "Similarity",
-								value: "similarity",
-								description: "Compare using text similarity algorithms",
-							},
-							{
-								name: "Rules",
-								value: "rules",
-								description: "Compare using exact rule-based methods",
-							},
-							{
-								name: "AI (Coming Soon)",
-								value: "ai",
-								description: "Use AI to compare elements intelligently",
-							},
-						],
-						default: "similarity",
-						description: "Method to use for matching entities",
-						displayOptions: {
-							show: {
-								comparisonApproach: ["matchAll", "fieldByField"],
-							},
-						},
-					},
-					// Smart Match (All) and Match All approach fields
 					{
 						displayName: "Reference Value",
 						name: "referenceValue",
 						type: "string",
-						default: "",
-						description: "The reference value to match against (usually from a previous node)",
-						displayOptions: {
-							show: {
-								comparisonApproach: ["smartAll", "matchAll"],
-							},
+						typeOptions: {
+							rows: 2,
 						},
-					},
-					{
-						displayName: "Similarity Algorithm",
-						name: "similarityAlgorithm",
-						type: "options",
-						options: [
-							{
-								name: "Smart (Combines Multiple Algorithms)",
-								value: "smart",
-								description: "Uses a combined approach for best results",
-							},
-							{
-								name: "Containment (Reference in Target)",
-								value: "containment",
-								description: "Check if reference is contained within target",
-							},
-							{
-								name: "Word Overlap (Jaccard)",
-								value: "jaccard",
-								description: "Best for comparing sets of keywords or terms",
-							},
-							{
-								name: "Edit Distance (Levenshtein)",
-								value: "levenshtein",
-								description: "Best for comparing similar texts with small variations",
-							},
-							{
-								name: "Exact Match",
-								value: "exact",
-								description: "Requires exact match between texts",
-							},
-							{
-								name: "Flexible Matching (Fuzzy)",
-								value: "fuzzy",
-								description: "Flexible matching with fuzzy logic",
-							},
-						],
-						default: "smart",
-						description: "Algorithm to use for calculating similarity",
+						default: "",
+						description: "Text to search for in the items",
 						displayOptions: {
 							show: {
 								comparisonApproach: ["smartAll", "matchAll"],
-								matchMethod: ["similarity"],
 							},
 						},
 					},
 					{
 						displayName: "Similarity Threshold",
-						name: "matchThreshold",
+						name: "threshold",
 						type: "number",
 						typeOptions: {
 							minValue: 0,
 							maxValue: 1,
 						},
-						default: 0.7,
-						description: "Minimum similarity score (0-1) required for this match criterion",
+						default: 0.3,
+						description: "Minimum similarity score (0-1) required for this criterion. Matches below this threshold will be ignored.",
 						displayOptions: {
 							show: {
 								comparisonApproach: ["smartAll", "matchAll"],
-								matchMethod: ["similarity"],
 							},
 						},
 					},
@@ -409,82 +379,38 @@ export const description: INodeProperties[] = [
 						displayOptions: {
 							show: {
 								comparisonApproach: ["smartAll", "matchAll"],
-								matchMethod: ["similarity"],
 							},
 						},
 					},
 					{
-						displayName: "Importance",
-						name: "importance",
+						displayName: "Weight",
+						name: "weight",
 						type: "number",
 						typeOptions: {
 							minValue: 0,
 							maxValue: 1,
 						},
-						default: 0.5,
+						default: 1,
 						description: "How important this criterion is in the overall match (0-1)",
 						displayOptions: {
 							show: {
 								comparisonApproach: ["smartAll", "matchAll"],
-								matchMethod: ["similarity"],
 							},
 						},
 					},
-					{
-						displayName: "Output Format",
-						name: "outputFormat",
-						type: "options",
-						options: [
-							{
-								name: "Smart (Auto-Detect Best Format)",
-								value: "smart",
-								description: "Automatically detect the best format for each element",
-							},
-							{
-								name: "Text Only",
-								value: "text",
-								description: "Extract only text content",
-							},
-							{
-								name: "HTML",
-								value: "html",
-								description: "Include HTML structure",
-							},
-						],
-						default: "smart",
-						description: "How to format extracted content",
-						displayOptions: {
-							show: {
-								comparisonApproach: ["fieldByField"],
-							},
-						},
-					},
-					// Field by Field comparisons
+					// Field-by-field comparison options
 					{
 						displayName: "Field Comparisons",
 						name: "fieldComparisons",
 						type: "fixedCollection",
+						default: {},
 						typeOptions: {
 							multipleValues: true,
-							sortable: true,
-						},
-						default: {
-							fields: [
-								{
-									name: "field1",
-									referenceValue: "",
-									selector: "",
-									algorithm: "smart",
-									weight: 0.5,
-									mustMatch: false,
-								}
-							]
 						},
 						description: "Define field-by-field comparison criteria",
 						displayOptions: {
 							show: {
 								comparisonApproach: ["fieldByField"],
-								matchMethod: ["similarity"],
 							},
 						},
 						options: [
@@ -497,8 +423,7 @@ export const description: INodeProperties[] = [
 										name: "name",
 										type: "string",
 										default: "",
-										placeholder: "e.g., name, price, location",
-										description: "Name for this field comparison",
+										description: "Name to identify this field",
 										required: true,
 									},
 									{
@@ -506,7 +431,7 @@ export const description: INodeProperties[] = [
 										name: "referenceValue",
 										type: "string",
 										default: "",
-										description: "The reference value to match (usually from previous node)",
+										description: "Text to search for in this field",
 										required: true,
 									},
 									{
@@ -514,9 +439,47 @@ export const description: INodeProperties[] = [
 										name: "selector",
 										type: "string",
 										default: "",
-										placeholder: "h3 a, .price, span.location",
-										description: "CSS selector to extract the value to compare against",
-										required: true,
+										placeholder: ".title, h3, td:nth-child(2)",
+										description:
+											"CSS selector to target specific element (relative to the result item)",
+									},
+									{
+										displayName: "Comparison Algorithm",
+										name: "algorithm",
+										type: "options",
+										options: [
+											{
+												name: "Smart (Mixed Strategies)",
+												value: "smart",
+												description: "Best all-purpose text comparison",
+											},
+											{
+												name: "Contains",
+												value: "contains",
+												description: "Check if target contains reference",
+											},
+											{
+												name: "Containment",
+												value: "containment",
+												description: "Optimized for finding text within larger content",
+											},
+											{
+												name: "Exact Match",
+												value: "exact",
+												description: "Require exact text match",
+											},
+											{
+												name: "Levenshtein",
+												value: "levenshtein",
+												description: "Edit distance-based similarity",
+											},
+											{
+												name: "Jaccard",
+												value: "jaccard",
+												description: "Word overlap similarity",
+											},
+										],
+										default: "smart",
 									},
 									{
 										displayName: "Data Format",
@@ -526,78 +489,33 @@ export const description: INodeProperties[] = [
 											{
 												name: "Text",
 												value: "text",
-												description: "Plain text",
+												description: "Plain text content",
 											},
 											{
-												name: "Number",
-												value: "number",
-												description: "Numeric value",
+												name: "HTML",
+												value: "html",
+												description: "HTML content",
 											},
 											{
-												name: "Date",
-												value: "date",
-												description: "Date value",
-											},
-											{
-												name: "Address",
-												value: "address",
-												description: "Physical address",
-											},
-											{
-												name: "Boolean",
-												value: "boolean",
-												description: "True/false value",
+												name: "Attribute",
+												value: "attribute",
+												description: "Element attribute value",
 											},
 										],
 										default: "text",
-										description: "The data type for this field",
 									},
 									{
-										displayName: "Comparison Algorithm",
-										name: "algorithm",
-										type: "options",
-										options: [
-											{
-												name: "Smart (Combines Multiple Algorithms)",
-												value: "smart",
-												description: "Uses a combined approach for best results",
-											},
-											{
-												name: "Containment (Reference in Target)",
-												value: "containment",
-												description: "Check if reference is contained within target",
-											},
-											{
-												name: "Word Overlap (Jaccard)",
-												value: "jaccard",
-												description: "Best for comparing sets of keywords or terms",
-											},
-											{
-												name: "Edit Distance (Levenshtein)",
-												value: "levenshtein",
-												description: "Best for comparing similar texts with small variations",
-											},
-											{
-												name: "Exact Match",
-												value: "exact",
-												description: "Requires exact match between texts",
-											},
-											{
-												name: "Flexible Matching (Fuzzy)",
-												value: "fuzzy",
-												description: "Flexible matching with fuzzy logic",
-											},
-										],
-										default: "smart",
-										description: "Algorithm to use for calculating similarity",
-									},
-									{
-										displayName: "Attribute",
+										displayName: "Attribute Name",
 										name: "attribute",
 										type: "string",
 										default: "",
-										placeholder: "href, textContent, value",
+										placeholder: "href, data-id, title",
 										description: "Element attribute to extract (leave empty for text content)",
+										displayOptions: {
+											show: {
+												dataFormat: ["attribute"],
+											},
+										},
 									},
 									{
 										displayName: "Weight",
@@ -625,115 +543,8 @@ export const description: INodeProperties[] = [
 											minValue: 0,
 											maxValue: 1,
 										},
-										default: 0.7,
+										default: 0.3,
 										description: "Minimum similarity for this specific field to be considered a match",
-									},
-								],
-							},
-						],
-					},
-					// Rule-based matching
-					{
-						displayName: "Rules Configuration",
-						name: "rulesConfig",
-						type: "fixedCollection",
-						typeOptions: {
-							multipleValues: true,
-							sortable: true,
-						},
-						default: {
-							rules: [
-								{
-									field: "field1",
-									operation: "contains",
-									value: "",
-									caseSensitive: false,
-								}
-							]
-						},
-						description: "Define rules for matching",
-						displayOptions: {
-							show: {
-								comparisonApproach: ["matchAll", "fieldByField"],
-								matchMethod: ["rules"],
-							},
-						},
-						options: [
-							{
-								name: "rules",
-								displayName: "Rules",
-								values: [
-									{
-										displayName: "Field",
-										name: "field",
-										type: "string",
-										default: "",
-										description: "Field name to check",
-										required: true,
-									},
-									{
-										displayName: "Selector",
-										name: "selector",
-										type: "string",
-										default: "",
-										description: "CSS selector to target element",
-										required: true,
-									},
-									{
-										displayName: "Operation",
-										name: "operation",
-										type: "options",
-										noDataExpression: true,
-										options: [
-											{
-												name: "Contains",
-												value: "contains",
-												description: "Field contains the specified value",
-											},
-											{
-												name: "Equals",
-												value: "equals",
-												description: "Field exactly equals the value",
-											},
-											{
-												name: "Starts With",
-												value: "startsWith",
-												description: "Field starts with the value",
-											},
-											{
-												name: "Ends With",
-												value: "endsWith",
-												description: "Field ends with the value",
-											},
-											{
-												name: "Regex Match",
-												value: "regex",
-												description: "Field matches the regex pattern",
-											},
-										],
-										default: "contains",
-									},
-									{
-										displayName: "Value",
-										name: "value",
-										type: "string",
-										default: "",
-										description: "Value to compare against",
-										required: true,
-									},
-									{
-										displayName: "Case Sensitive",
-										name: "caseSensitive",
-										type: "boolean",
-										default: false,
-										description: "Match is case sensitive",
-									},
-									{
-										displayName: "Required",
-										name: "required",
-										type: "boolean",
-										default: false,
-										description: "This rule must match for the overall match to be valid",
 									},
 								],
 							},
@@ -744,7 +555,7 @@ export const description: INodeProperties[] = [
 		]
 	},
 
-	// Action Configuration section
+	// ==================== 4. ACTION HANDLING ====================
 	{
 		displayName: "Action on Match",
 		name: "actionOnMatch",
@@ -767,7 +578,6 @@ export const description: INodeProperties[] = [
 			},
 		],
 		default: "none",
-		description: "Action to perform on matched elements",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -797,7 +607,7 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
-				actionOnMatch: ["click"],
+				actionOnMatch: ["click", "extract"],
 			},
 		},
 	},
@@ -812,29 +622,14 @@ export const description: INodeProperties[] = [
 				description: "Wait for navigation to complete",
 			},
 			{
-				name: "DOM Content Loaded",
-				value: "domContentLoaded",
-				description: "Wait for DOM content loaded event",
-			},
-			{
-				name: "Load Event",
-				value: "load",
-				description: "Wait for page load event",
-			},
-			{
-				name: "Specific Element",
+				name: "Element",
 				value: "element",
 				description: "Wait for a specific element to appear",
 			},
 			{
-				name: "Network Idle",
-				value: "networkIdle",
-				description: "Wait for network to be idle",
-			},
-			{
-				name: "Time Delay",
+				name: "Delay",
 				value: "delay",
-				description: "Wait for a specific time period",
+				description: "Wait for a specific amount of time",
 			},
 		],
 		default: "navigation",
@@ -842,7 +637,7 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
-				actionOnMatch: ["click"],
+				actionOnMatch: ["click", "extract"],
 				waitAfterAction: [true],
 			},
 		},
@@ -852,12 +647,12 @@ export const description: INodeProperties[] = [
 		name: "waitSelector",
 		type: "string",
 		default: "",
-		placeholder: "#content, .results-loaded",
-		description: "CSS selector to wait for (if waiting for element)",
+		description: "Element to wait for after action",
+		placeholder: "#result, .success-message",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
-				actionOnMatch: ["click"],
+				actionOnMatch: ["click", "extract"],
 				waitAfterAction: [true],
 				waitFor: ["element"],
 			},
@@ -868,12 +663,13 @@ export const description: INodeProperties[] = [
 		name: "waitTimeout",
 		type: "number",
 		default: 30000,
-		description: "Maximum wait time in milliseconds",
+		description: "Maximum time to wait in milliseconds",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
-				actionOnMatch: ["click"],
+				actionOnMatch: ["click", "extract"],
 				waitAfterAction: [true],
+				waitFor: ["navigation", "element"],
 			},
 		},
 	},
@@ -886,39 +682,9 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
-				actionOnMatch: ["click"],
+				actionOnMatch: ["click", "extract"],
 				waitAfterAction: [true],
 				waitFor: ["delay"],
-			},
-		},
-	},
-	// Performance and Debugging options moved to the end
-	{
-		displayName: "Performance Mode",
-		name: "performanceMode",
-		type: "options",
-		options: [
-			{
-				name: "Balanced",
-				value: "balanced",
-				description: "Balance between accuracy and performance"
-			},
-			{
-				name: "Speed",
-				value: "speed",
-				description: "Faster but may be less accurate (useful for large pages)"
-			},
-			{
-				name: "Accuracy",
-				value: "accuracy",
-				description: "More thorough matching but may be slower"
-			}
-		],
-		default: "balanced",
-		description: "Controls the performance vs. accuracy tradeoff.",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
 			},
 		},
 	},
