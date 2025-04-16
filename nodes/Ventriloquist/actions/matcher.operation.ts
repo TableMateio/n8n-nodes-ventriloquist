@@ -1044,6 +1044,8 @@ export async function execute(
 						'Word overlap and sequence matching'
 					]
 				},
+				// Include the sessionId in the output
+				sessionId,
 				duration: Date.now() - startTime,
 			}
 		};
