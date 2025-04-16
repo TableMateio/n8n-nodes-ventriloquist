@@ -185,6 +185,8 @@ export interface IEntityMatcherOutput {
   containerFound?: boolean;
   itemsFound?: number;
   containerHtml?: string;
+  referenceValues?: Record<string, string | null | undefined>;
+  threshold?: number;
   timings?: {
     extraction?: number;
     comparison?: number;

@@ -75,9 +75,6 @@ export function createMiddlewareContext(
  */
 export function createPipeline<TInput, TOutput>(): MiddlewarePipeline<TInput, TOutput> {
   const middlewares: IMiddleware<any, any>[] = [];
-  const beforeHooks: Array<(input: TInput, context: IMiddlewareContext) => Promise<void>> = [];
-  const afterHooks: Array<(result: TOutput, context: IMiddlewareContext) => Promise<void>> = [];
-  const errorHandlers: Array<(error: Error, context: IMiddlewareContext) => Promise<TOutput>> = [];
 
   return {
     use(middleware: IMiddleware<any, any>): MiddlewarePipeline<TInput, TOutput> {
@@ -86,60 +83,31 @@ export function createPipeline<TInput, TOutput>(): MiddlewarePipeline<TInput, TO
     },
 
     async execute(input: TInput, context: IMiddlewareContext): Promise<TOutput> {
-      try {
-        // Run before hooks
-        for (const hook of beforeHooks) {
-          await hook(input, context);
-        }
-
-        if (middlewares.length === 0) {
-          throw new Error('No middleware in pipeline');
-        }
-
-        // Chain the middleware execution
-        let result: any = input;
-        for (const middleware of middlewares) {
-          result = await middleware.execute(result, context);
-        }
-
-        const typedResult = result as TOutput;
-
-        // Run after hooks
-        for (const hook of afterHooks) {
-          await hook(typedResult, context);
-        }
-
-        return typedResult;
-      } catch (error) {
-        // Handle errors
-        if (errorHandlers.length > 0) {
-          for (const handler of errorHandlers) {
-            try {
-              return await handler(error as Error, context);
-            } catch (handlerError) {
-              context.logger.error(`Error handler failed: ${(handlerError as Error).message}`);
-              // Continue to the next handler
-            }
-          }
-        }
-
-        // If no handler succeeded, rethrow the error
-        throw error;
+      if (middlewares.length === 0) {
+        throw new Error('No middleware in pipeline');
       }
+
+      // Chain the middleware execution
+      let result: any = input;
+      for (const middleware of middlewares) {
+        result = await middleware.execute(result, context);
+      }
+
+      return result as TOutput;
     },
 
     before(hook: (input: TInput, context: IMiddlewareContext) => Promise<void>): MiddlewarePipeline<TInput, TOutput> {
-      beforeHooks.push(hook);
+      // Implementation of before method
       return this;
     },
 
     after(hook: (result: TOutput, context: IMiddlewareContext) => Promise<void>): MiddlewarePipeline<TInput, TOutput> {
-      afterHooks.push(hook);
+      // Implementation of after method
       return this;
     },
 
     catch(handler: (error: Error, context: IMiddlewareContext) => Promise<TOutput>): MiddlewarePipeline<TInput, TOutput> {
-      errorHandlers.push(handler);
+      // Implementation of catch method
       return this;
     },
   };

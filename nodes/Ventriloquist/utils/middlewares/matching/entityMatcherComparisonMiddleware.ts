@@ -129,6 +129,15 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
       logger.info(`${logPrefix} Configuration includes required (must-match) fields`);
     }
 
+    // Check for empty source fields and log a warning
+    const emptyFields = Object.entries(sourceFields)
+      .filter(([_, value]) => !value || value.trim?.() === '')
+      .map(([field]) => field);
+
+    if (emptyFields.length > 0) {
+      logger.warn(`${logPrefix} Source entity has empty fields: ${emptyFields.join(', ')}. These fields will not contribute to matches.`);
+    }
+
     // Process each extracted item
     for (const item of extractedItems) {
       try {
@@ -162,11 +171,12 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
         for (const [field, similarity] of Object.entries(comparisonResult.fieldSimilarities)) {
           const matchConfig = comparisonConfig.fieldComparisons.find(fc => fc.field === field);
           const fieldThreshold = matchConfig?.threshold || threshold;
+          const sourceValue = sourceFields[field] || '';
 
           logger.debug(
             `${logPrefix} Item #${item.index} - Field "${field}" similarity: ${similarity.toFixed(4)} ${
               similarity >= fieldThreshold ? '✓' : '✗'
-            }${matchConfig?.mustMatch ? ' (required)' : ''}`
+            }${matchConfig?.mustMatch ? ' (required)' : ''} (source value: ${sourceValue ? '"' + sourceValue + '"' : 'empty'})`
           );
         }
 

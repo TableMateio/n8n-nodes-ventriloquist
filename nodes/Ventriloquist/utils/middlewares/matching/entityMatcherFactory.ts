@@ -186,6 +186,44 @@ export class EntityMatcherFactory {
                 try {
                     logger.info(`[EntityMatcherFactory] Starting entity matching process`);
 
+                    // Check if source entity has valid fields
+                    if (!config.sourceEntity || Object.keys(config.sourceEntity).length === 0) {
+                        logger.warn(`[EntityMatcherFactory] Source entity is empty or missing`);
+                        return sanitizeOutput({
+                            success: false,
+                            matches: [],
+                            error: 'Source entity is empty or missing. Please provide reference values to match against.',
+                            referenceValues: {},
+                            threshold: config.threshold,
+                            timings: {
+                                total: Date.now() - startTime
+                            }
+                        });
+                    }
+
+                    // Check for empty source fields and log a warning
+                    const emptyFields = Object.entries(config.sourceEntity)
+                        .filter(([_, value]) => !value || (typeof value === 'string' && value.trim() === ''))
+                        .map(([field]) => field);
+
+                    if (emptyFields.length > 0) {
+                        if (emptyFields.length === Object.keys(config.sourceEntity).length) {
+                            logger.warn(`[EntityMatcherFactory] All source entity fields are empty`);
+                            return sanitizeOutput({
+                                success: false,
+                                matches: [],
+                                error: 'All source entity fields are empty. Please provide at least one non-empty reference value to match against.',
+                                referenceValues: config.sourceEntity,
+                                threshold: config.threshold,
+                                timings: {
+                                    total: Date.now() - startTime
+                                }
+                            });
+                        } else {
+                            logger.warn(`[EntityMatcherFactory] Some source entity fields are empty: ${emptyFields.join(', ')}`);
+                        }
+                    }
+
                     // 1. Create extraction input with maxItems limit
                     const extractionInput: IEntityMatcherExtractionInput = {
                         page,
@@ -272,6 +310,8 @@ export class EntityMatcherFactory {
                             error: comparisonResult.error || 'No matches found above threshold',
                             containerSelector: config.resultsSelector,
                             itemSelector: config.itemSelector || '(auto-detect)',
+                            referenceValues: config.sourceEntity || {},
+                            threshold: config.threshold,
                             timings: {
                                 extraction: extractionDuration,
                                 comparison: comparisonDuration,
@@ -329,6 +369,8 @@ export class EntityMatcherFactory {
                         itemsFound: extractionResult.itemsFound,
                         containerSelector: config.resultsSelector,
                         itemSelector: extractionResult.itemSelector,
+                        referenceValues: config.sourceEntity || {},
+                        threshold: config.threshold,
                         timings: {
                             extraction: extractionDuration,
                             comparison: comparisonDuration,
@@ -357,6 +399,8 @@ export class EntityMatcherFactory {
                         },
                         containerSelector: config.resultsSelector,
                         itemSelector: config.itemSelector || '(auto-detect)',
+                        referenceValues: config.sourceEntity || {},
+                        threshold: config.threshold,
                         timings: {
                             total: Date.now() - startTime
                         }
