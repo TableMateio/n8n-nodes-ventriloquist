@@ -1,144 +1,150 @@
 import type { Logger as ILogger } from 'n8n-workflow';
-import type * as puppeteer from 'puppeteer-core';
-import { createPipeline, type IMiddlewareContext } from '../middleware';
-import {
-  ExtractionMiddleware,
-  type IExtractInput,
-  type IExtractResult,
-  type IExtractOptions
-} from './extractMiddleware';
+import type { Page } from 'puppeteer-core';
+import type { IMiddleware, IMiddlewareContext } from '../middleware';
 
 /**
- * Configuration for extraction factory
+ * Extraction configuration interface
  */
 export interface IExtractionConfig {
   extractionType: string;
   selector: string;
   attributeName?: string;
-  outputFormat?: string;
-  includeMetadata?: boolean;
-  includeHeaders?: boolean;
-  rowSelector?: string;
-  cellSelector?: string;
-  extractionProperty?: string;
-  limit?: number;
-  separator?: string;
   waitForSelector?: boolean;
   selectorTimeout?: number;
 }
 
 /**
- * Factory for creating extraction operations
+ * Result of the extraction operation
  */
-export class ExtractionFactory {
-  /**
-   * Create an extraction operation
-   */
-  public static create(
-    page: puppeteer.Page,
-    config: IExtractionConfig,
-    context: {
-      logger: ILogger;
-      nodeName: string;
-      nodeId: string;
-      sessionId: string;
-      index: number;
-    }
-  ): {
-    execute: () => Promise<IExtractResult>;
-  } {
-    // Create extraction options
-    const options: IExtractOptions = {
-      extractionType: config.extractionType,
-      selector: config.selector,
-      attributeName: config.attributeName,
-      outputFormat: config.outputFormat,
-      includeMetadata: config.includeMetadata,
-      includeHeaders: config.includeHeaders,
-      rowSelector: config.rowSelector,
-      cellSelector: config.cellSelector,
-      extractionProperty: config.extractionProperty,
-      limit: config.limit,
-      separator: config.separator,
-      waitForSelector: config.waitForSelector,
-      selectorTimeout: config.selectorTimeout,
-      nodeName: context.nodeName,
-      nodeId: context.nodeId,
-      index: context.index,
-    };
+export interface IExtractionResult {
+  success: boolean;
+  data?: any;
+  error?: {
+    message: string;
+    details?: any;
+  };
+}
 
-    // Create middleware input
-    const input: IExtractInput = {
-      page,
-      options,
-    };
+/**
+ * Extraction interface for extracting data from the page
+ */
+export interface IExtraction {
+  execute(): Promise<IExtractionResult>;
+}
 
-    // Create middleware context
-    const middlewareContext: IMiddlewareContext = {
-      logger: context.logger,
-      nodeName: context.nodeName,
-      nodeId: context.nodeId,
-      sessionId: context.sessionId,
-      index: context.index,
-    };
+/**
+ * Basic extraction implementation
+ */
+class BasicExtraction implements IExtraction {
+  private page: Page;
+  private config: IExtractionConfig;
+  private context: IMiddlewareContext;
 
-    // Create extraction middleware
-    const middleware = new ExtractionMiddleware();
+  constructor(page: Page, config: IExtractionConfig, context: IMiddlewareContext) {
+    this.page = page;
+    this.config = config;
+    this.context = context;
+  }
 
-    // Create pipeline
-    const pipeline = createPipeline<IExtractInput, IExtractResult>()
-      .use(middleware)
-      .before(async (input: IExtractInput, ctx: IMiddlewareContext) => {
-        ctx.logger.debug(
-          `[ExtractionFactory][${ctx.nodeName}][${ctx.nodeId}] Starting extraction process for ${input.options.extractionType} on selector: ${input.options.selector}`
-        );
-      })
-      .after(async (result: IExtractResult, ctx: IMiddlewareContext) => {
-        if (result.success) {
-          ctx.logger.debug(
-            `[ExtractionFactory][${ctx.nodeName}][${ctx.nodeId}] Extraction completed successfully`
-          );
-        } else {
-          ctx.logger.warn(
-            `[ExtractionFactory][${ctx.nodeName}][${ctx.nodeId}] Extraction failed: ${result.error?.message}`
-          );
+  async execute(): Promise<IExtractionResult> {
+    const { logger, nodeName } = this.context;
+    const logPrefix = `[Extraction][${nodeName}]`;
+
+    try {
+      logger.debug(`${logPrefix} Extracting data with config: ${JSON.stringify(this.config)}`);
+
+      // Wait for selector if configured
+      if (this.config.waitForSelector) {
+        logger.debug(`${logPrefix} Waiting for selector: ${this.config.selector}`);
+        try {
+          await this.page.waitForSelector(this.config.selector, {
+            timeout: this.config.selectorTimeout || 5000,
+          });
+        } catch (error) {
+          logger.warn(`${logPrefix} Selector not found: ${this.config.selector}`);
+          return {
+            success: false,
+            error: {
+              message: `Selector not found: ${this.config.selector}`,
+              details: error,
+            },
+          };
         }
-      })
-      .catch(async (error: Error, ctx: IMiddlewareContext) => {
-        ctx.logger.error(
-          `[ExtractionFactory][${ctx.nodeName}][${ctx.nodeId}] Error in extraction: ${error.message}`
-        );
-        return {
-          success: false,
-          data: null,
-          selector: config.selector,
-          extractionType: config.extractionType,
-          error: error,
-        };
-      });
+      }
 
-    // Return executor
-    return {
-      execute: async () => pipeline.execute(input, middlewareContext),
-    };
+      // Extract data based on extraction type
+      let data: any;
+
+      switch (this.config.extractionType) {
+        case 'text':
+          data = await this.page.$eval(this.config.selector, (el) => el.textContent?.trim() || '');
+          break;
+
+        case 'attribute':
+          if (!this.config.attributeName) {
+            throw new Error('Attribute name is required for attribute extraction');
+          }
+          data = await this.page.$eval(
+            this.config.selector,
+            (el, attr) => el.getAttribute(attr) || '',
+            this.config.attributeName
+          );
+          break;
+
+        case 'html':
+          data = await this.page.$eval(this.config.selector, (el) => el.innerHTML);
+          break;
+
+        case 'outerHtml':
+          data = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+          break;
+
+        default:
+          throw new Error(`Unsupported extraction type: ${this.config.extractionType}`);
+      }
+
+      logger.debug(`${logPrefix} Extraction successful:`, typeof data === 'string' ? data.substring(0, 50) + '...' : data);
+
+      return {
+        success: true,
+        data,
+      };
+    } catch (error) {
+      logger.error(`${logPrefix} Extraction failed: ${(error as Error).message}`);
+
+      return {
+        success: false,
+        error: {
+          message: (error as Error).message,
+          details: error,
+        },
+      };
+    }
   }
 }
 
 /**
- * Helper function to create an extraction operation
+ * Create an extraction instance
  */
 export function createExtraction(
-  page: puppeteer.Page,
+  page: Page,
   config: IExtractionConfig,
   context: {
     logger: ILogger;
     nodeName: string;
     nodeId: string;
     sessionId: string;
-    index: number;
+    index?: number;
   }
-): {
-  execute: () => Promise<IExtractResult>;
-} {
-  return ExtractionFactory.create(page, config, context);
+): IExtraction {
+  // Convert to IMiddlewareContext
+  const middlewareContext: IMiddlewareContext = {
+    logger: context.logger,
+    nodeName: context.nodeName,
+    nodeId: context.nodeId,
+    sessionId: context.sessionId,
+    index: context.index,
+  };
+
+  return new BasicExtraction(page, config, middlewareContext);
 }

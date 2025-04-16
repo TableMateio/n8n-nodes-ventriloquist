@@ -1,208 +1,91 @@
-import type { Logger as ILogger } from 'n8n-workflow';
+/**
+ * Common extraction patterns for various types of data
+ * Used for extracting structured information from unstructured text
+ */
 
 /**
- * Pattern type definitions
+ * Email patterns
  */
-export type PatternType = 'name' | 'address' | 'phone' | 'email' | 'date' | 'ssn' | 'money' | 'custom';
+export const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 
 /**
- * Pattern definition interface
+ * Phone number patterns
  */
-export interface IPatternDefinition {
-  name: string;
-  type: PatternType;
-  description: string;
-  regex: RegExp;
-  formatOutput?: (match: RegExpMatchArray) => string | Record<string, string | number>;
+export const PHONE_PATTERN = /(?:\+\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/;
+
+/**
+ * URL patterns
+ */
+export const URL_PATTERN = /https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)/;
+
+/**
+ * US Address patterns
+ */
+export const US_ADDRESS_PATTERN = /\d+\s+([a-zA-Z]+\s){1,}\s*(?:st(?:\.|reet)?|rd|road|ave(?:\.|nue)?|avenue|dr(?:\.|ive)?|drive|blvd|boulevard|ln|lane|court|ct|way|parkway|pkwy|circle|cir|plaza|plz|square|sq|highway|hwy|route|rt)\s+(?:[a-zA-Z]+\s*)+,\s*(?:[a-zA-Z]+\s*)+,\s*(?:[a-zA-Z]+\s*)+\s+\d{5}(?:-\d{4})?/i;
+
+/**
+ * Date patterns (various formats)
+ */
+export const DATE_PATTERN = /(?:\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})|(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s.-]?\d{1,2}[\s,.-]?\d{2,4})/i;
+
+/**
+ * Currency patterns
+ */
+export const CURRENCY_PATTERN = /(?:[\$\€\£\¥]\s?[0-9,]+(?:\.\d{2})?)|(?:[0-9,]+(?:\.\d{2})?\s?(?:USD|EUR|GBP|JPY))/;
+
+/**
+ * Extract a pattern from text
+ */
+export function extractWithPattern(text: string, pattern: RegExp): string | null {
+  if (!text) return null;
+
+  const match = text.match(pattern);
+  return match ? match[0] : null;
 }
 
 /**
- * Pattern library containing common extraction patterns
+ * Extract all matches of a pattern from text
  */
-export const extractionPatterns: Record<string, IPatternDefinition> = {
-  // Name patterns
-  fullName: {
-    name: 'fullName',
-    type: 'name',
-    description: 'Extract full name in "First Middle Last" format',
-    regex: /([A-Z][a-z]+)(?:\s+([A-Z][a-z]+))?\s+([A-Z][a-z]+)/,
-    formatOutput: (match) => ({
-      firstName: match[1] || '',
-      middleName: match[2] || '',
-      lastName: match[3] || '',
-    }),
-  },
+export function extractAllWithPattern(text: string, pattern: RegExp): string[] {
+  if (!text) return [];
 
-  // Address patterns
-  usAddress: {
-    name: 'usAddress',
-    type: 'address',
-    description: 'Extract US address with street, city, state, zip',
-    regex: /([0-9]+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Place|Pl|Court|Ct|Way|Terrace|Ter))(?:\s*(?:Apt|Suite|Unit|#)\s*([A-Za-z0-9]+))?,?\s*([A-Za-z\s]+),\s*([A-Z]{2})\s*(\d{5}(?:-\d{4})?)/i,
-    formatOutput: (match) => ({
-      street: `${match[1]}${match[2] ? ` ${match[2]}` : ''}`,
-      city: match[3] || '',
-      state: match[4] || '',
-      zip: match[5] || '',
-    }),
-  },
+  const globalPattern = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g');
+  const matches = text.match(globalPattern);
 
-  // Phone number patterns
-  usPhone: {
-    name: 'usPhone',
-    type: 'phone',
-    description: 'Extract US phone number in various formats',
-    regex: /(?:\+1-?)?(?:\(\d{3}\)|\d{3})[-\s.]?\d{3}[-\s.]?\d{4}/,
-    formatOutput: (match) => {
-      // Normalize to ###-###-#### format
-      const digits = match[0].replace(/\D/g, '');
-      const normalizedPhone = digits.replace(/^1?(\d{3})(\d{3})(\d{4})$/, '$1-$2-$3');
-      return normalizedPhone;
-    },
-  },
-
-  // Email patterns
-  email: {
-    name: 'email',
-    type: 'email',
-    description: 'Extract email address',
-    regex: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/,
-  },
-
-  // Date patterns
-  usDate: {
-    name: 'usDate',
-    type: 'date',
-    description: 'Extract date in MM/DD/YYYY format',
-    regex: /(\d{1,2})\/(\d{1,2})\/(\d{4})/,
-    formatOutput: (match) => {
-      const month = match[1].padStart(2, '0');
-      const day = match[2].padStart(2, '0');
-      const year = match[3];
-      return `${year}-${month}-${day}`; // ISO format
-    },
-  },
-
-  // SSN patterns
-  ssn: {
-    name: 'ssn',
-    type: 'ssn',
-    description: 'Extract Social Security Number',
-    regex: /\b(?:\d{3}-\d{2}-\d{4}|\d{9})\b/,
-    formatOutput: (match) => {
-      // Normalize to ###-##-#### format
-      const digits = match[0].replace(/\D/g, '');
-      return digits.replace(/^(\d{3})(\d{2})(\d{4})$/, '$1-$2-$3');
-    },
-  },
-
-  // Money patterns
-  usMoney: {
-    name: 'usMoney',
-    type: 'money',
-    description: 'Extract US currency amount',
-    regex: /\$\s?([0-9,]+(?:\.[0-9]{2})?)/,
-    formatOutput: (match) => {
-      // Convert to numeric value and return as a string or in an object
-      const value = parseFloat(match[1].replace(/,/g, ''));
-      return { amount: value, currency: 'USD' };
-    },
-  },
-};
-
-/**
- * Extract data using a pattern
- */
-export function extractWithPattern(
-  text: string,
-  patternKey: string,
-  logger?: ILogger
-): string | Record<string, string | number> | null {
-  try {
-    const pattern = extractionPatterns[patternKey];
-    if (!pattern) {
-      throw new Error(`Pattern '${patternKey}' not found in pattern library`);
-    }
-
-    const match = text.match(pattern.regex);
-    if (!match) {
-      return null; // No match found
-    }
-
-    // Format the output if a formatter exists
-    if (pattern.formatOutput) {
-      return pattern.formatOutput(match);
-    }
-
-    // Return the first match group, or the entire match if no groups
-    return match[1] || match[0];
-  } catch (error) {
-    if (logger) {
-      logger.error(`[ExtractionPatterns] Error extracting with pattern '${patternKey}': ${(error as Error).message}`);
-    }
-    return null;
-  }
+  return matches || [];
 }
 
 /**
- * Extract all occurrences of a pattern
+ * Extract email addresses from text
  */
-export function extractAllWithPattern(
-  text: string,
-  patternKey: string,
-  logger?: ILogger
-): Array<string | Record<string, string | number>> {
-  try {
-    const pattern = extractionPatterns[patternKey];
-    if (!pattern) {
-      throw new Error(`Pattern '${patternKey}' not found in pattern library`);
-    }
-
-    const regex = new RegExp(pattern.regex, 'g');
-    const matches = Array.from(text.matchAll(regex));
-
-    if (!matches.length) {
-      return []; // No matches found
-    }
-
-    // Format each match with the output formatter if it exists
-    return matches.map(match => {
-      if (pattern.formatOutput) {
-        return pattern.formatOutput(match);
-      }
-      return match[1] || match[0];
-    });
-  } catch (error) {
-    if (logger) {
-      logger.error(`[ExtractionPatterns] Error extracting all with pattern '${patternKey}': ${(error as Error).message}`);
-    }
-    return [];
-  }
+export function extractEmails(text: string): string[] {
+  return extractAllWithPattern(text, EMAIL_PATTERN);
 }
 
 /**
- * Add a custom pattern to the pattern library
+ * Extract phone numbers from text
  */
-export function addCustomPattern(
-  key: string,
-  pattern: IPatternDefinition,
-  logger?: ILogger
-): boolean {
-  try {
-    if (extractionPatterns[key]) {
-      throw new Error(`Pattern with key '${key}' already exists`);
-    }
+export function extractPhoneNumbers(text: string): string[] {
+  return extractAllWithPattern(text, PHONE_PATTERN);
+}
 
-    extractionPatterns[key] = {
-      ...pattern,
-      type: pattern.type || 'custom',
-    };
+/**
+ * Extract URLs from text
+ */
+export function extractUrls(text: string): string[] {
+  return extractAllWithPattern(text, URL_PATTERN);
+}
 
-    return true;
-  } catch (error) {
-    if (logger) {
-      logger.error(`[ExtractionPatterns] Error adding custom pattern '${key}': ${(error as Error).message}`);
-    }
-    return false;
-  }
+/**
+ * Extract dates from text
+ */
+export function extractDates(text: string): string[] {
+  return extractAllWithPattern(text, DATE_PATTERN);
+}
+
+/**
+ * Extract currency values from text
+ */
+export function extractCurrencyValues(text: string): string[] {
+  return extractAllWithPattern(text, CURRENCY_PATTERN);
 }

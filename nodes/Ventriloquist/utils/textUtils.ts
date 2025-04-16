@@ -1,5 +1,3 @@
-import type { Logger as ILogger } from 'n8n-workflow';
-
 /**
  * Text normalization options
  */
@@ -7,153 +5,146 @@ export interface ITextNormalizationOptions {
   lowercase?: boolean;
   trimWhitespace?: boolean;
   removeExtraSpaces?: boolean;
+  normalizeNewlines?: boolean;
   removePunctuation?: boolean;
   removeSpecialChars?: boolean;
-  removeAccents?: boolean;
-  removeDiacritics?: boolean;
-  normalizeAddresses?: boolean;
 }
 
 /**
- * Default normalization options
+ * Default text normalization options
  */
-const DEFAULT_NORMALIZATION_OPTIONS: ITextNormalizationOptions = {
+export const DEFAULT_TEXT_NORMALIZATION_OPTIONS: ITextNormalizationOptions = {
   lowercase: true,
   trimWhitespace: true,
   removeExtraSpaces: true,
+  normalizeNewlines: true,
   removePunctuation: false,
   removeSpecialChars: false,
-  removeAccents: false,
-  removeDiacritics: false,
-  normalizeAddresses: false,
 };
 
 /**
- * Normalize text for comparison
+ * Normalize text for better comparison and display
  */
 export function normalizeText(
   text: string,
-  options: ITextNormalizationOptions = DEFAULT_NORMALIZATION_OPTIONS,
-  logger?: ILogger,
+  options: Partial<ITextNormalizationOptions> = DEFAULT_TEXT_NORMALIZATION_OPTIONS
 ): string {
-  if (!text) {
-    return '';
+  if (!text) return '';
+
+  const mergedOptions = { ...DEFAULT_TEXT_NORMALIZATION_OPTIONS, ...options };
+  let normalized = text;
+
+  if (mergedOptions.trimWhitespace) {
+    normalized = normalized.trim();
   }
 
-  try {
-    let normalized = text;
-
-    // Convert to lowercase
-    if (options.lowercase) {
-      normalized = normalized.toLowerCase();
-    }
-
-    // Trim whitespace
-    if (options.trimWhitespace) {
-      normalized = normalized.trim();
-    }
-
-    // Remove extra spaces
-    if (options.removeExtraSpaces) {
-      normalized = normalized.replace(/\s+/g, ' ');
-    }
-
-    // Remove punctuation
-    if (options.removePunctuation) {
-      normalized = normalized.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '');
-    }
-
-    // Remove special characters
-    if (options.removeSpecialChars) {
-      normalized = normalized.replace(/[^\w\s]/gi, '');
-    }
-
-    // Remove accents/diacritics
-    if (options.removeAccents || options.removeDiacritics) {
-      normalized = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    }
-
-    // Normalize address format
-    if (options.normalizeAddresses) {
-      // Replace common address abbreviations
-      const addressReplacements: Record<string, string> = {
-        'st\\.': 'street',
-        'st\\b': 'street',
-        'rd\\.': 'road',
-        'rd\\b': 'road',
-        'ave\\.': 'avenue',
-        'ave\\b': 'avenue',
-        'blvd\\.': 'boulevard',
-        'blvd\\b': 'boulevard',
-        'apt\\.': 'apartment',
-        'apt\\b': 'apartment',
-        'ste\\.': 'suite',
-        'ste\\b': 'suite',
-        '#': 'number',
-      };
-
-      // Apply all replacements
-      Object.entries(addressReplacements).forEach(([pattern, replacement]) => {
-        const regex = new RegExp(pattern, 'gi');
-        normalized = normalized.replace(regex, replacement);
-      });
-    }
-
-    return normalized;
-  } catch (error) {
-    if (logger) {
-      logger.error(`[TextUtils] Error normalizing text: ${(error as Error).message}`);
-    }
-    return text; // Return original text on error
+  if (mergedOptions.normalizeNewlines) {
+    normalized = normalized.replace(/\n+/g, '\n');
   }
+
+  if (mergedOptions.removeExtraSpaces) {
+    normalized = normalized.replace(/\s+/g, ' ');
+  }
+
+  if (mergedOptions.removePunctuation) {
+    normalized = normalized.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '');
+  }
+
+  if (mergedOptions.removeSpecialChars) {
+    normalized = normalized.replace(/[^\w\s]/g, '');
+  }
+
+  if (mergedOptions.lowercase) {
+    normalized = normalized.toLowerCase();
+  }
+
+  return normalized;
 }
 
 /**
- * Combine fields into a single string for comparison
+ * Format a person's name for better matching
  */
-export function combineFields(
-  fields: Record<string, string | undefined | null>,
-  separator: string = ' ',
-  options: ITextNormalizationOptions = DEFAULT_NORMALIZATION_OPTIONS,
-): string {
-  // Filter out empty/null/undefined values and join with separator
-  const combined = Object.values(fields)
-    .filter(Boolean)
-    .join(separator);
+export function formatPersonName(name: string): string {
+  if (!name) return '';
 
-  // Normalize the combined text
-  return normalizeText(combined, options);
-}
+  // Normalize the name
+  const normalized = normalizeText(name, {
+    lowercase: true,
+    trimWhitespace: true,
+    removeExtraSpaces: true,
+  });
 
-/**
- * Format a name for comparison (first, middle, last)
- */
-export function formatPersonName(
-  firstName?: string | null,
-  middleName?: string | null,
-  lastName?: string | null,
-  options: ITextNormalizationOptions = DEFAULT_NORMALIZATION_OPTIONS,
-): string {
-  return combineFields(
-    { firstName, middleName, lastName },
-    ' ',
-    options
+  // Split into words
+  const parts = normalized.split(/\s+/);
+
+  // Handle special cases
+  if (parts.length === 1) return parts[0];
+
+  // Remove common titles/prefixes/suffixes for better matching
+  const filteredParts = parts.filter(part =>
+    !['mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'jr', 'sr', 'esq', 'phd', 'md'].includes(part)
   );
+
+  return filteredParts.join(' ');
 }
 
 /**
- * Format an address for comparison
+ * Format an address for better matching
  */
-export function formatAddress(
-  street?: string | null,
-  city?: string | null,
-  state?: string | null,
-  zip?: string | null,
-  options: ITextNormalizationOptions = { ...DEFAULT_NORMALIZATION_OPTIONS, normalizeAddresses: true },
-): string {
-  return combineFields(
-    { street, city, state, zip },
-    ', ',
-    options
-  );
+export function formatAddress(address: string): string {
+  if (!address) return '';
+
+  // Normalize the address
+  let normalized = normalizeText(address, {
+    lowercase: true,
+    trimWhitespace: true,
+    removeExtraSpaces: true,
+  });
+
+  // Replace common abbreviations
+  const replacements: [RegExp, string][] = [
+    [/\bst\b/g, 'street'],
+    [/\brd\b/g, 'road'],
+    [/\bave\b/g, 'avenue'],
+    [/\bblvd\b/g, 'boulevard'],
+    [/\bln\b/g, 'lane'],
+    [/\bct\b/g, 'court'],
+    [/\bapt\b/g, 'apartment'],
+    [/\bste\b/g, 'suite'],
+    [/\bunit\b/g, 'unit'],
+    [/\bn\b/g, 'north'],
+    [/\bs\b/g, 'south'],
+    [/\be\b/g, 'east'],
+    [/\bw\b/g, 'west'],
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    normalized = normalized.replace(pattern, replacement);
+  }
+
+  return normalized;
+}
+
+/**
+ * Extracts a pattern from text using regex
+ */
+export function extractWithPattern(text: string, pattern: RegExp | string): string | null {
+  if (!text) return null;
+
+  const regex = typeof pattern === 'string' ? new RegExp(pattern) : pattern;
+  const match = text.match(regex);
+
+  return match ? match[0] : null;
+}
+
+/**
+ * Extracts all matches of a pattern from text
+ */
+export function extractAllWithPattern(text: string, pattern: RegExp | string): string[] {
+  if (!text) return [];
+
+  const regex = typeof pattern === 'string' ? new RegExp(pattern, 'g') : new RegExp(pattern.source, pattern.flags + (pattern.flags.includes('g') ? '' : 'g'));
+  const matches = text.match(regex);
+
+  return matches || [];
 }

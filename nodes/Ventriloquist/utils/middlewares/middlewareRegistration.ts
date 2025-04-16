@@ -1,106 +1,99 @@
-import type { Logger as ILogger } from 'n8n-workflow';
-import { MiddlewareRegistry, getMiddlewareRegistry } from './middlewareRegistry';
-import { createExtractionMiddlewareRegistration } from './extraction/extractionMiddleware';
-import { createEntityMatcherExtractionMiddlewareRegistration } from './matching/entityMatcherExtractionMiddleware';
-import { createEntityMatcherComparisonMiddlewareRegistration } from './matching/entityMatcherComparisonMiddleware';
-import { createEntityMatcherActionMiddlewareRegistration } from './matching/entityMatcherActionMiddleware';
+import type { IMiddleware } from './middleware';
 
 /**
- * Register all built-in middleware components
+ * Middleware type enum for categorization
  */
-export function registerBuiltInMiddleware(logger?: ILogger): void {
-  const registry = getMiddlewareRegistry();
-
-  if (logger) {
-    registry.setLogger(logger);
-    logger.info('[MiddlewareRegistration] Registering built-in middleware components');
-  }
-
-  // Register extraction middleware
-  const extractionMiddleware = createExtractionMiddlewareRegistration();
-  registry.register(extractionMiddleware);
-
-  // Register entity matcher extraction middleware
-  const entityMatcherExtractionMiddleware = createEntityMatcherExtractionMiddlewareRegistration();
-  registry.register(entityMatcherExtractionMiddleware);
-
-  // Register entity matcher comparison middleware
-  const entityMatcherComparisonMiddleware = createEntityMatcherComparisonMiddlewareRegistration();
-  registry.register(entityMatcherComparisonMiddleware);
-
-  // Register entity matcher action middleware
-  const entityMatcherActionMiddleware = createEntityMatcherActionMiddlewareRegistration();
-  registry.register(entityMatcherActionMiddleware);
-
-  // Additional middleware registrations will be added as they are implemented
-
-  if (logger) {
-    const count = registry.getAllRegistrations().length;
-    logger.info(`[MiddlewareRegistration] Registered ${count} built-in middleware components`);
-  }
+export enum MiddlewareType {
+  EXTRACTION = 'extraction',
+  MATCHING = 'matching',
+  ACTION = 'action',
+  FALLBACK = 'fallback',
 }
 
 /**
- * Initialize the middleware registry with all built-in middleware
+ * Interface for registering middleware in the system
  */
-export function initializeMiddlewareRegistry(logger?: ILogger): MiddlewareRegistry {
-  const registry = getMiddlewareRegistry();
-
-  // Clear any existing registrations
-  registry.clear();
-
-  // Register built-in middleware
-  registerBuiltInMiddleware(logger);
-
-  return registry;
+export interface IMiddlewareRegistration<TInput = any, TOutput = any> {
+  id: string;
+  type: MiddlewareType;
+  middleware: IMiddleware<TInput, TOutput>;
+  description?: string;
 }
 
 /**
- * Register a custom middleware
+ * Interface for the middleware registry
  */
-export function registerCustomMiddleware(
-  id: string,
-  middleware: any,
-  type: string,
-  options: {
-    name: string;
-    description: string;
-    dependencies?: string[];
-    version?: string;
-    tags?: string[];
-    configSchema?: object;
-  },
-  logger?: ILogger
-): void {
-  const registry = getMiddlewareRegistry();
+export interface IMiddlewareRegistry {
+  register<TInput, TOutput>(
+    id: string,
+    type: MiddlewareType,
+    middleware: IMiddleware<TInput, TOutput>,
+    description?: string
+  ): void;
 
-  if (logger) {
-    registry.setLogger(logger);
-  }
+  get<TInput, TOutput>(id: string): IMiddleware<TInput, TOutput> | undefined;
 
-  registry.register({
-    id,
-    type: type as any,
-    middleware,
-    name: options.name,
-    description: options.description,
-    dependencies: options.dependencies,
-    version: options.version,
-    tags: options.tags,
-    configSchema: options.configSchema,
-  });
+  getAll(): IMiddlewareRegistration[];
 
-  if (logger) {
-    logger.info(`[MiddlewareRegistration] Registered custom middleware: ${id} (${type})`);
-  }
+  getByType(type: MiddlewareType): IMiddlewareRegistration[];
 }
 
 /**
- * Export utility functions for middleware registration
+ * Middleware registry implementation
  */
-export default {
-  initializeRegistry: initializeMiddlewareRegistry,
-  registerBuiltIn: registerBuiltInMiddleware,
-  registerCustom: registerCustomMiddleware,
-  getRegistry: getMiddlewareRegistry,
-};
+class MiddlewareRegistry implements IMiddlewareRegistry {
+  private registrations: Map<string, IMiddlewareRegistration> = new Map();
+
+  /**
+   * Register a middleware with the system
+   */
+  public register<TInput, TOutput>(
+    id: string,
+    type: MiddlewareType,
+    middleware: IMiddleware<TInput, TOutput>,
+    description?: string
+  ): void {
+    this.registrations.set(id, {
+      id,
+      type,
+      middleware,
+      description,
+    });
+  }
+
+  /**
+   * Get a middleware by ID
+   */
+  public get<TInput, TOutput>(id: string): IMiddleware<TInput, TOutput> | undefined {
+    const registration = this.registrations.get(id);
+    return registration?.middleware as IMiddleware<TInput, TOutput>;
+  }
+
+  /**
+   * Get all registered middlewares
+   */
+  public getAll(): IMiddlewareRegistration[] {
+    return Array.from(this.registrations.values());
+  }
+
+  /**
+   * Get all middlewares of a specific type
+   */
+  public getByType(type: MiddlewareType): IMiddlewareRegistration[] {
+    return this.getAll().filter(registration => registration.type === type);
+  }
+}
+
+// Singleton instance for the registry
+let middlewareRegistry: IMiddlewareRegistry | null = null;
+
+/**
+ * Initialize the middleware registry
+ */
+export function initializeMiddlewareRegistry(): IMiddlewareRegistry {
+  if (!middlewareRegistry) {
+    middlewareRegistry = new MiddlewareRegistry();
+  }
+
+  return middlewareRegistry;
+}
