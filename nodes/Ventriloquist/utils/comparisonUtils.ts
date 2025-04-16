@@ -3,7 +3,7 @@ import type { Logger as ILogger } from 'n8n-workflow';
 /**
  * Comparison algorithm types supported by the system
  */
-export type ComparisonAlgorithm = 'exact' | 'contains' | 'containment' | 'levenshtein' | 'jaccard' | 'smart' | 'custom';
+export type ComparisonAlgorithm = 'exact' | 'contains' | 'containment' | 'levenshtein' | 'jaccard' | 'smart' | 'smartAll' | 'custom';
 
 /**
  * String comparison options
@@ -53,13 +53,14 @@ export const DEFAULT_COMPARISON_OPTIONS: IStringComparisonOptions = {
 /**
  * Extract visible text content from HTML
  * Removes all HTML tags while preserving text structure
+ * This is especially important for "Smart All" text matching
  */
 export function extractTextFromHtml(html: string): string {
     if (!html) return '';
 
     // Replace common block elements with newlines to preserve structure
     let text = html
-        .replace(/<(\/?)(?:div|p|h[1-6]|br|tr|ul|ol|li|blockquote|pre|header|footer|section|article)[^>]*>/gi,
+        .replace(/<(\/?)(?:div|p|h[1-6]|br|tr|ul|ol|li|blockquote|pre|header|footer|section|article|table|thead|tbody)[^>]*>/gi,
                  (_, closing) => closing ? '\n' : '\n')
         .replace(/<[^>]+>/g, '') // Remove all remaining HTML tags
         .replace(/&nbsp;/g, ' ') // Replace non-breaking spaces with regular spaces
@@ -72,6 +73,12 @@ export function extractTextFromHtml(html: string): string {
     // Normalize multiple newlines to a single newline
     text = text.replace(/\n{2,}/g, '\n');
 
+    // Remove leading/trailing whitespace from each line
+    text = text.split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .join('\n');
+
     return text.trim();
 }
 
@@ -82,6 +89,8 @@ export function extractTextFromHtml(html: string): string {
  * - Normalizes spaces (removes consecutive spaces)
  * - Normalizes newlines (replaces multiple newlines with a single one)
  * - Converts to lowercase if specified
+ *
+ * This is critical for the "Smart All" method to work properly
  */
 export function normalizeTextForComparison(text: string, options: IStringComparisonOptions = DEFAULT_COMPARISON_OPTIONS): string {
     if (!text) return '';
@@ -99,7 +108,14 @@ export function normalizeTextForComparison(text: string, options: IStringCompari
     }
 
     if (normOpts?.normalizeNewlines) {
+        // Replace all sequences of newlines with a single newline
         normalized = normalized.replace(/\n{2,}/g, '\n');
+
+        // Remove leading/trailing whitespace from each line
+        normalized = normalized.split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+            .join('\n');
     }
 
     if (normOpts?.removeExtraSpaces) {
@@ -165,8 +181,8 @@ export function jaccardSimilarity(a: string, b: string): number {
     if (!a || !b) return 0;
 
     // Split into words and filter empty strings
-    const aSet = new Set(a.split(/\s+/).filter(Boolean));
-    const bSet = new Set(b.split(/\s+/).filter(Boolean));
+    const aSet = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
+    const bSet = new Set(b.toLowerCase().split(/\s+/).filter(Boolean));
 
     if (aSet.size === 0 && bSet.size === 0) return 1;
     if (aSet.size === 0 || bSet.size === 0) return 0;
@@ -182,38 +198,48 @@ export function jaccardSimilarity(a: string, b: string): number {
  * Calculate containment similarity - how much of reference is contained in target
  * This is especially useful for "Smart all" matching where we want to see if the
  * reference text is fully contained within a possibly much larger target text
+ *
+ * Enhanced version with better text chunking and proximity scoring
  */
 export function containmentSimilarity(reference: string, target: string): number {
     if (!reference && !target) return 1;
     if (!reference) return 0.5; // Empty reference with content in target is a partial match
     if (!target) return 0;
 
-    // First check for direct containment
+    // First check for direct containment (highest priority)
     if (target.includes(reference)) {
         // Perfect containment - the reference appears exactly in the target
         // Return a high score but scale it based on relative size to prevent
         // tiny references from matching too easily
         const sizeRatio = Math.min(1, reference.length / Math.max(20, target.length * 0.1));
-        return 0.9 + (sizeRatio * 0.1); // Between 0.9 and 1.0 based on size ratio
+        return 0.95 + (sizeRatio * 0.05); // Between 0.95 and 1.0 based on size ratio
     }
 
-    // Calculate word-level containment
-    const referenceWords = reference.split(/\s+/).filter(Boolean);
+    // Split into words (ignoring very common words)
+    const stopWords = new Set(['the', 'and', 'or', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'of']);
+    const referenceWords = reference.toLowerCase().split(/\s+/)
+        .filter(word => word.length > 0 && (!stopWords.has(word) || word.length > 3));
+
     if (referenceWords.length === 0) return 0;
 
-    const targetWords = target.split(/\s+/).filter(Boolean);
+    const targetWords = target.toLowerCase().split(/\s+/)
+        .filter(word => word.length > 0);
 
     // Count matching words and their positions
     let matchedWords = 0;
     let sequentialMatches = 0;
     let lastMatchIndex = -1;
+    const matchedIndices: number[] = [];
 
     for (const word of referenceWords) {
         if (word.length <= 2) {
             // For very short words, require exact matches
-            const matchIndex = targetWords.findIndex(tw => tw === word);
+            const matchIndex = targetWords.findIndex((tw, i) =>
+                !matchedIndices.includes(i) && tw === word);
+
             if (matchIndex >= 0) {
                 matchedWords++;
+                matchedIndices.push(matchIndex);
 
                 // Check if words are appearing in sequence
                 if (matchIndex > lastMatchIndex) {
@@ -222,219 +248,251 @@ export function containmentSimilarity(reference: string, target: string): number
                 }
             }
         } else {
-            // For longer words, check for containment or exact matches
-            let found = false;
+            // For longer words, look for inclusion (partial matches)
+            let bestMatchIndex = -1;
             for (let i = 0; i < targetWords.length; i++) {
-                const tw = targetWords[i];
-                if (tw === word || tw.includes(word) || word.includes(tw)) {
-                    matchedWords++;
-
-                    // Check if words are appearing in sequence
-                    if (i > lastMatchIndex) {
-                        sequentialMatches++;
-                        lastMatchIndex = i;
-                    }
-
-                    found = true;
+                if (!matchedIndices.includes(i) &&
+                    (targetWords[i].includes(word) || word.includes(targetWords[i]))) {
+                    bestMatchIndex = i;
                     break;
+                }
+            }
+
+            if (bestMatchIndex >= 0) {
+                matchedWords++;
+                matchedIndices.push(bestMatchIndex);
+
+                // Check if words are appearing in sequence
+                if (bestMatchIndex > lastMatchIndex) {
+                    sequentialMatches++;
+                    lastMatchIndex = bestMatchIndex;
                 }
             }
         }
     }
 
-    // Calculate containment score with weighted components
-    const matchRatio = matchedWords / referenceWords.length;
-    const sequenceRatio = referenceWords.length > 1 ? sequentialMatches / referenceWords.length : 1;
+    // Calculate basic containment score
+    const containmentScore = referenceWords.length > 0 ?
+        matchedWords / referenceWords.length : 0;
 
-    // Weight the raw match count higher than sequence order
-    const weightedScore = (matchRatio * 0.7) + (sequenceRatio * 0.3);
+    // Calculate sequence bonus (words appearing in the same order get a bonus)
+    const sequenceBonus = sequentialMatches > 1 ?
+        0.2 * (sequentialMatches / Math.max(2, referenceWords.length)) : 0;
 
-    // Bonus for matching a significant portion of words
-    return matchRatio > 0.8 ? weightedScore * 1.1 : weightedScore;
+    // Calculate density bonus (clustered matches get a bonus over scattered matches)
+    const densityBonus = matchedIndices.length > 1 ?
+        0.1 * (1 - (Math.max(...matchedIndices) - Math.min(...matchedIndices)) / targetWords.length) : 0;
+
+    return Math.min(1, containmentScore + sequenceBonus + densityBonus);
 }
 
 /**
- * Smart comparison that combines multiple approaches for best results
- * Particularly useful for comparing jumbled text content from web pages
- * The "Smart all" approach prioritizes finding reference text contained within a larger target
+ * Smart match for "Smart All" comparison, specially designed for comparing a reference text
+ * against a larger body of potentially jumbled text while focusing on content matching
+ * rather than exact structure or order
  */
-export function smartSimilarity(reference: string, target: string): number {
-    if (!reference && !target) return 1;
-    if (!reference || !target) return 0;
-
-    // For very short inputs, prioritize exact matching
-    if (reference.length < 5 || target.length < 5) {
-        if (reference === target) return 1;
-        if (target.includes(reference) || reference.includes(target)) return 0.9;
-        return 0.5;
-    }
-
-    // 1. Check for exact containment (highest priority for Smart All matching)
-    if (target.includes(reference)) {
-        // Calculate how much of the target is matched
-        const ratio = reference.length / target.length;
-
-        // If reference is too short compared to target, reduce score slightly
-        if (ratio < 0.05 && reference.length < 20) {
-            return 0.85 + (ratio * 0.15); // Scale between 0.85 and 1.0
+export function smartAllMatch(reference: string, target: string, logger?: ILogger): number {
+    // Always normalize for smartAll matching (extract text, normalize whitespace, etc.)
+    const normalizedReference = normalizeTextForComparison(reference, {
+        algorithm: 'smartAll',
+        normalization: {
+            extractTextOnly: true,
+            trimWhitespace: true,
+            removeExtraSpaces: true,
+            normalizeNewlines: true,
+            toLowerCase: true
         }
+    });
 
-        return 0.9 + (ratio * 0.1); // Between 0.9 and 1.0 based on coverage
+    const normalizedTarget = normalizeTextForComparison(target, {
+        algorithm: 'smartAll',
+        normalization: {
+            extractTextOnly: true,
+            trimWhitespace: true,
+            removeExtraSpaces: true,
+            normalizeNewlines: true,
+            toLowerCase: true
+        }
+    });
+
+    if (logger) {
+        logger.debug('Smart All Match - Normalized Reference: ' + normalizedReference.substring(0, 100) +
+                   (normalizedReference.length > 100 ? '...' : ''));
+        logger.debug('Smart All Match - Normalized Target: ' + normalizedTarget.substring(0, 100) +
+                   (normalizedTarget.length > 100 ? '...' : ''));
     }
 
-    // 2. Check for word-level containment (most important for Smart All)
-    const containmentScore = containmentSimilarity(reference, target);
+    // First try containment approach (prioritizing if reference is contained in target)
+    const containmentScore = containmentSimilarity(normalizedReference, normalizedTarget);
 
-    // 3. Calculate word overlap with Jaccard (good for jumbled text)
-    const jaccardScore = jaccardSimilarity(reference, target);
+    // Also calculate Jaccard similarity for word overlap
+    const jaccardScore = jaccardSimilarity(normalizedReference, normalizedTarget);
 
-    // 4. Check edit distance for close matches (lowest priority in Smart All)
-    const levenshteinScore = levenshteinSimilarity(reference, target);
+    // Combine scores, weighting containment more heavily since it's better for finding
+    // when the reference is contained within a larger body of text
+    const combinedScore = containmentScore * 0.7 + jaccardScore * 0.3;
 
-    // Determine if there's high containment (reference terms mostly found in target)
-    if (containmentScore > 0.8) {
-        // High containment gets more weight
-        return (containmentScore * 0.7) + (jaccardScore * 0.25) + (levenshteinScore * 0.05);
-    } else if (jaccardScore > 0.7) {
-        // High word overlap gets balanced weights
-        return (containmentScore * 0.4) + (jaccardScore * 0.5) + (levenshteinScore * 0.1);
-    } else {
-        // Lower containment, use a more balanced approach
-        return (containmentScore * 0.4) + (jaccardScore * 0.4) + (levenshteinScore * 0.2);
+    if (logger) {
+        logger.debug(`Smart All Match - Containment Score: ${containmentScore.toFixed(4)}, Jaccard Score: ${jaccardScore.toFixed(4)}, Combined: ${combinedScore.toFixed(4)}`);
     }
+
+    return combinedScore;
 }
 
 /**
  * Compare two strings using the specified algorithm
  */
 export function compareStrings(
-    str1: string,
-    str2: string,
-    options: Partial<IStringComparisonOptions> = {},
+    reference: string,
+    target: string,
+    options: IStringComparisonOptions = DEFAULT_COMPARISON_OPTIONS,
     logger?: ILogger
 ): number {
-    try {
-        const mergedOptions: IStringComparisonOptions = {
-            ...DEFAULT_COMPARISON_OPTIONS,
-            ...options,
-            normalization: {
-                ...DEFAULT_COMPARISON_OPTIONS.normalization,
-                ...options.normalization
+    // Handle empty strings
+    if (!reference && !target) return 1; // Both empty = perfect match
+    if (!reference || !target) return 0; // One empty = no match
+
+    // Normalize both strings according to options
+    const normalizedReference = normalizeTextForComparison(reference, options);
+    const normalizedTarget = normalizeTextForComparison(target, options);
+
+    // If both strings are empty after normalization, they're equivalent
+    if (!normalizedReference && !normalizedTarget) return 1;
+    if (!normalizedReference || !normalizedTarget) return 0;
+
+    if (logger) {
+        logger.debug(`Comparing with algorithm: ${options.algorithm}`);
+        logger.debug(`Normalized reference: "${normalizedReference.substring(0, 50)}${normalizedReference.length > 50 ? '...' : ''}"`);
+        logger.debug(`Normalized target: "${normalizedTarget.substring(0, 50)}${normalizedTarget.length > 50 ? '...' : ''}"`);
+    }
+
+    // Use the appropriate algorithm
+    switch (options.algorithm) {
+        case 'exact':
+            return normalizedReference === normalizedTarget ? 1 : 0;
+
+        case 'contains':
+            return normalizedTarget.includes(normalizedReference) ? 1 : 0;
+
+        case 'containment':
+            return containmentSimilarity(normalizedReference, normalizedTarget);
+
+        case 'levenshtein':
+            return levenshteinSimilarity(normalizedReference, normalizedTarget);
+
+        case 'jaccard':
+            return jaccardSimilarity(normalizedReference, normalizedTarget);
+
+        case 'smartAll':
+            return smartAllMatch(reference, target, logger);
+
+        case 'smart':
+            // Use a combination of algorithms based on text length
+            if (normalizedReference.length < 5 || normalizedTarget.length < 5) {
+                // For very short strings, exact matching is more appropriate
+                return normalizedReference === normalizedTarget ? 1 : 0;
+            } else if (normalizedReference.length < 20 && normalizedTarget.length < 20) {
+                // For short strings, Levenshtein works well
+                return levenshteinSimilarity(normalizedReference, normalizedTarget);
+            } else {
+                // For longer strings, use a weighted combination of Jaccard and containment
+                const jaccardScore = jaccardSimilarity(normalizedReference, normalizedTarget);
+                const containmentScore = containmentSimilarity(normalizedReference, normalizedTarget);
+                return jaccardScore * 0.6 + containmentScore * 0.4;
             }
-        };
 
-        // Normalize strings for comparison
-        const normalizedStr1 = normalizeTextForComparison(str1, mergedOptions);
-        const normalizedStr2 = normalizeTextForComparison(str2, mergedOptions);
+        case 'custom':
+            if (options.customComparator) {
+                return options.customComparator(normalizedReference, normalizedTarget);
+            }
+            // Fall back to levenshtein if no custom comparator is provided
+            return levenshteinSimilarity(normalizedReference, normalizedTarget);
 
-        // Special case: both strings empty
-        if (!normalizedStr1 && !normalizedStr2) return 1;
-
-        // Special case: one string empty
-        if (!normalizedStr1 || !normalizedStr2) return 0;
-
-        // Apply selected algorithm
-        switch (mergedOptions.algorithm) {
-            case 'exact':
-                return normalizedStr1 === normalizedStr2 ? 1 : 0;
-
-            case 'contains':
-                if (normalizedStr1.includes(normalizedStr2)) return 0.9;
-                if (normalizedStr2.includes(normalizedStr1)) return 0.8;
-                return 0;
-
-            case 'containment':
-                return containmentSimilarity(normalizedStr1, normalizedStr2);
-
-            case 'levenshtein':
-                return levenshteinSimilarity(normalizedStr1, normalizedStr2);
-
-            case 'jaccard':
-                return jaccardSimilarity(normalizedStr1, normalizedStr2);
-
-            case 'smart':
-                return smartSimilarity(normalizedStr1, normalizedStr2);
-
-            case 'custom':
-                if (mergedOptions.customComparator) {
-                    return mergedOptions.customComparator(normalizedStr1, normalizedStr2);
-                }
-                logger?.warn('Custom comparator not provided, falling back to Levenshtein');
-                return levenshteinSimilarity(normalizedStr1, normalizedStr2);
-
-            default:
-                logger?.warn(`Unknown comparison algorithm: ${mergedOptions.algorithm}, falling back to Levenshtein`);
-                return levenshteinSimilarity(normalizedStr1, normalizedStr2);
-        }
-    } catch (error) {
-        logger?.error(`Error comparing strings: ${(error as Error).message}`);
-        return 0;
+        default:
+            // Default to levenshtein for unknown algorithms
+            return levenshteinSimilarity(normalizedReference, normalizedTarget);
     }
 }
 
 /**
- * Check if a similarity score meets the threshold
- */
-export function meetsThreshold(similarity: number, threshold?: number): boolean {
-    // Ensure we have a valid threshold value, using DEFAULT_COMPARISON_OPTIONS.threshold as fallback
-    const thresholdValue = threshold !== undefined
-        ? threshold
-        : (DEFAULT_COMPARISON_OPTIONS.threshold || 0.7);
-
-    return similarity >= thresholdValue;
-}
-
-/**
- * Compare two entities across multiple fields
+ * Compare two entities based on field comparisons
  */
 export function compareEntities(
     sourceEntity: Record<string, string | null | undefined>,
     targetEntity: Record<string, string | null | undefined>,
-    fieldConfigs: IFieldComparisonConfig[],
+    fieldComparisons: IFieldComparisonConfig[],
     logger?: ILogger
 ): {
     overallSimilarity: number;
     fieldSimilarities: Record<string, number>;
-    meetsThreshold: boolean;
-    requiredFieldsMet: boolean;
+    matchedFields: number;
+    requiredFieldsMatched: boolean;
 } {
+    // Initialize result
     const fieldSimilarities: Record<string, number> = {};
     let totalWeight = 0;
-    let weightedSum = 0;
-    let requiredFieldsMet = true;
+    let weightedSimilarity = 0;
+    let matchedFields = 0;
+    let requiredFieldsMatched = true;
 
-    for (const config of fieldConfigs) {
-        const sourceValue = sourceEntity[config.field] || '';
-        const targetValue = targetEntity[config.field] || '';
+    if (logger) {
+        logger.debug(`Comparing entities with ${fieldComparisons.length} field configurations`);
+    }
 
+    // Process each field
+    for (const fieldConfig of fieldComparisons) {
+        const { field, weight, algorithm = 'levenshtein', threshold = 0.7, mustMatch = false } = fieldConfig;
+
+        // Get field values
+        const sourceValue = sourceEntity[field] || '';
+        const targetValue = targetEntity[field] || '';
+
+        // Compare this field
         const similarity = compareStrings(
-            sourceValue,
-            targetValue,
-            {
-                algorithm: config.algorithm || 'smart',
-                threshold: config.threshold,
-                customComparator: config.customComparator,
-            },
+            sourceValue.toString(),
+            targetValue.toString(),
+            { algorithm: algorithm as ComparisonAlgorithm, threshold },
             logger
         );
 
-        fieldSimilarities[config.field] = similarity;
+        // Store result for this field
+        fieldSimilarities[field] = similarity;
 
-        if (config.mustMatch && !meetsThreshold(similarity, config.threshold)) {
-            requiredFieldsMet = false;
+        // Update weighted similarity calculation
+        totalWeight += weight;
+        weightedSimilarity += similarity * weight;
+
+        // Check if this field is considered a match
+        const isMatch = similarity >= threshold;
+        if (isMatch) {
+            matchedFields++;
         }
 
-        totalWeight += config.weight;
-        weightedSum += similarity * config.weight;
+        // Check required fields
+        if (mustMatch && !isMatch) {
+            requiredFieldsMatched = false;
+            if (logger) {
+                logger.debug(`Required field "${field}" failed to match: ${similarity.toFixed(4)} < ${threshold}`);
+            }
+        }
+
+        if (logger) {
+            logger.debug(`Field "${field}" (weight: ${weight}) similarity: ${similarity.toFixed(4)}`);
+        }
     }
 
-    const overallSimilarity = totalWeight > 0 ? weightedSum / totalWeight : 0;
+    // Calculate overall similarity
+    const overallSimilarity = totalWeight > 0 ? weightedSimilarity / totalWeight : 0;
+
+    if (logger) {
+        logger.debug(`Overall similarity: ${overallSimilarity.toFixed(4)}, Matched fields: ${matchedFields}/${fieldComparisons.length}, Required fields matched: ${requiredFieldsMatched}`);
+    }
 
     return {
         overallSimilarity,
         fieldSimilarities,
-        meetsThreshold: meetsThreshold(overallSimilarity),
-        requiredFieldsMet,
+        matchedFields,
+        requiredFieldsMatched
     };
 }
 
@@ -449,6 +507,7 @@ export interface IHtmlExtractionOptions {
 /**
  * Get visible text content from HTML
  * More advanced than simple tag removal, handles block elements properly
+ * Critical for the "Smart All" text extraction
  */
 export function getVisibleTextFromHtml(html: string, options: IHtmlExtractionOptions = {}): string {
     if (!html) return '';
@@ -457,7 +516,7 @@ export function getVisibleTextFromHtml(html: string, options: IHtmlExtractionOpt
     // In Node.js we use a simpler regex-based approach
     let text = html
         // Replace common block elements with newlines
-        .replace(/<(div|p|h[1-6]|br|tr|li|blockquote|pre|header|section)[^>]*>/gi, '\n')
+        .replace(/<(div|p|h[1-6]|br|tr|li|blockquote|pre|header|section|article|table|thead|tbody)[^>]*>/gi, '\n')
         // Remove remaining HTML tags
         .replace(/<[^>]+>/g, '')
         // Replace common HTML entities
@@ -468,12 +527,15 @@ export function getVisibleTextFromHtml(html: string, options: IHtmlExtractionOpt
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'");
 
-    // Normalize newlines and spaces
-    text = text.replace(/\n+/g, '\n').replace(/\s+/g, ' ').trim();
+    // Normalize newlines and spaces - exactly one newline between paragraphs
+    text = text.split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .join('\n');
 
     if (options.removeNewlines) {
         text = text.replace(/\n/g, ' ');
     }
 
-    return text;
+    return text.trim();
 }

@@ -26,6 +26,12 @@ import * as clickOperation from './actions/click.operation';
 import * as closeOperation from './actions/close.operation';
 import * as matcherOperation from './actions/matcher.operation';
 
+// Import middleware initialization
+import { initializeEntityMatcher } from './utils/middlewares/matching/registerEntityMatcherMiddlewares';
+
+// Initialize middlewares
+initializeEntityMatcher();
+
 /**
  * Configure outputs for decision operation based on routing parameters
  */
