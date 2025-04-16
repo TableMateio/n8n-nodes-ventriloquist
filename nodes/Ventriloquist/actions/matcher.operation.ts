@@ -695,25 +695,40 @@ export async function execute(
 	this: IExecuteFunctions,
 	index: number,
 	workflowId: string,
+	websocketEndpoint: string,
 ): Promise<INodeExecutionData> {
 	// Get operation start time for performance logging
 	const startTime = Date.now();
 
-	// Get the browser from session
-	const browser = await this.getNodeParameter('browser', index) as any;
-
-	// Get active page using the function from sessionUtils
-	const page = await getActivePageFunc.call(this, browser, this.logger);
-	if (!page) throw new Error("No active page found");
+	// Get the node information for logging
+	const nodeId = this.getNode().id || "unknown";
+	const nodeName = this.getNode().name;
 
 	// Get session ID or use empty string if not available
 	const sessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
 
-	const nodeId = this.getNode().id || "unknown";
-	const nodeName = this.getNode().name;
-	this.logger.info(`[Matcher][${nodeId}] Starting matcher operation on: ${await page.url()}`);
+	this.logger.info(`[Matcher][${nodeId}] Starting matcher operation`);
+
+	// Initialize page as null so it's accessible in catch block
+	let page: Page | null = null;
 
 	try {
+		// Get browser and page using the SessionManager instead of direct parameter access
+		const sessionResult = await SessionManager.getOrCreatePageSession(this.logger, {
+			explicitSessionId: sessionId,
+			websocketEndpoint, // Now we use the passed websocketEndpoint
+			workflowId,
+			operationName: 'Matcher',
+			nodeId,
+			nodeName,
+			index,
+		});
+
+		page = sessionResult.page;
+		if (!page) throw new Error("No active page found");
+
+		this.logger.info(`[Matcher][${nodeId}] Starting matcher operation on: ${await page.url()}`);
+
 		// Get configuration values
 		const matchCriteria = this.getNodeParameter('matchCriteria.criteria', index, []) as IDataObject[];
 		this.logger.debug(`[Matcher] Match criteria: ${JSON.stringify(matchCriteria)}`);

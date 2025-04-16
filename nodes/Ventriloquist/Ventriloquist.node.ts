@@ -955,6 +955,7 @@ export class Ventriloquist implements INodeType {
 						this,
 						i,
 						workflowId,
+						websocketEndpoint,
 					);
 
 					// Add execution duration to the result
