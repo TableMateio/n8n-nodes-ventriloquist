@@ -179,5 +179,7 @@ export interface IEntityMatcherOutput {
   itemSelector?: string;
   containerFound?: boolean;
   itemsFound?: number;
+  totalExtracted?: number;
   containerHtml?: string;
+  extractedItems?: IExtractedItem[];
 }
