@@ -1,4 +1,5 @@
-import type { IMiddleware } from './middleware';
+import type { IMiddleware, IMiddlewareContext } from './middleware';
+import type { Logger as ILogger } from 'n8n-workflow';
 
 /**
  * Middleware type enum for categorization
@@ -11,13 +12,48 @@ export enum MiddlewareType {
 }
 
 /**
- * Interface for registering middleware in the system
+ * Interface for registering a middleware with metadata
  */
-export interface IMiddlewareRegistration<TInput = any, TOutput = any> {
+export interface IMiddlewareRegistration<TInput, TOutput> {
+  /**
+   * Unique identifier for the middleware
+   */
   id: string;
-  type: MiddlewareType;
-  middleware: IMiddleware<TInput, TOutput>;
+
+  /**
+   * Display name for the middleware
+   */
+  name: string;
+
+  /**
+   * Description of what the middleware does
+   */
   description?: string;
+
+  /**
+   * The actual middleware implementation
+   */
+  middleware: IMiddleware<TInput, TOutput>;
+
+  /**
+   * Version of the middleware
+   */
+  version?: string;
+
+  /**
+   * Tags for categorizing this middleware
+   */
+  tags?: string[];
+
+  /**
+   * Optional function to validate the input
+   */
+  validateInput?: (input: TInput) => boolean | Promise<boolean>;
+
+  /**
+   * Optional function to determine if this middleware can handle the given input
+   */
+  canHandle?: (input: TInput) => boolean | Promise<boolean>;
 }
 
 /**
@@ -39,119 +75,155 @@ export interface IMiddlewareRegistry {
 }
 
 /**
- * Middleware registry implementation
+ * Registry for middleware components
  */
 class MiddlewareRegistry implements IMiddlewareRegistry {
-  private registrations: Map<string, IMiddlewareRegistration> = new Map();
+  private middlewares: Map<string, IMiddlewareRegistration<any, any>> = new Map();
+  private logger?: ILogger;
 
   /**
-   * Register a middleware with the system
+   * Set the logger for the registry
    */
-  public register<TInput, TOutput>(
-    id: string,
-    type: MiddlewareType,
-    middleware: IMiddleware<TInput, TOutput>,
-    description?: string
-  ): void {
-    this.registrations.set(id, {
-      id,
-      type,
-      middleware,
-      description,
-    });
+  public setLogger(logger: ILogger): void {
+    this.logger = logger;
+  }
+
+  /**
+   * Register a middleware
+   */
+  public register<TInput, TOutput>(registration: IMiddlewareRegistration<TInput, TOutput>): void {
+    if (this.middlewares.has(registration.id)) {
+      const errorMessage = `Middleware with ID '${registration.id}' is already registered`;
+      this.logger?.warn(errorMessage);
+      throw new Error(errorMessage);
+    }
+
+    this.middlewares.set(registration.id, registration);
+    this.logger?.debug(`Registered middleware: ${registration.name} (${registration.id})`);
   }
 
   /**
    * Get a middleware by ID
    */
-  public get<TInput, TOutput>(id: string): IMiddleware<TInput, TOutput> | undefined {
-    const registration = this.registrations.get(id);
-    return registration?.middleware as IMiddleware<TInput, TOutput>;
+  public get<TInput, TOutput>(id: string): IMiddlewareRegistration<TInput, TOutput> | undefined {
+    return this.middlewares.get(id) as IMiddlewareRegistration<TInput, TOutput> | undefined;
+  }
+
+  /**
+   * Check if a middleware is registered
+   */
+  public has(id: string): boolean {
+    return this.middlewares.has(id);
+  }
+
+  /**
+   * Unregister a middleware
+   */
+  public unregister(id: string): boolean {
+    const result = this.middlewares.delete(id);
+    if (result) {
+      this.logger?.debug(`Unregistered middleware: ${id}`);
+    }
+    return result;
   }
 
   /**
    * Get all registered middlewares
    */
-  public getAll(): IMiddlewareRegistration[] {
-    return Array.from(this.registrations.values());
+  public getAll(): IMiddlewareRegistration<any, any>[] {
+    return Array.from(this.middlewares.values());
   }
 
   /**
-   * Get all middlewares of a specific type
+   * Find middlewares by tag
    */
-  public getByType(type: MiddlewareType): IMiddlewareRegistration[] {
-    return this.getAll().filter(registration => registration.type === type);
-  }
-}
-
-// Singleton instance for the registry
-let middlewareRegistry: IMiddlewareRegistry | null = null;
-
-/**
- * Initialize the middleware registry
- */
-export function initializeMiddlewareRegistry(): IMiddlewareRegistry {
-  if (!middlewareRegistry) {
-    middlewareRegistry = new MiddlewareRegistry();
+  public findByTag(tag: string): IMiddlewareRegistration<any, any>[] {
+    return this.getAll().filter((m) => m.tags?.includes(tag));
   }
 
-  return middlewareRegistry;
-}
-
-/**
- * Get the middleware registry
- */
-export function getMiddlewareRegistry(): IMiddlewareRegistry {
-  if (!middlewareRegistry) {
-    return initializeMiddlewareRegistry();
-  }
-  return middlewareRegistry;
-}
-
-/**
- * Register a middleware with the system
- */
-export function registerMiddleware<TInput, TOutput>(
-  id: string,
-  type: MiddlewareType,
-  middleware: IMiddleware<TInput, TOutput>,
-  description?: string
-): void {
-  const registry = getMiddlewareRegistry();
-  registry.register(id, type, middleware, description);
-}
-
-/**
- * Unregister a middleware
- */
-export function unregisterMiddleware(id: string): void {
-  const registry = getMiddlewareRegistry();
-  if (registry instanceof MiddlewareRegistry) {
-    (registry as any).registrations.delete(id);
-  }
-}
-
-/**
- * Create a middleware pipeline that executes a chain of middlewares
- */
-export function createMiddlewarePipeline<TInput, TOutput>(
-  middlewareIds: string[]
-): IMiddleware<TInput, TOutput> {
-  return {
-    async execute(input: TInput, context: any): Promise<TOutput> {
-      const registry = getMiddlewareRegistry();
-      let currentInput = input;
-
-      for (const id of middlewareIds) {
-        const middleware = registry.get<any, any>(id);
-        if (!middleware) {
-          throw new Error(`Middleware with ID ${id} not found in registry`);
-        }
-
-        currentInput = await middleware.execute(currentInput, context);
+  /**
+   * Find a middleware that can handle the given input
+   */
+  public async findHandler<TInput, TOutput>(
+    input: TInput
+  ): Promise<IMiddlewareRegistration<TInput, TOutput> | undefined> {
+    for (const middleware of this.middlewares.values()) {
+      if (middleware.canHandle && (await middleware.canHandle(input))) {
+        return middleware as IMiddlewareRegistration<TInput, TOutput>;
       }
-
-      return currentInput as unknown as TOutput;
     }
+    return undefined;
+  }
+
+  /**
+   * Clear all registered middlewares
+   */
+  public clear(): void {
+    this.middlewares.clear();
+    this.logger?.debug('Cleared all registered middlewares');
+  }
+}
+
+// Singleton instance of the middleware registry
+const middlewareRegistry = new MiddlewareRegistry();
+
+/**
+ * Initialize the middleware registry with a logger
+ */
+export function initializeMiddlewareRegistry(logger: ILogger): MiddlewareRegistry {
+  middlewareRegistry.setLogger(logger);
+  logger.info('Middleware registry initialized');
+  return middlewareRegistry;
+}
+
+/**
+ * Get the middleware registry instance
+ */
+export function getMiddlewareRegistry(): MiddlewareRegistry {
+  return middlewareRegistry;
+}
+
+/**
+ * Helper function to create middleware execution context
+ */
+export function createExecutionContext(
+  logger: ILogger,
+  nodeName: string,
+  nodeId: string,
+  sessionId: string,
+  index?: number
+): IMiddlewareContext {
+  return {
+    logger,
+    nodeName,
+    nodeId,
+    sessionId,
+    index
   };
+}
+
+/**
+ * Execute a specific middleware by its ID
+ */
+export async function executeMiddleware<TInput, TOutput>(
+  middlewareId: string,
+  input: TInput,
+  context: IMiddlewareContext
+): Promise<TOutput> {
+  const registry = getMiddlewareRegistry();
+  const registration = registry.get<TInput, TOutput>(middlewareId);
+
+  if (!registration) {
+    throw new Error(`Middleware with ID '${middlewareId}' not found`);
+  }
+
+  if (registration.validateInput) {
+    const isValid = await registration.validateInput(input);
+    if (!isValid) {
+      throw new Error(`Input validation failed for middleware '${middlewareId}'`);
+    }
+  }
+
+  context.logger.debug(`Executing middleware: ${registration.name} (${middlewareId})`);
+  return registration.middleware.execute(input, context);
 }
