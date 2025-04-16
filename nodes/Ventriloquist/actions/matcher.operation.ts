@@ -107,6 +107,35 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: "Match Mode",
+		name: "matchMode",
+		type: "options",
+		options: [
+			{
+				name: "Best Match",
+				value: "best",
+				description: "Select only the best match above threshold",
+			},
+			{
+				name: "All Matches",
+				value: "all",
+				description: "Return all matches above threshold",
+			},
+			{
+				name: "First Match Above Threshold",
+				value: "firstAboveThreshold",
+				description: "Select first match that meets threshold",
+			},
+		],
+		default: "best",
+		description: "How to select matches from the results",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
 
 	// ==================== 2. MATCH CONFIGURATION ====================
 	{
@@ -190,35 +219,6 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Match Mode",
-		name: "matchMode",
-		type: "options",
-		options: [
-			{
-				name: "Best Match",
-				value: "best",
-				description: "Select only the best match above threshold",
-			},
-			{
-				name: "All Matches",
-				value: "all",
-				description: "Return all matches above threshold",
-			},
-			{
-				name: "First Match Above Threshold",
-				value: "firstAboveThreshold",
-				description: "Select first match that meets threshold",
-			},
-		],
-		default: "best",
-		description: "How to select matches from the results",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
 		displayName: "Wait For Selectors",
 		name: "waitForSelectors",
 		type: "boolean",
@@ -240,49 +240,6 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ["matcher"],
 				waitForSelectors: [true],
-			},
-		},
-	},
-	{
-		displayName: "Match Configuration",
-		name: "matchConfig",
-		type: "fixedCollection",
-		default: {},
-		options: [
-			{
-				name: "config",
-				displayName: "Match Configuration",
-				values: [
-					{
-						displayName: "Performance Mode",
-						name: "performanceMode",
-						type: "options",
-						options: [
-							{
-								name: "Balanced",
-								value: "balanced",
-								description: "Balance between accuracy and performance"
-							},
-							{
-								name: "Speed",
-								value: "speed",
-								description: "Faster but may be less accurate (useful for large pages)"
-							},
-							{
-								name: "Accuracy",
-								value: "accuracy",
-								description: "More thorough matching but may be slower"
-							}
-						],
-						default: "balanced",
-						description: "Controls the performance vs. accuracy tradeoff",
-					},
-				],
-			},
-		],
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
 			},
 		},
 	},
@@ -689,6 +646,35 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: "Performance Mode",
+		name: "performanceMode",
+		type: "options",
+		options: [
+			{
+				name: "Balanced",
+				value: "balanced",
+				description: "Balance between accuracy and performance"
+			},
+			{
+				name: "Speed",
+				value: "speed",
+				description: "Faster but may be less accurate (useful for large pages)"
+			},
+			{
+				name: "Accuracy",
+				value: "accuracy",
+				description: "More thorough matching but may be slower"
+			}
+		],
+		default: "balanced",
+		description: "Controls the performance vs. accuracy tradeoff",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
 		displayName: "Enable Detailed Logs",
 		name: "enableDetailedLogs",
 		type: "boolean",
@@ -729,9 +715,6 @@ export async function execute(
 
 	try {
 		// Get configuration values
-		const matchConfig = this.getNodeParameter('matchConfig.config', index) as IDataObject;
-		this.logger.debug(`[Matcher] Match configuration: ${JSON.stringify(matchConfig)}`);
-
 		const matchCriteria = this.getNodeParameter('matchCriteria.criteria', index, []) as IDataObject[];
 		this.logger.debug(`[Matcher] Match criteria: ${JSON.stringify(matchCriteria)}`);
 
@@ -869,7 +852,7 @@ export async function execute(
 			resultsSelector: selectionMethod === 'containerItems' ? resultsSelector : directItemSelector,
 			itemSelector,
 			autoDetectChildren: true,
-			threshold: Number(matchConfig.threshold) || 0.3,
+			threshold: Number(matchCriteria[0].threshold) || 0.3,
 			matchMode: matchMode as 'best' | 'all' | 'firstAboveThreshold',
 			limitResults: maxResults,
 			sourceEntity,
