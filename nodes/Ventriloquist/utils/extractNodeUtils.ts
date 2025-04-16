@@ -29,6 +29,8 @@ export interface IExtractItem {
     outputLimit?: number;
     extractProperty?: boolean;
     propertyKey?: string;
+    separator?: string;
+    outputFormat?: string;
   };
 }
 
@@ -163,8 +165,14 @@ export async function processExtractionItems(
       extractionConfig.attributeName = item.multipleOptions.attributeName || "";
       extractionConfig.extractionProperty = item.multipleOptions.extractionProperty || "textContent";
       extractionConfig.limit = item.multipleOptions.outputLimit || 0;
-      extractionConfig.outputFormat = item.multipleOptions.extractProperty === true ? "object" : "array";
-      extractionConfig.separator = item.multipleOptions.propertyKey || "value";
+      extractionConfig.outputFormat = item.multipleOptions.outputFormat || "array";
+
+      // Only use object format if array output is selected and extractProperty is true
+      if (extractionConfig.outputFormat === "array" && item.multipleOptions.extractProperty === true) {
+        extractionConfig.outputFormat = "object";
+      }
+
+      extractionConfig.separator = item.multipleOptions.separator || ", ";
     }
 
     try {

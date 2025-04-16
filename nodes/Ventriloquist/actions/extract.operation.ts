@@ -253,7 +253,7 @@ export const description: INodeProperties[] = [
 						},
 						options: [
 							{
-								displayName: "Extraction Property",
+								displayName: "Content to Extract",
 								name: "extractionProperty",
 								type: "options",
 								options: [
@@ -263,7 +263,7 @@ export const description: INodeProperties[] = [
 										description: "Extract text content from each element",
 									},
 									{
-										name: "HTML",
+										name: "Inner HTML",
 										value: "innerHTML",
 										description: "Extract HTML content from each element",
 									},
@@ -274,13 +274,13 @@ export const description: INodeProperties[] = [
 											"Extract outer HTML (including the element itself) from each element",
 									},
 									{
-										name: "Attribute",
+										name: "Attribute Value",
 										value: "attribute",
-										description: "Extract a specific attribute from each element",
+										description: "Extract a specific attribute value from each element",
 									},
 								],
 								default: "textContent",
-								description: "What property to extract from each matched element",
+								description: "What content to extract from each matched element",
 							},
 							{
 								displayName: "Attribute Name",
@@ -289,10 +289,46 @@ export const description: INodeProperties[] = [
 								default: "",
 								placeholder: "href, src, data-ID",
 								description:
-									"Name of the attribute to extract (required when Extraction Property is set to Attribute)",
+									"Name of the attribute to extract (required when Content to Extract is set to Attribute Value)",
 								displayOptions: {
 									show: {
 										extractionProperty: ["attribute"],
+									},
+								},
+							},
+							{
+								displayName: "Output Format",
+								name: "outputFormat",
+								type: "options",
+								options: [
+									{
+										name: "Array",
+										value: "array",
+										description: "Return a simple array of values",
+									},
+									{
+										name: "JSON Objects",
+										value: "object",
+										description: "Return an array of JSON objects with key-value pairs",
+									},
+									{
+										name: "Joined String",
+										value: "string",
+										description: "Return a single string with elements joined by separator",
+									},
+								],
+								default: "array",
+								description: "Format of the extracted data",
+							},
+							{
+								displayName: "Separator",
+								name: "separator",
+								type: "string",
+								default: ", ",
+								description: "Character(s) used to join elements when Output Format is set to Joined String",
+								displayOptions: {
+									show: {
+										outputFormat: ["string"],
 									},
 								},
 							},
@@ -305,23 +341,29 @@ export const description: INodeProperties[] = [
 									"Maximum number of elements to extract (0 = no limit)",
 							},
 							{
-								displayName: "Extract Property",
+								displayName: "Output as Objects",
 								name: "extractProperty",
 								type: "boolean",
 								default: false,
 								description:
-									"Whether to extract the property as field/value format",
+									"Whether to output results as objects with a key-value structure instead of an array",
+								displayOptions: {
+									show: {
+										outputFormat: ["array"],
+									},
+								},
 							},
 							{
-								displayName: "Property Key",
+								displayName: "Object Key Name",
 								name: "propertyKey",
 								type: "string",
 								default: "value",
 								description:
-									"The name of the property key (when extractProperty is enabled)",
+									"The name of the key to use in the output objects (when Output as Objects is enabled)",
 								displayOptions: {
 									show: {
 										extractProperty: [true],
+										outputFormat: ["array"],
 									},
 								},
 							},
