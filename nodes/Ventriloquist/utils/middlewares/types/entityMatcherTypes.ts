@@ -35,6 +35,7 @@ export interface IEntityMatcherExtractionConfig {
   waitForSelectors?: boolean;
   timeout?: number;
   autoDetectChildren?: boolean;
+  maxItems?: number;
 }
 
 /**

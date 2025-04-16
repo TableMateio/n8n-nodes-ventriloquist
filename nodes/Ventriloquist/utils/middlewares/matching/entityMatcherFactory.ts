@@ -9,7 +9,6 @@ import {
     type IEntityMatcherActionInput
 } from '../types/entityMatcherTypes';
 import { initializeMiddlewareRegistry } from '../middlewareRegistration';
-import { type IEntityMatcher } from './entityMatcher';
 import { type IFieldComparisonConfig } from '../../comparisonUtils';
 import { EntityMatcherExtractionMiddleware } from './entityMatcherExtractionMiddleware';
 import { EntityMatcherComparisonMiddleware } from './entityMatcherComparisonMiddleware';

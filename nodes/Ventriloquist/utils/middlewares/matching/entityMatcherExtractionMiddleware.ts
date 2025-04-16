@@ -17,6 +17,7 @@ import {
     IDetectionResult
 } from '../../detectionUtils';
 import { elementExists, isElementVisible } from '../../navigationUtils';
+import { extractTextFromHtml, getVisibleTextFromHtml } from '../../comparisonUtils';
 
 /**
  * Entity Matcher Extraction Middleware

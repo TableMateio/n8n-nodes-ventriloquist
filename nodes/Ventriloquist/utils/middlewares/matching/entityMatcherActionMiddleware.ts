@@ -1,10 +1,11 @@
 import type { Logger as ILogger } from 'n8n-workflow';
-import type { Page } from 'puppeteer-core';
+import type { Page, ElementHandle } from 'puppeteer-core';
 import { type IMiddleware, type IMiddlewareContext } from '../middleware';
 import { type IMiddlewareRegistration, type MiddlewareType } from '../middlewareRegistry';
 import {
   type IEntityMatcherActionInput,
-  type IEntityMatcherActionOutput
+  type IEntityMatcherActionOutput,
+  type IEntityMatchResult
 } from '../types/entityMatcherTypes';
 
 /**
@@ -23,10 +24,19 @@ export class EntityMatcherActionMiddleware implements IMiddleware<IEntityMatcher
     const { page, selectedMatch, actionConfig } = input;
     const logPrefix = `[EntityMatcherAction][${nodeName}][${nodeId}]`;
 
+    logger.debug(`${logPrefix} Starting action with config: ${JSON.stringify({
+      action: actionConfig.action,
+      actionSelector: actionConfig.actionSelector || '(use match element)',
+      actionAttribute: actionConfig.actionAttribute || '(none)',
+      waitAfterAction: actionConfig.waitAfterAction,
+      waitTime: actionConfig.waitTime,
+      waitSelector: actionConfig.waitSelector
+    })}`);
+
     try {
-      // If no match or action is "none", return immediately
-      if (!selectedMatch || actionConfig.action === 'none') {
-        logger.info(`${logPrefix} No action to perform (${!selectedMatch ? 'no match selected' : 'action is none'})`);
+      // If no action or no selected match, return early
+      if (actionConfig.action === 'none' || !selectedMatch) {
+        logger.info(`${logPrefix} No action performed: ${!selectedMatch ? 'No selected match' : 'Action type is none'}`);
         return {
           success: true,
           actionPerformed: false
@@ -35,194 +45,118 @@ export class EntityMatcherActionMiddleware implements IMiddleware<IEntityMatcher
 
       logger.info(`${logPrefix} Performing ${actionConfig.action} action on matched entity (index: ${selectedMatch.index})`);
 
-      // Perform the appropriate action
-      let actionResult: any;
+      // Get the element to perform action on
+      let actionElement: ElementHandle<Element> | null = null;
 
-      switch (actionConfig.action) {
-        case 'click':
-          actionResult = await this.performClickAction(
-            page,
-            selectedMatch,
-            actionConfig,
-            logger,
-            logPrefix
-          );
-          break;
+      if (actionConfig.actionSelector) {
+        // If an action selector is provided, use it with the match element as context
+        try {
+          const matchElement = selectedMatch.element as ElementHandle<Element>;
+          actionElement = await matchElement.$(actionConfig.actionSelector);
 
-        case 'extract':
-          actionResult = await this.performExtractAction(
-            page,
-            selectedMatch,
-            actionConfig,
-            logger,
-            logPrefix
-          );
-          break;
-
-        default:
-          throw new Error(`Unsupported action: ${actionConfig.action}`);
+          if (!actionElement) {
+            // Try with page context as fallback
+            logger.debug(`${logPrefix} Action element not found within match element, trying with page context`);
+            actionElement = await page.$(actionConfig.actionSelector);
+          }
+        } catch (error) {
+          logger.warn(`${logPrefix} Error finding action element with selector "${actionConfig.actionSelector}": ${(error as Error).message}`);
+          actionElement = null;
+        }
+      } else {
+        // If no action selector provided, use the match element itself
+        actionElement = selectedMatch.element as ElementHandle<Element>;
       }
 
-      logger.info(`${logPrefix} Action completed successfully`);
+      // If no action element found, return error
+      if (!actionElement) {
+        const errorMessage = actionConfig.actionSelector
+          ? `Action element not found with selector: ${actionConfig.actionSelector}`
+          : 'No valid element to perform action on';
 
+        logger.warn(`${logPrefix} ${errorMessage}`);
+        return {
+          success: false,
+          actionPerformed: false,
+          error: errorMessage
+        };
+      }
+
+      // Perform the specified action
+      let actionResult: any = null;
+
+      if (actionConfig.action === 'click') {
+        // Perform click action
+        logger.debug(`${logPrefix} Clicking element`);
+        await actionElement.click();
+        actionResult = { clicked: true };
+        logger.info(`${logPrefix} Click action performed successfully`);
+      } else if (actionConfig.action === 'extract') {
+        // Extract data from element
+        logger.debug(`${logPrefix} Extracting data from element`);
+
+        if (actionConfig.actionAttribute) {
+          // Extract attribute value
+          actionResult = await page.evaluate(
+            (el, attr) => el.getAttribute(attr) || '',
+            actionElement,
+            actionConfig.actionAttribute
+          );
+
+          logger.debug(`${logPrefix} Extracted attribute "${actionConfig.actionAttribute}" value: ${actionResult}`);
+        } else {
+          // Extract text content
+          actionResult = await page.evaluate(
+            el => el.textContent || '',
+            actionElement
+          );
+
+          logger.debug(`${logPrefix} Extracted text content: ${actionResult}`);
+        }
+
+        logger.info(`${logPrefix} Extract action performed successfully`);
+      }
+
+      // Handle wait behavior after action
+      if (actionConfig.waitAfterAction) {
+        if (actionConfig.waitSelector) {
+          // Wait for a specific selector to appear
+          logger.debug(`${logPrefix} Waiting for selector after action: ${actionConfig.waitSelector}`);
+
+          try {
+            const timeout = actionConfig.waitTime || 5000;
+            await page.waitForSelector(actionConfig.waitSelector, { timeout });
+            logger.debug(`${logPrefix} Wait selector condition met`);
+          } catch (error) {
+            logger.warn(`${logPrefix} Timeout waiting for selector "${actionConfig.waitSelector}": ${(error as Error).message}`);
+          }
+        } else if (actionConfig.waitTime && actionConfig.waitTime > 0) {
+          // Wait for a specific amount of time
+          logger.debug(`${logPrefix} Waiting for ${actionConfig.waitTime}ms after action`);
+          await new Promise(resolve => setTimeout(resolve, actionConfig.waitTime));
+          logger.debug(`${logPrefix} Wait time completed`);
+        } else {
+          // Default wait - just a short pause
+          logger.debug(`${logPrefix} Waiting for default time (500ms) after action`);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      // Return successful result
       return {
         success: true,
         actionPerformed: true,
         actionResult
       };
     } catch (error) {
-      const errorMessage = (error as Error).message;
-      logger.error(`${logPrefix} Error during action execution: ${errorMessage}`);
-
+      // Handle any unexpected errors
+      logger.error(`${logPrefix} Action failed: ${(error as Error).message}`);
       return {
         success: false,
         actionPerformed: false,
-        error: errorMessage
+        error: `Entity action failed: ${(error as Error).message}`
       };
     }
-  }
-
-  /**
-   * Perform a click action on the matched element
-   */
-  private async performClickAction(
-    page: Page,
-    selectedMatch: IEntityMatcherActionInput['selectedMatch'],
-    actionConfig: IEntityMatcherActionInput['actionConfig'],
-    logger: ILogger,
-    logPrefix: string
-  ): Promise<any> {
-    if (!selectedMatch) {
-      throw new Error('No match selected for click action');
-    }
-
-    // Get the element to click on
-    const element = selectedMatch.element;
-
-    if (!element) {
-      throw new Error('Selected match has no associated element');
-    }
-
-    logger.debug(`${logPrefix} Preparing to click on matched element`);
-
-    // If a specific selector is provided, find that element relative to the match
-    let targetElement = element;
-
-    if (actionConfig.actionSelector) {
-      logger.debug(`${logPrefix} Looking for action selector: ${actionConfig.actionSelector}`);
-      targetElement = await element.$(actionConfig.actionSelector);
-
-      if (!targetElement) {
-        throw new Error(`Action selector not found: ${actionConfig.actionSelector}`);
-      }
-    }
-
-    // Capture the current URL for comparison
-    const beforeUrl = await page.url();
-
-    // Click the element
-    logger.debug(`${logPrefix} Clicking element`);
-    await targetElement.click();
-
-    // Handle waiting after action if configured
-    if (actionConfig.waitAfterAction) {
-      const waitTime = actionConfig.waitTime || 5000;
-
-      if (actionConfig.waitSelector) {
-        // Wait for a specific selector to appear
-        logger.debug(`${logPrefix} Waiting for selector: ${actionConfig.waitSelector}`);
-        await page.waitForSelector(actionConfig.waitSelector, { timeout: waitTime });
-      } else {
-        // Wait for navigation if no specific selector
-        logger.debug(`${logPrefix} Waiting ${waitTime}ms for navigation`);
-
-        try {
-          await page.waitForNavigation({ timeout: waitTime });
-        } catch (error) {
-          // Check if the URL changed even if waitForNavigation timed out
-          const afterUrl = await page.url();
-          if (beforeUrl === afterUrl) {
-            logger.warn(`${logPrefix} No navigation occurred after click`);
-          } else {
-            logger.info(`${logPrefix} URL changed to: ${afterUrl}`);
-          }
-        }
-      }
-    }
-
-    // Capture the final URL and page title
-    const afterUrl = await page.url();
-    const afterTitle = await page.title();
-
-    return {
-      clicked: true,
-      beforeUrl,
-      afterUrl,
-      urlChanged: beforeUrl !== afterUrl,
-      afterTitle
-    };
-  }
-
-  /**
-   * Perform an extract action on the matched element
-   */
-  private async performExtractAction(
-    page: Page,
-    selectedMatch: IEntityMatcherActionInput['selectedMatch'],
-    actionConfig: IEntityMatcherActionInput['actionConfig'],
-    logger: ILogger,
-    logPrefix: string
-  ): Promise<any> {
-    if (!selectedMatch) {
-      throw new Error('No match selected for extract action');
-    }
-
-    // Get the element to extract from
-    const element = selectedMatch.element;
-
-    if (!element) {
-      throw new Error('Selected match has no associated element');
-    }
-
-    logger.debug(`${logPrefix} Preparing to extract data from matched element`);
-
-    // If a specific selector is provided, find that element relative to the match
-    let targetElement = element;
-
-    if (actionConfig.actionSelector) {
-      logger.debug(`${logPrefix} Looking for action selector: ${actionConfig.actionSelector}`);
-      targetElement = await element.$(actionConfig.actionSelector);
-
-      if (!targetElement) {
-        throw new Error(`Action selector not found: ${actionConfig.actionSelector}`);
-      }
-    }
-
-    // Extract the data based on attribute or text content
-    let extractedValue: string;
-
-    if (actionConfig.actionAttribute) {
-      // Extract attribute value
-      logger.debug(`${logPrefix} Extracting attribute: ${actionConfig.actionAttribute}`);
-      extractedValue = await page.evaluate(
-        (el, attr) => el.getAttribute(attr) || '',
-        targetElement,
-        actionConfig.actionAttribute
-      );
-    } else {
-      // Extract text content
-      logger.debug(`${logPrefix} Extracting text content`);
-      extractedValue = await page.evaluate(
-        el => el.textContent || '',
-        targetElement
-      );
-    }
-
-    return {
-      extracted: true,
-      value: extractedValue.trim(),
-      attribute: actionConfig.actionAttribute
-    };
   }
 }
 
