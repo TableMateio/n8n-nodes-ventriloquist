@@ -343,7 +343,7 @@ export const description: INodeProperties[] = [
 			}
 		],
 		default: "balanced",
-		description: "Controls the performance vs. accuracy tradeoff",
+		description: "Controls the performance vs. accuracy tradeoff.",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
