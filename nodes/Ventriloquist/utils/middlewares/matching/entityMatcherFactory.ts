@@ -234,7 +234,9 @@ export class EntityMatcherFactory {
                             waitForSelectors: config.waitForSelectors !== false,
                             timeout: config.timeout || 10000,
                             autoDetectChildren: config.autoDetectChildren === true,
-                            maxItems: config.maxItems || 0 // Apply item limit at extraction phase
+                            maxItems: config.matchMode === 'all'
+                                ? (config.maxItems || 50) // Allow more items for 'all' mode
+                                : (config.maxItems || 20) // Reasonable default for best/first match modes
                         }
                     };
 
@@ -246,6 +248,11 @@ export class EntityMatcherFactory {
                             : 5000;
                         if (!config.maxItems) {
                             extractionInput.extractionConfig.maxItems = 10; // Default limit for speed mode
+                        }
+                    } else if (config.performanceMode === 'accuracy') {
+                        // Optimize for accuracy
+                        if (!config.maxItems) {
+                            extractionInput.extractionConfig.maxItems = 50; // Higher limit for accuracy mode
                         }
                     }
 
@@ -266,7 +273,7 @@ export class EntityMatcherFactory {
                             itemsFound: extractionResult.itemsFound || 0,
                             error: extractionResult.error || 'No items found',
                             containerSelector: config.resultsSelector,
-                            itemSelector: config.itemSelector || '(auto-detect)',
+                            itemSelector: config.itemSelector || '(auto-detected)',
                             timings: {
                                 extraction: extractionDuration,
                                 total: Date.now() - startTime
@@ -300,16 +307,23 @@ export class EntityMatcherFactory {
 
                     logger.info(`[EntityMatcherFactory] Comparison completed in ${comparisonDuration}ms`);
 
-                    if (!comparisonResult.success || comparisonResult.matches.length === 0) {
-                        logger.warn(`[EntityMatcherFactory] Comparison failed or no matches found above threshold: ${comparisonResult.error || 'No matches found'}`);
+                    // New: Separate actual matches (above threshold) from all compared items
+                    const actualMatches = comparisonResult.matches.filter(m => m.overallSimilarity >= config.threshold);
+                    const allComparisons = comparisonResult.matches;
+
+                    if (!comparisonResult.success || actualMatches.length === 0) {
+                        logger.warn(`[EntityMatcherFactory] Comparison found no matches above threshold ${config.threshold}. Found ${allComparisons.length} items below threshold.`);
+
                         return sanitizeOutput({
-                            success: false,
-                            matches: comparisonResult.matches || [],
+                            success: true, // Still return success:true as we successfully compared, just found no matches
+                            matches: [], // Required property in the interface
+                            actualMatches: [], // No actual matches above threshold
+                            comparisons: allComparisons, // All comparisons regardless of threshold
                             containerFound: extractionResult.containerFound || false,
                             itemsFound: extractionResult.itemsFound || 0,
-                            error: comparisonResult.error || 'No matches found above threshold',
+                            message: 'No items matched above the similarity threshold',
                             containerSelector: config.resultsSelector,
-                            itemSelector: config.itemSelector || '(auto-detect)',
+                            itemSelector: extractionResult.itemSelector || '(auto-detected)',
                             referenceValues: config.sourceEntity || {},
                             threshold: config.threshold,
                             timings: {
@@ -320,7 +334,7 @@ export class EntityMatcherFactory {
                         });
                     }
 
-                    logger.info(`[EntityMatcherFactory] Comparison succeeded: Found ${comparisonResult.matches.length} matches, selected: ${comparisonResult.selectedMatch ? 'Yes' : 'No'}`);
+                    logger.info(`[EntityMatcherFactory] Comparison succeeded: Found ${actualMatches.length} matches above threshold (out of ${allComparisons.length} total comparisons), selected: ${comparisonResult.selectedMatch ? 'Yes' : 'No'}`);
 
                     // 5. Execute action if we have a selected match and an action to perform
                     let actionResult = { success: false, actionPerformed: false } as IEntityMatcherActionOutput;
@@ -358,17 +372,20 @@ export class EntityMatcherFactory {
                     const totalDuration = Date.now() - startTime;
                     logger.info(`[EntityMatcherFactory] Entity matching process completed in ${totalDuration}ms`);
 
-                    // Return sanitized result
+                    // Return sanitized result with clearer terminology
                     return sanitizeOutput({
                         success: true,
-                        matches: comparisonResult.matches,
+                        matches: actualMatches, // Only include actual matches (above threshold)
+                        comparisons: allComparisons, // All comparisons including those below threshold
+                        matchCount: actualMatches.length, // Clear count of actual matches
+                        totalCompared: allComparisons.length, // Total items compared
                         selectedMatch: comparisonResult.selectedMatch,
                         actionPerformed: actionResult.actionPerformed,
                         actionResult: actionResult.actionResult,
                         containerFound: extractionResult.containerFound,
                         itemsFound: extractionResult.itemsFound,
                         containerSelector: config.resultsSelector,
-                        itemSelector: extractionResult.itemSelector,
+                        itemSelector: extractionResult.itemSelector || '(auto-detected)',
                         referenceValues: config.sourceEntity || {},
                         threshold: config.threshold,
                         timings: {

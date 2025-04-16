@@ -20,6 +20,7 @@ export interface IStringComparisonOptions {
         toLowerCase?: boolean;
         extractTextOnly?: boolean; // Extract only text content from HTML
     };
+    debugMode?: boolean; // Added to enable detailed logging for important comparisons
 }
 
 /**
@@ -317,7 +318,7 @@ export function smartSimilarity(reference: string, target: string): number {
 }
 
 /**
- * Compare two strings using the specified algorithm
+ * Compare strings using the selected algorithm with improved logging
  */
 export function compareStrings(
     str1: string,
@@ -339,8 +340,17 @@ export function compareStrings(
         const normalizedStr1 = normalizeTextForComparison(str1, mergedOptions);
         const normalizedStr2 = normalizeTextForComparison(str2, mergedOptions);
 
+        // Log normalized strings for debugging if enabled
+        if (logger && mergedOptions.debugMode) {
+            logger.debug(`Comparing strings:
+            - Original 1: "${str1?.substring(0, 50)}${str1?.length > 50 ? '...' : ''}"
+            - Original 2: "${str2?.substring(0, 50)}${str2?.length > 50 ? '...' : ''}"
+            - Normalized 1: "${normalizedStr1?.substring(0, 50)}${normalizedStr1?.length > 50 ? '...' : ''}"
+            - Normalized 2: "${normalizedStr2?.substring(0, 50)}${normalizedStr2?.length > 50 ? '...' : ''}"`);
+        }
+
         // Special case: both strings empty
-        if (!normalizedStr1 && !normalizedStr2) return 0; // Changed from 1 to 0 - empty shouldn't match empty
+        if (!normalizedStr1 && !normalizedStr2) return 0.5; // Changed - empty should partially match empty (neutral)
 
         // Special case: reference string empty - this is important for matching!
         if (!normalizedStr1) return 0; // If reference is empty, it shouldn't match anything
@@ -349,38 +359,64 @@ export function compareStrings(
         if (!normalizedStr2) return 0;
 
         // Apply selected algorithm
+        let similarity = 0;
         switch (mergedOptions.algorithm) {
             case 'exact':
-                return normalizedStr1 === normalizedStr2 ? 1 : 0;
+                similarity = normalizedStr1 === normalizedStr2 ? 1 : 0;
+                break;
 
             case 'contains':
-                if (normalizedStr1.includes(normalizedStr2)) return 0.9;
-                if (normalizedStr2.includes(normalizedStr1)) return 0.8;
-                return 0;
+                if (normalizedStr1.includes(normalizedStr2)) similarity = 0.9;
+                else if (normalizedStr2.includes(normalizedStr1)) similarity = 0.8;
+                else similarity = 0;
+                break;
 
             case 'containment':
-                return containmentSimilarity(normalizedStr1, normalizedStr2);
+                similarity = containmentSimilarity(normalizedStr1, normalizedStr2);
+                break;
 
             case 'levenshtein':
-                return levenshteinSimilarity(normalizedStr1, normalizedStr2);
+                similarity = levenshteinSimilarity(normalizedStr1, normalizedStr2);
+                break;
 
             case 'jaccard':
-                return jaccardSimilarity(normalizedStr1, normalizedStr2);
+                similarity = jaccardSimilarity(normalizedStr1, normalizedStr2);
+                break;
 
             case 'smart':
-                return smartSimilarity(normalizedStr1, normalizedStr2);
+                similarity = smartSimilarity(normalizedStr1, normalizedStr2);
+                break;
 
             case 'custom':
                 if (mergedOptions.customComparator) {
-                    return mergedOptions.customComparator(normalizedStr1, normalizedStr2);
+                    similarity = mergedOptions.customComparator(normalizedStr1, normalizedStr2);
+                } else {
+                    logger?.warn('Custom comparator not provided, falling back to Levenshtein');
+                    similarity = levenshteinSimilarity(normalizedStr1, normalizedStr2);
                 }
-                logger?.warn('Custom comparator not provided, falling back to Levenshtein');
-                return levenshteinSimilarity(normalizedStr1, normalizedStr2);
+                break;
 
             default:
                 logger?.warn(`Unknown comparison algorithm: ${mergedOptions.algorithm}, falling back to Levenshtein`);
-                return levenshteinSimilarity(normalizedStr1, normalizedStr2);
+                similarity = levenshteinSimilarity(normalizedStr1, normalizedStr2);
+                break;
         }
+
+        // Ensure similarity is a valid number between 0 and 1
+        if (isNaN(similarity)) {
+            logger?.warn('Similarity calculation returned NaN, defaulting to 0');
+            similarity = 0;
+        }
+
+        // Clamp to valid range
+        similarity = Math.max(0, Math.min(1, similarity));
+
+        // Log result if debug is enabled
+        if (logger && mergedOptions.debugMode) {
+            logger.debug(`Similarity result (${mergedOptions.algorithm}): ${similarity.toFixed(4)}`);
+        }
+
+        return similarity;
     } catch (error) {
         logger?.error(`Error comparing strings: ${(error as Error).message}`);
         return 0;
@@ -400,7 +436,7 @@ export function meetsThreshold(similarity: number, threshold?: number): boolean 
 }
 
 /**
- * Compare two entities across multiple fields
+ * Compare two entities across multiple fields with improved default handling
  */
 export function compareEntities(
     sourceEntity: Record<string, string | null | undefined>,
@@ -418,6 +454,21 @@ export function compareEntities(
     let weightedSum = 0;
     let requiredFieldsMet = true;
 
+    // If no field configs provided, generate default ones from source entity fields
+    if (!fieldConfigs || fieldConfigs.length === 0) {
+        fieldConfigs = Object.keys(sourceEntity).map(field => ({
+            field,
+            weight: 1,
+            algorithm: 'smart' as ComparisonAlgorithm,
+            threshold: DEFAULT_COMPARISON_OPTIONS.threshold,
+            mustMatch: false
+        }));
+
+        if (logger) {
+            logger.debug(`No field configurations provided, generated ${fieldConfigs.length} default configs from source entity fields`);
+        }
+    }
+
     // Check for empty source fields and log a warning
     const emptyFields = Object.entries(sourceEntity)
         .filter(([_, value]) => !value || (typeof value === 'string' && value.trim() === ''))
@@ -427,14 +478,52 @@ export function compareEntities(
         logger.debug(`Empty source fields detected: ${emptyFields.join(', ')}. These won't contribute positively to matches.`);
     }
 
+    // If all fields are empty, we can't make a meaningful comparison
+    const allFieldsEmpty = Object.keys(sourceEntity).length > 0 &&
+                           Object.keys(sourceEntity).every(key =>
+                               !sourceEntity[key] ||
+                               (typeof sourceEntity[key] === 'string' &&
+                                sourceEntity[key]!.trim() === ''));
+
+    if (allFieldsEmpty) {
+        if (logger) {
+            logger.warn('All source fields are empty, can\'t perform meaningful comparison');
+        }
+        return {
+            overallSimilarity: 0,
+            fieldSimilarities: {},
+            meetsThreshold: false,
+            requiredFieldsMet: false
+        };
+    }
+
+    // Process each field configuration
     for (const config of fieldConfigs) {
         const sourceValue = sourceEntity[config.field] || '';
         const targetValue = targetEntity[config.field] || '';
 
-        // Skip fields with empty references if logging is enabled
-        if ((!sourceValue || (typeof sourceValue === 'string' && sourceValue.trim() === '')) && logger) {
-            logger.debug(`Field "${config.field}" has empty reference value and won't contribute to matching.`);
+        // Skip fields with empty references unless they're required
+        if ((!sourceValue || (typeof sourceValue === 'string' && sourceValue.trim() === ''))) {
+            if (logger) {
+                logger.debug(`Field "${config.field}" has empty reference value and won't contribute to matching.`);
+            }
+
+            // For empty required fields, default to 0 similarity
+            if (config.mustMatch) {
+                fieldSimilarities[config.field] = 0;
+                requiredFieldsMet = false;
+
+                if (logger) {
+                    logger.warn(`Required field "${config.field}" has empty reference value and fails automatic matching`);
+                }
+            }
+
+            continue;
         }
+
+        // Use debug flag for important fields
+        const isImportantField = config.weight > 0.8 || config.mustMatch;
+        const debugMode = isImportantField;
 
         const similarity = compareStrings(
             sourceValue,
@@ -443,6 +532,7 @@ export function compareEntities(
                 algorithm: config.algorithm || 'smart',
                 threshold: config.threshold,
                 customComparator: config.customComparator,
+                debugMode
             },
             logger
         );
@@ -451,6 +541,10 @@ export function compareEntities(
 
         if (config.mustMatch && !meetsThreshold(similarity, config.threshold)) {
             requiredFieldsMet = false;
+
+            if (logger) {
+                logger.debug(`Required field "${config.field}" with value "${sourceValue}" failed to match "${targetValue}" with similarity ${similarity.toFixed(4)} (needed ${config.threshold})`);
+            }
         }
 
         totalWeight += config.weight;
@@ -458,6 +552,11 @@ export function compareEntities(
     }
 
     const overallSimilarity = totalWeight > 0 ? weightedSum / totalWeight : 0;
+    const thresholdValue = DEFAULT_COMPARISON_OPTIONS.threshold || 0.3;
+
+    if (logger) {
+        logger.debug(`Overall similarity: ${overallSimilarity.toFixed(4)} (threshold: ${thresholdValue}) - Required fields met: ${requiredFieldsMet}`);
+    }
 
     return {
         overallSimilarity,

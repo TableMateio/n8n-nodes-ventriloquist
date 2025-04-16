@@ -238,16 +238,30 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
 
     logger.info(`${logPrefix} Applying match mode: ${matchMode} with threshold: ${threshold}`);
 
+    // Make sure all items are initially not selected
+    for (const match of limitedMatches) {
+      match.selected = false;
+    }
+
     // Count how many matches are above threshold for logging
     const matchesAboveThreshold = limitedMatches.filter(m => m.overallSimilarity >= threshold).length;
     logger.info(`${logPrefix} Found ${matchesAboveThreshold} matches above threshold out of ${limitedMatches.length} total`);
+
+    // If no matches above threshold, return with no selected items
+    if (matchesAboveThreshold === 0) {
+      logger.info(`${logPrefix} No matches above threshold (${threshold}), not selecting any items`);
+      return limitedMatches;
+    }
+
+    // Filter matches above threshold for selection
+    const matchesAboveThresholdArray = limitedMatches.filter(m => m.overallSimilarity >= threshold);
 
     switch (matchMode) {
       case 'all':
         // All matches above threshold are selected
         for (const match of limitedMatches) {
-          match.selected = match.overallSimilarity >= threshold;
-          if (match.selected) {
+          if (match.overallSimilarity >= threshold) {
+            match.selected = true;
             logger.debug(`${logPrefix} Selected match #${match.index} with score: ${match.overallSimilarity.toFixed(4)}`);
           }
         }
@@ -255,30 +269,25 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
 
       case 'firstAboveThreshold':
         // First match above threshold is selected
-        let firstSelected = false;
-        for (const match of limitedMatches) {
-          if (!firstSelected && match.overallSimilarity >= threshold) {
-            match.selected = true;
-            firstSelected = true;
-            logger.debug(`${logPrefix} Selected first match #${match.index} with score: ${match.overallSimilarity.toFixed(4)}`);
-          } else {
-            match.selected = false;
-          }
+        if (matchesAboveThresholdArray.length > 0) {
+          matchesAboveThresholdArray[0].selected = true;
+          logger.debug(
+            `${logPrefix} Selected first match #${matchesAboveThresholdArray[0].index} with score: ${matchesAboveThresholdArray[0].overallSimilarity.toFixed(4)}`
+          );
         }
         break;
 
       case 'best':
       default:
         // Only the best match is selected if it's above threshold
-        if (limitedMatches.length > 0) {
-          const bestMatch = limitedMatches[0];
-          bestMatch.selected = bestMatch.overallSimilarity >= threshold;
-
-          if (bestMatch.selected) {
-            logger.debug(`${logPrefix} Selected best match #${bestMatch.index} with score: ${bestMatch.overallSimilarity.toFixed(4)}`);
-          } else {
-            logger.debug(`${logPrefix} Best match #${bestMatch.index} with score: ${bestMatch.overallSimilarity.toFixed(4)} below threshold (${threshold})`);
-          }
+        if (matchesAboveThresholdArray.length > 0) {
+          // Since we already sorted, the best match is the first one above threshold
+          matchesAboveThresholdArray[0].selected = true;
+          logger.debug(
+            `${logPrefix} Selected best match #${matchesAboveThresholdArray[0].index} with score: ${matchesAboveThresholdArray[0].overallSimilarity.toFixed(4)}`
+          );
+        } else {
+          logger.debug(`${logPrefix} No matches above threshold, not selecting any match`);
         }
         break;
     }

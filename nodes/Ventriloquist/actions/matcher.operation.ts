@@ -860,7 +860,59 @@ export async function execute(
 		}
 
 		// Create match configuration object
-		const maxResults = matchMode === 'all' ? 10 : 1;
+		const maxItems = matchMode === 'all' ?
+			(this.getNodeParameter('maxItems', index, 10) as number) :
+			(this.getNodeParameter('maxItems', index, 20) as number);
+
+		// Build field comparison configurations from criteria
+		const fieldComparisons: any[] = [];
+
+		for (let i = 0; i < matchCriteria.length; i++) {
+			const criterion = matchCriteria[i];
+			const mustMatch = criterion.mustMatch === true;
+			const weight = criterion.weight !== undefined ? Number(criterion.weight) : 1;
+			const threshold = criterion.threshold !== undefined ? Number(criterion.threshold) : 0.3;
+
+			if (criterion.comparisonApproach === 'smartAll' || criterion.comparisonApproach === 'matchAll') {
+				// For Smart Match (All) and Match All methods, add a field comparison entry
+				const fieldName = criterion.name as string || `criterion_${i}`;
+
+				fieldComparisons.push({
+					field: fieldName,
+					weight,
+					mustMatch,
+					threshold,
+					algorithm: criterion.comparisonApproach === 'smartAll' ? 'smart' : 'containment'
+				});
+			} else if (criterion.comparisonApproach === 'fieldByField') {
+				// For Field by Field, extract all field comparisons
+				const fieldComparisonConfigs = (criterion.fieldComparisons as IDataObject)?.fields as IDataObject[] || [];
+
+				for (const fieldConfig of fieldComparisonConfigs) {
+					fieldComparisons.push({
+						field: fieldConfig.name as string,
+						weight: fieldConfig.weight !== undefined ? Number(fieldConfig.weight) : 0.5,
+						mustMatch: fieldConfig.mustMatch === true,
+						threshold: fieldConfig.threshold !== undefined ? Number(fieldConfig.threshold) : threshold,
+						algorithm: fieldConfig.algorithm as string || 'smart'
+					});
+				}
+			}
+		}
+
+		// If no field comparisons were created, create a default one using all criteria
+		if (fieldComparisons.length === 0 && Object.keys(sourceEntity).length > 0) {
+			// Create a default comparison using all fields as a single smart comparison
+			fieldComparisons.push({
+				field: 'Default Criterion',
+				weight: 1,
+				mustMatch: false,
+				threshold: Number(matchCriteria[0].threshold) || 0.3,
+				algorithm: 'smart'
+			});
+
+			this.logger.info(`[Matcher] Created default field comparison for all criteria`);
+		}
 
 		// Create entity matcher configuration
 		const matcherConfig: IEntityMatcherConfig = {
@@ -869,9 +921,10 @@ export async function execute(
 			autoDetectChildren: true,
 			threshold: Number(matchCriteria[0].threshold) || 0.3,
 			matchMode: matchMode as 'best' | 'all' | 'firstAboveThreshold',
-			limitResults: maxResults,
+			limitResults: matchMode === 'all' ? Math.max(10, maxItems) : maxItems,
+			maxItems,
 			sourceEntity,
-			fieldComparisons: [],
+			fieldComparisons,
 			fields: [],
 			performanceMode: performanceMode as 'balanced' | 'speed' | 'accuracy',
 			debugMode: enableDetailedLogs,
@@ -912,12 +965,22 @@ export async function execute(
 
 		// Log the match result
 		if (matchResult.success) {
-			this.logger.info(`[Matcher] Found ${matchResult.matches?.length || 0} matches`);
+			this.logger.info(`[Matcher] Found ${matchResult.matches?.length || 0} matches above threshold`);
 			if (matchResult.selectedMatch) {
-				this.logger.info(`[Matcher] Selected match with score: ${matchResult.selectedMatch.overallSimilarity}`);
+				this.logger.info(`[Matcher] Selected match with score: ${matchResult.selectedMatch.overallSimilarity.toFixed(4)}`);
+			}
+
+			// Additional logging for total items compared
+			if (matchResult.comparisons) {
+				this.logger.info(`[Matcher] Compared ${matchResult.comparisons.length} total items`);
+			}
+
+			// If there are matches but no selections, log why
+			if (matchResult.matches?.length > 0 && !matchResult.selectedMatch) {
+				this.logger.warn(`[Matcher] No match was selected despite finding matches. Check match criteria and threshold.`);
 			}
 		} else {
-			this.logger.warn(`[Matcher] No matches found: ${matchResult.error || 'Unknown error'}`);
+			this.logger.warn(`[Matcher] No matches found: ${matchResult.error || matchResult.message || 'Unknown error'}`);
 		}
 
 		// Log additional debug info if enabled
@@ -930,15 +993,42 @@ export async function execute(
 					nodeId,
 					index
 				});
+
+				// Log comparison details for debugging
+				if (matchResult.comparisons && matchResult.comparisons.length > 0) {
+					this.logger.info(`[Matcher] Top comparison details:`);
+					const topComparison = matchResult.comparisons[0];
+					this.logger.info(`  - Index: ${topComparison.index}`);
+					this.logger.info(`  - Overall similarity: ${topComparison.overallSimilarity.toFixed(4)}`);
+					this.logger.info(`  - Selected: ${topComparison.selected}`);
+
+					// Log field similarities
+					if (topComparison.similarities) {
+						for (const [field, score] of Object.entries(topComparison.similarities)) {
+							this.logger.info(`  - ${field}: ${(score as number).toFixed(4)}`);
+						}
+					}
+				}
 			} catch (error) {
 				this.logger.error(`[Matcher] Debug logging error: ${(error as Error).message}`);
 			}
 		}
 
-		// Create output item
+		// Create output item with clearer structure
 		const item = {
 			json: {
 				...matchResult,
+				// For backward compatibility, keep the matches array if it exists
+				matches: matchResult.matches || matchResult.comparisons || [],
+				// Add clear distinction between matches and all comparisons
+				actualMatches: matchResult.matches || [],
+				allComparisons: matchResult.comparisons || [],
+				// Make it clearer if anything was actually matched
+				matchesFound: (matchResult.matches?.length || 0) > 0,
+				matchSelected: !!matchResult.selectedMatch,
+				// Add standardized formatting to match counts
+				matchCount: matchResult.matchCount || matchResult.matches?.length || 0,
+				totalCompared: matchResult.totalCompared || matchResult.comparisons?.length || matchResult.itemsFound || 0,
 				duration: Date.now() - startTime,
 			}
 		};

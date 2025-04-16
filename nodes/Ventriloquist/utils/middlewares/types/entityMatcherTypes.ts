@@ -172,10 +172,13 @@ export interface IEntityMatcherInput {
 export interface IEntityMatcherOutput {
   success: boolean;
   matches: IEntityMatchResult[];
+  comparisons?: IEntityMatchResult[];
+  actualMatches?: IEntityMatchResult[];
   selectedMatch?: IEntityMatchResult;
   actionPerformed?: boolean;
   actionResult?: any;
   error?: string;
+  message?: string;
   errorDetails?: {
     message: string;
     stack?: string;
@@ -184,6 +187,8 @@ export interface IEntityMatcherOutput {
   itemSelector?: string;
   containerFound?: boolean;
   itemsFound?: number;
+  matchCount?: number;
+  totalCompared?: number;
   containerHtml?: string;
   referenceValues?: Record<string, string | null | undefined>;
   threshold?: number;
