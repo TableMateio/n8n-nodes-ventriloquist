@@ -321,6 +321,47 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: "Performance Mode",
+		name: "performanceMode",
+		type: "options",
+		options: [
+			{
+				name: "Balanced",
+				value: "balanced",
+				description: "Balance between accuracy and performance"
+			},
+			{
+				name: "Speed",
+				value: "speed",
+				description: "Faster but may be less accurate (useful for large pages)"
+			},
+			{
+				name: "Accuracy",
+				value: "accuracy",
+				description: "More thorough matching but may be slower"
+			}
+		],
+		default: "balanced",
+		description: "Controls the performance vs. accuracy tradeoff",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Enable Detailed Logs",
+		name: "enableDetailedLogs",
+		type: "boolean",
+		default: false,
+		description: "Enable more detailed logging for debugging",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
 
 	// ==================== 3. COMPARISON CRITERIA ====================
 	{
@@ -793,7 +834,7 @@ export async function execute(
 		const endTime = Date.now();
 		const executionDuration = endTime - startTime;
 
-		// Return the matching results
+		// Return the matching results with enhanced information
 		return {
 			json: {
 				success: true,
@@ -807,17 +848,34 @@ export async function execute(
 				itemsFound: result.itemsFound,
 				containerFound: result.containerFound,
 				executionDuration,
+				performance: {
+					...result.timings,
+					total: executionDuration // Use the full operation time
+				},
+				containerInfo: {
+					containerSelector: result.containerSelector,
+					itemSelector: result.itemSelector,
+					containerFound: result.containerFound || false,
+					itemsFound: result.itemsFound || 0
+				}
 			}
 		};
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
+		const stack = error instanceof Error ? error.stack : undefined;
 		this.logger.error(`${logPrefix} Error in matcher operation: ${errorMessage}`);
 
-		// Use proper error response format with json property
+		if (stack) {
+			this.logger.debug(`${logPrefix} Error stack: ${stack}`);
+		}
+
+		// Use proper error response format with extended error information
 		return {
 			json: {
 				success: false,
 				error: errorMessage,
+				errorDetails: stack ? { message: errorMessage, stack } : undefined,
+				executionDuration: Date.now() - startTime
 			}
 		};
 	}
@@ -854,6 +912,10 @@ async function buildEntityMatcherConfig(this: IExecuteFunctions, index: number):
 	const threshold = this.getNodeParameter('threshold', index, 0.7) as number;
 	const maxItems = this.getNodeParameter('maxItemsToProcess', index, 0) as number;
 	const outputFormat = this.getNodeParameter('outputFormat', index, 'smart') as 'text' | 'html' | 'smart';
+
+	// Get advanced performance settings
+	const performanceMode = this.getNodeParameter('performanceMode', index, 'balanced') as 'balanced' | 'speed' | 'accuracy';
+	const debugMode = this.getNodeParameter('enableDetailedLogs', index, false) as boolean;
 
 	// Get action configuration
 	const action = this.getNodeParameter('action', index, 'none') as 'click' | 'extract' | 'none';
@@ -978,5 +1040,9 @@ async function buildEntityMatcherConfig(this: IExecuteFunctions, index: number):
 		// Timing configuration
 		waitForSelectors,
 		timeout,
+
+		// Performance options
+		performanceMode,
+		debugMode,
 	};
 }

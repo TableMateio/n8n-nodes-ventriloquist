@@ -176,11 +176,19 @@ export interface IEntityMatcherOutput {
   actionPerformed?: boolean;
   actionResult?: any;
   error?: string;
+  errorDetails?: {
+    message: string;
+    stack?: string;
+  };
   containerSelector?: string;
   itemSelector?: string;
   containerFound?: boolean;
   itemsFound?: number;
-  totalExtracted?: number;
   containerHtml?: string;
-  extractedItems?: IExtractedItem[];
+  timings?: {
+    extraction?: number;
+    comparison?: number;
+    action?: number;
+    total: number;
+  };
 }

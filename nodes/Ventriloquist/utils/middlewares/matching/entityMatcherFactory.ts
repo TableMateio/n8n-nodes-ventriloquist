@@ -61,6 +61,10 @@ export interface IEntityMatcherConfig {
 
     // Output format
     outputFormat?: 'text' | 'html' | 'smart';
+
+    // Performance options
+    performanceMode?: 'balanced' | 'speed' | 'accuracy';
+    debugMode?: boolean;
 }
 
 /**
@@ -127,9 +131,24 @@ export class EntityMatcherFactory {
             logger.debug(`[EntityMatcherFactory] Error registering middleware: ${(error as Error).message}`);
         }
 
+        // Log configuration details for debugging
+        if (config.debugMode) {
+            logger.info(`[EntityMatcherFactory] Configuration: ${JSON.stringify({
+                resultsSelector: config.resultsSelector,
+                itemSelector: config.itemSelector || '(auto-detect)',
+                fieldCount: config.fields?.length || 0,
+                comparisonCount: config.fieldComparisons?.length || 0,
+                threshold: config.threshold,
+                matchMode: config.matchMode || 'best',
+                maxItems: config.maxItems,
+                performanceMode: config.performanceMode || 'balanced'
+            })}`);
+        }
+
         // Return the entity matcher with execute method
         return {
             async execute(): Promise<IEntityMatcherOutput> {
+                const startTime = Date.now();
                 const middlewareContext: IMiddlewareContext = {
                     logger,
                     nodeName,
@@ -141,7 +160,7 @@ export class EntityMatcherFactory {
                 try {
                     logger.info(`[EntityMatcherFactory] Starting entity matching process`);
 
-                    // 1. Create extraction input
+                    // 1. Create extraction input with maxItems limit
                     const extractionInput: IEntityMatcherExtractionInput = {
                         page,
                         extractionConfig: {
@@ -151,12 +170,28 @@ export class EntityMatcherFactory {
                             waitForSelectors: config.waitForSelectors !== false,
                             timeout: config.timeout || 10000,
                             autoDetectChildren: config.autoDetectChildren === true,
+                            maxItems: config.maxItems || 0 // Apply item limit at extraction phase
                         }
                     };
 
+                    // Performance optimizations based on performance mode
+                    if (config.performanceMode === 'speed') {
+                        // Optimize for speed
+                        extractionInput.extractionConfig.timeout = extractionInput.extractionConfig.timeout !== undefined
+                            ? Math.min(extractionInput.extractionConfig.timeout, 5000)
+                            : 5000;
+                        if (!config.maxItems) {
+                            extractionInput.extractionConfig.maxItems = 10; // Default limit for speed mode
+                        }
+                    }
+
                     // 2. Execute extraction
                     logger.info(`[EntityMatcherFactory] Executing extraction middleware`);
+                    const extractionStart = Date.now();
                     const extractionResult = await extractionMiddleware.execute(extractionInput, middlewareContext);
+                    const extractionDuration = Date.now() - extractionStart;
+
+                    logger.info(`[EntityMatcherFactory] Extraction completed in ${extractionDuration}ms`);
 
                     if (!extractionResult.success || extractionResult.items.length === 0) {
                         logger.warn(`[EntityMatcherFactory] Extraction failed or no items found: ${extractionResult.error || 'No items found'}`);
@@ -168,6 +203,10 @@ export class EntityMatcherFactory {
                             error: extractionResult.error || 'No items found',
                             containerSelector: config.resultsSelector,
                             itemSelector: config.itemSelector || '(auto-detect)',
+                            timings: {
+                                extraction: extractionDuration,
+                                total: Date.now() - startTime
+                            }
                         };
                     }
 
@@ -191,7 +230,11 @@ export class EntityMatcherFactory {
 
                     // 4. Execute comparison
                     logger.info(`[EntityMatcherFactory] Executing comparison middleware`);
+                    const comparisonStart = Date.now();
                     const comparisonResult = await comparisonMiddleware.execute(comparisonInput, middlewareContext);
+                    const comparisonDuration = Date.now() - comparisonStart;
+
+                    logger.info(`[EntityMatcherFactory] Comparison completed in ${comparisonDuration}ms`);
 
                     if (!comparisonResult.success || comparisonResult.matches.length === 0) {
                         logger.warn(`[EntityMatcherFactory] Comparison failed or no matches found above threshold: ${comparisonResult.error || 'No matches found'}`);
@@ -203,6 +246,11 @@ export class EntityMatcherFactory {
                             error: comparisonResult.error || 'No matches found above threshold',
                             containerSelector: config.resultsSelector,
                             itemSelector: config.itemSelector || '(auto-detect)',
+                            timings: {
+                                extraction: extractionDuration,
+                                comparison: comparisonDuration,
+                                total: Date.now() - startTime
+                            }
                         };
                     }
 
@@ -210,6 +258,7 @@ export class EntityMatcherFactory {
 
                     // 5. Execute action if we have a selected match and an action to perform
                     let actionResult = { success: false, actionPerformed: false } as IEntityMatcherActionOutput;
+                    let actionDuration = 0;
 
                     if (comparisonResult.selectedMatch && config.action && config.action !== 'none') {
                         // Create action input
@@ -228,10 +277,20 @@ export class EntityMatcherFactory {
 
                         // Execute action
                         logger.info(`[EntityMatcherFactory] Executing action middleware: ${config.action}`);
+                        const actionStart = Date.now();
                         actionResult = await actionMiddleware.execute(actionInput, middlewareContext);
+                        actionDuration = Date.now() - actionStart;
 
-                        logger.info(`[EntityMatcherFactory] Action ${actionResult.success ? 'succeeded' : 'failed'}: ${actionResult.actionPerformed ? 'Action performed' : 'No action performed'}`);
+                        logger.info(`[EntityMatcherFactory] Action ${actionResult.success ? 'succeeded' : 'failed'} in ${actionDuration}ms: ${actionResult.actionPerformed ? 'Action performed' : 'No action performed'}`);
+                    } else if (comparisonResult.selectedMatch) {
+                        logger.info(`[EntityMatcherFactory] No action to perform (action: ${config.action || 'none'})`);
+                    } else {
+                        logger.info(`[EntityMatcherFactory] No action performed because no match was selected`);
                     }
+
+                    // Calculate total duration
+                    const totalDuration = Date.now() - startTime;
+                    logger.info(`[EntityMatcherFactory] Entity matching process completed in ${totalDuration}ms`);
 
                     // 6. Return combined result
                     return {
@@ -244,18 +303,36 @@ export class EntityMatcherFactory {
                         itemsFound: extractionResult.itemsFound,
                         containerSelector: config.resultsSelector,
                         itemSelector: extractionResult.itemSelector,
+                        timings: {
+                            extraction: extractionDuration,
+                            comparison: comparisonDuration,
+                            action: actionDuration,
+                            total: totalDuration
+                        }
                     };
 
                 } catch (error) {
                     const errorMessage = (error as Error).message;
+                    const stack = (error as Error).stack;
                     logger.error(`[EntityMatcherFactory] Error in entity matcher execution: ${errorMessage}`);
+
+                    if (stack) {
+                        logger.debug(`[EntityMatcherFactory] Error stack: ${stack}`);
+                    }
 
                     return {
                         success: false,
                         matches: [],
                         error: errorMessage,
+                        errorDetails: {
+                            message: errorMessage,
+                            stack: stack
+                        },
                         containerSelector: config.resultsSelector,
                         itemSelector: config.itemSelector || '(auto-detect)',
+                        timings: {
+                            total: Date.now() - startTime
+                        }
                     };
                 }
             }
