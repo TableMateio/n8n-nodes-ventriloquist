@@ -10,6 +10,10 @@ export interface IAdvancedTextNormalizationOptions extends ITextNormalizationOpt
   extractKeyPhrases?: boolean;
   synonymReplacement?: boolean;
   synonymMap?: Record<string, string[]>;
+  extractHtmlText?: boolean;
+  dataType?: 'text' | 'number' | 'date' | 'address' | 'boolean';
+  dateFormat?: string;
+  locale?: string;
 }
 
 /**
@@ -30,6 +34,28 @@ export function advancedNormalizeText(
 ): string {
   // First apply basic normalization
   let normalized = normalizeText(text, options);
+
+  // Extract text from HTML if needed
+  if (options.extractHtmlText) {
+    normalized = extractTextFromHtml(normalized);
+  }
+
+  // Handle specific data types
+  if (options.dataType) {
+    switch (options.dataType) {
+      case 'number':
+        return normalizeNumber(normalized);
+      case 'date':
+        return normalizeDate(normalized, options.dateFormat, options.locale);
+      case 'address':
+        return normalizeAddress(normalized);
+      case 'boolean':
+        return normalizeBoolean(normalized);
+      default:
+        // Continue with text normalization
+        break;
+    }
+  }
 
   // Split into words for advanced processing
   let words = normalized.split(/\s+/);
@@ -53,6 +79,116 @@ export function advancedNormalizeText(
   }
 
   return words.join(' ');
+}
+
+/**
+ * Normalize a number string by removing non-numeric characters except decimal point
+ */
+export function normalizeNumber(text: string): string {
+  if (!text) return '';
+
+  // Extract first number from text
+  const match = text.match(/-?[\d,.]+(e[-+]?\d+)?/i);
+  if (!match) return '';
+
+  // Clean up the number format - keep only digits, decimal point, and optional negative sign
+  let cleanNumber = match[0].replace(/[^\d.-]/g, '');
+
+  // Handle multiple decimal points (keep only the first one)
+  const parts = cleanNumber.split('.');
+  if (parts.length > 2) {
+    cleanNumber = parts[0] + '.' + parts.slice(1).join('');
+  }
+
+  return cleanNumber;
+}
+
+/**
+ * Normalize a date string to ISO format where possible
+ */
+export function normalizeDate(text: string, format?: string, locale: string = 'en-US'): string {
+  if (!text) return '';
+
+  try {
+    // Try to create a date object from the text
+    const dateObj = new Date(text);
+
+    // Check if date is valid
+    if (!isNaN(dateObj.getTime())) {
+      // Return ISO format by default
+      return dateObj.toISOString().split('T')[0];
+    }
+
+    // If we have a specified format, try to parse using that
+    // This would require a date-fns or similar library for advanced formatting
+
+    // Fallback: just return cleaned text
+    return text.replace(/[^\d/\-.:\s]/g, '');
+  } catch (e) {
+    // If any error, return the original text
+    return text;
+  }
+}
+
+/**
+ * Normalize an address string
+ */
+export function normalizeAddress(text: string): string {
+  if (!text) return '';
+
+  // Basic normalization
+  let normalized = normalizeText(text, {
+    lowercase: true,
+    trimWhitespace: true,
+    removeExtraSpaces: true,
+  });
+
+  // Replace common abbreviations
+  const replacements: [RegExp, string][] = [
+    [/\bst\b/g, 'street'],
+    [/\brd\b/g, 'road'],
+    [/\bave\b/g, 'avenue'],
+    [/\bblvd\b/g, 'boulevard'],
+    [/\bln\b/g, 'lane'],
+    [/\bct\b/g, 'court'],
+    [/\bapt\b/g, 'apartment'],
+    [/\bste\b/g, 'suite'],
+    [/\bunit\b/g, 'unit'],
+    [/\bn\b/g, 'north'],
+    [/\bs\b/g, 'south'],
+    [/\be\b/g, 'east'],
+    [/\bw\b/g, 'west'],
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    normalized = normalized.replace(pattern, replacement);
+  }
+
+  return normalized;
+}
+
+/**
+ * Normalize a boolean value
+ */
+export function normalizeBoolean(text: string): string {
+  if (!text) return 'false';
+
+  const normalized = text.toLowerCase().trim();
+
+  // True values
+  if (
+    normalized === 'true' ||
+    normalized === 'yes' ||
+    normalized === 'y' ||
+    normalized === '1' ||
+    normalized === 'on' ||
+    normalized === 'checked'
+  ) {
+    return 'true';
+  }
+
+  // False values
+  return 'false';
 }
 
 /**
@@ -145,4 +281,34 @@ function countSyllables(text: string): number {
   }
 
   return count;
+}
+
+/**
+ * Extract readable text from HTML content
+ */
+export function extractTextFromHtml(html: string): string {
+  if (!html) return '';
+
+  // Replace common block elements with newlines to preserve structure
+  let text = html
+    .replace(/<(\/?)(?:div|p|h[1-6]|br|tr|ul|ol|li|blockquote|pre|header|footer|section|article|table|thead|tbody)[^>]*>/gi,
+             (_, closing) => closing ? '\n' : '\n')
+    .replace(/<[^>]+>/g, '') // Remove all remaining HTML tags
+    .replace(/&nbsp;/g, ' ') // Replace non-breaking spaces with regular spaces
+    .replace(/&lt;/g, '<')   // Replace common HTML entities
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+  // Normalize multiple newlines to a single newline
+  text = text.replace(/\n{2,}/g, '\n');
+
+  // Remove leading/trailing whitespace from each line
+  text = text.split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .join('\n');
+
+  return text.trim();
 }
