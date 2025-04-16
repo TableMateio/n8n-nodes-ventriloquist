@@ -11,6 +11,15 @@ export interface IExtractionConfig {
   attributeName?: string;
   waitForSelector?: boolean;
   selectorTimeout?: number;
+  // Additional properties needed by extractNodeUtils.ts
+  outputFormat?: string;
+  includeMetadata?: boolean;
+  includeHeaders?: boolean;
+  rowSelector?: string;
+  cellSelector?: string;
+  extractionProperty?: string;
+  limit?: number;
+  separator?: string;
 }
 
 /**

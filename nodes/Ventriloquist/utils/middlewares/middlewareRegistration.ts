@@ -97,3 +97,61 @@ export function initializeMiddlewareRegistry(): IMiddlewareRegistry {
 
   return middlewareRegistry;
 }
+
+/**
+ * Get the middleware registry
+ */
+export function getMiddlewareRegistry(): IMiddlewareRegistry {
+  if (!middlewareRegistry) {
+    return initializeMiddlewareRegistry();
+  }
+  return middlewareRegistry;
+}
+
+/**
+ * Register a middleware with the system
+ */
+export function registerMiddleware<TInput, TOutput>(
+  id: string,
+  type: MiddlewareType,
+  middleware: IMiddleware<TInput, TOutput>,
+  description?: string
+): void {
+  const registry = getMiddlewareRegistry();
+  registry.register(id, type, middleware, description);
+}
+
+/**
+ * Unregister a middleware
+ */
+export function unregisterMiddleware(id: string): void {
+  const registry = getMiddlewareRegistry();
+  if (registry instanceof MiddlewareRegistry) {
+    (registry as any).registrations.delete(id);
+  }
+}
+
+/**
+ * Create a middleware pipeline that executes a chain of middlewares
+ */
+export function createMiddlewarePipeline<TInput, TOutput>(
+  middlewareIds: string[]
+): IMiddleware<TInput, TOutput> {
+  return {
+    async execute(input: TInput, context: any): Promise<TOutput> {
+      const registry = getMiddlewareRegistry();
+      let currentInput = input;
+
+      for (const id of middlewareIds) {
+        const middleware = registry.get<any, any>(id);
+        if (!middleware) {
+          throw new Error(`Middleware with ID ${id} not found in registry`);
+        }
+
+        currentInput = await middleware.execute(currentInput, context);
+      }
+
+      return currentInput as unknown as TOutput;
+    }
+  };
+}
