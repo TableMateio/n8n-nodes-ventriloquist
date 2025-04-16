@@ -785,7 +785,7 @@ export const description: INodeProperties[] = [
 		type: "string",
 		default: "",
 		placeholder: "button.details, a.view-more",
-		description: "CSS selector for the element to interact with (leave empty to use the matched element)",
+		description: "CSS selector relative to the matched element (leave empty to use the matched element itself)",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
