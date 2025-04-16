@@ -15,7 +15,8 @@ import {
     type IEntityMatcherComparisonInput,
     type IEntityMatcherActionInput,
     type IEntityMatcherOutput,
-    type IEntityMatcherActionOutput
+    type IEntityMatcherActionOutput,
+    type IEntityMatchResult
 } from '../types/entityMatcherTypes';
 
 /**
@@ -65,6 +66,31 @@ export interface IEntityMatcherConfig {
     // Performance options
     performanceMode?: 'balanced' | 'speed' | 'accuracy';
     debugMode?: boolean;
+}
+
+/**
+ * Sanitize the entity matcher output by removing element handles
+ * that can't be properly serialized to JSON
+ */
+function sanitizeOutput(output: IEntityMatcherOutput): IEntityMatcherOutput {
+    // Create a deep copy of the output
+    const sanitized = { ...output };
+
+    // Sanitize matches
+    if (sanitized.matches && Array.isArray(sanitized.matches)) {
+        sanitized.matches = sanitized.matches.map(match => {
+            const { element, ...rest } = match;
+            return { ...rest };
+        });
+    }
+
+    // Sanitize selectedMatch
+    if (sanitized.selectedMatch) {
+        const { element, ...rest } = sanitized.selectedMatch;
+        sanitized.selectedMatch = { ...rest };
+    }
+
+    return sanitized;
 }
 
 /**
@@ -195,7 +221,7 @@ export class EntityMatcherFactory {
 
                     if (!extractionResult.success || extractionResult.items.length === 0) {
                         logger.warn(`[EntityMatcherFactory] Extraction failed or no items found: ${extractionResult.error || 'No items found'}`);
-                        return {
+                        return sanitizeOutput({
                             success: false,
                             matches: [],
                             containerFound: extractionResult.containerFound || false,
@@ -207,7 +233,7 @@ export class EntityMatcherFactory {
                                 extraction: extractionDuration,
                                 total: Date.now() - startTime
                             }
-                        };
+                        });
                     }
 
                     logger.info(`[EntityMatcherFactory] Extraction succeeded: Found ${extractionResult.items.length} items`);
@@ -238,7 +264,7 @@ export class EntityMatcherFactory {
 
                     if (!comparisonResult.success || comparisonResult.matches.length === 0) {
                         logger.warn(`[EntityMatcherFactory] Comparison failed or no matches found above threshold: ${comparisonResult.error || 'No matches found'}`);
-                        return {
+                        return sanitizeOutput({
                             success: false,
                             matches: comparisonResult.matches || [],
                             containerFound: extractionResult.containerFound || false,
@@ -251,7 +277,7 @@ export class EntityMatcherFactory {
                                 comparison: comparisonDuration,
                                 total: Date.now() - startTime
                             }
-                        };
+                        });
                     }
 
                     logger.info(`[EntityMatcherFactory] Comparison succeeded: Found ${comparisonResult.matches.length} matches, selected: ${comparisonResult.selectedMatch ? 'Yes' : 'No'}`);
@@ -292,8 +318,8 @@ export class EntityMatcherFactory {
                     const totalDuration = Date.now() - startTime;
                     logger.info(`[EntityMatcherFactory] Entity matching process completed in ${totalDuration}ms`);
 
-                    // 6. Return combined result
-                    return {
+                    // Return sanitized result
+                    return sanitizeOutput({
                         success: true,
                         matches: comparisonResult.matches,
                         selectedMatch: comparisonResult.selectedMatch,
@@ -309,7 +335,7 @@ export class EntityMatcherFactory {
                             action: actionDuration,
                             total: totalDuration
                         }
-                    };
+                    });
 
                 } catch (error) {
                     const errorMessage = (error as Error).message;
@@ -320,7 +346,8 @@ export class EntityMatcherFactory {
                         logger.debug(`[EntityMatcherFactory] Error stack: ${stack}`);
                     }
 
-                    return {
+                    // Return sanitized error response
+                    return sanitizeOutput({
                         success: false,
                         matches: [],
                         error: errorMessage,
@@ -333,7 +360,7 @@ export class EntityMatcherFactory {
                         timings: {
                             total: Date.now() - startTime
                         }
-                    };
+                    });
                 }
             }
         };
