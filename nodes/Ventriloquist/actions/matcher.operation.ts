@@ -376,6 +376,30 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: "Match Method",
+		name: "matchMethod",
+		type: "options",
+		options: [
+			{
+				name: "Similarity",
+				value: "similarity",
+				description: "Compare using text similarity algorithms",
+			},
+			{
+				name: "Rules",
+				value: "rules",
+				description: "Compare using exact rule-based methods",
+			},
+		],
+		default: "similarity",
+		description: "Method to use for matching entities",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
 		displayName: "Matching Approach",
 		name: "matchingApproach",
 		type: "options",
@@ -396,6 +420,7 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
+				matchMethod: ["similarity"],
 			},
 		},
 	},
@@ -410,6 +435,7 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
+				matchMethod: ["similarity"],
 				matchingApproach: ["smartAll"],
 			},
 		},
@@ -444,12 +470,18 @@ export const description: INodeProperties[] = [
 				value: "exact",
 				description: "Requires exact match between texts",
 			},
+			{
+				name: "Flexible Matching (Fuzzy)",
+				value: "fuzzy",
+				description: "Flexible matching with fuzzy logic",
+			},
 		],
 		default: "smart",
 		description: "Algorithm to use for calculating similarity",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
+				matchMethod: ["similarity"],
 				matchingApproach: ["smartAll"],
 			},
 		},
@@ -467,6 +499,7 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
+				matchMethod: ["similarity"],
 				matchingApproach: ["smartAll"],
 			},
 		},
@@ -480,6 +513,7 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
+				matchMethod: ["similarity"],
 				matchingApproach: ["smartAll"],
 			},
 		},
@@ -497,6 +531,7 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
+				matchMethod: ["similarity"],
 				matchingApproach: ["smartAll"],
 			},
 		},
@@ -527,6 +562,7 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
+				matchMethod: ["similarity"],
 				matchingApproach: ["fieldByField"],
 			},
 		},
@@ -562,6 +598,40 @@ export const description: INodeProperties[] = [
 						required: true,
 					},
 					{
+						displayName: "Data Format",
+						name: "dataFormat",
+						type: "options",
+						options: [
+							{
+								name: "Text",
+								value: "text",
+								description: "Plain text",
+							},
+							{
+								name: "Number",
+								value: "number",
+								description: "Numeric value",
+							},
+							{
+								name: "Date",
+								value: "date",
+								description: "Date value",
+							},
+							{
+								name: "Address",
+								value: "address",
+								description: "Physical address",
+							},
+							{
+								name: "Boolean",
+								value: "boolean",
+								description: "True/false value",
+							},
+						],
+						default: "text",
+						description: "The data type for this field",
+					},
+					{
 						displayName: "Comparison Algorithm",
 						name: "algorithm",
 						type: "options",
@@ -590,6 +660,11 @@ export const description: INodeProperties[] = [
 								name: "Exact Match",
 								value: "exact",
 								description: "Requires exact match between texts",
+							},
+							{
+								name: "Flexible Matching (Fuzzy)",
+								value: "fuzzy",
+								description: "Flexible matching with fuzzy logic",
 							},
 						],
 						default: "smart",
@@ -637,6 +712,114 @@ export const description: INodeProperties[] = [
 		],
 	},
 
+	// Rules-based matching approach
+	{
+		displayName: "Rules Configuration",
+		name: "rulesConfig",
+		type: "fixedCollection",
+		typeOptions: {
+			multipleValues: true,
+			sortable: true,
+		},
+		default: {
+			rules: [
+				{
+					field: "field1",
+					operation: "contains",
+					value: "",
+					caseSensitive: false,
+				}
+			]
+		},
+		description: "Define rules for matching",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				matchMethod: ["rules"],
+			},
+		},
+		options: [
+			{
+				name: "rules",
+				displayName: "Rules",
+				values: [
+					{
+						displayName: "Field",
+						name: "field",
+						type: "string",
+						default: "",
+						description: "Field name to check",
+						required: true,
+					},
+					{
+						displayName: "Selector",
+						name: "selector",
+						type: "string",
+						default: "",
+						description: "CSS selector to target element",
+						required: true,
+					},
+					{
+						displayName: "Operation",
+						name: "operation",
+						type: "options",
+						options: [
+							{
+								name: "Contains",
+								value: "contains",
+								description: "Field contains the specified value",
+							},
+							{
+								name: "Equals",
+								value: "equals",
+								description: "Field exactly equals the value",
+							},
+							{
+								name: "Starts With",
+								value: "startsWith",
+								description: "Field starts with the value",
+							},
+							{
+								name: "Ends With",
+								value: "endsWith",
+								description: "Field ends with the value",
+							},
+							{
+								name: "Regex Match",
+								value: "regex",
+								description: "Field matches the regex pattern",
+							},
+						],
+						default: "contains",
+						description: "Operation to perform",
+					},
+					{
+						displayName: "Value",
+						name: "value",
+						type: "string",
+						default: "",
+						description: "Value to compare against",
+						required: true,
+					},
+					{
+						displayName: "Case Sensitive",
+						name: "caseSensitive",
+						type: "boolean",
+						default: false,
+						description: "Match is case sensitive",
+					},
+					{
+						displayName: "Required",
+						name: "required",
+						type: "boolean",
+						default: false,
+						description: "This rule must match for the overall match to be valid",
+					},
+				],
+			},
+		],
+	},
+
 	// ==================== 4. ACTION HANDLING ====================
 	{
 		displayName: "Action Configuration",
@@ -649,400 +832,3 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
-	{
-		displayName: "Action After Match",
-		name: "action",
-		type: "options",
-		options: [
-			{
-				name: "None",
-				value: "none",
-				description: "Just return match results, don't perform any action",
-			},
-			{
-				name: "Click",
-				value: "click",
-				description: "Click on the matched element",
-			},
-			{
-				name: "Extract Data",
-				value: "extract",
-				description: "Extract additional data from the matched element",
-			},
-		],
-		default: "none",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Action Selector",
-		name: "actionSelector",
-		type: "string",
-		default: "",
-		placeholder: "a.details, button.select",
-		description: "CSS selector for the element to click or extract from (relative to matched item)",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				action: ["click", "extract"],
-			},
-		},
-	},
-	{
-		displayName: "Attribute to Extract",
-		name: "actionAttribute",
-		type: "string",
-		default: "",
-		placeholder: "href, data-ID",
-		description: "Attribute to extract (leave empty for text content)",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				action: ["extract"],
-			},
-		},
-	},
-	{
-		displayName: "Wait After Action",
-		name: "waitAfterAction",
-		type: "boolean",
-		default: true,
-		description: "Wait after performing the action",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				action: ["click"],
-			},
-		},
-	},
-	{
-		displayName: "Wait Time (Ms)",
-		name: "waitTime",
-		type: "number",
-		default: 5000,
-		description: "How long to wait after action in milliseconds",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				action: ["click"],
-				waitAfterAction: [true],
-			},
-		},
-	},
-	{
-		displayName: "Wait for Selector",
-		name: "waitSelector",
-		type: "string",
-		default: "",
-		placeholder: "#details, .confirmation",
-		description: "Wait for this selector to appear after action (empty to just wait for time)",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				action: ["click"],
-				waitAfterAction: [true],
-			},
-		},
-	},
-];
-
-/**
- * Entity Matcher execute function
- */
-export async function execute(
-	this: IExecuteFunctions,
-	index: number,
-	websocketEndpoint: string,
-	workflowId: string
-): Promise<INodeExecutionData> {
-	const startTime = Date.now();
-	const logPrefix = `[EntityMatcher][${this.getNode().name}]`;
-
-	try {
-		// Get input data
-		const items = this.getInputData();
-
-		// Get session ID (from parameter or input)
-		const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
-		let sessionId: string;
-
-		if (explicitSessionId) {
-			sessionId = explicitSessionId;
-		} else if (items[index]?.json?.sessionId) {
-			sessionId = items[index].json.sessionId as string;
-		} else {
-			sessionId = `session_${workflowId}`;
-		}
-
-		// Use the centralized session management
-		const sessionResult = await SessionManager.getOrCreatePageSession(
-			this.logger,
-			{
-				explicitSessionId: sessionId,
-				websocketEndpoint,
-				workflowId,
-				operationName: "Matcher",
-				nodeId: this.getNode().id,
-				nodeName: this.getNode().name,
-				index,
-			},
-		);
-		sessionId = sessionResult.sessionId;
-
-		// Get the page
-		let page = sessionResult.page;
-		if (!page) {
-			const currentSession = SessionManager.getSession(sessionId);
-			if (currentSession?.browser?.isConnected()) {
-				page = await getActivePageFunc(currentSession.browser, this.logger);
-			} else {
-				throw new Error("Failed to get session or browser is disconnected");
-			}
-		}
-
-		if (!page) {
-			throw new Error("Failed to get or create a page");
-		}
-
-		// Log debug info about the page
-		await logPageDebugInfo(page, this.logger, {
-			operation: "Matcher",
-			nodeName: this.getNode().name,
-			nodeId: this.getNode().id,
-			index,
-		});
-
-		// Create entity matcher configuration
-		const matcherConfig = await buildEntityMatcherConfig.call(this, index);
-
-		// Create matcher context
-		const context = {
-			logger: this.logger,
-			nodeName: this.getNode().name,
-			nodeId: this.getNode().id,
-			sessionId,
-			index,
-		};
-
-		// Create and execute the entity matcher
-		const matcher = createEntityMatcher(page, matcherConfig, context);
-		const result = await matcher.execute();
-
-		const endTime = Date.now();
-		const executionDuration = endTime - startTime;
-
-		// Return the matching results with enhanced information
-		return {
-			json: {
-				success: true,
-				sessionId,
-				matches: result.matches,
-				selectedMatch: result.selectedMatch,
-				matchCount: result.matches?.length || 0,
-				hasMatch: !!result.selectedMatch,
-				actionPerformed: result.actionPerformed || false,
-				actionResult: result.actionResult,
-				itemsFound: result.itemsFound,
-				containerFound: result.containerFound,
-				executionDuration,
-				performance: {
-					...result.timings,
-					total: executionDuration // Use the full operation time
-				},
-				containerInfo: {
-					containerSelector: result.containerSelector,
-					itemSelector: result.itemSelector,
-					containerFound: result.containerFound || false,
-					itemsFound: result.itemsFound || 0
-				}
-			}
-		};
-	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
-		const stack = error instanceof Error ? error.stack : undefined;
-		this.logger.error(`${logPrefix} Error in matcher operation: ${errorMessage}`);
-
-		if (stack) {
-			this.logger.debug(`${logPrefix} Error stack: ${stack}`);
-		}
-
-		// Use proper error response format with extended error information
-		return {
-			json: {
-				success: false,
-				error: errorMessage,
-				errorDetails: stack ? { message: errorMessage, stack } : undefined,
-				executionDuration: Date.now() - startTime
-			}
-		};
-	}
-}
-
-/**
- * Build the entity matcher configuration from node parameters
- */
-async function buildEntityMatcherConfig(this: IExecuteFunctions, index: number): Promise<IEntityMatcherConfig> {
-	// Get selection method and selectors
-	const selectionMethod = this.getNodeParameter('selectionMethod', index, 'containerItems') as string;
-
-	let resultsSelector = '';
-	let itemSelector = '';
-
-	if (selectionMethod === 'containerItems') {
-		resultsSelector = this.getNodeParameter('resultsSelector', index, '') as string;
-		itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
-	} else {
-		// For direct items, use the direct selector but keep container selector empty
-		itemSelector = this.getNodeParameter('directItemSelector', index, '') as string;
-	}
-
-	// Get auto-detection settings
-	const autoDetectChildren = this.getNodeParameter('autoDetectChildren', index, true) as boolean;
-
-	// Get timing settings
-	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
-	const timeout = this.getNodeParameter('timeout', index, 10000) as number;
-
-	// Get matching settings
-	const matchMode = this.getNodeParameter('matchMode', index, 'best') as 'best' | 'all' | 'firstAboveThreshold';
-	const limitResults = this.getNodeParameter('limitResults', index, 5) as number;
-	const threshold = this.getNodeParameter('threshold', index, 0.7) as number;
-	const maxItems = this.getNodeParameter('maxItemsToProcess', index, 0) as number;
-	const outputFormat = this.getNodeParameter('outputFormat', index, 'smart') as 'text' | 'html' | 'smart';
-
-	// Get advanced performance settings
-	const performanceMode = this.getNodeParameter('performanceMode', index, 'balanced') as 'balanced' | 'speed' | 'accuracy';
-	const debugMode = this.getNodeParameter('enableDetailedLogs', index, false) as boolean;
-
-	// Get action configuration
-	const action = this.getNodeParameter('action', index, 'none') as 'click' | 'extract' | 'none';
-	const actionSelector = this.getNodeParameter('actionSelector', index, '') as string;
-	const actionAttribute = this.getNodeParameter('actionAttribute', index, '') as string;
-	const waitAfterAction = this.getNodeParameter('waitAfterAction', index, true) as boolean;
-	const waitTime = this.getNodeParameter('waitTime', index, 5000) as number;
-	const waitSelector = this.getNodeParameter('waitSelector', index, '') as string;
-
-	// Build source entity and field comparisons based on matching approach
-	const matchingApproach = this.getNodeParameter('matchingApproach', index, 'smartAll') as string;
-
-	let sourceEntity: Record<string, string | null | undefined> = {};
-	let fieldComparisons: IFieldComparisonConfig[] = [];
-	let fields: Array<any> = [];
-
-	if (matchingApproach === 'smartAll') {
-		// For smart matching, we use a single reference value
-		const referenceValue = this.getNodeParameter('referenceValue', index, '') as string;
-		sourceEntity = { text: referenceValue };
-
-		// Get the comparison algorithm
-		const algorithm = this.getNodeParameter('similarityAlgorithm', index, 'smart') as ComparisonAlgorithm;
-		const matchThreshold = this.getNodeParameter('matchThreshold', index, 0.1) as number;
-		const mustMatch = this.getNodeParameter('mustMatch', index, false) as boolean;
-		const importance = this.getNodeParameter('importance', index, 0.5) as number;
-
-		// Create a single field comparison for all text
-		fieldComparisons = [
-			{
-				field: 'text',
-				weight: importance,
-				algorithm,
-				threshold: matchThreshold,
-				mustMatch,
-			}
-		];
-
-		// For smart matching, create a field definition for extraction
-		fields = [
-			{
-				name: 'text',
-				selector: '',
-				weight: importance,
-				required: mustMatch,
-				dataFormat: 'text'
-			}
-		];
-	} else {
-		// For field-by-field matching, get all field configurations
-		const fieldComparisonsList = this.getNodeParameter('fieldComparisons.fields', index, []) as IDataObject[];
-
-		// Build source entity and field comparisons from field list
-		sourceEntity = {};
-		fieldComparisons = [];
-		fields = [];
-
-		for (const field of fieldComparisonsList) {
-			const fieldName = field.name as string;
-			const referenceValue = field.referenceValue as string;
-			const selector = field.selector as string;
-			const algorithm = field.algorithm as ComparisonAlgorithm;
-			const weight = field.weight as number;
-			const mustMatch = field.mustMatch as boolean;
-			const threshold = field.threshold as number;
-			const attribute = field.attribute as string;
-
-			// Add to source entity
-			sourceEntity[fieldName] = referenceValue;
-
-			// Add to field comparisons
-			fieldComparisons.push({
-				field: fieldName,
-				weight,
-				algorithm,
-				threshold,
-				mustMatch,
-			});
-
-			// Add to fields for extraction (separate from fieldComparisons)
-			fields.push({
-				name: fieldName,
-				selector,
-				attribute: attribute || undefined,
-				weight,
-				required: mustMatch,
-				dataFormat: 'text'
-			});
-		}
-	}
-
-	// Build the complete config
-	return {
-		// Source entity data
-		sourceEntity,
-
-		// Selectors for finding results
-		resultsSelector,
-		itemSelector,
-
-		// Field extraction configuration
-		fields,
-
-		// Matching configuration
-		fieldComparisons,
-		threshold,
-		limitResults,
-		matchMode,
-		maxItems,
-
-		// Auto-detection
-		autoDetectChildren,
-
-		// Action configuration
-		action,
-		actionSelector,
-		actionAttribute,
-		waitAfterAction,
-		waitTime,
-		waitSelector,
-
-		// Timing configuration
-		waitForSelectors,
-		timeout,
-
-		// Performance options
-		performanceMode,
-		debugMode,
-	};
-}
