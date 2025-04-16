@@ -191,73 +191,99 @@ export function containmentSimilarity(reference: string, target: string): number
     }
 
     // Handle other empty cases
-    if (!reference && !target) return 0; // Changed from 1 to 0
+    if (!reference && !target) return 0;
     if (!reference) return 0; // Empty reference shouldn't match anything
     if (!target) return 0;
 
-    // First check for direct containment
-    if (target.includes(reference)) {
-        // Perfect containment - the reference appears exactly in the target
-        // Return a high score but scale it based on relative size to prevent
-        // tiny references from matching too easily
-        const sizeRatio = Math.min(1, reference.length / Math.max(20, target.length * 0.1));
-        return 0.9 + (sizeRatio * 0.1); // Between 0.9 and 1.0 based on size ratio
+    // Normalize inputs
+    const normalizedRef = reference.toLowerCase().trim();
+    const normalizedTarget = target.toLowerCase().trim();
+
+    // First check: direct full containment (highest priority)
+    if (normalizedTarget.includes(normalizedRef)) {
+        // Perfect match - award high score
+        return 0.95; // Almost perfect
     }
 
-    // Calculate word-level containment
-    const referenceWords = reference.split(/\s+/).filter(Boolean);
-    if (referenceWords.length === 0) return 0;
+    // Extract potential name entities from reference (2-3 word sequences)
+    const refWords = normalizedRef.split(/\s+/).filter(Boolean);
+    const nameSegments: string[] = [];
 
-    const targetWords = target.split(/\s+/).filter(Boolean);
+    // Look for potential name patterns (2-3 consecutive words)
+    for (let i = 0; i < refWords.length - 1; i++) {
+        // Check for 2-word names
+        if (refWords[i].length > 1 && refWords[i+1].length > 1) {
+            nameSegments.push(`${refWords[i]} ${refWords[i+1]}`);
+        }
 
-    // Count matching words and their positions
-    let matchedWords = 0;
-    let sequentialMatches = 0;
-    let lastMatchIndex = -1;
-
-    for (const word of referenceWords) {
-        if (word.length <= 2) {
-            // For very short words, require exact matches
-            const matchIndex = targetWords.findIndex(tw => tw === word);
-            if (matchIndex >= 0) {
-                matchedWords++;
-
-                // Check if words are appearing in sequence
-                if (matchIndex > lastMatchIndex) {
-                    sequentialMatches++;
-                    lastMatchIndex = matchIndex;
-                }
-            }
-        } else {
-            // For longer words, check for containment or exact matches
-            let found = false;
-            for (let i = 0; i < targetWords.length; i++) {
-                const tw = targetWords[i];
-                if (tw === word || tw.includes(word) || word.includes(tw)) {
-                    matchedWords++;
-
-                    // Check if words are appearing in sequence
-                    if (i > lastMatchIndex) {
-                        sequentialMatches++;
-                        lastMatchIndex = i;
-                    }
-
-                    found = true;
-                    break;
-                }
-            }
+        // Check for 3-word names if possible
+        if (i < refWords.length - 2 && refWords[i].length > 1 &&
+            refWords[i+1].length > 1 && refWords[i+2].length > 1) {
+            nameSegments.push(`${refWords[i]} ${refWords[i+1]} ${refWords[i+2]}`);
         }
     }
 
-    // Calculate containment score with weighted components
-    const matchRatio = matchedWords / referenceWords.length;
-    const sequenceRatio = referenceWords.length > 1 ? sequentialMatches / referenceWords.length : 1;
+    // Check for entity matches (names, etc.)
+    for (const segment of nameSegments) {
+        if (normalizedTarget.includes(segment)) {
+            // Award high score for matching name entities
+            return 0.90; // Very good match - found entity name
+        }
+    }
 
-    // Weight the raw match count higher than sequence order
-    const weightedScore = (matchRatio * 0.7) + (sequenceRatio * 0.3);
+    // Word-level matching with position bonuses
+    let totalWords = refWords.length;
+    let matchedWords = 0;
+    let positionBonus = 0;
+    let lastPosition = -1;
 
-    // Bonus for matching a significant portion of words
-    return matchRatio > 0.8 ? weightedScore * 1.1 : weightedScore;
+    // Check each word from reference
+    for (let i = 0; i < refWords.length; i++) {
+        const word = refWords[i];
+
+        // Skip very short words (unless they're numbers)
+        if (word.length < 3 && !/^\d+$/.test(word)) continue;
+
+        const targetWords = normalizedTarget.split(/\s+/).filter(Boolean);
+        let bestPosition = -1;
+
+        // Find this word in target
+        for (let j = 0; j < targetWords.length; j++) {
+            if (targetWords[j] === word ||
+                targetWords[j].includes(word) ||
+                word.includes(targetWords[j])) {
+                bestPosition = j;
+                break;
+            }
+        }
+
+        if (bestPosition !== -1) {
+            matchedWords++;
+
+            // Bonus for words appearing in sequence
+            if (lastPosition !== -1 && bestPosition > lastPosition) {
+                positionBonus += 0.1; // Bonus for sequential words
+            }
+
+            lastPosition = bestPosition;
+        }
+    }
+
+    // Calculate base containment score
+    let matchRatio = totalWords > 0 ? matchedWords / totalWords : 0;
+
+    // Boost score if we matched a significant portion of words
+    if (matchRatio > 0.5) {
+        matchRatio += positionBonus;
+
+        // Additional boost for matching most words
+        if (matchRatio > 0.7) {
+            matchRatio += 0.1;
+        }
+    }
+
+    // Cap at 0.85 - not as good as direct containment or entity match
+    return Math.min(0.85, matchRatio);
 }
 
 /**
@@ -266,54 +292,55 @@ export function containmentSimilarity(reference: string, target: string): number
  * The "Smart all" approach prioritizes finding reference text contained within a larger target
  */
 export function smartSimilarity(reference: string, target: string): number {
-    // Explicitly handle empty reference case - empty references should match nothing or very little
+    // Explicitly handle empty reference case - empty references should match nothing
     if (!reference || reference.trim().length === 0) {
         return 0; // Empty reference shouldn't match anything
     }
 
     // Handle cases where both are empty
-    if (!reference && !target) return 0; // Changed from 1 to 0 - empty shouldn't match empty
+    if (!reference && !target) return 0;
     if (!target) return 0;
 
     // For very short inputs, prioritize exact matching
     if (reference.length < 5 || target.length < 5) {
         if (reference === target) return 1;
-        if (target.includes(reference) || reference.includes(target)) return 0.9;
+        if (target.includes(reference)) return 0.95;
+        if (reference.includes(target)) return 0.9;
         return 0.5;
     }
 
-    // 1. Check for exact containment (highest priority for Smart All matching)
-    if (target.includes(reference)) {
-        // Calculate how much of the target is matched
-        const ratio = reference.length / target.length;
+    // Normalize for comparison
+    const normalizedRef = reference.toLowerCase().trim();
+    const normalizedTarget = target.toLowerCase().trim();
 
-        // If reference is too short compared to target, reduce score slightly
-        if (ratio < 0.05 && reference.length < 20) {
-            return 0.85 + (ratio * 0.15); // Scale between 0.85 and 1.0
-        }
-
-        return 0.9 + (ratio * 0.1); // Between 0.9 and 1.0 based on coverage
+    // 1. Check for direct containment (highest priority)
+    if (normalizedTarget.includes(normalizedRef)) {
+        // Target fully contains reference - this is ideal
+        return 0.95;
     }
 
-    // 2. Check for word-level containment (most important for Smart All)
+    // 2. Calculate advanced containment score (most important)
     const containmentScore = containmentSimilarity(reference, target);
 
-    // 3. Calculate word overlap with Jaccard (good for jumbled text)
+    // 3. Check for word-level overlap as backup
     const jaccardScore = jaccardSimilarity(reference, target);
 
-    // 4. Check edit distance for close matches (lowest priority in Smart All)
-    const levenshteinScore = levenshteinSimilarity(reference, target);
+    // 4. Only use Levenshtein for very close matches or short strings
+    let levenshteinScore = 0;
+    if (reference.length < 30 && target.length < 30) {
+        levenshteinScore = levenshteinSimilarity(reference, target);
+    }
 
-    // Determine if there's high containment (reference terms mostly found in target)
-    if (containmentScore > 0.8) {
-        // High containment gets more weight
-        return (containmentScore * 0.7) + (jaccardScore * 0.25) + (levenshteinScore * 0.05);
-    } else if (jaccardScore > 0.7) {
-        // High word overlap gets balanced weights
-        return (containmentScore * 0.4) + (jaccardScore * 0.5) + (levenshteinScore * 0.1);
+    // Prioritize containment heavily
+    if (containmentScore > 0.7) {
+        // High containment - reference is mostly contained in target
+        return Math.max(containmentScore, 0.7);
+    } else if (jaccardScore > 0.6) {
+        // Good word overlap - use a balanced approach favoring containment
+        return Math.max((containmentScore * 0.7) + (jaccardScore * 0.3), 0.6);
     } else {
-        // Lower containment, use a more balanced approach
-        return (containmentScore * 0.4) + (jaccardScore * 0.4) + (levenshteinScore * 0.2);
+        // Lower match quality - still prioritize containment but consider other factors
+        return (containmentScore * 0.7) + (jaccardScore * 0.2) + (levenshteinScore * 0.1);
     }
 }
 
@@ -366,12 +393,14 @@ export function compareStrings(
                 break;
 
             case 'contains':
-                if (normalizedStr1.includes(normalizedStr2)) similarity = 0.9;
-                else if (normalizedStr2.includes(normalizedStr1)) similarity = 0.8;
+                // Check if either string contains the other, with higher score if target contains reference
+                if (normalizedStr2.includes(normalizedStr1)) similarity = 0.9;
+                else if (normalizedStr1.includes(normalizedStr2)) similarity = 0.7;
                 else similarity = 0;
                 break;
 
             case 'containment':
+                // Use improved containment logic that's better at finding references in targets
                 similarity = containmentSimilarity(normalizedStr1, normalizedStr2);
                 break;
 
@@ -384,7 +413,21 @@ export function compareStrings(
                 break;
 
             case 'smart':
+                // Use improved smart algorithm that's better at finding entities
                 similarity = smartSimilarity(normalizedStr1, normalizedStr2);
+
+                // Log additional details for smart algorithm if debugging
+                if (logger && mergedOptions.debugMode) {
+                    // Calculate individual scores for insight
+                    const cScore = containmentSimilarity(normalizedStr1, normalizedStr2);
+                    const jScore = jaccardSimilarity(normalizedStr1, normalizedStr2);
+                    const lScore = levenshteinSimilarity(normalizedStr1, normalizedStr2);
+
+                    logger.debug(`Smart similarity components:
+                    - Containment: ${cScore.toFixed(4)}
+                    - Jaccard: ${jScore.toFixed(4)}
+                    - Levenshtein: ${lScore.toFixed(4)}`);
+                }
                 break;
 
             case 'custom':
@@ -521,19 +564,59 @@ export function compareEntities(
             continue;
         }
 
-        // Use debug flag for important fields
-        const isImportantField = config.weight > 0.8 || config.mustMatch;
-        const debugMode = isImportantField;
+        // Check if we have a single criterion with a "smart" algorithm and all content
+        // (This is our special case for whole record containment)
+        const isSingleSmartField = fieldConfigs.length === 1 && config.algorithm === 'smart';
+        const debugMode = config.weight > 0.8 || config.mustMatch || isSingleSmartField;
+
+        // Create combined entity strings for better name matching when using smart algorithm
+        let finalSourceValue = sourceValue;
+        let finalTargetValue = targetValue;
+
+        // Special handling for smart single-field case - concatenate all fields for richer comparison
+        if (isSingleSmartField) {
+            // Use all source and target fields concatenated for a holistic match
+            finalSourceValue = Object.values(sourceEntity)
+                .filter(v => v && typeof v === 'string' && v.trim() !== '')
+                .join(' ');
+
+            finalTargetValue = Object.values(targetEntity)
+                .filter(v => v && typeof v === 'string' && v.trim() !== '')
+                .join(' ');
+
+            if (logger && debugMode) {
+                logger.debug(`Using combined entity values for smart matching:
+                - Source: ${finalSourceValue.substring(0, 50)}${finalSourceValue.length > 50 ? '...' : ''}
+                - Target: ${finalTargetValue.substring(0, 50)}${finalTargetValue.length > 50 ? '...' : ''}`);
+            }
+        }
+
+        // Use different algorithm weights for smart matching
+        const algorithm = config.algorithm || 'smart';
+
+        // For single criterion smart matching, we need to boost containment
+        const comparisonOptions: Partial<IStringComparisonOptions> = {
+            algorithm,
+            threshold: config.threshold,
+            customComparator: config.customComparator,
+            debugMode
+        };
+
+        // For our smart algorithm, ensure we normalize properly
+        if (algorithm === 'smart' || algorithm === 'containment') {
+            comparisonOptions.normalization = {
+                trimWhitespace: true,
+                removeExtraSpaces: true,
+                normalizeNewlines: true,
+                toLowerCase: true,
+                extractTextOnly: true
+            };
+        }
 
         const similarity = compareStrings(
-            sourceValue,
-            targetValue,
-            {
-                algorithm: config.algorithm || 'smart',
-                threshold: config.threshold,
-                customComparator: config.customComparator,
-                debugMode
-            },
+            finalSourceValue,
+            finalTargetValue,
+            comparisonOptions,
             logger
         );
 
@@ -551,6 +634,7 @@ export function compareEntities(
         weightedSum += similarity * config.weight;
     }
 
+    // Calculate overall similarity, ensuring we don't divide by zero
     const overallSimilarity = totalWeight > 0 ? weightedSum / totalWeight : 0;
     const thresholdValue = DEFAULT_COMPARISON_OPTIONS.threshold || 0.3;
 
