@@ -144,19 +144,6 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Limit Number of Matches",
-		name: "limitMatches",
-		type: "boolean",
-		default: false,
-		description: "Whether to limit the number of matches to return",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				matchMode: ["nMatches"],
-			},
-		},
-	},
-	{
 		displayName: "Number of Matches to Find",
 		name: "maxMatches",
 		type: "number",
@@ -166,7 +153,6 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ["matcher"],
 				matchMode: ["nMatches"],
-				limitMatches: [true],
 			},
 		},
 	},
@@ -223,18 +209,6 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Maximum Items to Process",
-		name: "maxItemsToProcess",
-		type: "number",
-		default: 0,
-		description: "Maximum number of items to process from the page (0 for all items)",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
 		displayName: "Wait for Elements",
 		name: "waitForSelectors",
 		type: "boolean",
@@ -259,76 +233,6 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
-	{
-		displayName: "Output Format",
-		name: "outputFormat",
-		type: "options",
-		options: [
-			{
-				name: "Smart (Auto-Detect Best Format)",
-				value: "smart",
-				description: "Automatically detect the best format for each element",
-			},
-			{
-				name: "Text Only",
-				value: "text",
-				description: "Extract only text content",
-			},
-			{
-				name: "HTML",
-				value: "html",
-				description: "Include HTML structure",
-			},
-		],
-		default: "smart",
-		description: "How to format extracted content",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Performance Mode",
-		name: "performanceMode",
-		type: "options",
-		options: [
-			{
-				name: "Balanced",
-				value: "balanced",
-				description: "Balance between accuracy and performance"
-			},
-			{
-				name: "Speed",
-				value: "speed",
-				description: "Faster but may be less accurate (useful for large pages)"
-			},
-			{
-				name: "Accuracy",
-				value: "accuracy",
-				description: "More thorough matching but may be slower"
-			}
-		],
-		default: "balanced",
-		description: "Controls the performance vs. accuracy tradeoff.",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
-	{
-		displayName: "Enable Detailed Logs",
-		name: "enableDetailedLogs",
-		type: "boolean",
-		default: false,
-		description: "Enable more detailed logging for debugging",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-			},
-		},
-	},
 
 	// ==================== 3. CRITERIA COLLECTION ====================
 	{
@@ -338,6 +242,7 @@ export const description: INodeProperties[] = [
 		typeOptions: {
 			multipleValues: true,
 			sortable: true,
+			multipleValueButtonText: "Add Criterion",
 		},
 		default: {
 			criteria: [
@@ -527,6 +432,35 @@ export const description: INodeProperties[] = [
 							show: {
 								comparisonApproach: ["smartAll", "matchAll"],
 								matchMethod: ["similarity"],
+							},
+						},
+					},
+					{
+						displayName: "Output Format",
+						name: "outputFormat",
+						type: "options",
+						options: [
+							{
+								name: "Smart (Auto-Detect Best Format)",
+								value: "smart",
+								description: "Automatically detect the best format for each element",
+							},
+							{
+								name: "Text Only",
+								value: "text",
+								description: "Extract only text content",
+							},
+							{
+								name: "HTML",
+								value: "html",
+								description: "Include HTML structure",
+							},
+						],
+						default: "smart",
+						description: "How to format extracted content",
+						displayOptions: {
+							show: {
+								comparisonApproach: ["fieldByField"],
 							},
 						},
 					},
@@ -963,6 +897,48 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	// Performance and Debugging options moved to the end
+	{
+		displayName: "Performance Mode",
+		name: "performanceMode",
+		type: "options",
+		options: [
+			{
+				name: "Balanced",
+				value: "balanced",
+				description: "Balance between accuracy and performance"
+			},
+			{
+				name: "Speed",
+				value: "speed",
+				description: "Faster but may be less accurate (useful for large pages)"
+			},
+			{
+				name: "Accuracy",
+				value: "accuracy",
+				description: "More thorough matching but may be slower"
+			}
+		],
+		default: "balanced",
+		description: "Controls the performance vs. accuracy tradeoff.",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Enable Detailed Logs",
+		name: "enableDetailedLogs",
+		type: "boolean",
+		default: false,
+		description: "Enable more detailed logging for debugging",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
 ];
 
 /**
@@ -985,15 +961,8 @@ export async function execute(
 	let maxResults: number | undefined;
 	if (matchMode === 'nMatches') {
 		maxResults = this.getNodeParameter('maxMatches', index, 5) as number;
-	} else if (matchMode === 'all') {
-		const limitMatches = this.getNodeParameter('limitMatches', index, false) as boolean;
-		if (limitMatches) {
-			maxResults = this.getNodeParameter('maxMatches', index, 5) as number;
-		}
 	}
 
-	const maxItemsToProcess = this.getNodeParameter('maxItemsToProcess', index, 0) as number;
-	const outputFormat = this.getNodeParameter('outputFormat', index, 'smart') as string;
 	const performanceMode = this.getNodeParameter('performanceMode', index, 'balanced') as string;
 	const enableDetailedLogs = this.getNodeParameter('enableDetailedLogs', index, false) as boolean;
 
@@ -1145,8 +1114,7 @@ export async function execute(
 			resultsSelector: selectionMethod === 'containerItems' ? resultsSelector : '',
 			itemSelector: selectionMethod === 'containerItems' ? itemSelector : directItemSelector,
 			autoDetectChildren,
-			maxItems: maxItemsToProcess || undefined,
-			outputFormat: outputFormat as 'text' | 'html' | 'smart',
+			outputFormat: 'smart', // Default output format
 			waitForSelectors,
 			timeout,
 			performanceMode: performanceMode as 'balanced' | 'speed' | 'accuracy',
@@ -1165,6 +1133,12 @@ export async function execute(
 			const firstCriterion = matchCriteria[0];
 			const comparisonApproach = firstCriterion.comparisonApproach as string;
 			const matchMethod = firstCriterion.matchMethod as string || 'similarity';
+
+			// For field-by-field approach, get output format from the criterion
+			if (comparisonApproach === 'fieldByField') {
+				const outputFormat = firstCriterion.outputFormat as string || 'smart';
+				matcherConfig.outputFormat = outputFormat as 'text' | 'html' | 'smart';
+			}
 
 			if (matchMethod === 'similarity') {
 				if (comparisonApproach === 'smartAll' || comparisonApproach === 'matchAll') {
