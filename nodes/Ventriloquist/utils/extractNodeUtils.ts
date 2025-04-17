@@ -34,6 +34,7 @@ export interface IExtractionNodeOptions {
   useHumanDelays?: boolean;
   continueOnFail?: boolean;
   debugMode?: boolean;
+  debugPageContent?: boolean;
 }
 
 /**
@@ -365,7 +366,8 @@ export async function processExtractionItems(
   });
 
   // If debug mode is not enabled, remove technical details from the output
-  if (!extractionNodeOptions.debugMode) {
+  // Note: debugPageContent is checked for backward compatibility
+  if (!extractionNodeOptions.debugMode && !extractionNodeOptions.debugPageContent) {
     typedExtractionItems.forEach(item => {
       // Keep essential data but remove technical details
       const extractedData = item.extractedData;

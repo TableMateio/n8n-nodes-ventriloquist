@@ -20,6 +20,7 @@ export interface IDebugOptions {
   includeBodyText?: boolean;
   includeUrl?: boolean;
   includeTitle?: boolean;
+  debugMode?: boolean; // Master debug flag that enables all debug features when true (includes page content logging)
 }
 
 /**
@@ -43,11 +44,14 @@ export async function logPageDebugInfo(
     index
   } = context;
 
+  // If debugMode is true, enable all debug features
+  const debugMode = options.debugMode === true;
+
   const {
     previewLength = 200,
-    includeBodyText = true,
-    includeUrl = true,
-    includeTitle = true
+    includeBodyText = debugMode ? true : options.includeBodyText ?? true,
+    includeUrl = debugMode ? true : options.includeUrl ?? true,
+    includeTitle = debugMode ? true : options.includeTitle ?? true
   } = options;
 
   try {

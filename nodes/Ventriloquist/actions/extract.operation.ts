@@ -40,7 +40,7 @@ export const description: INodeProperties[] = [
 		type: "boolean",
 		default: false,
 		description:
-			"Whether to include technical details in the output. When disabled, only extracted data and essential fields are returned.",
+			"Whether to include technical details in the output and page information in debug logs. When disabled, only extracted data and essential fields are returned.",
 		displayOptions: {
 			show: {
 				operation: ["extract"],
@@ -732,9 +732,15 @@ export async function execute(
 	const useHumanDelays = this.getNodeParameter("useHumanDelays", index, false) as boolean;
 	const takeScreenshotOption = this.getNodeParameter("takeScreenshot", index, false) as boolean;
 	const continueOnFail = this.getNodeParameter("continueOnFail", index, true) as boolean;
-	const debugPageContent = this.getNodeParameter("debugPageContent", index, false) as boolean;
-	const explicitSessionId = this.getNodeParameter("explicitSessionId", index, "") as string;
 	const debugMode = this.getNodeParameter("debugMode", index, false) as boolean;
+	// For backward compatibility
+	let debugPageContent = false;
+	try {
+		debugPageContent = this.getNodeParameter("debugPageContent", index, false) as boolean;
+	} catch (e) {
+		// Parameter might not exist in the UI anymore, ignore the error
+	}
+	const explicitSessionId = this.getNodeParameter("explicitSessionId", index, "") as string;
 
 	this.logger.info(
 		formatOperationLog(
@@ -780,7 +786,7 @@ export async function execute(
 		}
 
 		// Debug page content if enabled
-		if (debugPageContent) {
+		if (debugMode || debugPageContent) {
 			await logPageDebugInfo(
 				page,
 				this.logger,
@@ -789,6 +795,9 @@ export async function execute(
 					nodeName,
 					nodeId,
 					index,
+				},
+				{
+					debugMode // Pass debugMode to enable all debug features
 				}
 			);
 		}
@@ -945,7 +954,7 @@ export async function execute(
 				nodeId,
 				// Add AI formatting options - these get checked for each item individually
 				enableAiFormatting: true, // We handle enableAiFormatting per item in the typedExtractionItems array
-				debugMode, // Pass the debug mode option to control output format
+				debugMode: debugMode || debugPageContent, // Pass the debug mode option to control output format, including backward compatibility
 			},
 			this.logger,
 			openAiApiKey
