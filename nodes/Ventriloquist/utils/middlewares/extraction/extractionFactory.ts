@@ -94,9 +94,16 @@ class BasicExtraction implements IExtraction {
 
           // Clean text if the option is enabled
           if (this.config.cleanText) {
-            logger.info(`${logPrefix} Cleaning text content (replacing multiple newlines with single newline)`);
-            // Replace 2 or more consecutive newlines with a single newline
+            logger.info(`${logPrefix} Cleaning text content - original length: ${data.length}`);
+            // First replace all whitespace (including non-breaking spaces, tabs, etc.) with regular spaces
+            data = data.replace(/[\s\n\r\t\f\v]+/g, ' ');
+            // Then replace multiple consecutive spaces with a single space
+            data = data.replace(/ {2,}/g, ' ');
+            // Replace newlines around spaces/whitespace
+            data = data.replace(/\s*\n\s*/g, '\n');
+            // Finally replace multiple consecutive newlines
             data = data.replace(/\n{2,}/g, '\n');
+            logger.info(`${logPrefix} Text cleaned - new length: ${data.length}`);
           }
           break;
 
@@ -230,7 +237,16 @@ class BasicExtraction implements IExtraction {
 
                 // Clean text if the option is enabled
                 if (this.config.cleanText) {
+                  logger.info(`${logPrefix} Cleaning text content - original length: ${textContent.length}`);
+                  // First replace all whitespace (including non-breaking spaces, tabs, etc.) with regular spaces
+                  textContent = textContent.replace(/[\s\n\r\t\f\v]+/g, ' ');
+                  // Then replace multiple consecutive spaces with a single space
+                  textContent = textContent.replace(/ {2,}/g, ' ');
+                  // Replace newlines around spaces/whitespace
+                  textContent = textContent.replace(/\s*\n\s*/g, '\n');
+                  // Finally replace multiple consecutive newlines
                   textContent = textContent.replace(/\n{2,}/g, '\n');
+                  logger.info(`${logPrefix} Text cleaned - new length: ${textContent.length}`);
                 }
 
                 return textContent;

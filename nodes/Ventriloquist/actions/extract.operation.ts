@@ -625,6 +625,9 @@ export async function execute(
 				outputLimit?: number;
 				extractProperty?: boolean;
 				propertyKey?: string;
+				separator?: string;
+				outputFormat?: string;
+				cleanText?: boolean;
 			} | undefined,
 		}));
 
