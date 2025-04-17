@@ -962,8 +962,9 @@ export async function execute(
 
 		// Store all extraction results
 		const extractionResults: IDataObject = {
-			extractedData: extractionData,
-			// Add a more easily accessible format for the actual extracted data values
+			// Only include extractedData array when debug mode is enabled
+			...(debugMode && { extractedData: extractionData }),
+			// Always include the more accessible data format
 			data: extractionData.reduce((result: IDataObject, item: IExtractItem) => {
 				// Only include items that have extracted data
 				if (item.extractedData !== undefined) {
