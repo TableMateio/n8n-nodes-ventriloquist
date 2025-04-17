@@ -121,6 +121,13 @@ export const description: INodeProperties[] = [
 						required: true,
 					},
 					{
+						displayName: "Continue If Not Found",
+						name: "continueIfNotFound",
+						type: "boolean",
+						default: false,
+						description: "Whether to continue with other extractions if this selector isn't found on the page",
+					},
+					{
 						displayName: "Attribute Name",
 						name: "attributeName",
 						type: "string",
@@ -561,6 +568,7 @@ export async function execute(
 			name: item.name as string,
 			extractionType: item.extractionType as string,
 			selector: item.selector as string,
+			continueIfNotFound: item.continueIfNotFound as boolean | undefined,
 			attributeName: item.attributeName as string | undefined,
 			htmlOptions: item.htmlOptions as {
 				outputFormat?: string;

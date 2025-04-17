@@ -12,6 +12,7 @@ export interface IExtractItem {
   name: string;
   extractionType: string;
   selector: string;
+  continueIfNotFound?: boolean;
   attributeName?: string;
   htmlOptions?: {
     outputFormat?: string;
@@ -119,21 +120,87 @@ export async function processExtractionItems(
         )
       );
 
+      // Add diagnostic check - see if the selector exists immediately
+      try {
+        const selectorCount = await page.evaluate((sel) => {
+          return document.querySelectorAll(sel).length;
+        }, selector);
+
+        logger.info(
+          formatOperationLog(
+            "Extract",
+            nodeName,
+            nodeId,
+            index,
+            `Quick check: Found ${selectorCount} elements matching selector immediately`
+          )
+        );
+
+        // If we found elements, log the page URL to help with debugging
+        if (selectorCount === 0) {
+          const url = await page.url();
+          logger.info(
+            formatOperationLog(
+              "Extract",
+              nodeName,
+              nodeId,
+              index,
+              `Current page URL: ${url}`
+            )
+          );
+
+          // Check if the page has frames which might contain the element
+          const frames = await page.frames();
+          if (frames.length > 1) {
+            logger.info(
+              formatOperationLog(
+                "Extract",
+                nodeName,
+                nodeId,
+                index,
+                `Page has ${frames.length} frames. Element might be in a frame.`
+              )
+            );
+          }
+        }
+      } catch (evalError) {
+        logger.warn(
+          formatOperationLog(
+            "Extract",
+            nodeName,
+            nodeId,
+            index,
+            `Error during selector check: ${(evalError as Error).message}`
+          )
+        );
+      }
+
       try {
         await page.waitForSelector(selector, { timeout });
       } catch (error) {
+        const errorMessage = `Selector timeout for ${itemName}: ${selector} after ${timeout}ms`;
         logger.error(
           formatOperationLog(
             "Extract",
             nodeName,
             nodeId,
             index,
-            `Selector timeout for ${itemName}: ${selector} after ${timeout}ms`
+            errorMessage
           )
         );
 
-        // Continue with next item instead of throwing
-        if (continueOnFail) {
+        // Check if we should continue with other extractions
+        // Item-level setting takes precedence over global setting
+        if (item.continueIfNotFound === true || continueOnFail) {
+          logger.info(
+            formatOperationLog(
+              "Extract",
+              nodeName,
+              nodeId,
+              index,
+              `Continuing with other extractions (${item.continueIfNotFound ? 'selector-level setting' : 'global setting'})`
+            )
+          );
           extractionData[itemName] = { error: `Selector not found: ${selector}` };
           continue;
         } else {
