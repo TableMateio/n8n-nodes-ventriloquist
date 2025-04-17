@@ -451,6 +451,15 @@ export class Ventriloquist implements INodeType {
 					},
 				},
 			},
+			{
+				name: 'openAIApi',
+				required: false,
+				displayOptions: {
+					show: {
+						operation: ['extract'],
+					},
+				},
+			},
 		],
 		properties: [
 			{
