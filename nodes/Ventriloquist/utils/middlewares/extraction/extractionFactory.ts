@@ -226,7 +226,14 @@ class BasicExtraction implements IExtraction {
           const extractedValues = await Promise.all(
             limitedElements.map(async (element) => {
               if (extractionProperty === 'textContent') {
-                return await element.evaluate((el) => el.textContent?.trim() || '');
+                let textContent = await element.evaluate((el) => el.textContent?.trim() || '');
+
+                // Clean text if the option is enabled
+                if (this.config.cleanText) {
+                  textContent = textContent.replace(/\n{2,}/g, '\n');
+                }
+
+                return textContent;
               } else if (extractionProperty === 'innerHTML') {
                 return await element.evaluate((el) => el.innerHTML);
               } else if (extractionProperty === 'outerHTML') {

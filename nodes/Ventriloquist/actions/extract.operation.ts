@@ -314,6 +314,18 @@ export const description: INodeProperties[] = [
 								description: "What content to extract from each matched element",
 							},
 							{
+								displayName: "Clean Text",
+								name: "cleanText",
+								type: "boolean",
+								default: false,
+								description: "Whether to clean up the text by replacing multiple consecutive newlines with a single newline",
+								displayOptions: {
+									show: {
+										extractionProperty: ["textContent"],
+									},
+								},
+							},
+							{
 								displayName: "Attribute Name",
 								name: "attributeName",
 								type: "string",

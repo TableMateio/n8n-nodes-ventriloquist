@@ -35,6 +35,7 @@ export interface IExtractItem {
     propertyKey?: string;
     separator?: string;
     outputFormat?: string;
+    cleanText?: boolean;
   };
 }
 
@@ -245,6 +246,11 @@ export async function processExtractionItems(
       }
 
       extractionConfig.separator = item.multipleOptions.separator || ", ";
+
+      // Add clean text option if extracting text content
+      if (extractionConfig.extractionProperty === "textContent") {
+        extractionConfig.cleanText = item.multipleOptions.cleanText;
+      }
     }
 
     try {
