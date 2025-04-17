@@ -128,6 +128,30 @@ export const description: INodeProperties[] = [
 						description: "Whether to continue with other extractions if this selector isn't found on the page",
 					},
 					{
+						displayName: "Text Options",
+						name: "textOptions",
+						type: "collection",
+						placeholder: "Add Option",
+						default: {},
+						typeOptions: {
+							multipleValues: false,
+						},
+						displayOptions: {
+							show: {
+								extractionType: ["text"],
+							},
+						},
+						options: [
+							{
+								displayName: "Clean Text",
+								name: "cleanText",
+								type: "boolean",
+								default: false,
+								description: "Whether to clean up the text by replacing multiple consecutive newlines with a single newline",
+							},
+						],
+					},
+					{
 						displayName: "Attribute Name",
 						name: "attributeName",
 						type: "string",
@@ -570,6 +594,9 @@ export async function execute(
 			selector: item.selector as string,
 			continueIfNotFound: item.continueIfNotFound as boolean | undefined,
 			attributeName: item.attributeName as string | undefined,
+			textOptions: item.textOptions as {
+				cleanText?: boolean;
+			} | undefined,
 			htmlOptions: item.htmlOptions as {
 				outputFormat?: string;
 				includeMetadata?: boolean;

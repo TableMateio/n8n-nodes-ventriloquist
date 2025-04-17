@@ -14,6 +14,9 @@ export interface IExtractItem {
   selector: string;
   continueIfNotFound?: boolean;
   attributeName?: string;
+  textOptions?: {
+    cleanText?: boolean;
+  };
   htmlOptions?: {
     outputFormat?: string;
     includeMetadata?: boolean;
@@ -223,6 +226,8 @@ export async function processExtractionItems(
       extractionConfig.includeMetadata = item.htmlOptions.includeMetadata;
     } else if (extractionType === "attribute") {
       extractionConfig.attributeName = item.attributeName;
+    } else if (extractionType === "text" && item.textOptions) {
+      extractionConfig.cleanText = item.textOptions.cleanText;
     } else if (extractionType === "table" && item.tableOptions) {
       extractionConfig.includeHeaders = item.tableOptions.includeHeaders !== false;
       extractionConfig.rowSelector = item.tableOptions.rowSelector || "tr";

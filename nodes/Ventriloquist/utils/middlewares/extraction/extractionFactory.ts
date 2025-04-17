@@ -22,6 +22,8 @@ export interface IExtractionConfig {
   separator?: string;
   // Additional properties for HTML extraction
   includeMetadata?: boolean;
+  // Additional properties for Text extraction
+  cleanText?: boolean;
 }
 
 /**
@@ -89,6 +91,13 @@ class BasicExtraction implements IExtraction {
       switch (this.config.extractionType) {
         case 'text':
           data = await this.page.$eval(this.config.selector, (el) => el.textContent?.trim() || '');
+
+          // Clean text if the option is enabled
+          if (this.config.cleanText) {
+            logger.info(`${logPrefix} Cleaning text content (replacing multiple newlines with single newline)`);
+            // Replace 2 or more consecutive newlines with a single newline
+            data = data.replace(/\n{2,}/g, '\n');
+          }
           break;
 
         case 'attribute':
