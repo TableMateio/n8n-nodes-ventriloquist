@@ -15,6 +15,7 @@ import {
 import { createErrorResponse } from "../utils/errorUtils";
 import { processExtractionItems, type IExtractItem } from "../utils/extractNodeUtils";
 import { logPageDebugInfo } from "../utils/debugUtils";
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Extract operation description
@@ -157,7 +158,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						default: "",
 						placeholder: "href, src, data-ID",
-						description: "Name of the attribute to extract from the element",
+						description: "Name of the attribute to extract (only needed when Content to Extract is set to Attribute Value)",
 						displayOptions: {
 							show: {
 								extractionType: ["attribute"],
@@ -208,6 +209,221 @@ export const description: INodeProperties[] = [
 									"Whether to include metadata about the HTML (length, structure info)",
 							},
 						],
+					},
+					{
+						displayName: "Enable AI Formatting",
+						name: "enableAiFormatting",
+						type: "boolean",
+						default: false,
+						description: "Whether to use AI to format and structure the extracted data",
+					},
+					{
+						displayName: "Extraction Format",
+						name: "extractionFormat",
+						type: "options",
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+							},
+						},
+						options: [
+							{
+								name: "Auto-detect",
+								value: "auto",
+								description: "Automatically detect the format of the extracted data",
+							},
+							{
+								name: "JSON",
+								value: "json",
+								description: "Extract data as JSON",
+							},
+							{
+								name: "Text",
+								value: "text",
+								description: "Extract data as text",
+							},
+							{
+								name: "CSV",
+								value: "csv",
+								description: "Extract data as CSV",
+							},
+							{
+								name: "Table",
+								value: "table",
+								description: "Extract data as a table",
+							},
+							{
+								name: "HTML",
+								value: "html",
+								description: "Extract data as HTML",
+							},
+						],
+						default: "json",
+						description: "Format to use for extracted data",
+					},
+					{
+						displayName: "AI Model",
+						name: "aiModel",
+						type: "options",
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+							},
+						},
+						options: [
+							{
+								name: "GPT-4o",
+								value: "gpt-4o",
+								description: "Most advanced model with broader general knowledge and improved instruction following",
+							},
+							{
+								name: "GPT-4",
+								value: "gpt-4",
+								description: "Most capable GPT-4 model for complex tasks",
+							},
+							{
+								name: "GPT-3.5 Turbo",
+								value: "gpt-3.5-turbo",
+								description: "Most capable GPT-3.5 model, optimized for chat at 1/10th the cost of GPT-4",
+							},
+						],
+						default: "gpt-4o",
+						description: "AI model to use for formatting",
+					},
+					{
+						displayName: "General Instructions",
+						name: "generalInstructions",
+						type: "string",
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+							},
+						},
+						default: "",
+						description: "Additional instructions for the AI",
+						typeOptions: {
+							rows: 4,
+						},
+					},
+					{
+						displayName: "Strategy",
+						name: "strategy",
+						type: "options",
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+							},
+						},
+						options: [
+							{
+								name: "Auto",
+								value: "auto",
+								description: "Automatically determine fields from content",
+							},
+							{
+								name: "Manual",
+								value: "manual",
+								description: "Define specific fields to extract",
+							},
+						],
+						default: "auto",
+						description: "Strategy to use for extraction",
+					},
+					{
+						displayName: "Fields",
+						name: "aiFields",
+						placeholder: "Add Field",
+						type: "fixedCollection",
+						typeOptions: {
+							multipleValues: true,
+							sortable: true,
+						},
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+								strategy: ["manual"],
+							},
+						},
+						default: { items: [{ name: "", type: "string", instructions: "" }] },
+						options: [
+							{
+								name: "items",
+								displayName: "Items",
+								values: [
+									{
+										displayName: "Name",
+										name: "name",
+										type: "string",
+										default: "",
+										description: "Name of the field to extract",
+										required: true,
+									},
+									{
+										displayName: "Type",
+										name: "type",
+										type: "options",
+										options: [
+											{
+												name: "String",
+												value: "string",
+											},
+											{
+												name: "Number",
+												value: "number",
+											},
+											{
+												name: "Boolean",
+												value: "boolean",
+											},
+											{
+												name: "Object",
+												value: "object",
+											},
+											{
+												name: "Array",
+												value: "array",
+											},
+										],
+										default: "string",
+										description: "Type of the field to extract",
+									},
+									{
+										displayName: "Instructions",
+										name: "instructions",
+										type: "string",
+										default: "",
+										description: "Instructions for the AI on how to extract this field",
+										typeOptions: {
+											rows: 2,
+										},
+									},
+								],
+							},
+						],
+					},
+					{
+						displayName: "Include Schema",
+						name: "includeSchema",
+						type: "boolean",
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+							},
+						},
+						default: false,
+						description: "Whether to include the generated schema in the output",
+					},
+					{
+						displayName: "Include Raw Data",
+						name: "includeRawData",
+						type: "boolean",
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+							},
+						},
+						default: false,
+						description: "Whether to include the raw data in the output",
 					},
 					{
 						displayName: "Table Options",
@@ -318,12 +534,7 @@ export const description: INodeProperties[] = [
 								name: "cleanText",
 								type: "boolean",
 								default: false,
-								description: "Whether to clean up the text by replacing multiple consecutive newlines with a single newline",
-								displayOptions: {
-									show: {
-										extractionProperty: ["textContent"],
-									},
-								},
+								description: "Whether to clean up the text by replacing multiple consecutive newlines with a single newline (only applies when Content to Extract is set to Text Content)",
 							},
 							{
 								displayName: "Attribute Name",
@@ -332,12 +543,7 @@ export const description: INodeProperties[] = [
 								default: "",
 								placeholder: "href, src, data-ID",
 								description:
-									"Name of the attribute to extract (required when Content to Extract is set to Attribute Value)",
-								displayOptions: {
-									show: {
-										extractionProperty: ["attribute"],
-									},
-								},
+									"Name of the attribute to extract (only needed when Content to Extract is set to Attribute Value)",
 							},
 							{
 								displayName: "Output Format",
@@ -368,12 +574,7 @@ export const description: INodeProperties[] = [
 								name: "separator",
 								type: "string",
 								default: ", ",
-								description: "Character(s) used to join elements when Output Format is set to Joined String",
-								displayOptions: {
-									show: {
-										outputFormat: ["string"],
-									},
-								},
+								description: "Character(s) used to join elements (only applies when Output Format is set to Joined String)",
 							},
 							{
 								displayName: "Output Limit",
@@ -389,12 +590,7 @@ export const description: INodeProperties[] = [
 								type: "boolean",
 								default: false,
 								description:
-									"Whether to output results as objects with a key-value structure instead of an array",
-								displayOptions: {
-									show: {
-										outputFormat: ["array"],
-									},
-								},
+									"Whether to output results as objects with a key-value structure instead of an array (only applies when Output Format is set to Array)",
 							},
 							{
 								displayName: "Object Key Name",
@@ -402,13 +598,7 @@ export const description: INodeProperties[] = [
 								type: "string",
 								default: "value",
 								description:
-									"The name of the key to use in the output objects (when Output as Objects is enabled)",
-								displayOptions: {
-									show: {
-										extractProperty: [true],
-										outputFormat: ["array"],
-									},
-								},
+									"The name of the key to use in the output objects (only applies when Output as Objects is enabled and Output Format is set to Array)",
 							},
 						],
 					},
@@ -500,6 +690,7 @@ export async function execute(
 	index: number,
 	websocketEndpoint: string,
 	workflowId: string,
+	openAiApiKey?: string,
 ): Promise<INodeExecutionData> {
 	const startTime = Date.now();
 	const items = this.getInputData();
@@ -600,40 +791,81 @@ export async function execute(
 		}
 
 		// Convert extraction items to properly typed items
-		const typedExtractionItems: IExtractItem[] = extractionItems.map((item) => ({
-			name: item.name as string,
-			extractionType: item.extractionType as string,
-			selector: item.selector as string,
-			continueIfNotFound: item.continueIfNotFound as boolean | undefined,
-			attributeName: item.attributeName as string | undefined,
-			textOptions: item.textOptions as {
-				cleanText?: boolean;
-			} | undefined,
-			htmlOptions: item.htmlOptions as {
-				outputFormat?: string;
-				includeMetadata?: boolean;
-			} | undefined,
-			tableOptions: item.tableOptions as {
-				includeHeaders?: boolean;
-				rowSelector?: string;
-				cellSelector?: string;
-				outputFormat?: string;
-			} | undefined,
-			multipleOptions: item.multipleOptions as {
-				attributeName?: string;
-				extractionProperty?: string;
-				outputLimit?: number;
-				extractProperty?: boolean;
-				propertyKey?: string;
-				separator?: string;
-				outputFormat?: string;
-				cleanText?: boolean;
-			} | undefined,
-		}));
+		const typedExtractionItems: IExtractItem[] = extractionItems.map((item) => {
+			// Create AI formatting options from parameters
+			const aiFormatting = this.getNodeParameter(
+				`aiFormatting`,
+				index,
+				{} as IDataObject
+			) as IDataObject;
+
+			const aiFormattingEnabled = aiFormatting.enabled === true;
+
+			// Get AI fields if manual strategy is selected
+			const aiFields = aiFormattingEnabled && aiFormatting.strategy === 'manual'
+				? this.getNodeParameter(`aiFields.items`, index, []) as IDataObject[]
+				: [];
+
+			const extractItem: IExtractItem = {
+				id: uuidv4(),
+				name: item.name as string,
+				extractionType: item.extractionType as string,
+				selector: item.selector as string,
+				continueIfNotFound: item.continueIfNotFound as boolean | undefined,
+				attribute: item.attributeName as string | undefined,
+				textOptions: item.textOptions as {
+					cleanText?: boolean;
+				} | undefined,
+				htmlOptions: item.htmlOptions as {
+					outputFormat?: string;
+					includeMetadata?: boolean;
+				} | undefined,
+				tableOptions: item.tableOptions as {
+					includeHeaders?: boolean;
+					rowSelector?: string;
+					cellSelector?: string;
+					outputFormat?: string;
+				} | undefined,
+				multipleOptions: item.multipleOptions as {
+					attributeName?: string;
+					extractionProperty?: string;
+					outputLimit?: number;
+					extractProperty?: boolean;
+					propertyKey?: string;
+					separator?: string;
+					outputFormat?: string;
+					cleanText?: boolean;
+				} | undefined,
+				// Add AI formatting options from the AI formatting section
+				aiFormatting: aiFormattingEnabled ? {
+					enabled: true,
+					extractionFormat: aiFormatting.extractionFormat as string,
+					aiModel: aiFormatting.aiModel as string,
+					generalInstructions: aiFormatting.generalInstructions as string,
+					strategy: aiFormatting.strategy as string,
+					includeSchema: aiFormatting.includeSchema === true,
+					includeRawData: aiFormatting.includeRawData === true,
+				} : undefined,
+				// Add AI fields if using manual strategy
+				aiFields: aiFormattingEnabled && aiFormatting.strategy === 'manual' ?
+					aiFields.map((field) => ({
+						name: field.name as string,
+						description: field.instructions as string,
+						type: field.type as string,
+						required: field.format === 'required'
+					})) : undefined,
+				// Add OpenAI API key
+				openAiApiKey: openAiApiKey,
+				// Add page and session information
+				puppeteerPage: page,
+				puppeteerSessionId: sessionId,
+			};
+
+			return extractItem;
+		});
 
 		// Using our new utility to process all extraction items
 		const extractionData = await processExtractionItems(
-			page,
 			typedExtractionItems,
 			{
 				waitForSelector,
@@ -641,18 +873,21 @@ export async function execute(
 				useHumanDelays,
 				continueOnFail,
 			},
-			{
-				logger: this.logger,
-				nodeName,
-				nodeId,
-				sessionId,
-				index,
-			}
+			this.logger,
+			openAiApiKey
 		);
 
 		// Store all extraction results
 		const extractionResults: IDataObject = {
 			extractedData: extractionData,
+			// Add a more easily accessible format for the actual extracted data values
+			data: extractionData.reduce((result: IDataObject, item: IExtractItem) => {
+				// Only include items that have extracted data
+				if (item.extractedData !== undefined) {
+					result[item.name] = item.extractedData;
+				}
+				return result;
+			}, {}),
 		};
 
 		// Log timing information

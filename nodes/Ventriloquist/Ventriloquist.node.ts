@@ -751,6 +751,34 @@ export class Ventriloquist implements INodeType {
 			throw new Error(`No credentials provided for ${browserService}`);
 		}
 
+		// After getting browser credentials
+		// Get OpenAI credentials if needed for smart extraction
+		let openAiApiKey = "";
+		const operation = this.getNodeParameter('operation', 0) as string;
+
+		// Only get OpenAI credentials if we're doing an extract operation
+		if (operation === 'extract') {
+			// Get the extraction items to check if any use smart extraction
+			const extractionItems = this.getNodeParameter('extractionItems.items', 0, []) as IDataObject[];
+			const hasSmartExtraction = extractionItems.some(item => item.extractionType === 'smart');
+
+			if (hasSmartExtraction) {
+				try {
+					const openAiCredentials = await this.getCredentials('openAIApi');
+
+					if (openAiCredentials && openAiCredentials.apiKey) {
+						openAiApiKey = openAiCredentials.apiKey as string;
+						this.logger.debug('OpenAI credentials loaded successfully');
+					} else {
+						this.logger.warn('Smart extraction is being used, but OpenAI API key was not found in credentials');
+					}
+				} catch (error) {
+					// Don't fail the node if credentials aren't found - we'll handle this in the extract operation
+					this.logger.warn(`Failed to get OpenAI credentials: ${(error as Error).message}`);
+				}
+			}
+		}
+
 		// Process all items
 		for (let i = 0; i < items.length; i++) {
 			const operation = this.getNodeParameter('operation', i) as string;
@@ -911,6 +939,7 @@ export class Ventriloquist implements INodeType {
 						i,
 						websocketEndpoint,
 						workflowId,
+						openAiApiKey // Pass the OpenAI API key to the extract operation
 					);
 
 					// Add execution duration to the result

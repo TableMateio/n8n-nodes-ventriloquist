@@ -1,6 +1,10 @@
 import type { Logger as ILogger } from 'n8n-workflow';
 import type { Page } from 'puppeteer-core';
 import type { IMiddleware, IMiddlewareContext } from '../middleware';
+import { extractSmartContent, type ISmartExtractionOptions } from '../../smartExtractionUtils';
+import { formatOperationLog } from '../../resultUtils';
+import { IExtractItem } from '../../extractNodeUtils';
+import { processWithAI, IAIFormattingOptions } from '../../smartExtractionUtils';
 
 /**
  * Extraction configuration interface
@@ -24,6 +28,34 @@ export interface IExtractionConfig {
   includeMetadata?: boolean;
   // Additional properties for Text extraction
   cleanText?: boolean;
+  // Additional properties for Smart extraction
+  smartOptions?: {
+    extractionFormat?: string;
+    enableAiFormatter?: boolean;
+    aiModel?: string;
+    generalInstructions?: string;
+    strategy?: string;
+    includeSchema?: boolean;
+    includeRawData?: boolean;
+  };
+  // Fields for manual strategy in smart extraction
+  fields?: {
+    items?: Array<{
+      name: string;
+      type: string;
+      instructions: string;
+      format: string;
+      formatString?: string;
+      examples?: {
+        items?: Array<{
+          input: string;
+          output: string;
+        }>;
+      };
+    }>;
+  };
+  // API key for OpenAI access
+  openaiApiKey?: string;
 }
 
 /**
@@ -32,6 +64,7 @@ export interface IExtractionConfig {
 export interface IExtractionResult {
   success: boolean;
   data?: any;
+  schema?: any;
   error?: {
     message: string;
     details?: any;
@@ -48,7 +81,7 @@ export interface IExtraction {
 /**
  * Basic extraction implementation
  */
-class BasicExtraction implements IExtraction {
+export class BasicExtraction implements IExtraction {
   private page: Page;
   private config: IExtractionConfig;
   private context: IMiddlewareContext;
@@ -124,6 +157,58 @@ class BasicExtraction implements IExtraction {
 
         case 'outerHtml':
           data = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+          break;
+
+        case 'smart':
+          // Handle smart extraction using the new utility
+          logger.info(`${logPrefix} Using smart extraction for selector: ${this.config.selector}`);
+
+          if (!this.config.smartOptions) {
+            throw new Error('Smart options are required for smart extraction');
+          }
+
+          // Check if OpenAI API key is provided
+          if (!this.config.openaiApiKey) {
+            throw new Error('OpenAI API key is required for smart extraction');
+          }
+
+          try {
+            // Create properly typed smart options
+            const smartOptions: ISmartExtractionOptions = {
+              enabled: true,
+              extractionFormat: (this.config.smartOptions.extractionFormat as 'json' | 'csv' | 'text' | 'auto') || 'json',
+              aiModel: this.config.smartOptions.aiModel || 'gpt-4',
+              generalInstructions: this.config.smartOptions.generalInstructions || '',
+              strategy: (this.config.smartOptions.strategy as 'auto' | 'manual') || 'auto',
+              includeSchema: this.config.smartOptions.includeSchema === true,
+              includeRawData: this.config.smartOptions.includeRawData === true
+            };
+
+            // Create a context object with the required properties
+            const extractContext: IMiddlewareContext = {
+              logger: this.context.logger,
+              nodeName: this.context.nodeName,
+              nodeId: this.context.nodeId,
+              index: this.context.index || 0, // Provide a default value for index
+              sessionId: this.context.sessionId || 'unknown' // Add the sessionId
+            };
+
+            const smartResult = await extractSmartContent(
+              this.page,
+              this.config.selector,
+              smartOptions,
+              this.config.fields?.items,
+              this.config.openaiApiKey,
+              extractContext
+            );
+
+            // Set the data from the smart extraction result
+            data = smartResult;
+            logger.info(`${logPrefix} Smart extraction successful`);
+          } catch (error) {
+            logger.error(`${logPrefix} Smart extraction failed: ${(error as Error).message}`);
+            throw error;
+          }
           break;
 
         case 'table':
@@ -287,6 +372,51 @@ class BasicExtraction implements IExtraction {
       }
 
       logger.debug(`${logPrefix} Extraction successful:`, typeof data === 'string' ? data.substring(0, 50) + '...' : data);
+
+      // Apply AI formatting if enabled
+      if (this.config.smartOptions?.enableAiFormatter && this.config.openaiApiKey) {
+        // Prepare AI formatting options
+        const aiFormattingOptions: IAIFormattingOptions = {
+          enabled: true,
+          extractionFormat: this.config.smartOptions.extractionFormat || 'json',
+          aiModel: this.config.smartOptions.aiModel || 'gpt-4',
+          generalInstructions: this.config.smartOptions.generalInstructions || '',
+          strategy: this.config.smartOptions.strategy || 'auto',
+          includeSchema: this.config.smartOptions.includeSchema === true,
+          includeRawData: this.config.smartOptions.includeRawData === true
+        };
+
+        // Process with AI
+        const aiResult = await processWithAI(
+          data,
+          aiFormattingOptions,
+          this.config.fields?.items || [],
+          this.config.openaiApiKey,
+          {
+            logger,
+            nodeName,
+            nodeId: this.context.nodeId,
+            index: this.context.index || 0
+          }
+        );
+
+        // Check if AI processing was successful
+        if (aiResult.success) {
+          logger.info(`${logPrefix} AI formatting successful`);
+          return {
+            success: true,
+            data: aiResult.data,
+            schema: aiResult.schema
+          };
+        } else {
+          // Log AI processing error but return original content
+          logger.warn(`${logPrefix} AI formatting failed: ${aiResult.error}. Returning original extracted content.`);
+          return {
+            success: true,
+            data
+          };
+        }
+      }
 
       return {
         success: true,

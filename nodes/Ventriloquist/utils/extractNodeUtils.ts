@@ -4,16 +4,56 @@ import { createExtraction, type IExtractionConfig } from './middlewares/extracti
 import { formatExtractedDataForLog } from './extractionUtils';
 import { formatOperationLog } from './resultUtils';
 import { getHumanDelay } from './extractionUtils';
+import { detectContentType, processWithAI } from './smartExtractionUtils';
+import { Logger } from 'n8n-workflow';
+import { v4 as uuidv4 } from 'uuid';
+import { IMiddlewareContext } from './middlewares/middleware';
+
+/**
+ * Interface for extraction node options
+ */
+export interface IExtractionNodeOptions {
+  nodeName?: string;
+  nodeId?: string;
+  enableAiFormatting?: boolean;
+  extractionFormat?: string;
+  aiModel?: string;
+  generalInstructions?: string;
+  strategy?: string;
+  includeSchema?: boolean;
+  includeRawData?: boolean;
+  aiFields?: {
+    items?: Array<{
+      name: string;
+      type: string;
+      instructions: string;
+    }>;
+  };
+  waitForSelector?: boolean;
+  timeout?: number;
+  useHumanDelays?: boolean;
+  continueOnFail?: boolean;
+}
 
 /**
  * Interface for extract item configuration
  */
 export interface IExtractItem {
+  id: string;
   name: string;
   extractionType: string;
-  selector: string;
+  extractedData?: any;
+  selector?: string;
+  attribute?: string;
+  regex?: string;
+  cssPath?: string;
+  jsonPath?: string;
+  xpath?: string;
+  puppeteer?: any;
+  puppeteerSessionId?: string;
+  puppeteerPage?: any;
+  openAiApiKey?: string;
   continueIfNotFound?: boolean;
-  attributeName?: string;
   textOptions?: {
     cleanText?: boolean;
   };
@@ -37,6 +77,21 @@ export interface IExtractItem {
     outputFormat?: string;
     cleanText?: boolean;
   };
+  aiFormatting?: {
+    enabled: boolean;
+    extractionFormat?: string;
+    aiModel?: string;
+    generalInstructions?: string;
+    strategy?: string;
+    includeSchema?: boolean;
+    includeRawData?: boolean;
+  };
+  aiFields?: Array<{
+    name: string;
+    description?: string;
+    type?: string;
+    required?: boolean;
+  }>;
 }
 
 /**
@@ -53,264 +108,228 @@ export interface IExtractConfig {
  * Process all extraction items using our middleware architecture
  */
 export async function processExtractionItems(
-  page: puppeteer.Page,
   extractionItems: IExtractItem[],
-  config: IExtractConfig,
-  context: {
-    logger: ILogger;
-    nodeName: string;
-    nodeId: string;
-    sessionId: string;
-    index: number;
-  }
-): Promise<{ [key: string]: any }> {
-  const { logger, nodeName, nodeId, index } = context;
-  const { waitForSelector, timeout, useHumanDelays, continueOnFail } = config;
+  extractionNodeOptions: IExtractionNodeOptions,
+  logger: Logger,
+  openAiApiKey?: string
+): Promise<IExtractItem[]> {
+  const nodeName = extractionNodeOptions.nodeName || 'Ventriloquist';
+  const nodeId = extractionNodeOptions.nodeId || 'unknown';
+  logger.debug(formatOperationLog('extraction', nodeName, nodeId, 0, `Starting extraction process with ${extractionItems.length} items`));
 
-  // Log the start of extraction
-  logger.info(
-    formatOperationLog(
-      "Extract",
-      nodeName,
-      nodeId,
-      index,
-      `Starting extraction operation with ${extractionItems.length} item(s)`
-    )
-  );
-
-  // Add a human-like delay if enabled
-  if (useHumanDelays) {
-    const delay = getHumanDelay();
-    logger.info(
-      formatOperationLog(
-        "Extract",
-        nodeName,
-        nodeId,
-        index,
-        `Adding human-like delay: ${delay}ms`
-      )
-    );
-    await new Promise((resolve) => setTimeout(resolve, delay));
+  // Return early if there are no extraction items
+  if (!extractionItems || extractionItems.length === 0) {
+    logger.debug(formatOperationLog('extraction', nodeName, nodeId, 0, 'No extraction items to process'));
+    return [];
   }
 
   // Process each extraction item
-  const extractionData: { [key: string]: any } = {};
+  const typedExtractionItems: IExtractItem[] = [];
 
   for (let i = 0; i < extractionItems.length; i++) {
-    const item = extractionItems[i];
-    const itemName = item.name;
-    const extractionType = item.extractionType;
-    const selector = item.selector;
-
-    logger.info(
+    const extractionItem = extractionItems[i];
+    logger.debug(
       formatOperationLog(
-        "Extract",
+        'extraction',
         nodeName,
         nodeId,
-        index,
-        `Processing extraction item ${i+1}/${extractionItems.length}: ${itemName} (${extractionType}) with selector: ${selector}`
+        i,
+        `Processing extraction item [${extractionItem.name}] with type [${extractionItem.extractionType}]`
       )
     );
 
-    // Wait for the selector if needed
-    if (waitForSelector) {
-      logger.info(
-        formatOperationLog(
-          "Extract",
-          nodeName,
-          nodeId,
-          index,
-          `Waiting for selector: ${selector} (timeout: ${timeout}ms)`
-        )
-      );
-
-      // Add diagnostic check - see if the selector exists immediately
-      try {
-        const selectorCount = await page.evaluate((sel) => {
-          return document.querySelectorAll(sel).length;
-        }, selector);
-
-        logger.info(
-          formatOperationLog(
-            "Extract",
-            nodeName,
-            nodeId,
-            index,
-            `Quick check: Found ${selectorCount} elements matching selector immediately`
-          )
-        );
-
-        // If we found elements, log the page URL to help with debugging
-        if (selectorCount === 0) {
-          const url = await page.url();
-          logger.info(
-            formatOperationLog(
-              "Extract",
-              nodeName,
-              nodeId,
-              index,
-              `Current page URL: ${url}`
-            )
-          );
-
-          // Check if the page has frames which might contain the element
-          const frames = await page.frames();
-          if (frames.length > 1) {
-            logger.info(
-              formatOperationLog(
-                "Extract",
-                nodeName,
-                nodeId,
-                index,
-                `Page has ${frames.length} frames. Element might be in a frame.`
-              )
-            );
-          }
-        }
-      } catch (evalError) {
-        logger.warn(
-          formatOperationLog(
-            "Extract",
-            nodeName,
-            nodeId,
-            index,
-            `Error during selector check: ${(evalError as Error).message}`
-          )
-        );
-      }
-
-      try {
-        await page.waitForSelector(selector, { timeout });
-      } catch (error) {
-        const errorMessage = `Selector timeout for ${itemName}: ${selector} after ${timeout}ms`;
-        logger.error(
-          formatOperationLog(
-            "Extract",
-            nodeName,
-            nodeId,
-            index,
-            errorMessage
-          )
-        );
-
-        // Check if we should continue with other extractions
-        // Item-level setting takes precedence over global setting
-        if (item.continueIfNotFound === true || continueOnFail) {
-          logger.info(
-            formatOperationLog(
-              "Extract",
-              nodeName,
-              nodeId,
-              index,
-              `Continuing with other extractions (${item.continueIfNotFound ? 'selector-level setting' : 'global setting'})`
-            )
-          );
-          extractionData[itemName] = { error: `Selector not found: ${selector}` };
-          continue;
-        } else {
-          throw error;
-        }
-      }
-    }
-
-    // Create extraction config based on extraction type
-    const extractionConfig: IExtractionConfig = {
-      extractionType,
-      selector,
-      waitForSelector: false, // We already handled this above
-      selectorTimeout: timeout,
+    // Create extraction configuration based on the extraction type
+    let extractionConfig: IExtractionConfig = {
+      extractionType: extractionItem.extractionType,
+      selector: extractionItem.selector || '',
+      attributeName: extractionItem.attribute,
+      waitForSelector: extractionNodeOptions.waitForSelector,
+      selectorTimeout: extractionNodeOptions.timeout,
+      cleanText: extractionItem.textOptions?.cleanText,
     };
 
-    // Add extraction-specific parameters based on type
-    if (extractionType === "html" && item.htmlOptions) {
-      extractionConfig.outputFormat = item.htmlOptions.outputFormat || "html";
-      extractionConfig.includeMetadata = item.htmlOptions.includeMetadata;
-    } else if (extractionType === "attribute") {
-      extractionConfig.attributeName = item.attributeName;
-    } else if (extractionType === "text" && item.textOptions) {
-      extractionConfig.cleanText = item.textOptions.cleanText;
-    } else if (extractionType === "table" && item.tableOptions) {
-      extractionConfig.includeHeaders = item.tableOptions.includeHeaders !== false;
-      extractionConfig.rowSelector = item.tableOptions.rowSelector || "tr";
-      extractionConfig.cellSelector = item.tableOptions.cellSelector || "td, th";
-      extractionConfig.outputFormat = item.tableOptions.outputFormat || "json";
-    } else if (extractionType === "multiple" && item.multipleOptions) {
-      extractionConfig.attributeName = item.multipleOptions.attributeName || "";
-      extractionConfig.extractionProperty = item.multipleOptions.extractionProperty || "textContent";
-      extractionConfig.limit = item.multipleOptions.outputLimit || 0;
-      extractionConfig.outputFormat = item.multipleOptions.outputFormat || "array";
+    // Handle AI formatting settings if enabled
+    if (extractionNodeOptions.enableAiFormatting) {
+      extractionItem.aiFormatting = {
+        enabled: true,
+        extractionFormat: extractionNodeOptions.extractionFormat || 'json',
+        aiModel: extractionNodeOptions.aiModel || 'gpt-4',
+        generalInstructions: extractionNodeOptions.generalInstructions || '',
+        strategy: extractionNodeOptions.strategy || 'auto',
+        includeSchema: extractionNodeOptions.includeSchema === true,
+        includeRawData: extractionNodeOptions.includeRawData === true
+      };
 
-      // Only use object format if array output is selected and extractProperty is true
-      if (extractionConfig.outputFormat === "array" && item.multipleOptions.extractProperty === true) {
-        extractionConfig.outputFormat = "object";
+      // Add AI fields if provided
+      if (extractionNodeOptions.aiFields && extractionNodeOptions.aiFields.items) {
+        extractionItem.aiFields = extractionNodeOptions.aiFields.items;
       }
 
-      extractionConfig.separator = item.multipleOptions.separator || ", ";
+      // Configure the smart extraction options
+      extractionConfig.smartOptions = {
+        extractionFormat: extractionItem.aiFormatting.extractionFormat,
+        enableAiFormatter: true,
+        aiModel: extractionItem.aiFormatting.aiModel,
+        generalInstructions: extractionItem.aiFormatting.generalInstructions,
+        strategy: extractionItem.aiFormatting.strategy,
+        includeSchema: extractionItem.aiFormatting.includeSchema,
+        includeRawData: extractionItem.aiFormatting.includeRawData
+      };
 
-      // Add clean text option if extracting text content
-      if (extractionConfig.extractionProperty === "textContent") {
-        extractionConfig.cleanText = item.multipleOptions.cleanText;
+      // Add fields for manual strategy
+      if (extractionItem.aiFields && extractionItem.aiFormatting.strategy === 'manual') {
+        extractionConfig.fields = {
+          items: extractionItem.aiFields.map(field => ({
+            name: field.name,
+            type: field.type || 'string',
+            instructions: field.description || '',
+            format: 'default'
+          }))
+        };
       }
+
+      // Auto-detect content type if set to 'auto'
+      if (extractionItem.aiFormatting.extractionFormat === 'auto' && extractionItem.extractedData) {
+        const detectedType = detectContentType(extractionItem.extractedData);
+        logger.debug(
+          formatOperationLog(
+            'aiFormatting',
+            nodeName,
+            nodeId,
+            i,
+            `Auto-detected content type: ${detectedType}`
+          )
+        );
+        extractionItem.aiFormatting.extractionFormat = detectedType;
+      }
+
+      // Set OpenAI API key
+      extractionItem.openAiApiKey = openAiApiKey;
+      extractionConfig.openaiApiKey = openAiApiKey;
     }
 
-    try {
-      // Create and execute extraction using our factory
-      const extraction = createExtraction(page, extractionConfig, context);
-      const result = await extraction.execute();
+    // Add specific options for different extraction types
+    if (extractionItem.extractionType === 'table' && extractionItem.tableOptions) {
+      extractionConfig = {
+        ...extractionConfig,
+        includeHeaders: extractionItem.tableOptions.includeHeaders,
+        rowSelector: extractionItem.tableOptions.rowSelector,
+        cellSelector: extractionItem.tableOptions.cellSelector,
+        outputFormat: extractionItem.tableOptions.outputFormat
+      };
+    } else if (extractionItem.extractionType === 'multiple' && extractionItem.multipleOptions) {
+      extractionConfig = {
+        ...extractionConfig,
+        extractionProperty: extractionItem.multipleOptions.extractionProperty,
+        limit: extractionItem.multipleOptions.outputLimit,
+        separator: extractionItem.multipleOptions.separator,
+        outputFormat: extractionItem.multipleOptions.outputFormat,
+        cleanText: extractionItem.multipleOptions.cleanText
+      };
+    } else if (extractionItem.extractionType === 'html' && extractionItem.htmlOptions) {
+      extractionConfig = {
+        ...extractionConfig,
+        outputFormat: extractionItem.htmlOptions.outputFormat,
+        includeMetadata: extractionItem.htmlOptions.includeMetadata
+      };
+    }
 
-      if (result.success) {
-        const extractedData = result.data;
-
-        // Format the data for logging
-        const logSafeData = formatExtractedDataForLog(extractedData, extractionType);
-
-        logger.info(
-          formatOperationLog(
-            "Extract",
-            nodeName,
-            nodeId,
-            index,
-            `Extraction result for ${itemName} (${extractionType}): ${logSafeData}`
-          )
-        );
-
-        // Store result under the item name
-        extractionData[itemName] = extractedData;
-      } else {
-        logger.error(
-          formatOperationLog(
-            "Extract",
-            nodeName,
-            nodeId,
-            index,
-            `Extraction failed for ${itemName}: ${result.error?.message || "Unknown error"}`
-          )
-        );
-
-        if (continueOnFail) {
-          extractionData[itemName] = { error: result.error?.message || "Extraction failed" };
-        } else {
-          throw result.error || new Error(`Extraction failed for item "${itemName}"`);
-        }
-      }
-    } catch (error) {
-      logger.error(
-        formatOperationLog(
-          "Extract",
+    // Perform the extraction if there's a puppeteer page available
+    if (extractionItem.puppeteerPage) {
+      try {
+        // Create the extraction middleware context
+        const context: IMiddlewareContext = {
+          logger,
           nodeName,
           nodeId,
-          index,
-          `Error processing extraction item ${itemName}: ${(error as Error).message}`
+          sessionId: extractionItem.puppeteerSessionId || 'unknown',
+          index: i
+        };
+
+        // Create and execute the extraction
+        const extraction = createExtraction(extractionItem.puppeteerPage, extractionConfig, context);
+        const result = await extraction.execute();
+
+        if (result.success) {
+          // Store the extracted data in the extraction item
+          extractionItem.extractedData = result.data;
+
+          logger.debug(
+            formatOperationLog(
+              'extraction',
+              nodeName,
+              nodeId,
+              i,
+              `Extraction successful for [${extractionItem.name}]`
+            )
+          );
+        } else {
+          // Log extraction failure
+          logger.warn(
+            formatOperationLog(
+              'extraction',
+              nodeName,
+              nodeId,
+              i,
+              `Extraction failed for [${extractionItem.name}]: ${result.error?.message}`
+            )
+          );
+
+          // Store error message if extraction failed
+          extractionItem.extractedData = { error: result.error?.message };
+        }
+      } catch (error) {
+        logger.error(
+          formatOperationLog(
+            'extraction',
+            nodeName,
+            nodeId,
+            i,
+            `Error during extraction for [${extractionItem.name}]: ${(error as Error).message}`
+          )
+        );
+
+        // Store error message if exception occurred
+        extractionItem.extractedData = { error: (error as Error).message };
+      }
+    } else {
+      logger.warn(
+        formatOperationLog(
+          'extraction',
+          nodeName,
+          nodeId,
+          i,
+          `No puppeteer page available for [${extractionItem.name}]`
         )
       );
 
-      if (continueOnFail) {
-        extractionData[itemName] = { error: (error as Error).message };
-      } else {
-        throw error;
-      }
+      // Store error message if no puppeteer page
+      extractionItem.extractedData = { error: 'No puppeteer page available' };
     }
+
+    // Add extraction item to the list of typed extraction items
+    typedExtractionItems.push(extractionItem);
+
+    logger.debug(
+      formatOperationLog(
+        'extraction',
+        nodeName,
+        nodeId,
+        i,
+        `Successfully processed extraction item [${extractionItem.name}]`
+      )
+    );
   }
 
-  return extractionData;
+  logger.debug(
+    formatOperationLog(
+      'extraction',
+      nodeName,
+      nodeId,
+      0,
+      `Completed extraction process for ${typedExtractionItems.length} items`
+    )
+  );
+
+  return typedExtractionItems;
 }
