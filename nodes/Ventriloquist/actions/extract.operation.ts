@@ -999,7 +999,7 @@ export async function execute(
 			additionalData: {
 				...extractionResults,
 			},
-			inputData: items[index].json,
+			// Do not include input data to avoid exposing previous node data
 		});
 
 		return { json: successResponse };
@@ -1016,9 +1016,7 @@ export async function execute(
 			logger: this.logger,
 			takeScreenshot: takeScreenshotOption,
 			startTime,
-			additionalData: {
-				...items[index].json,
-			},
+			// Do not include input data to avoid exposing previous node data
 		});
 
 		if (!continueOnFail) {
