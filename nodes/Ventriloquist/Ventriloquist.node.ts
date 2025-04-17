@@ -769,9 +769,14 @@ export class Ventriloquist implements INodeType {
 		if (operation === 'extract') {
 			// Get the extraction items to check if any use smart extraction
 			const extractionItems = this.getNodeParameter('extractionItems.items', 0, []) as IDataObject[];
-			const hasSmartExtraction = extractionItems.some(item => item.extractionType === 'smart');
 
-			if (hasSmartExtraction) {
+			// Look for both smart extraction type AND AI formatting being enabled
+			const needsOpenAI = extractionItems.some(item =>
+				item.extractionType === 'smart' ||
+				item.enableAiFormatting === true
+			);
+
+			if (needsOpenAI) {
 				try {
 					const openAiCredentials = await this.getCredentials('openAIApi');
 
@@ -779,7 +784,7 @@ export class Ventriloquist implements INodeType {
 						openAiApiKey = openAiCredentials.apiKey as string;
 						this.logger.debug('OpenAI credentials loaded successfully');
 					} else {
-						this.logger.warn('Smart extraction is being used, but OpenAI API key was not found in credentials');
+						this.logger.warn('Smart extraction or AI formatting is being used, but OpenAI API key was not found in credentials');
 					}
 				} catch (error) {
 					// Don't fail the node if credentials aren't found - we'll handle this in the extract operation
