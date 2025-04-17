@@ -35,6 +35,19 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: "Debug Mode",
+		name: "debugMode",
+		type: "boolean",
+		default: false,
+		description:
+			"Whether to include technical details in the output. When disabled, only extracted data and essential fields are returned.",
+		displayOptions: {
+			show: {
+				operation: ["extract"],
+			},
+		},
+	},
+	{
 		displayName: "Extractions",
 		name: "extractionItems",
 		type: "fixedCollection",
@@ -721,6 +734,7 @@ export async function execute(
 	const continueOnFail = this.getNodeParameter("continueOnFail", index, true) as boolean;
 	const debugPageContent = this.getNodeParameter("debugPageContent", index, false) as boolean;
 	const explicitSessionId = this.getNodeParameter("explicitSessionId", index, "") as string;
+	const debugMode = this.getNodeParameter("debugMode", index, false) as boolean;
 
 	this.logger.info(
 		formatOperationLog(
@@ -931,6 +945,7 @@ export async function execute(
 				nodeId,
 				// Add AI formatting options - these get checked for each item individually
 				enableAiFormatting: true, // We handle enableAiFormatting per item in the typedExtractionItems array
+				debugMode, // Pass the debug mode option to control output format
 			},
 			this.logger,
 			openAiApiKey

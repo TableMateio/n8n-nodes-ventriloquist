@@ -33,6 +33,7 @@ export interface IExtractionNodeOptions {
   timeout?: number;
   useHumanDelays?: boolean;
   continueOnFail?: boolean;
+  debugMode?: boolean;
 }
 
 /**
@@ -362,6 +363,31 @@ export async function processExtractionItems(
       delete item.aiFields;
     }
   });
+
+  // If debug mode is not enabled, remove technical details from the output
+  if (!extractionNodeOptions.debugMode) {
+    typedExtractionItems.forEach(item => {
+      // Keep essential data but remove technical details
+      const extractedData = item.extractedData;
+      const schema = item.schema;
+      const name = item.name;
+
+      // Create a clean version with only essential properties
+      Object.keys(item).forEach(key => {
+        if (!['name', 'extractedData', 'schema'].includes(key)) {
+          // Use type assertion to fix the TypeScript error
+          delete (item as {[key: string]: any})[key];
+        }
+      });
+
+      // Restore essential data
+      item.name = name;
+      item.extractedData = extractedData;
+      if (schema) {
+        item.schema = schema;
+      }
+    });
+  }
 
   logger.debug(
     formatOperationLog(
