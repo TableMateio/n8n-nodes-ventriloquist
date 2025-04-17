@@ -22,6 +22,9 @@ export interface IExtractionNodeOptions {
   strategy?: string;
   includeSchema?: boolean;
   includeRawData?: boolean;
+  includeReferenceContext?: boolean;
+  referenceSelector?: string;
+  referenceName?: string;
   aiFields?: {
     items?: Array<{
       name: string;
@@ -89,6 +92,10 @@ export interface IExtractItem {
     strategy?: string;
     includeSchema?: boolean;
     includeRawData?: boolean;
+    includeReferenceContext?: boolean;
+    referenceSelector?: string;
+    referenceName?: string;
+    referenceContent?: string; // Will store the extracted reference content
   };
   aiFields?: Array<{
     name: string;
@@ -172,7 +179,10 @@ export async function processExtractionItems(
         generalInstructions: extractionItem.aiFormatting.generalInstructions || extractionNodeOptions.generalInstructions || '',
         strategy: extractionItem.aiFormatting.strategy || extractionNodeOptions.strategy || 'auto',
         includeSchema: extractionItem.aiFormatting.includeSchema === true || extractionNodeOptions.includeSchema === true,
-        includeRawData: extractionItem.aiFormatting.includeRawData === true || extractionNodeOptions.includeRawData === true
+        includeRawData: extractionItem.aiFormatting.includeRawData === true || extractionNodeOptions.includeRawData === true,
+        includeReferenceContext: extractionItem.aiFormatting.includeReferenceContext === true || extractionNodeOptions.includeReferenceContext === true,
+        referenceSelector: extractionItem.aiFormatting.referenceSelector || extractionNodeOptions.referenceSelector || '',
+        referenceName: extractionItem.aiFormatting.referenceName || extractionNodeOptions.referenceName || 'referenceContext'
       };
 
       // Add AI fields if provided
@@ -188,7 +198,10 @@ export async function processExtractionItems(
         generalInstructions: extractionItem.aiFormatting.generalInstructions,
         strategy: extractionItem.aiFormatting.strategy,
         includeSchema: extractionItem.aiFormatting.includeSchema,
-        includeRawData: extractionItem.aiFormatting.includeRawData
+        includeRawData: extractionItem.aiFormatting.includeRawData,
+        includeReferenceContext: extractionItem.aiFormatting.includeReferenceContext,
+        referenceSelector: extractionItem.aiFormatting.referenceSelector,
+        referenceName: extractionItem.aiFormatting.referenceName
       };
 
       // Add fields for manual strategy
@@ -271,6 +284,75 @@ export async function processExtractionItems(
           sessionId: extractionItem.puppeteerSessionId || 'unknown',
           index: i
         };
+
+        // Extract reference context if enabled
+        if (extractionItem.aiFormatting?.enabled &&
+            extractionItem.aiFormatting?.includeReferenceContext &&
+            extractionItem.aiFormatting?.referenceSelector) {
+          try {
+            logger.debug(
+              formatOperationLog(
+                'aiFormatting',
+                nodeName,
+                nodeId,
+                i,
+                `Extracting reference context using selector: ${extractionItem.aiFormatting.referenceSelector}`
+              )
+            );
+
+            // Extract the reference content as text
+            const referenceContent = await extractionItem.puppeteerPage.evaluate(
+              (selector: string) => {
+                const element = document.querySelector(selector);
+                if (element) {
+                  return element.textContent || '';
+                }
+                return '';
+              },
+              extractionItem.aiFormatting.referenceSelector
+            );
+
+            // Store the reference content in the AI formatting options
+            if (referenceContent) {
+              extractionItem.aiFormatting.referenceContent = referenceContent.trim();
+
+              // Add reference content to extraction config
+              if (extractionConfig.smartOptions) {
+                extractionConfig.smartOptions.referenceContent = referenceContent.trim();
+              }
+
+              logger.debug(
+                formatOperationLog(
+                  'aiFormatting',
+                  nodeName,
+                  nodeId,
+                  i,
+                  `Reference context extracted successfully (${referenceContent.length} chars)`
+                )
+              );
+            } else {
+              logger.warn(
+                formatOperationLog(
+                  'aiFormatting',
+                  nodeName,
+                  nodeId,
+                  i,
+                  `No reference context found for selector: ${extractionItem.aiFormatting.referenceSelector}`
+                )
+              );
+            }
+          } catch (error) {
+            logger.warn(
+              formatOperationLog(
+                'aiFormatting',
+                nodeName,
+                nodeId,
+                i,
+                `Error extracting reference context: ${(error as Error).message}`
+              )
+            );
+          }
+        }
 
         // Create and execute the extraction
         const extraction = createExtraction(extractionItem.puppeteerPage, extractionConfig, context);

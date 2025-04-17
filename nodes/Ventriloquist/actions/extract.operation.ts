@@ -319,6 +319,48 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
+						displayName: "Include Reference Context",
+						name: "includeReferenceContext",
+						type: "boolean",
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+							},
+						},
+						default: false,
+						description: "Whether to include additional context from another element on the page",
+					},
+					{
+						displayName: "Reference Selector",
+						name: "referenceSelector",
+						type: "string",
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+								includeReferenceContext: [true],
+							},
+						},
+						default: "",
+						placeholder: "#header_info, .context-element",
+						description: "CSS selector for the element containing reference context",
+						required: true,
+					},
+					{
+						displayName: "Reference Name",
+						name: "referenceName",
+						type: "string",
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+								includeReferenceContext: [true],
+							},
+						},
+						default: "referenceContext",
+						placeholder: "header_info, pageContext",
+						description: "Name to use for the reference context in the AI prompt",
+						required: true,
+					},
+					{
 						displayName: "Strategy",
 						name: "strategy",
 						type: "options",
@@ -827,6 +869,9 @@ export async function execute(
 				strategy: string;
 				includeSchema: boolean;
 				includeRawData: boolean;
+				includeReferenceContext: boolean;
+				referenceSelector: string;
+				referenceName: string;
 			} | undefined = undefined;
 
 			if (enableAiFormatting) {
@@ -867,6 +912,30 @@ export async function execute(
 					false
 				) as boolean;
 
+				// Handle reference context parameters
+				const includeReferenceContext = this.getNodeParameter(
+					`extractionItems.items[${extractionItems.indexOf(item)}].includeReferenceContext`,
+					index,
+					false
+				) as boolean;
+
+				let referenceSelector = '';
+				let referenceName = 'referenceContext';
+
+				if (includeReferenceContext) {
+					referenceSelector = this.getNodeParameter(
+						`extractionItems.items[${extractionItems.indexOf(item)}].referenceSelector`,
+						index,
+						''
+					) as string;
+
+					referenceName = this.getNodeParameter(
+						`extractionItems.items[${extractionItems.indexOf(item)}].referenceName`,
+						index,
+						'referenceContext'
+					) as string;
+				}
+
 				// Get AI fields if manual strategy is selected
 				if (strategy === 'manual') {
 					try {
@@ -888,7 +957,10 @@ export async function execute(
 					generalInstructions,
 					strategy,
 					includeSchema,
-					includeRawData
+					includeRawData,
+					includeReferenceContext,
+					referenceSelector,
+					referenceName
 				};
 			}
 

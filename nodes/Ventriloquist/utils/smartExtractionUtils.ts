@@ -14,6 +14,10 @@ export interface ISmartExtractionOptions {
   strategy: string; // auto or manual
   includeSchema: boolean;
   includeRawData: boolean;
+  includeReferenceContext?: boolean;
+  referenceSelector?: string;
+  referenceName?: string;
+  referenceContent?: string;
 }
 
 /**
@@ -37,6 +41,10 @@ export interface IAIFormattingOptions {
   strategy: string;
   includeSchema: boolean;
   includeRawData: boolean;
+  includeReferenceContext?: boolean;
+  referenceSelector?: string;
+  referenceName?: string;
+  referenceContent?: string;
 }
 
 /**
@@ -206,8 +214,24 @@ export async function extractSmartContent(
       model: options.aiModel,
       generalInstructions: options.generalInstructions,
       includeSchema: options.includeSchema,
-      includeRawData: options.includeRawData
+      includeRawData: options.includeRawData,
+      includeReferenceContext: options.includeReferenceContext,
+      referenceName: options.referenceName,
+      referenceContent: options.referenceContent
     };
+
+    // Log reference context if available
+    if (options.includeReferenceContext && options.referenceContent) {
+      logger?.debug(
+        formatOperationLog(
+          'smartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `Including reference context: ${options.referenceName || 'referenceContext'} (${options.referenceContent.length} chars)`
+        )
+      );
+    }
 
     // Add fields for manual strategy
     if (options.strategy === 'manual' && fields) {

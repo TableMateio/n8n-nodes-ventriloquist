@@ -37,6 +37,10 @@ export interface IExtractionConfig {
     strategy?: string;
     includeSchema?: boolean;
     includeRawData?: boolean;
+    includeReferenceContext?: boolean;
+    referenceSelector?: string;
+    referenceName?: string;
+    referenceContent?: string;
   };
   // Fields for manual strategy in smart extraction
   fields?: {
@@ -181,8 +185,17 @@ export class BasicExtraction implements IExtraction {
               generalInstructions: this.config.smartOptions.generalInstructions || '',
               strategy: (this.config.smartOptions.strategy as 'auto' | 'manual') || 'auto',
               includeSchema: this.config.smartOptions.includeSchema === true,
-              includeRawData: this.config.smartOptions.includeRawData === true
+              includeRawData: this.config.smartOptions.includeRawData === true,
+              includeReferenceContext: this.config.smartOptions.includeReferenceContext === true,
+              referenceSelector: this.config.smartOptions.referenceSelector || '',
+              referenceName: this.config.smartOptions.referenceName || 'referenceContext',
+              referenceContent: this.config.smartOptions.referenceContent || ''
             };
+
+            // Log reference context if available
+            if (smartOptions.includeReferenceContext && smartOptions.referenceContent) {
+              logger.debug(`${logPrefix} Reference context provided for smart extraction: ${smartOptions.referenceName}`);
+            }
 
             // Create a context object with the required properties
             const extractContext: IMiddlewareContext = {

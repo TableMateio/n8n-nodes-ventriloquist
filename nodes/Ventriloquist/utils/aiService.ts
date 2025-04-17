@@ -48,6 +48,9 @@ export interface IAIExtractionOptions {
   fields?: IField[];
   includeSchema: boolean;
   includeRawData: boolean;
+  includeReferenceContext?: boolean;
+  referenceName?: string;
+  referenceContent?: string;
 }
 
 /**
@@ -72,6 +75,7 @@ export class AIService {
     nodeId: string;
     index: number;
   };
+  private options?: IAIExtractionOptions;
 
   /**
    * Create a new AI service
@@ -106,6 +110,9 @@ export class AIService {
     const { nodeName, nodeId, index } = this.context;
     const logPrefix = `[AIExtraction][${nodeName}]`;
 
+    // Store options for use in other methods
+    this.options = options;
+
     try {
       this.logger.info(
         formatOperationLog(
@@ -127,6 +134,19 @@ export class AIService {
           `Content length: ${content.length} characters`
         )
       );
+
+      // Log reference context if available
+      if (options.includeReferenceContext && options.referenceContent) {
+        this.logger.debug(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `Reference context included (${options.referenceName}): ${options.referenceContent?.substring(0, 50)}...`
+          )
+        );
+      }
 
       let result: IAIExtractionResult;
 
@@ -198,17 +218,20 @@ export class AIService {
       if (result.success && result.data) {
         const data = JSON.parse(result.data);
 
+        // Generate schema if requested
+        let schema = null;
+        if (options.includeSchema) {
+          schema = this.generateSchema(data);
+        }
+
         return {
           success: true,
-          data: data,
+          data,
+          schema: schema,
           rawData: options.includeRawData ? content : undefined,
-          schema: options.includeSchema ? this.generateSchema(data) : undefined,
         };
       } else {
-        return {
-          success: false,
-          error: result.error || 'No data returned from AI assistant',
-        };
+        throw new Error(result.error || 'Failed to get response from AI assistant');
       }
     } catch (error) {
       this.logger.error(
@@ -217,7 +240,7 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          `Auto strategy error: ${(error as Error).message}`
+          `Auto strategy processing error: ${(error as Error).message}`
         )
       );
       return {
@@ -236,14 +259,6 @@ export class AIService {
   ): Promise<IAIExtractionResult> {
     const { nodeName, nodeId, index } = this.context;
 
-    // Validate that fields are provided
-    if (!options.fields || options.fields.length === 0) {
-      return {
-        success: false,
-        error: "No fields defined for manual strategy",
-      };
-    }
-
     try {
       this.logger.info(
         formatOperationLog(
@@ -251,89 +266,22 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          `Using Manual strategy with ${options.fields.length} defined fields`
+          "Using Manual strategy - Processing with user-defined fields"
         )
       );
 
-      // Process each field separately
-      const result: { [key: string]: any } = {};
-
-      // Process fields in parallel for better performance
-      const fieldPromises = options.fields.map(field =>
-        this.processField(content, field)
-      );
-
-      const fieldResults = await Promise.all(fieldPromises);
-
-      // Combine all field results
-      options.fields.forEach((field, index) => {
-        const fieldResult = fieldResults[index];
-        if (fieldResult.success) {
-          result[field.name] = fieldResult.data;
-        } else {
-          this.logger.warn(
-            formatOperationLog(
-              "SmartExtraction",
-              nodeName,
-              nodeId,
-              this.context.index,
-              `Failed to extract field ${field.name}: ${fieldResult.error}`
-            )
-          );
-          result[field.name] = null;
-        }
-      });
-
-      return {
-        success: true,
-        data: result,
-        rawData: options.includeRawData ? content : undefined,
-        schema: options.includeSchema ? this.generateSchema(result) : undefined,
-      };
-    } catch (error) {
-      this.logger.error(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `Manual strategy error: ${(error as Error).message}`
-        )
-      );
-      return {
-        success: false,
-        error: (error as Error).message,
-      };
-    }
-  }
-
-  /**
-   * Process a single field in the manual strategy
-   */
-  private async processField(
-    content: string,
-    field: IField
-  ): Promise<IAIExtractionResult> {
-    const { nodeName, nodeId, index } = this.context;
-
-    try {
-      this.logger.debug(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `Processing field: ${field.name} (${field.type})`
-        )
-      );
+      // Check if fields are provided
+      if (!options.fields || options.fields.length === 0) {
+        throw new Error('No fields defined for manual strategy');
+      }
 
       // Create a new thread
       const thread = await this.openai.beta.threads.create();
 
-      // Add a message to the thread with the content and field configuration
+      // Add a message to the thread with the content and instructions
       await this.openai.beta.threads.messages.create(thread.id, {
         role: "user",
-        content: this.buildFieldPrompt(content, field),
+        content: this.buildManualPrompt(content, options),
       });
 
       // Run the assistant on the thread
@@ -344,57 +292,28 @@ export class AIService {
       // Poll for completion
       const result = await this.pollRunCompletion(thread.id, run.id);
 
+      // Process the response
       if (result.success && result.data) {
-        // For fields that should be parsed as JSON
-        if (['object', 'array'].includes(field.type) ||
-            (typeof result.data === 'string' &&
-             (result.data.startsWith('{') || result.data.startsWith('[')))) {
-          try {
-            const parsedData = JSON.parse(result.data);
-            return {
-              success: true,
-              data: parsedData,
-            };
-          } catch (parseError) {
-            this.logger.warn(
-              formatOperationLog(
-                "SmartExtraction",
-                nodeName,
-                nodeId,
-                index,
-                `Failed to parse JSON for field ${field.name}: ${(parseError as Error).message}`
-              )
-            );
-            return {
-              success: true,
-              data: result.data, // Return as string if parsing fails
-            };
+        try {
+          const data = JSON.parse(result.data);
+
+          // Generate schema if requested
+          let schema = null;
+          if (options.includeSchema) {
+            schema = this.generateSchema(data);
           }
+
+          return {
+            success: true,
+            data,
+            schema,
+            rawData: options.includeRawData ? content : undefined,
+          };
+        } catch (error) {
+          throw new Error(`Failed to parse AI response: ${error}`);
         }
-
-        // For other field types, apply appropriate conversions
-        let processedValue: any = result.data;
-
-        // Convert to the appropriate type
-        switch (field.type) {
-          case 'number':
-            processedValue = Number(processedValue);
-            break;
-          case 'boolean':
-            processedValue = processedValue === 'true' || processedValue === true;
-            break;
-          // Keep string and other types as is
-        }
-
-        return {
-          success: true,
-          data: processedValue,
-        };
       } else {
-        return {
-          success: false,
-          error: result.error || 'No data returned from AI assistant',
-        };
+        throw new Error(result.error || 'Failed to get response from AI assistant');
       }
     } catch (error) {
       this.logger.error(
@@ -403,7 +322,7 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          `Field processing error for ${field.name}: ${(error as Error).message}`
+          `Manual strategy processing error: ${(error as Error).message}`
         )
       );
       return {
@@ -491,33 +410,72 @@ export class AIService {
    * Build prompt for auto strategy
    */
   private buildAutoPrompt(content: string, generalInstructions: string): string {
-    return `
-TASK: Analyze the provided content, determine an appropriate data schema, and convert the data into well-structured JSON.
+    // Create a base prompt
+    let prompt = "You are an expert data extraction assistant.\n\n";
 
-INPUT DATA:
-${content}
+    // Add reference context if available
+    if (this.options?.includeReferenceContext && this.options?.referenceContent) {
+      prompt += `\nREFERENCE CONTEXT (${this.options.referenceName || 'referenceContext'}):\n${this.options.referenceContent}\n\n`;
+    }
 
-EXTRACTION GOAL: ${generalInstructions || 'Extract and structure the key information from this content'}
+    // Add the main content and instructions
+    prompt += "CONTENT TO EXTRACT:\n";
+    prompt += content;
+    prompt += "\n\nTASK:";
+    prompt += "\nExtract and structure the relevant data from the above content.";
 
-PROCESSING INSTRUCTIONS:
-1. Analyze the input data to identify key information based on the extraction goal
-2. Determine the most appropriate schema structure for representing this information
-3. Extract relevant data according to this schema
-4. Clean up any unnecessary formatting, tags, or irrelevant content
-5. Convert all data to appropriate types (strings, numbers, objects, arrays, dates)
-6. Return properly structured JSON
+    // Add general instructions if provided
+    if (generalInstructions && generalInstructions.trim() !== '') {
+      prompt += `\n\nADDITIONAL INSTRUCTIONS:\n${generalInstructions}`;
+    }
 
-OUTPUT REQUIREMENTS:
-- Return ONLY valid JSON that represents the extracted data
-- Ensure the output uses appropriate data types and structure
-- Use meaningful property names for all fields
-- Organize data logically in a way that best represents the content
-- If data cannot be found or processed, return an appropriate empty structure
+    // Add format instructions
+    prompt += "\n\nRESPONSE FORMAT:";
+    prompt += "\nProvide the extracted data as a valid JSON object.";
+    prompt += "\nEnsure the structure is consistent and logically organized.";
+    prompt += "\nOnly include the final JSON result without any explanation or preamble.";
 
-If the content appears to be tabular, structure it as an array of objects.
-If the content appears to be a single entity with properties, structure it as an object.
-If the content is a collection of similar entities, structure it as an array.
-`;
+    return prompt;
+  }
+
+  /**
+   * Build prompt for manual strategy
+   */
+  private buildManualPrompt(content: string, options: IAIExtractionOptions): string {
+    // Create a base prompt
+    let prompt = "You are an expert data extraction assistant.\n\n";
+
+    // Add reference context if available
+    if (options.includeReferenceContext && options.referenceContent) {
+      prompt += `\nREFERENCE CONTEXT (${options.referenceName || 'referenceContext'}):\n${options.referenceContent}\n\n`;
+    }
+
+    // Add the main content
+    prompt += "CONTENT TO EXTRACT:\n";
+    prompt += content;
+
+    // Add general instructions if provided
+    if (options.generalInstructions && options.generalInstructions.trim() !== '') {
+      prompt += `\n\nGENERAL INSTRUCTIONS:\n${options.generalInstructions}`;
+    }
+
+    // Add field definitions
+    if (options.fields && options.fields.length > 0) {
+      prompt += "\n\nFIELDS TO EXTRACT:";
+      options.fields.forEach((field, index) => {
+        prompt += `\n${index + 1}. ${field.name} (${field.type})`;
+        if (field.instructions) {
+          prompt += `: ${field.instructions}`;
+        }
+      });
+    }
+
+    // Add response format instructions
+    prompt += "\n\nRESPONSE FORMAT:";
+    prompt += "\nProvide the extracted data as a valid JSON object using the field names specified above.";
+    prompt += "\nOnly include the final JSON result without any explanation or preamble.";
+
+    return prompt;
   }
 
   /**
