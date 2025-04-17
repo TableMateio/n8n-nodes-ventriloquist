@@ -793,18 +793,81 @@ export async function execute(
 		// Convert extraction items to properly typed items
 		const typedExtractionItems: IExtractItem[] = extractionItems.map((item) => {
 			// Create AI formatting options from parameters
-			const aiFormatting = this.getNodeParameter(
-				`aiFormatting`,
-				index,
-				{} as IDataObject
-			) as IDataObject;
+			const enableAiFormatting = this.getNodeParameter(`extractionItems.items[${extractionItems.indexOf(item)}].enableAiFormatting`, index, false) as boolean;
 
-			const aiFormattingEnabled = aiFormatting.enabled === true;
+			let aiFields: IDataObject[] = [];
+			let aiFormatting: {
+				enabled: boolean;
+				extractionFormat: string;
+				aiModel: string;
+				generalInstructions: string;
+				strategy: string;
+				includeSchema: boolean;
+				includeRawData: boolean;
+			} | undefined = undefined;
 
-			// Get AI fields if manual strategy is selected
-			const aiFields = aiFormattingEnabled && aiFormatting.strategy === 'manual'
-				? this.getNodeParameter(`aiFields.items`, index, []) as IDataObject[]
-				: [];
+			if (enableAiFormatting) {
+				// Get AI specific parameters only if enableAiFormatting is true
+				const extractionFormat = this.getNodeParameter(
+					`extractionItems.items[${extractionItems.indexOf(item)}].extractionFormat`,
+					index,
+					'json'
+				) as string;
+
+				const aiModel = this.getNodeParameter(
+					`extractionItems.items[${extractionItems.indexOf(item)}].aiModel`,
+					index,
+					'gpt-4o'
+				) as string;
+
+				const generalInstructions = this.getNodeParameter(
+					`extractionItems.items[${extractionItems.indexOf(item)}].generalInstructions`,
+					index,
+					''
+				) as string;
+
+				const strategy = this.getNodeParameter(
+					`extractionItems.items[${extractionItems.indexOf(item)}].strategy`,
+					index,
+					'auto'
+				) as string;
+
+				const includeSchema = this.getNodeParameter(
+					`extractionItems.items[${extractionItems.indexOf(item)}].includeSchema`,
+					index,
+					false
+				) as boolean;
+
+				const includeRawData = this.getNodeParameter(
+					`extractionItems.items[${extractionItems.indexOf(item)}].includeRawData`,
+					index,
+					false
+				) as boolean;
+
+				// Get AI fields if manual strategy is selected
+				if (strategy === 'manual') {
+					try {
+						aiFields = this.getNodeParameter(
+							`extractionItems.items[${extractionItems.indexOf(item)}].aiFields.items`,
+							index,
+							[]
+						) as IDataObject[];
+					} catch (error) {
+						// Handle the case where aiFields might not exist
+						aiFields = [];
+					}
+				}
+
+				aiFormatting = {
+					enabled: true,
+					extractionFormat,
+					aiModel,
+					generalInstructions,
+					strategy,
+					includeSchema,
+					includeRawData
+				};
+			}
 
 			const extractItem: IExtractItem = {
 				id: uuidv4(),
@@ -836,26 +899,19 @@ export async function execute(
 					outputFormat?: string;
 					cleanText?: boolean;
 				} | undefined,
-				// Add AI formatting options from the AI formatting section
-				aiFormatting: aiFormattingEnabled ? {
-					enabled: true,
-					extractionFormat: aiFormatting.extractionFormat as string,
-					aiModel: aiFormatting.aiModel as string,
-					generalInstructions: aiFormatting.generalInstructions as string,
-					strategy: aiFormatting.strategy as string,
-					includeSchema: aiFormatting.includeSchema === true,
-					includeRawData: aiFormatting.includeRawData === true,
-				} : undefined,
+				// Add AI formatting options if enabled
+				aiFormatting: enableAiFormatting ? aiFormatting : undefined,
 				// Add AI fields if using manual strategy
-				aiFields: aiFormattingEnabled && aiFormatting.strategy === 'manual' ?
+				aiFields: enableAiFormatting && aiFormatting && aiFormatting.strategy === 'manual' ?
 					aiFields.map((field) => ({
 						name: field.name as string,
 						description: field.instructions as string,
 						type: field.type as string,
 						required: field.format === 'required'
 					})) : undefined,
-				// Add OpenAI API key
-				openAiApiKey: openAiApiKey,
+				// Note: We don't expose the API key in the returned object
+				// Instead, it will be passed separately to the processing function
+				hasOpenAiApiKey: !!openAiApiKey,
 				// Add page and session information
 				puppeteerPage: page,
 				puppeteerSessionId: sessionId,
@@ -872,6 +928,10 @@ export async function execute(
 				timeout,
 				useHumanDelays,
 				continueOnFail,
+				nodeName,
+				nodeId,
+				// Add AI formatting options - these get checked for each item individually
+				enableAiFormatting: true, // We handle enableAiFormatting per item in the typedExtractionItems array
 			},
 			this.logger,
 			openAiApiKey

@@ -43,6 +43,7 @@ export interface IExtractItem {
   name: string;
   extractionType: string;
   extractedData?: any;
+  schema?: any;
   selector?: string;
   attribute?: string;
   regex?: string;
@@ -53,6 +54,7 @@ export interface IExtractItem {
   puppeteerSessionId?: string;
   puppeteerPage?: any;
   openAiApiKey?: string;
+  hasOpenAiApiKey?: boolean;
   continueIfNotFound?: boolean;
   textOptions?: {
     cleanText?: boolean;
@@ -148,7 +150,7 @@ export async function processExtractionItems(
       cleanText: extractionItem.textOptions?.cleanText,
     };
 
-    // Handle AI formatting settings if enabled
+    // Handle AI formatting settings if enabled - fix indentation
     if (extractionNodeOptions.enableAiFormatting) {
       extractionItem.aiFormatting = {
         enabled: true,
@@ -203,9 +205,14 @@ export async function processExtractionItems(
         extractionItem.aiFormatting.extractionFormat = detectedType;
       }
 
-      // Set OpenAI API key
-      extractionItem.openAiApiKey = openAiApiKey;
-      extractionConfig.openaiApiKey = openAiApiKey;
+      // Set OpenAI API key for processing (not for output)
+      // The actual key should not be exposed in the result
+      if (openAiApiKey) {
+        // Only store a boolean flag in the extractionItem for output
+        extractionItem.hasOpenAiApiKey = true;
+        // Use the actual key only in the extraction config which won't be included in output
+        extractionConfig.openaiApiKey = openAiApiKey;
+      }
     }
 
     // Add specific options for different extraction types
@@ -253,6 +260,11 @@ export async function processExtractionItems(
         if (result.success) {
           // Store the extracted data in the extraction item
           extractionItem.extractedData = result.data;
+
+          // Store schema if available and includeSchema is true
+          if (result.schema && extractionItem.aiFormatting?.includeSchema) {
+            extractionItem.schema = result.schema;
+          }
 
           logger.debug(
             formatOperationLog(
@@ -305,6 +317,11 @@ export async function processExtractionItems(
 
       // Store error message if no puppeteer page
       extractionItem.extractedData = { error: 'No puppeteer page available' };
+    }
+
+    // Remove API key from the output
+    if (extractionItem.openAiApiKey) {
+      delete extractionItem.openAiApiKey;
     }
 
     // Add extraction item to the list of typed extraction items
