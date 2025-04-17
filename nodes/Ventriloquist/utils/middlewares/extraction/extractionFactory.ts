@@ -386,6 +386,8 @@ export class BasicExtraction implements IExtraction {
           includeRawData: this.config.smartOptions.includeRawData === true
         };
 
+        logger.info(`${logPrefix} Applying AI formatting with ${aiFormattingOptions.strategy} strategy, format: ${aiFormattingOptions.extractionFormat}`);
+
         // Process with AI
         const aiResult = await processWithAI(
           data,

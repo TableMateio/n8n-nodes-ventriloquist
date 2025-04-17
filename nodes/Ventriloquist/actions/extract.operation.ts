@@ -909,9 +909,8 @@ export async function execute(
 						type: field.type as string,
 						required: field.format === 'required'
 					})) : undefined,
-				// Note: We don't expose the API key in the returned object
-				// Instead, it will be passed separately to the processing function
-				hasOpenAiApiKey: !!openAiApiKey,
+				// Only set hasOpenAiApiKey when AI formatting is actually enabled for this item
+				hasOpenAiApiKey: enableAiFormatting && !!openAiApiKey,
 				// Add page and session information
 				puppeteerPage: page,
 				puppeteerSessionId: sessionId,

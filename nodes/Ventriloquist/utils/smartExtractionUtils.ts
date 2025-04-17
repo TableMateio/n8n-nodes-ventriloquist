@@ -331,7 +331,9 @@ export async function processWithAI(
           content: prompt,
         },
       ],
-      response_format: { type: 'json_object' },
+      response_format: options.aiModel.includes('gpt-4-turbo') || options.aiModel.includes('gpt-3.5-turbo')
+        ? { type: 'json_object' }
+        : undefined,
     });
 
     // Process the response
@@ -349,7 +351,18 @@ export async function processWithAI(
     try {
       parsedResponse = JSON.parse(aiResponse);
     } catch (error) {
-      throw new Error(`Failed to parse AI response as JSON: ${(error as Error).message}`);
+      // If the response is not valid JSON, try to extract JSON from the text
+      // This handles cases where the model might include explanations
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          parsedResponse = JSON.parse(jsonMatch[0]);
+        } catch {
+          throw new Error(`Failed to parse AI response as JSON: ${(error as Error).message}`);
+        }
+      } else {
+        throw new Error(`Failed to parse AI response as JSON: ${(error as Error).message}`);
+      }
     }
 
     // Extract data and schema from the response

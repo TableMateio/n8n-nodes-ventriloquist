@@ -148,18 +148,29 @@ export async function processExtractionItems(
       waitForSelector: extractionNodeOptions.waitForSelector,
       selectorTimeout: extractionNodeOptions.timeout,
       cleanText: extractionItem.textOptions?.cleanText,
+      // Initialize smartOptions based on the item's own AI formatting setting, not the node-level setting
+      smartOptions: extractionItem.aiFormatting?.enabled === true ? {
+        enableAiFormatter: true,
+        extractionFormat: 'json',
+        aiModel: 'gpt-3.5-turbo',
+        generalInstructions: '',
+        strategy: 'auto',
+        includeSchema: false,
+        includeRawData: false
+      } : undefined
     };
 
     // Handle AI formatting settings if enabled - fix indentation
-    if (extractionNodeOptions.enableAiFormatting) {
+    if (extractionItem.aiFormatting?.enabled === true) {
+      // Ensure the AI formatting settings are properly set
       extractionItem.aiFormatting = {
         enabled: true,
-        extractionFormat: extractionNodeOptions.extractionFormat || 'json',
-        aiModel: extractionNodeOptions.aiModel || 'gpt-4',
-        generalInstructions: extractionNodeOptions.generalInstructions || '',
-        strategy: extractionNodeOptions.strategy || 'auto',
-        includeSchema: extractionNodeOptions.includeSchema === true,
-        includeRawData: extractionNodeOptions.includeRawData === true
+        extractionFormat: extractionItem.aiFormatting.extractionFormat || extractionNodeOptions.extractionFormat || 'json',
+        aiModel: extractionItem.aiFormatting.aiModel || extractionNodeOptions.aiModel || 'gpt-3.5-turbo',
+        generalInstructions: extractionItem.aiFormatting.generalInstructions || extractionNodeOptions.generalInstructions || '',
+        strategy: extractionItem.aiFormatting.strategy || extractionNodeOptions.strategy || 'auto',
+        includeSchema: extractionItem.aiFormatting.includeSchema === true || extractionNodeOptions.includeSchema === true,
+        includeRawData: extractionItem.aiFormatting.includeRawData === true || extractionNodeOptions.includeRawData === true
       };
 
       // Add AI fields if provided
@@ -209,10 +220,16 @@ export async function processExtractionItems(
       // The actual key should not be exposed in the result
       if (openAiApiKey) {
         // Only store a boolean flag in the extractionItem for output
+        // Only set hasOpenAiApiKey when AI formatting is enabled for this specific item
         extractionItem.hasOpenAiApiKey = true;
         // Use the actual key only in the extraction config which won't be included in output
         extractionConfig.openaiApiKey = openAiApiKey;
       }
+    } else {
+      // Ensure hasOpenAiApiKey is not set when AI formatting is not enabled
+      extractionItem.hasOpenAiApiKey = false;
+      // Also ensure aiFormatting is properly set to disabled
+      extractionItem.aiFormatting = { enabled: false };
     }
 
     // Add specific options for different extraction types
