@@ -355,6 +355,14 @@ export async function processExtractionItems(
     );
   }
 
+  // Clean up any redundant data before returning
+  typedExtractionItems.forEach(item => {
+    // Remove aiFields from output as they're redundant with schema
+    if (item.aiFields) {
+      delete item.aiFields;
+    }
+  });
+
   logger.debug(
     formatOperationLog(
       'extraction',
