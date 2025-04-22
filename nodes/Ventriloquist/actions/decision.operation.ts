@@ -2466,10 +2466,55 @@ export async function execute(
 
 			// Get route if routing is enabled
 			if (enableRouting) {
-				const groupRoute = group.route as number;
-				if (groupRoute) {
-					// Route numbers are 1-based, but indexes are 0-based
-					routeIndex = groupRoute - 1;
+				// Get the route value and ensure we properly parse it
+				// Route might be a string or number depending on how n8n passes parameters
+				const groupRoute = group.route;
+				let routeNumber: number;
+
+				if (groupRoute !== undefined && groupRoute !== null) {
+					// Convert to number regardless of original type
+					if (typeof groupRoute === 'string') {
+						routeNumber = parseInt(groupRoute, 10);
+					} else {
+						routeNumber = groupRoute as number;
+					}
+
+					// Ensure it's a valid number
+					if (!isNaN(routeNumber)) {
+						// Route numbers are 1-based, but indexes are 0-based
+						routeIndex = routeNumber - 1;
+						this.logger.info(
+							formatOperationLog(
+								"Decision",
+								nodeName,
+								nodeId,
+								index,
+								`Using route: ${routeNumber} (index: ${routeIndex})`,
+							),
+						);
+					} else {
+						this.logger.warn(
+							formatOperationLog(
+								"Decision",
+								nodeName,
+								nodeId,
+								index,
+								`Invalid route value: ${groupRoute}. Using default route 1.`,
+							),
+						);
+						routeIndex = 0; // Default to first route
+					}
+				} else {
+					this.logger.warn(
+						formatOperationLog(
+							"Decision",
+							nodeName,
+							nodeId,
+							index,
+							`No route specified for group "${groupName}". Using default route 1.`,
+						),
+					);
+					routeIndex = 0; // Default to first route
 				}
 			}
 
@@ -2685,6 +2730,33 @@ export async function execute(
 										),
 									);
 
+									// Add detailed logging for URL change detection
+									this.logger.info(
+										formatOperationLog(
+											"Decision",
+											nodeName,
+											nodeId,
+											index,
+											`[Decision][clickAction] URL change details - urlChanged: ${actionResult.urlChanged}, navigationSuccessful: ${actionResult.navigationSuccessful}, contextDestroyed: ${actionResult.contextDestroyed}`,
+										),
+									);
+
+									// Update result data with navigation status from the click result
+									resultData.urlChangeDetected = !!actionResult.urlChanged;
+									resultData.navigationCompleted = !!actionResult.navigationSuccessful;
+									resultData.contextDestroyed = !!actionResult.contextDestroyed;
+
+									// Log the updated resultData
+									this.logger.info(
+										formatOperationLog(
+											"Decision",
+											nodeName,
+											nodeId,
+											index,
+											`[Decision][clickAction] Updated result data - urlChangeDetected: ${resultData.urlChangeDetected}, navigationCompleted: ${resultData.navigationCompleted}, contextDestroyed: ${resultData.contextDestroyed}`,
+										),
+									);
+
 									// Handle action failures
 									if (!actionResult.success) {
 										throw new Error(
@@ -2705,11 +2777,6 @@ export async function execute(
 									// Check if the context was destroyed or navigation happened
 									// Cast to IClickActionResult to access the urlChanged property
 									const clickResult = actionResult as IClickActionResult;
-
-									// Update result data with navigation status from the click result
-									resultData.urlChangeDetected = !!clickResult.urlChanged;
-									resultData.navigationCompleted = !!clickResult.navigationSuccessful;
-									resultData.contextDestroyed = !!clickResult.contextDestroyed;
 
 									this.logger.info(
 										formatOperationLog(
@@ -4624,6 +4691,12 @@ export async function execute(
 				currentUrl: resultData.currentUrl,
 				pageTitle: resultData.pageTitle,
 				sessionId: sessionId || "",
+				navigationCompleted: resultData.navigationCompleted,
+				urlChangeDetected: resultData.urlChangeDetected,
+				contextDestroyed: resultData.contextDestroyed,
+				beforeUrl: resultData.beforeUrl,
+				afterUrl: resultData.afterUrl,
+				navigationError: resultData.navigationError,
 			},
 		});
 
@@ -4659,6 +4732,17 @@ export async function execute(
 				.fill(null)
 				.map(() => []);
 
+			// Add detailed debugging log
+			this.logger.info(
+				formatOperationLog(
+					"Decision",
+					nodeName,
+					nodeId,
+					index,
+					`Routing details - routeIndex: ${routeIndex}, routeCount: ${routeCount}, enableRouting: ${enableRouting}`,
+				),
+			);
+
 			// Put the item in the correct route
 			if (routeIndex >= 0 && routeIndex < routeCount) {
 				routes[routeIndex].push(returnItem);
@@ -4668,9 +4752,22 @@ export async function execute(
 						nodeName,
 						nodeId,
 						index,
-						`Sending output to route ${routeIndex + 1}`,
+						`Sending output to route ${routeIndex + 1} (routes array length: ${routes.length})`,
 					),
 				);
+
+				// Debug each route's item count
+				for (let i = 0; i < routes.length; i++) {
+					this.logger.info(
+						formatOperationLog(
+							"Decision",
+							nodeName,
+							nodeId,
+							index,
+							`Route ${i + 1} has ${routes[i].length} items`,
+						),
+					);
+				}
 			} else {
 				// Default to route 0 if routeIndex is out of bounds
 				routes[0].push(returnItem);
