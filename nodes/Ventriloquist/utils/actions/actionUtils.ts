@@ -54,7 +54,7 @@ export interface IActionOptions {
 }
 
 /**
- * Interface for action results
+ * Interface for action execution result
  */
 export interface IActionResult {
 	success: boolean;
@@ -64,6 +64,8 @@ export interface IActionResult {
 	contextDestroyed?: boolean;
 	pageReconnected?: boolean;
 	reconnectedPage?: Page;
+	urlChanged?: boolean;
+	navigationSuccessful?: boolean;
 }
 
 /**
@@ -124,9 +126,16 @@ export async function executeAction(
 				return {
 					success: result.success,
 					actionType: "click",
-					details: result.details,
+					details: {
+						...result.details,
+						urlChanged: result.urlChanged,
+						navigationSuccessful: result.navigationSuccessful,
+						contextDestroyed: result.contextDestroyed,
+					},
 					error: result.error,
-					contextDestroyed: result.details?.contextDestroyed === true,
+					contextDestroyed: result.contextDestroyed,
+					urlChanged: result.urlChanged,
+					navigationSuccessful: result.navigationSuccessful,
 				};
 			}
 

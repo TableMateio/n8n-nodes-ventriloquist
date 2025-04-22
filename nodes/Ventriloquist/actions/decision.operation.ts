@@ -2506,8 +2506,8 @@ export async function execute(
 					// Convert conditions collection if it exists
 					conditions:
 						group.conditions &&
-						typeof group.conditions === "object" &&
-						(group.conditions as IDataObject).condition
+							typeof group.conditions === "object" &&
+							(group.conditions as IDataObject).condition
 							? ((group.conditions as IDataObject).condition as IDataObject[])
 							: undefined,
 				};
@@ -2705,6 +2705,11 @@ export async function execute(
 									// Check if the context was destroyed or navigation happened
 									// Cast to IClickActionResult to access the urlChanged property
 									const clickResult = actionResult as IClickActionResult;
+
+									// Update result data with navigation status from the click result
+									resultData.urlChangeDetected = !!clickResult.urlChanged;
+									resultData.navigationCompleted = !!clickResult.navigationSuccessful;
+									resultData.contextDestroyed = !!clickResult.contextDestroyed;
 
 									this.logger.info(
 										formatOperationLog(
@@ -3141,14 +3146,14 @@ export async function execute(
 											// Add options based on field type
 											...(fieldType === "text"
 												? {
-														clearField: true,
-														humanLike: useHumanDelays,
-													}
+													clearField: true,
+													humanLike: useHumanDelays,
+												}
 												: {}),
 											...(fieldType === "password"
 												? {
-														clearField: true,
-													}
+													clearField: true,
+												}
 												: {}),
 										};
 
@@ -3750,8 +3755,8 @@ export async function execute(
 																clickResult.error instanceof Error
 																	? clickResult.error.message
 																	: String(
-																			clickResult.error || "Unknown error",
-																		),
+																		clickResult.error || "Unknown error",
+																	),
 															submitSelector,
 															waitAfterSubmit,
 															waitSubmitTime,
