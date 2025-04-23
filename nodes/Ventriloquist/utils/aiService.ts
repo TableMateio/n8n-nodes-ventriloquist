@@ -251,7 +251,7 @@ export class AIService {
   }
 
   /**
-   * Process content using the manual strategy (user-defined fields)
+   * Process content using the manual strategy (fields defined by user)
    */
   private async processManualStrategy(
     content: string,
@@ -270,9 +270,8 @@ export class AIService {
         )
       );
 
-      // Check if fields are provided
       if (!options.fields || options.fields.length === 0) {
-        throw new Error('No fields defined for manual strategy');
+        throw new Error('Manual strategy requires at least one field definition');
       }
 
       // Create a new thread
@@ -284,9 +283,16 @@ export class AIService {
         content: this.buildManualPrompt(content, options),
       });
 
-      // Run the assistant on the thread
+      // Generate schema for function calling
+      const schema = this.generateOpenAISchema(options.fields);
+
+      // Run the assistant on the thread with the schema
       const run = await this.openai.beta.threads.runs.create(thread.id, {
         assistant_id: ASSISTANTS.manual,
+        tools: [{
+          type: "function",
+          function: schema
+        }]
       });
 
       // Poll for completion
@@ -294,24 +300,20 @@ export class AIService {
 
       // Process the response
       if (result.success && result.data) {
-        try {
-          const data = JSON.parse(result.data);
+        const data = JSON.parse(result.data);
 
-          // Generate schema if requested
-          let schema = null;
-          if (options.includeSchema) {
-            schema = this.generateSchema(data);
-          }
-
-          return {
-            success: true,
-            data,
-            schema,
-            rawData: options.includeRawData ? content : undefined,
-          };
-        } catch (error) {
-          throw new Error(`Failed to parse AI response: ${error}`);
+        // Generate schema if requested
+        let outputSchema = null;
+        if (options.includeSchema) {
+          outputSchema = this.generateSchema(data);
         }
+
+        return {
+          success: true,
+          data,
+          schema: outputSchema,
+          rawData: options.includeRawData ? content : undefined,
+        };
       } else {
         throw new Error(result.error || 'Failed to get response from AI assistant');
       }
@@ -333,7 +335,7 @@ export class AIService {
   }
 
   /**
-   * Poll for the completion of an OpenAI run
+   * Poll for run completion
    */
   private async pollRunCompletion(
     threadId: string,
@@ -343,66 +345,120 @@ export class AIService {
   ): Promise<{ success: boolean; data?: string; error?: string }> {
     const { nodeName, nodeId, index } = this.context;
 
-    let attempts = 0;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        // Get run status
+        const run = await this.openai.beta.threads.runs.retrieve(threadId, runId);
 
-    while (attempts < maxAttempts) {
-      attempts++;
+        // Check if completed
+        if (run.status === 'completed') {
+          // Get messages from the thread (newest first)
+          const messages = await this.openai.beta.threads.messages.list(threadId, {
+            order: 'desc',
+            limit: 5,
+          });
 
-      const run = await this.openai.beta.threads.runs.retrieve(threadId, runId);
+          // Check for function call results
+          const lastMessage = messages.data[0];
+          if (lastMessage && lastMessage.role === 'assistant') {
+            // Check for function calls
+            if (lastMessage.content && lastMessage.content.length > 0) {
+              for (const content of lastMessage.content) {
+                // Handle function call responses
+                if (content.type === 'function_call' && content.function_call) {
+                  this.logger.debug(
+                    formatOperationLog(
+                      "SmartExtraction",
+                      nodeName,
+                      nodeId,
+                      index,
+                      `Received function call response: ${content.function_call.name}`
+                    )
+                  );
+                  return {
+                    success: true,
+                    data: content.function_call.arguments
+                  };
+                }
 
-      if (run.status === 'completed') {
-        // Get the assistant's response
-        const messages = await this.openai.beta.threads.messages.list(threadId);
-        const assistantMessages = messages.data.filter((msg: any) => msg.role === 'assistant');
-
-        if (assistantMessages.length > 0) {
-          const latestMessage = assistantMessages[0];
-
-          if (latestMessage.content && latestMessage.content.length > 0) {
-            const textContent = latestMessage.content[0];
-
-            if (textContent.type === 'text') {
-              return {
-                success: true,
-                data: textContent.text.value,
-              };
+                // Handle text responses
+                if (content.type === 'text') {
+                  return {
+                    success: true,
+                    data: content.text.value,
+                  };
+                }
+              }
             }
+
+            // No usable content found
+            return {
+              success: false,
+              error: 'No usable content in assistant response',
+            };
           }
+
+          return {
+            success: false,
+            error: 'No response from assistant',
+          };
         }
 
-        return {
-          success: false,
-          error: "No response content found in assistant message",
-        };
-      } else if (run.status === 'failed') {
+        // Check for failures
+        if (['failed', 'cancelled', 'expired'].includes(run.status)) {
+          return {
+            success: false,
+            error: `Run ${run.status}: ${run.last_error?.message || 'Unknown error'}`,
+          };
+        }
+
+        // Check for tool calls that need responses
+        if (run.status === 'requires_action' && run.required_action?.type === 'submit_tool_outputs') {
+          // Get the tool calls
+          const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
+
+          // This shouldn't happen in our case since we don't have interactive tools,
+          // but we'll handle it gracefully anyway
+          this.logger.warn(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Run requires tool outputs, but this isn't currently supported`
+            )
+          );
+
+          // Submit empty tool outputs to allow the run to continue
+          await this.openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
+            tool_outputs: toolCalls.map((tc: any) => ({
+              tool_call_id: tc.id,
+              output: "{}",
+            })),
+          });
+        }
+
+        // Wait before next attempt
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      } catch (error) {
         this.logger.error(
           formatOperationLog(
             "SmartExtraction",
             nodeName,
             nodeId,
             index,
-            `Run failed: ${run.last_error?.message || 'Unknown error'}`
+            `Error polling run: ${(error as Error).message}`
           )
         );
 
-        return {
-          success: false,
-          error: run.last_error?.message || "Assistant run failed",
-        };
-      } else if (['cancelled', 'expired'].includes(run.status)) {
-        return {
-          success: false,
-          error: `Run ${run.status}`,
-        };
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, delayMs));
       }
-
-      // Wait before polling again
-      await new Promise(resolve => setTimeout(resolve, delayMs));
     }
 
     return {
       success: false,
-      error: "Timeout waiting for assistant response",
+      error: `Timed out after ${maxAttempts} attempts`,
     };
   }
 
@@ -583,5 +639,117 @@ ${examplesSection}
 
     // Handle primitive types
     return { type: typeof data };
+  }
+
+  /**
+   * Generate OpenAI function schema from field definitions
+   */
+  private generateOpenAISchema(fields: IField[]): any {
+    // Create properties object for the schema
+    const properties: Record<string, any> = {};
+    const required: string[] = [];
+
+    // Add each field to the properties
+    fields.forEach(field => {
+      // Determine JSON Schema type based on field type
+      let schemaType = 'string';
+      let schemaFormat = undefined;
+      let additionalProps = {};
+
+      switch (field.type.toLowerCase()) {
+        case 'number':
+        case 'integer':
+          schemaType = field.type.toLowerCase();
+          break;
+        case 'boolean':
+          schemaType = 'boolean';
+          break;
+        case 'date':
+          schemaType = 'string';
+          schemaFormat = 'date';
+          break;
+        case 'datetime':
+          schemaType = 'string';
+          schemaFormat = 'date-time';
+          break;
+        case 'array':
+          schemaType = 'array';
+          additionalProps = { items: { type: 'string' } };
+          break;
+        case 'object':
+          schemaType = 'object';
+          additionalProps = { additionalProperties: true };
+          break;
+        default:
+          schemaType = 'string';
+      }
+
+      // Create the property definition
+      const property: Record<string, any> = {
+        type: schemaType,
+        description: field.instructions || `Extract the ${field.name}`
+      };
+
+      // Add format if applicable
+      if (schemaFormat) {
+        property.format = schemaFormat;
+      }
+
+      // Add additional properties
+      Object.assign(property, additionalProps);
+
+      // Add to properties object
+      properties[field.name] = property;
+
+      // Add to required list (all fields are considered required unless explicitly marked optional)
+      required.push(field.name);
+    });
+
+    // Return the schema in the exact format requested by OpenAI
+    return {
+      name: "entity_extraction",
+      description: "Extract structured information from the provided text content",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            enum: ["entity_extraction"],
+            default: "entity_extraction"
+          },
+          strict: {
+            type: "boolean",
+            default: true
+          },
+          schema: {
+            type: "object",
+            properties: {
+              type: {
+                type: "string",
+                enum: ["object"],
+                default: "object"
+              },
+              properties: {
+                type: "object",
+                properties: properties
+              },
+              required: {
+                type: "array",
+                items: {
+                  type: "string"
+                },
+                default: required
+              },
+              additionalProperties: {
+                type: "boolean",
+                default: false
+              }
+            },
+            required: ["type", "properties", "required", "additionalProperties"]
+          }
+        },
+        required: ["name", "strict", "schema"]
+      }
+    };
   }
 }
