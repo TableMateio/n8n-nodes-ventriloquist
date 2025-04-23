@@ -1023,12 +1023,20 @@ export async function execute(
 				aiFormatting: enableAiFormatting ? aiFormatting : undefined,
 				// Add AI fields if using manual strategy
 				aiFields: enableAiFormatting && aiFormatting && aiFormatting.strategy === 'manual' ?
-					aiFields.map((field) => ({
-						name: field.name as string,
-						description: field.instructions as string,
-						type: field.type as string,
-						required: field.format === 'required'
-					})) : undefined,
+					aiFields.map((field) => {
+						// Debug log to see field data
+						console.log('FIELD FROM UI:', JSON.stringify(field, null, 2));
+
+						return {
+							name: field.name as string,
+							// Map 'instructions' from UI directly to 'instructions' property in aiFields
+							instructions: field.instructions as string,
+							// Keep description as a backup but keep it separate
+							description: field.description as string,
+							type: field.type as string,
+							required: field.format === 'required'
+						};
+					}) : undefined,
 				// Only set hasOpenAiApiKey when AI formatting is actually enabled for this item
 				hasOpenAiApiKey: enableAiFormatting && !!openAiApiKey,
 				// Add page and session information
@@ -1069,12 +1077,30 @@ export async function execute(
 
 					// Include schema if it exists and includeSchema was enabled for this item
 					if (item.schema && item.aiFormatting?.includeSchema) {
+						// Log the original schema before adding it to the output
+						this.logger.debug(`Original schema structure: ${JSON.stringify(item.schema, null, 2)}`);
+
+						// Additional debug information about schema structure
+						console.log('SCHEMA BEFORE OUTPUT:', JSON.stringify(item.schema, null, 2));
+						console.log('SCHEMA TYPE:', typeof item.schema);
+						console.log('SCHEMA PROPERTIES:', Object.keys(item.schema));
+						if (item.schema.properties) {
+							console.log('SCHEMA PROPERTY KEYS:', Object.keys(item.schema.properties));
+						}
+
+						// Preserve the full schema structure including descriptions
 						result[`${item.name}_schema`] = item.schema;
+
+						// Log what was actually added to the output
+						this.logger.debug(`Schema added to output: ${JSON.stringify(result[`${item.name}_schema`], null, 2)}`);
+
+						// Additional debug information about output schema
+						console.log('FINAL SCHEMA IN OUTPUT:', JSON.stringify(result[`${item.name}_schema`], null, 2));
 					}
 
 					// Include raw data if includeRawData was enabled for this item
 					if (item.aiFormatting?.includeRawData) {
-						result[`${item.name}_raw`] = item.extractedData;
+						result[`${item.name}_raw`] = item.rawData || item.extractedData;
 					}
 				}
 				return result;

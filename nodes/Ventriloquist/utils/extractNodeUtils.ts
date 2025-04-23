@@ -101,6 +101,7 @@ export interface IExtractItem {
   aiFields?: Array<{
     name: string;
     description?: string;
+    instructions?: string;
     type?: string;
     required?: boolean;
   }>;
@@ -207,14 +208,24 @@ export async function processExtractionItems(
 
       // Add fields for manual strategy
       if (extractionItem.aiFields && extractionItem.aiFormatting.strategy === 'manual') {
+        console.log('FIELDS BEFORE MAPPING:', JSON.stringify(extractionItem.aiFields, null, 2));
+
         extractionConfig.fields = {
-          items: extractionItem.aiFields.map(field => ({
-            name: field.name,
-            type: field.type || 'string',
-            instructions: field.description || '',
-            format: 'default'
-          }))
+          items: extractionItem.aiFields.map(field => {
+            // Debug log field mapping
+            console.log(`MAPPING FIELD [${field.name}]: instructions=${field.instructions || field.description || 'none'}`);
+
+            return {
+              name: field.name,
+              type: field.type || 'string',
+              // Map field.instructions directly to instructions (not through description)
+              instructions: field.instructions || field.description || '',
+              format: 'default'
+            };
+          })
         };
+
+        console.log('FIELDS AFTER MAPPING:', JSON.stringify(extractionConfig.fields.items, null, 2));
       }
 
       // Auto-detect content type if set to 'auto'
@@ -370,7 +381,19 @@ export async function processExtractionItems(
 
           // Store schema if available and includeSchema is true
           if (result.schema && extractionItem.aiFormatting?.includeSchema) {
+            // Keep the full schema format with descriptions
             extractionItem.schema = result.schema;
+
+            // Log the schema structure for debugging
+            logger.debug(
+              formatOperationLog(
+                'extraction',
+                nodeName,
+                nodeId,
+                i,
+                `Schema for [${extractionItem.name}]: ${JSON.stringify(result.schema, null, 2)}`
+              )
+            );
           }
 
           logger.debug(
@@ -444,50 +467,6 @@ export async function processExtractionItems(
       )
     );
   }
-
-  // Clean up any redundant data before returning
-  typedExtractionItems.forEach(item => {
-    // Remove aiFields from output as they're redundant with schema
-    if (item.aiFields) {
-      delete item.aiFields;
-    }
-  });
-
-  // If debug mode is not enabled, remove technical details from the output
-  // Note: debugPageContent is checked for backward compatibility
-  if (!extractionNodeOptions.debugMode && !extractionNodeOptions.debugPageContent) {
-    typedExtractionItems.forEach(item => {
-      // Keep essential data but remove technical details
-      const extractedData = item.extractedData;
-      const schema = item.schema;
-      const name = item.name;
-
-      // Create a clean version with only essential properties
-      Object.keys(item).forEach(key => {
-        if (!['name', 'extractedData', 'schema'].includes(key)) {
-          // Use type assertion to fix the TypeScript error
-          delete (item as {[key: string]: any})[key];
-        }
-      });
-
-      // Restore essential data
-      item.name = name;
-      item.extractedData = extractedData;
-      if (schema) {
-        item.schema = schema;
-      }
-    });
-  }
-
-  logger.debug(
-    formatOperationLog(
-      'extraction',
-      nodeName,
-      nodeId,
-      0,
-      `Completed extraction process for ${typedExtractionItems.length} items`
-    )
-  );
 
   return typedExtractionItems;
 }
