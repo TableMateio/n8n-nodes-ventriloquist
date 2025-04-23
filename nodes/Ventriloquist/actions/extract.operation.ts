@@ -287,12 +287,7 @@ export const description: INodeProperties[] = [
 							{
 								name: "GPT-4o",
 								value: "gpt-4o",
-								description: "Most advanced model with broader general knowledge and improved instruction following",
-							},
-							{
-								name: "Claude 3 Opus",
-								value: "claude-3-opus",
-								description: "Anthropic's most powerful model, excellent at complex reasoning and detailed instruction following",
+								description: "Latest GPT-4 model with enhanced reasoning capabilities",
 							},
 							{
 								name: "GPT-4",
@@ -300,13 +295,42 @@ export const description: INodeProperties[] = [
 								description: "Most capable GPT-4 model for complex tasks",
 							},
 							{
+								name: "GPT-4 Turbo",
+								value: "gpt-4-turbo",
+								description: "Optimized version of GPT-4",
+							},
+							{
 								name: "GPT-3.5 Turbo",
 								value: "gpt-3.5-turbo",
-								description: "Most capable GPT-3.5 model, optimized for chat at 1/10th the cost of GPT-4",
+								description: "Fast and efficient model for most tasks",
 							},
 						],
-						default: "gpt-4o",
-						description: "AI model to use for formatting",
+						default: "gpt-4",
+						description: "AI model to use for processing the extraction",
+					},
+					{
+						displayName: "Assistant Type",
+						name: "assistantType",
+						type: "options",
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+							},
+						},
+						options: [
+							{
+								name: "Auto",
+								value: "auto",
+								description: "Automatically detect fields and structure (asst_YOKjWiQPTTeg3OvDV6D8984n)",
+							},
+							{
+								name: "Manual",
+								value: "manual",
+								description: "Manually define fields to extract (asst_p65Hrk79gidj5thHqgs4W1lK)",
+							},
+						],
+						default: "auto",
+						description: "Type of assistant to use for extraction",
 					},
 					{
 						displayName: "General Instructions",
@@ -862,14 +886,14 @@ export async function execute(
 
 		// Convert extraction items to properly typed items
 		const typedExtractionItems: IExtractItem[] = extractionItems.map((item) => {
-			// Create AI formatting options from parameters
+			// Add AI formatting options from parameters
 			const enableAiFormatting = this.getNodeParameter(`extractionItems.items[${extractionItems.indexOf(item)}].enableAiFormatting`, index, false) as boolean;
 
 			let aiFields: IDataObject[] = [];
 			let aiFormatting: {
 				enabled: boolean;
 				extractionFormat: string;
-				aiModel: string;
+				assistantType: string;
 				generalInstructions: string;
 				strategy: string;
 				includeSchema: boolean;
@@ -887,10 +911,10 @@ export async function execute(
 					'json'
 				) as string;
 
-				const aiModel = this.getNodeParameter(
-					`extractionItems.items[${extractionItems.indexOf(item)}].aiModel`,
+				const assistantType = this.getNodeParameter(
+					`extractionItems.items[${extractionItems.indexOf(item)}].assistantType`,
 					index,
-					'gpt-4o'
+					'auto'
 				) as string;
 
 				const generalInstructions = this.getNodeParameter(
@@ -899,11 +923,7 @@ export async function execute(
 					''
 				) as string;
 
-				const strategy = this.getNodeParameter(
-					`extractionItems.items[${extractionItems.indexOf(item)}].strategy`,
-					index,
-					'auto'
-				) as string;
+				const strategy = assistantType; // Use assistantType as strategy (auto/manual)
 
 				const includeSchema = this.getNodeParameter(
 					`extractionItems.items[${extractionItems.indexOf(item)}].includeSchema`,
@@ -942,7 +962,7 @@ export async function execute(
 				}
 
 				// Get AI fields if manual strategy is selected
-				if (strategy === 'manual') {
+				if (assistantType === 'manual') {
 					try {
 						aiFields = this.getNodeParameter(
 							`extractionItems.items[${extractionItems.indexOf(item)}].aiFields.items`,
@@ -958,9 +978,9 @@ export async function execute(
 				aiFormatting = {
 					enabled: true,
 					extractionFormat,
-					aiModel,
+					assistantType,
 					generalInstructions,
-					strategy,
+					strategy: assistantType, // Use assistantType as strategy
 					includeSchema,
 					includeRawData,
 					includeReferenceContext,
@@ -1046,6 +1066,16 @@ export async function execute(
 				// Only include items that have extracted data
 				if (item.extractedData !== undefined) {
 					result[item.name] = item.extractedData;
+
+					// Include schema if it exists and includeSchema was enabled for this item
+					if (item.schema && item.aiFormatting?.includeSchema) {
+						result[`${item.name}_schema`] = item.schema;
+					}
+
+					// Include raw data if includeRawData was enabled for this item
+					if (item.aiFormatting?.includeRawData) {
+						result[`${item.name}_raw`] = item.extractedData;
+					}
 				}
 				return result;
 			}, {}),
