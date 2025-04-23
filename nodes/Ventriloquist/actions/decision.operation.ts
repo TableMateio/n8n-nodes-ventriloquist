@@ -2469,53 +2469,18 @@ export async function execute(
 				// Get the route value and ensure we properly parse it
 				// Route might be a string or number depending on how n8n passes parameters
 				const groupRoute = group.route;
-				let routeNumber: number;
 
-				if (groupRoute !== undefined && groupRoute !== null) {
-					// Convert to number regardless of original type
-					if (typeof groupRoute === 'string') {
-						routeNumber = parseInt(groupRoute, 10);
-					} else {
-						routeNumber = groupRoute as number;
-					}
-
-					// Ensure it's a valid number
-					if (!isNaN(routeNumber)) {
-						// Route numbers are 1-based, but indexes are 0-based
-						routeIndex = routeNumber - 1;
-						this.logger.info(
-							formatOperationLog(
-								"Decision",
-								nodeName,
-								nodeId,
-								index,
-								`Using route: ${routeNumber} (index: ${routeIndex})`,
-							),
-						);
-					} else {
-						this.logger.warn(
-							formatOperationLog(
-								"Decision",
-								nodeName,
-								nodeId,
-								index,
-								`Invalid route value: ${groupRoute}. Using default route 1.`,
-							),
-						);
-						routeIndex = 0; // Default to first route
-					}
-				} else {
-					this.logger.warn(
-						formatOperationLog(
-							"Decision",
-							nodeName,
-							nodeId,
-							index,
-							`No route specified for group "${groupName}". Using default route 1.`,
-						),
-					);
-					routeIndex = 0; // Default to first route
-				}
+				// REMOVED: Setting routeIndex before condition evaluation
+				// This was causing the issue where the last condition's route would override previous settings
+				this.logger.info(
+					formatOperationLog(
+						"Decision",
+						nodeName,
+						nodeId,
+						index,
+						`Group "${groupName}" has route: ${groupRoute} (will be set if condition matches)`,
+					),
+				);
 			}
 
 			this.logger.info(
@@ -2588,18 +2553,51 @@ export async function execute(
 					// For routing capability, store route information
 					if (enableRouting) {
 						const groupRoute = group.route as number;
-						if (groupRoute) {
-							// Route numbers are 1-based, but indexes are 0-based
-							routeIndex = groupRoute - 1;
-							this.logger.info(
+						if (groupRoute !== undefined && groupRoute !== null) {
+							// Convert to number regardless of original type
+							let routeNumber: number;
+							if (typeof groupRoute === 'string') {
+								routeNumber = parseInt(groupRoute, 10);
+							} else {
+								routeNumber = groupRoute as number;
+							}
+
+							// Ensure it's a valid number
+							if (!isNaN(routeNumber)) {
+								// Route numbers are 1-based, but indexes are 0-based
+								routeIndex = routeNumber - 1;
+								this.logger.info(
+									formatOperationLog(
+										"Decision",
+										nodeName,
+										nodeId,
+										index,
+										`Using route: ${routeNumber} (index: ${routeIndex})`,
+									),
+								);
+							} else {
+								this.logger.warn(
+									formatOperationLog(
+										"Decision",
+										nodeName,
+										nodeId,
+										index,
+										`Invalid route value: ${groupRoute}. Using default route 1.`,
+									),
+								);
+								routeIndex = 0; // Default to first route
+							}
+						} else {
+							this.logger.warn(
 								formatOperationLog(
 									"Decision",
 									nodeName,
 									nodeId,
 									index,
-									`Using route: ${groupRoute} (index: ${routeIndex})`,
+									`No route specified for group "${groupName}". Using default route 1.`,
 								),
 							);
+							routeIndex = 0; // Default to first route
 						}
 					}
 
@@ -2862,6 +2860,64 @@ export async function execute(
 													),
 												);
 
+												// Modified: respect routing configuration instead of returning directly
+												if (enableRouting) {
+													// Create an array for each possible output route
+													const routeCount = this.getNodeParameter(
+														"routeCount",
+														index,
+														2,
+													) as number;
+													const routes: INodeExecutionData[][] = Array(routeCount)
+														.fill(null)
+														.map(() => []);
+
+													// Add detailed debugging log
+													this.logger.info(
+														formatOperationLog(
+															"Decision",
+															nodeName,
+															nodeId,
+															index,
+															`[Decision][clickAction] Early return routing - routeIndex: ${routeIndex}, routeCount: ${routeCount}`,
+														),
+													);
+
+													// Put the item in the correct route
+													if (routeIndex >= 0 && routeIndex < routeCount) {
+														routes[routeIndex].push({
+															json: resultData,
+															pairedItem: { item: index },
+														});
+														this.logger.info(
+															formatOperationLog(
+																"Decision",
+																nodeName,
+																nodeId,
+																index,
+																`[Decision][clickAction] Sending output to route ${routeIndex + 1}`,
+															),
+														);
+													} else {
+														// Default to route 0 if routeIndex is out of bounds
+														routes[0].push({
+															json: resultData,
+															pairedItem: { item: index },
+														});
+														this.logger.warn(
+															formatOperationLog(
+																"Decision",
+																nodeName,
+																nodeId,
+																index,
+																`[Decision][clickAction] Route index ${routeIndex} out of bounds, defaulting to route 1`,
+															),
+														);
+													}
+
+													return routes;
+												}
+
 												return [this.helpers.returnJsonArray([resultData])];
 											} catch (pageError) {
 												// If we still can't access the page, return with limited data
@@ -2921,6 +2977,64 @@ export async function execute(
 													`[Decision][clickAction] Returning success with context destruction noted`,
 												),
 											);
+
+											// Modified: respect routing configuration instead of returning directly
+											if (enableRouting) {
+												// Create an array for each possible output route
+												const routeCount = this.getNodeParameter(
+													"routeCount",
+													index,
+													2,
+												) as number;
+												const routes: INodeExecutionData[][] = Array(routeCount)
+													.fill(null)
+													.map(() => []);
+
+												// Add detailed debugging log
+												this.logger.info(
+													formatOperationLog(
+														"Decision",
+														nodeName,
+														nodeId,
+														index,
+														`[Decision][clickAction] Early return routing (no-page) - routeIndex: ${routeIndex}, routeCount: ${routeCount}`,
+													),
+												);
+
+												// Put the item in the correct route
+												if (routeIndex >= 0 && routeIndex < routeCount) {
+													routes[routeIndex].push({
+														json: resultData,
+														pairedItem: { item: index },
+													});
+													this.logger.info(
+														formatOperationLog(
+															"Decision",
+															nodeName,
+															nodeId,
+															index,
+															`[Decision][clickAction] Sending output to route ${routeIndex + 1}`,
+														),
+													);
+												} else {
+													// Default to route 0 if routeIndex is out of bounds
+													routes[0].push({
+														json: resultData,
+														pairedItem: { item: index },
+													});
+													this.logger.warn(
+														formatOperationLog(
+															"Decision",
+															nodeName,
+															nodeId,
+															index,
+															`[Decision][clickAction] Route index ${routeIndex} out of bounds, defaulting to route 1`,
+														),
+													);
+												}
+
+												return routes;
+											}
 
 											return [this.helpers.returnJsonArray([resultData])];
 										}
