@@ -215,6 +215,12 @@ export class BasicExtraction implements IExtraction {
               sessionId: this.context.sessionId || 'unknown' // Add the sessionId
             };
 
+            // Log fields for debugging
+            if (this.config.fields?.items && this.config.fields.items.length > 0) {
+              logger.debug(`${logPrefix} Using ${this.config.fields.items.length} field definitions for manual strategy`);
+              console.log('FIELD DEFINITIONS BEING PASSED:', JSON.stringify(this.config.fields.items, null, 2));
+            }
+
             const smartResult = await extractSmartContent(
               this.page,
               this.config.selector,

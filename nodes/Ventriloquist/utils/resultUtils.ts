@@ -35,6 +35,19 @@ export async function createSuccessResponse(options: SuccessResponseOptions): Pr
     inputData = {},
   } = options;
 
+  // Calculate duration
+  const executionDuration = Date.now() - startTime;
+
+  // Debug log for schema structure
+  if (additionalData && typeof additionalData === 'object' && 'data' in additionalData && additionalData.data && typeof additionalData.data === 'object') {
+    Object.keys(additionalData.data as Record<string, unknown>).forEach(key => {
+      if (key.endsWith('_schema')) {
+        const schemaData = (additionalData.data as Record<string, unknown>)[key];
+        logger.debug(`Schema structure for ${key}: ${JSON.stringify(schemaData, null, 2)}`);
+      }
+    });
+  }
+
   // Get current page information
   const { url, title } = await safeGetPageInfo(page, logger);
 
@@ -46,7 +59,7 @@ export async function createSuccessResponse(options: SuccessResponseOptions): Pr
     url,
     title,
     timestamp: new Date().toISOString(),
-    executionDuration: Date.now() - startTime,
+    executionDuration: executionDuration,
     ...additionalData,
     ...inputData, // Pass through input data
   };

@@ -25,8 +25,7 @@ export interface ISmartExtractionOptions {
  */
 export interface IAIField {
   name: string;
-  description?: string;
-  instructions?: string;
+  instructions?: string;  // This field contains the UI instructions which become OpenAI schema descriptions
   type?: string;
   required?: boolean;
 }
@@ -466,7 +465,7 @@ Fields to extract:
 
   // Add each field definition
   fields.forEach((field) => {
-    prompt += `- ${field.name}${field.required ? ' (Required)' : ''}: ${field.description || ''} (Type: ${field.type || 'string'})\n`;
+    prompt += `- ${field.name}${field.required ? ' (Required)' : ''}: ${field.instructions || ''} (Type: ${field.type || 'string'})\n`;
   });
 
   prompt += `\n${options.includeSchema ? 'Include a "schema" field in your response that describes the structure of the data.\n' : ''}
@@ -511,15 +510,14 @@ function enrichSchemaWithFieldDescriptions(schema: any, fields: IAIField[]): any
       // Find matching field definition and add description
       const fieldDef = fields.find(f => f.name === key);
       if (fieldDef) {
-        // Check for description OR instructions (instructions come from UI)
-        const description = fieldDef.description || fieldDef.instructions;
-        if (description) {
-          properSchema.properties[key].description = description;
-          console.log(`Added description to field ${key}: ${description.substring(0, 50)}...`);
+        // Use instructions directly as the schema description
+        if (fieldDef.instructions) {
+          properSchema.properties[key].description = fieldDef.instructions;
+          console.log(`Added description to field ${key}: ${fieldDef.instructions.substring(0, 50)}...`);
         } else {
-          // Add default description only if no description available
+          // Add default description only if no instructions available
           properSchema.properties[key].description = `The ${key} field`;
-          console.log(`No description found for field ${key}, using default`);
+          console.log(`No instructions found for field ${key}, using default`);
         }
       } else {
         // Field not found in definitions
@@ -537,14 +535,13 @@ function enrichSchemaWithFieldDescriptions(schema: any, fields: IAIField[]): any
     // Add descriptions to each property
     for (const field of fields) {
       if (schema.properties[field.name]) {
-        const description = field.description || field.instructions;
-        if (description) {
-          schema.properties[field.name].description = description;
-          console.log(`Added description to field ${field.name}: ${description.substring(0, 50)}...`);
+        if (field.instructions) {
+          schema.properties[field.name].description = field.instructions;
+          console.log(`Added description to field ${field.name}: ${field.instructions.substring(0, 50)}...`);
         } else {
-          // Only set default if no description available
+          // Only set default if no instructions available
           schema.properties[field.name].description = `The ${field.name} field`;
-          console.log(`No description found for field ${field.name}, using default`);
+          console.log(`No instructions found for field ${field.name}, using default`);
         }
       }
     }
