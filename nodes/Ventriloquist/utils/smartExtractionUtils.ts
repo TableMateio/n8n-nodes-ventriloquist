@@ -26,6 +26,7 @@ export interface ISmartExtractionOptions {
 export interface IAIField {
   name: string;
   description?: string;
+  instructions?: string;
   type?: string;
   required?: boolean;
 }
@@ -393,6 +394,11 @@ export async function processWithAI(
     let data = parsedResponse.data || parsedResponse;
     const schema = parsedResponse.schema;
 
+    // If we have a schema and this is manual mode with fields, enrich the schema with field descriptions
+    const enrichedSchema = options.strategy === 'manual' && schema && fields.length > 0
+      ? enrichSchemaWithFieldDescriptions(schema, fields)
+      : schema;
+
     // Log success
     logger?.debug(
       formatOperationLog(
@@ -407,7 +413,7 @@ export async function processWithAI(
     return {
       success: true,
       data,
-      schema,
+      schema: enrichedSchema,
     };
   } catch (error) {
     const errorMessage = `AI processing failed: ${(error as Error).message}`;
@@ -474,4 +480,76 @@ ${content}
 `;
 
   return prompt;
+}
+
+/**
+ * Enriches a schema with field descriptions from the field definitions
+ * @param schema The schema to enrich
+ * @param fields Field definitions with descriptions
+ * @returns Enriched schema with descriptions
+ */
+function enrichSchemaWithFieldDescriptions(schema: any, fields: IAIField[]): any {
+  if (!schema) return schema;
+
+  console.log('ENRICHING SCHEMA - ORIGINAL:', JSON.stringify(schema, null, 2));
+  console.log('FIELD DEFINITIONS:', JSON.stringify(fields, null, 2));
+
+  // If schema is just a simple type map like { "field1": "string", "field2": "number" }
+  // Convert it to a proper schema object
+  if (typeof schema === 'object' && !schema.type && !schema.properties) {
+    const properSchema: any = {
+      type: 'object',
+      properties: {}
+    };
+
+    // Convert simple type map to proper schema
+    for (const [key, value] of Object.entries(schema)) {
+      properSchema.properties[key] = {
+        type: value,
+      };
+
+      // Find matching field definition and add description
+      const fieldDef = fields.find(f => f.name === key);
+      if (fieldDef) {
+        // Check for description OR instructions (instructions come from UI)
+        const description = fieldDef.description || fieldDef.instructions;
+        if (description) {
+          properSchema.properties[key].description = description;
+          console.log(`Added description to field ${key}: ${description.substring(0, 50)}...`);
+        } else {
+          // Add default description only if no description available
+          properSchema.properties[key].description = `The ${key} field`;
+          console.log(`No description found for field ${key}, using default`);
+        }
+      } else {
+        // Field not found in definitions
+        properSchema.properties[key].description = `The ${key} field`;
+        console.log(`No field definition found for ${key}, using default description`);
+      }
+    }
+
+    console.log('ENRICHED SIMPLE SCHEMA:', JSON.stringify(properSchema, null, 2));
+    return properSchema;
+  }
+
+  // If we have a proper schema object with properties
+  if (schema.type === 'object' && schema.properties) {
+    // Add descriptions to each property
+    for (const field of fields) {
+      if (schema.properties[field.name]) {
+        const description = field.description || field.instructions;
+        if (description) {
+          schema.properties[field.name].description = description;
+          console.log(`Added description to field ${field.name}: ${description.substring(0, 50)}...`);
+        } else {
+          // Only set default if no description available
+          schema.properties[field.name].description = `The ${field.name} field`;
+          console.log(`No description found for field ${field.name}, using default`);
+        }
+      }
+    }
+  }
+
+  console.log('ENRICHED SCHEMA:', JSON.stringify(schema, null, 2));
+  return schema;
 }
