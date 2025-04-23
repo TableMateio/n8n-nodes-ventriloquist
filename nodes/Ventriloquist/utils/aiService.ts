@@ -284,14 +284,14 @@ export class AIService {
       });
 
       // Generate schema for function calling
-      const schema = this.generateOpenAISchema(options.fields);
+      const functionDef = this.generateOpenAISchema(options.fields);
 
       // Run the assistant on the thread with the schema
       const run = await this.openai.beta.threads.runs.create(thread.id, {
         assistant_id: ASSISTANTS.manual,
         tools: [{
           type: "function",
-          function: schema
+          function: functionDef
         }]
       });
 
@@ -375,6 +375,18 @@ export class AIService {
                       `Received function call response: ${content.function_call.name}`
                     )
                   );
+
+                  // Log the arguments for debugging
+                  this.logger.debug(
+                    formatOperationLog(
+                      "SmartExtraction",
+                      nodeName,
+                      nodeId,
+                      index,
+                      `Function arguments: ${content.function_call.arguments}`
+                    )
+                  );
+
                   return {
                     success: true,
                     data: content.function_call.arguments
@@ -498,7 +510,7 @@ export class AIService {
    * Build prompt for manual strategy
    */
   private buildManualPrompt(content: string, options: IAIExtractionOptions): string {
-    // Create a base prompt
+    // Create a base prompt with clearer instructions
     let prompt = "You are an expert data extraction assistant.\n\n";
 
     // Add reference context if available
@@ -515,21 +527,30 @@ export class AIService {
       prompt += `\n\nGENERAL INSTRUCTIONS:\n${options.generalInstructions}`;
     }
 
-    // Add field definitions
+    // Add field definitions with more prominence
     if (options.fields && options.fields.length > 0) {
-      prompt += "\n\nFIELDS TO EXTRACT:";
+      prompt += "\n\nFIELDS TO EXTRACT (Important - follow these instructions carefully):\n";
       options.fields.forEach((field, index) => {
         prompt += `\n${index + 1}. ${field.name} (${field.type})`;
-        if (field.instructions) {
-          prompt += `: ${field.instructions}`;
+        if (field.instructions && field.instructions.trim()) {
+          prompt += `:\n   INSTRUCTIONS: ${field.instructions}\n`;
+        } else {
+          prompt += '\n';
         }
       });
     }
 
+    // Add emphasis on data types and formatting
+    prompt += "\n\nDATA TYPE REQUIREMENTS:";
+    prompt += "\n- Ensure you return proper data types (string, number, boolean, etc.) as specified for each field";
+    prompt += "\n- For boolean fields, return actual boolean values (true/false), not strings";
+    prompt += "\n- For empty fields, return empty strings \"\" or appropriate default values";
+
     // Add response format instructions
     prompt += "\n\nRESPONSE FORMAT:";
-    prompt += "\nProvide the extracted data as a valid JSON object using the field names specified above.";
-    prompt += "\nOnly include the final JSON result without any explanation or preamble.";
+    prompt += "\n- Provide the extracted data as a valid JSON object using the field names specified above.";
+    prompt += "\n- Only include the final JSON result without any explanation or preamble.";
+    prompt += "\n- Ensure your response is properly formatted with the correct data types.";
 
     return prompt;
   }
@@ -654,7 +675,7 @@ ${examplesSection}
       // Determine JSON Schema type based on field type
       let schemaType = 'string';
       let schemaFormat = undefined;
-      let additionalProps = {};
+      let additionalProps: Record<string, any> = {};
 
       switch (field.type.toLowerCase()) {
         case 'number':
@@ -674,17 +695,17 @@ ${examplesSection}
           break;
         case 'array':
           schemaType = 'array';
-          additionalProps = { items: { type: 'string' } };
+          additionalProps.items = { type: 'string' };
           break;
         case 'object':
           schemaType = 'object';
-          additionalProps = { additionalProperties: true };
+          additionalProps.additionalProperties = true;
           break;
         default:
           schemaType = 'string';
       }
 
-      // Create the property definition
+      // Create the property definition with description directly at the field level
       const property: Record<string, any> = {
         type: schemaType,
         description: field.instructions || `Extract the ${field.name}`
@@ -705,50 +726,14 @@ ${examplesSection}
       required.push(field.name);
     });
 
-    // Return the schema in the exact format requested by OpenAI
+    // Create a function definition for OpenAI function calling
     return {
-      name: "entity_extraction",
-      description: "Extract structured information from the provided text content",
+      name: "extract_data",
+      description: "Extract structured information from the provided text content according to the specified fields",
       parameters: {
         type: "object",
-        properties: {
-          name: {
-            type: "string",
-            enum: ["entity_extraction"],
-            default: "entity_extraction"
-          },
-          strict: {
-            type: "boolean",
-            default: true
-          },
-          schema: {
-            type: "object",
-            properties: {
-              type: {
-                type: "string",
-                enum: ["object"],
-                default: "object"
-              },
-              properties: {
-                type: "object",
-                properties: properties
-              },
-              required: {
-                type: "array",
-                items: {
-                  type: "string"
-                },
-                default: required
-              },
-              additionalProperties: {
-                type: "boolean",
-                default: false
-              }
-            },
-            required: ["type", "properties", "required", "additionalProperties"]
-          }
-        },
-        required: ["name", "strict", "schema"]
+        properties: properties,
+        required: required
       }
     };
   }
