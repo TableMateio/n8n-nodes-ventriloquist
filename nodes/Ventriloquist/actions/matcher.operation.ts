@@ -1029,6 +1029,15 @@ export async function execute(
 				// Add standardized formatting to match counts
 				matchCount: matchResult.matchCount || matchResult.matches?.length || 0,
 				totalCompared: matchResult.totalCompared || matchResult.comparisons?.length || matchResult.itemsFound || 0,
+				// Include unique selectors for matched elements
+				uniqueSelectors: {
+					selected: matchResult.selectedMatch?.uniqueSelector || null,
+					matches: matchResult.matches?.filter((m: IEntityMatchResult) => m.uniqueSelector).map((m: IEntityMatchResult) => ({
+						index: m.index,
+						selector: m.uniqueSelector,
+						similarity: m.overallSimilarity
+					})) || []
+				},
 				// Add information about matches that helps explain the selection
 				matchDetails: {
 					richestMatch: matchResult.comparisons?.sort((a: IEntityMatchResult, b: IEntityMatchResult) =>

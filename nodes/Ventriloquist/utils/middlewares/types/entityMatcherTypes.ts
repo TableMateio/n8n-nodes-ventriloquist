@@ -73,6 +73,10 @@ export interface IEntityMatchResult {
   overallSimilarity: number;
   selected: boolean;
   informationRichness?: number;
+  entity?: ISourceEntity;
+  requiredFieldsPresent?: boolean;
+  isMatch?: boolean;
+  uniqueSelector?: string;
 }
 
 /**
@@ -95,6 +99,9 @@ export interface IExtractedItem {
   fields: Record<string, IExtractedField>;
   overallSimilarity?: number;
   selected?: boolean;
+  sourceNodeName?: string;
+  sourceNodeId?: string;
+  uniqueSelector?: string;
 }
 
 /**
