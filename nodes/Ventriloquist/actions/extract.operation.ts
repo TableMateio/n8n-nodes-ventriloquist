@@ -290,6 +290,11 @@ export const description: INodeProperties[] = [
 								description: "Most advanced model with broader general knowledge and improved instruction following",
 							},
 							{
+								name: "Claude 3 Opus",
+								value: "claude-3-opus",
+								description: "Anthropic's most powerful model, excellent at complex reasoning and detailed instruction following",
+							},
+							{
 								name: "GPT-4",
 								value: "gpt-4",
 								description: "Most capable GPT-4 model for complex tasks",
