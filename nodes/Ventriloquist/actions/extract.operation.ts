@@ -1029,16 +1029,14 @@ export async function execute(
 						console.log(`Field name: ${field.name}`);
 						console.log(`Field type: ${field.type}`);
 						console.log(`Field instructions: "${field.instructions || 'UNDEFINED'}"`);
-						console.log(`Field description: "${field.description || 'UNDEFINED'}"`);
 						console.log(`Field format: ${field.format || 'UNDEFINED'}`);
 						console.log('====================================');
 
 						return {
 							name: field.name as string,
-							// Map 'instructions' from UI directly to 'instructions' property in aiFields
+							// Instructions from UI map directly to instructions property in the IField interface
+							// which will become the description in the OpenAI schema
 							instructions: field.instructions as string,
-							// Keep description as a backup but keep it separate
-							description: field.description as string,
 							type: field.type as string,
 							required: field.format === 'required'
 						};

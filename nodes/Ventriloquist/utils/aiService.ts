@@ -29,7 +29,7 @@ const ASSISTANTS = {
 export interface IField {
   name: string;
   type: string;
-  instructions: string;
+  instructions: string;  // This becomes the "description" in the OpenAI schema
   format: string;
   formatString?: string;
   examples?: Array<{
