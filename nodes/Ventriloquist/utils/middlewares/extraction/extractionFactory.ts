@@ -69,6 +69,7 @@ export interface IExtractionResult {
   success: boolean;
   data?: any;
   schema?: any;
+  rawContent?: string;
   error?: {
     message: string;
     details?: any;
@@ -124,10 +125,12 @@ export class BasicExtraction implements IExtraction {
 
       // Extract data based on extraction type
       let data: any;
+      let rawContent: string = '';
 
       switch (this.config.extractionType) {
         case 'text':
-          data = await this.page.$eval(this.config.selector, (el) => el.textContent?.trim() || '');
+          rawContent = await this.page.$eval(this.config.selector, (el) => el.textContent?.trim() || '');
+          data = rawContent;
 
           // Clean text if the option is enabled
           if (this.config.cleanText) {
@@ -148,19 +151,22 @@ export class BasicExtraction implements IExtraction {
           if (!this.config.attributeName) {
             throw new Error('Attribute name is required for attribute extraction');
           }
-          data = await this.page.$eval(
+          rawContent = await this.page.$eval(
             this.config.selector,
             (el, attr) => el.getAttribute(attr) || '',
             this.config.attributeName
           );
+          data = rawContent;
           break;
 
         case 'html':
-          data = await this.page.$eval(this.config.selector, (el) => el.innerHTML);
+          rawContent = await this.page.$eval(this.config.selector, (el) => el.innerHTML);
+          data = rawContent;
           break;
 
         case 'outerHtml':
-          data = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+          rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+          data = rawContent;
           break;
 
         case 'smart':
@@ -177,6 +183,9 @@ export class BasicExtraction implements IExtraction {
           }
 
           try {
+            // Get raw content from the element
+            rawContent = await this.page.$eval(this.config.selector, (el) => el.textContent?.trim() || '');
+
             // Create properly typed smart options
             const smartOptions: ISmartExtractionOptions = {
               enabled: true,
@@ -237,7 +246,8 @@ export class BasicExtraction implements IExtraction {
             if (tableOutputFormat === 'html') {
               // Just return the HTML if that's what was requested
               logger.info(`${logPrefix} Extracting table as HTML`);
-              data = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+              rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+              data = rawContent;
               logger.info(`${logPrefix} Table HTML extracted successfully, length: ${data.length}`);
             } else {
               // Extract as array of rows and cells
@@ -255,6 +265,9 @@ export class BasicExtraction implements IExtraction {
               if (!rowsExist) {
                 logger.warn(`${logPrefix} No rows found in table with rowSelector: ${rowSelector}`);
               }
+
+              // Get the raw HTML for raw content
+              rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
 
               data = await this.page.$$eval(
                 `${this.config.selector} ${rowSelector}`,
@@ -297,12 +310,13 @@ export class BasicExtraction implements IExtraction {
 
         case 'value':
           // Handle input value extraction
-          data = await this.page.$eval(this.config.selector, (el) => {
+          rawContent = await this.page.$eval(this.config.selector, (el) => {
             if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
               return el.value;
             }
             return '';
           });
+          data = rawContent;
           break;
 
         case 'multiple':
@@ -319,10 +333,17 @@ export class BasicExtraction implements IExtraction {
           if (elements.length === 0) {
             logger.warn(`${logPrefix} No elements found matching selector: ${this.config.selector}`);
             data = [];
+            rawContent = '';
             break;
           }
 
           logger.info(`${logPrefix} Found ${elements.length} elements matching selector`);
+
+          // Get raw content as outer HTML of all matching elements
+          rawContent = await this.page.evaluate((selector) => {
+            const elements = document.querySelectorAll(selector);
+            return Array.from(elements).map(el => el.outerHTML).join('\n');
+          }, this.config.selector);
 
           // Limit the number of elements if requested
           const limitedElements = limit > 0 ? elements.slice(0, limit) : elements;
@@ -421,14 +442,16 @@ export class BasicExtraction implements IExtraction {
           return {
             success: true,
             data: aiResult.data,
-            schema: aiResult.schema
+            schema: aiResult.schema,
+            rawContent
           };
         } else {
           // Log AI processing error but return original content
           logger.warn(`${logPrefix} AI formatting failed: ${aiResult.error}. Returning original extracted content.`);
           return {
             success: true,
-            data
+            data,
+            rawContent
           };
         }
       }
@@ -436,6 +459,7 @@ export class BasicExtraction implements IExtraction {
       return {
         success: true,
         data,
+        rawContent
       };
     } catch (error) {
       logger.error(`${logPrefix} Extraction failed: ${(error as Error).message}`);
@@ -446,6 +470,7 @@ export class BasicExtraction implements IExtraction {
           message: (error as Error).message,
           details: error,
         },
+        rawContent: ''
       };
     }
   }

@@ -48,6 +48,7 @@ export interface IExtractItem {
   name: string;
   extractionType: string;
   extractedData?: any;
+  rawData?: any;
   schema?: any;
   selector?: string;
   attribute?: string;
@@ -359,6 +360,11 @@ export async function processExtractionItems(
         const result = await extraction.execute();
 
         if (result.success) {
+          // Store the original raw text before AI processing if raw data is requested
+          if (extractionItem.aiFormatting?.includeRawData) {
+            extractionItem.rawData = result.rawContent;
+          }
+
           // Store the extracted data in the extraction item
           extractionItem.extractedData = result.data;
 
