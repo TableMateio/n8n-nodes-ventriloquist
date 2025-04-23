@@ -108,9 +108,8 @@ export class AIService {
     options: IAIExtractionOptions
   ): Promise<IAIExtractionResult> {
     const { nodeName, nodeId, index } = this.context;
-    const logPrefix = `[AIExtraction][${nodeName}]`;
 
-    // Store options for use in other methods
+    // Reset options for this run (no connection to previous runs)
     this.options = options;
 
     try {
@@ -197,7 +196,7 @@ export class AIService {
         )
       );
 
-      // Create a new thread
+      // Create a new thread (no tracking or management, just create a fresh one)
       const thread = await this.openai.beta.threads.create();
 
       // Add a message to the thread with the content and instructions
@@ -274,7 +273,7 @@ export class AIService {
         throw new Error('Manual strategy requires at least one field definition');
       }
 
-      // Create a new thread
+      // Create a new thread (no tracking or management, just create a fresh one)
       const thread = await this.openai.beta.threads.create();
 
       // Add a message to the thread with the content and instructions
@@ -285,6 +284,29 @@ export class AIService {
 
       // Generate schema for function calling
       const functionDef = this.generateOpenAISchema(options.fields);
+
+      // More detailed logging to see exactly what's being sent to OpenAI
+      console.log('OPENAI FUNCTION SCHEMA - FULL DETAILS:');
+      console.log('-------------------------------------');
+      console.log(JSON.stringify(functionDef, null, 2));
+
+      if (functionDef && functionDef.parameters && functionDef.parameters.properties) {
+        console.log('FIELD DESCRIPTIONS IN SCHEMA:');
+        Object.entries(functionDef.parameters.properties).forEach(([fieldName, fieldDef]: [string, any]) => {
+          console.log(`${fieldName}: "${fieldDef.description}"`);
+        });
+      }
+
+      // Log the function definition for debugging
+      this.logger.debug(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Function definition: ${JSON.stringify(functionDef, null, 2)}`
+        )
+      );
 
       // Run the assistant on the thread with the schema
       const run = await this.openai.beta.threads.runs.create(thread.id, {
@@ -302,10 +324,46 @@ export class AIService {
       if (result.success && result.data) {
         const data = JSON.parse(result.data);
 
+        // Log the parsed result for debugging
+        this.logger.debug(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `Parsed result data: ${JSON.stringify(data, null, 2)}`
+          )
+        );
+
         // Generate schema if requested
-        let outputSchema = null;
+        let outputSchema: any = null;
         if (options.includeSchema) {
+          // Make sure descriptions from fields are available
+          this.options = options; // Set options to include field definitions
+
+          // Generate the schema with field descriptions
           outputSchema = this.generateSchema(data);
+
+          // Ensure all fields from the schema definition are properly described
+          if (outputSchema && outputSchema.type === 'object' && outputSchema.properties) {
+            options.fields.forEach(field => {
+              if (outputSchema.properties[field.name]) {
+                // Make sure every field has a description from the field definition
+                outputSchema.properties[field.name].description = field.instructions || `Extract the ${field.name}`;
+              }
+            });
+          }
+
+          // Log the generated schema for debugging
+          this.logger.debug(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Generated schema: ${JSON.stringify(outputSchema, null, 2)}`
+            )
+          );
         }
 
         return {
@@ -630,6 +688,9 @@ ${examplesSection}
       return { type: 'null' };
     }
 
+    // Debug the input data
+    console.log('GENERATING SCHEMA FOR DATA:', JSON.stringify(data, null, 2));
+
     if (Array.isArray(data)) {
       let schema: any = { type: 'array' };
 
@@ -642,6 +703,14 @@ ${examplesSection}
     }
 
     if (typeof data === 'object') {
+      // Get the field descriptions from the configuration if available
+      const fieldDescriptions: Record<string, string> = {};
+      if (this.options?.fields) {
+        this.options.fields.forEach(field => {
+          fieldDescriptions[field.name] = field.instructions || `Extract the ${field.name}`;
+        });
+      }
+
       const schema: any = {
         type: 'object',
         properties: {},
@@ -650,22 +719,70 @@ ${examplesSection}
 
       for (const [key, value] of Object.entries(data)) {
         schema.properties[key] = this.generateSchema(value);
+
+        // Include the description if available
+        if (fieldDescriptions[key]) {
+          schema.properties[key].description = fieldDescriptions[key];
+        } else {
+          // Add a default description if none was provided
+          schema.properties[key].description = `The ${key} field`;
+        }
+
         if (value !== null && value !== undefined) {
           schema.required.push(key);
         }
       }
 
+      // Debug the generated object schema
+      console.log('GENERATED OBJECT SCHEMA:', JSON.stringify(schema, null, 2));
       return schema;
     }
 
-    // Handle primitive types
-    return { type: typeof data };
+    // Handle primitive types with more detail
+    const type = typeof data;
+    const schema: any = { type };
+
+    // Add format for specific types
+    if (type === 'string' && this.looksLikeDate(data)) {
+      schema.format = 'date-time';
+    }
+
+    // Include an example value
+    schema.example = data;
+
+    // Add a description for primitive types too
+    schema.description = `A ${type} value`;
+
+    // Debug the generated primitive schema
+    console.log('GENERATED PRIMITIVE SCHEMA:', JSON.stringify(schema, null, 2));
+    return schema;
+  }
+
+  /**
+   * Check if a string looks like a date
+   */
+  private looksLikeDate(value: string): boolean {
+    if (typeof value !== 'string') return false;
+
+    // Check for ISO date format
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) return true;
+
+    // Check for other common date formats
+    if (/^\d{4}-\d{2}-\d{2}/.test(value)) return true;
+
+    return false;
   }
 
   /**
    * Generate OpenAI function schema from field definitions
    */
   private generateOpenAISchema(fields: IField[]): any {
+    // Log incoming field definitions
+    console.log('FIELDS RECEIVED BY generateOpenAISchema:');
+    fields.forEach(field => {
+      console.log(`Field: ${field.name}, Type: ${field.type}, Instructions: "${field.instructions || 'none'}"`);
+    });
+
     // Create properties object for the schema
     const properties: Record<string, any> = {};
     const required: string[] = [];

@@ -1024,8 +1024,14 @@ export async function execute(
 				// Add AI fields if using manual strategy
 				aiFields: enableAiFormatting && aiFormatting && aiFormatting.strategy === 'manual' ?
 					aiFields.map((field) => {
-						// Debug log to see field data
-						console.log('FIELD FROM UI:', JSON.stringify(field, null, 2));
+						// More detailed debugging of UI field data
+						console.log('========== UI FIELD DATA ==========');
+						console.log(`Field name: ${field.name}`);
+						console.log(`Field type: ${field.type}`);
+						console.log(`Field instructions: "${field.instructions || 'UNDEFINED'}"`);
+						console.log(`Field description: "${field.description || 'UNDEFINED'}"`);
+						console.log(`Field format: ${field.format || 'UNDEFINED'}`);
+						console.log('====================================');
 
 						return {
 							name: field.name as string,
