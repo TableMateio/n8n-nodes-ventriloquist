@@ -123,21 +123,10 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
     logPrefix: string
   ): Promise<IEntityMatchResult[]> {
     const matches: IEntityMatchResult[] = [];
-    const threshold = comparisonConfig.threshold;
-    const hasRequiredFields = comparisonConfig.fieldComparisons.some(fc => fc.mustMatch === true);
+    const threshold = comparisonConfig.threshold || 0.7;
+    const hasRequiredFields = comparisonConfig.fieldComparisons.some(fc => fc.mustMatch);
 
-    if (hasRequiredFields) {
-      logger.info(`${logPrefix} Configuration includes required (must-match) fields`);
-    }
-
-    // Check for empty source fields and log a warning
-    const emptyFields = Object.entries(sourceFields)
-      .filter(([_, value]) => !value || value.trim?.() === '')
-      .map(([field]) => field);
-
-    if (emptyFields.length > 0) {
-      logger.warn(`${logPrefix} Source entity has empty fields: ${emptyFields.join(', ')}. These fields will not contribute to matches.`);
-    }
+    logger.debug(`${logPrefix} Starting comparison of ${extractedItems.length} items against source fields with threshold ${threshold}`);
 
     // Process each extracted item
     for (const item of extractedItems) {
@@ -153,6 +142,29 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
         // Log which fields we're comparing for debugging
         const fieldsToBeTested = Object.keys(itemFields);
         logger.debug(`${logPrefix} Item #${item.index} fields: ${fieldsToBeTested.join(', ')}`);
+
+        // For each field comparison with a selector, get the targeted content from the item's field
+        for (const fieldComparison of comparisonConfig.fieldComparisons) {
+          if (fieldComparison.selector && fieldComparison.selector.trim() !== '' && item.element) {
+            try {
+              // Try to get the element using the target selector
+              const targetValue = await this.getTargetContent(
+                item.element,
+                fieldComparison.selector,
+                logger,
+                logPrefix
+              );
+
+              if (targetValue) {
+                // Override the field value with the targeted content
+                itemFields[fieldComparison.field] = targetValue;
+                logger.debug(`${logPrefix} Applied target selector "${fieldComparison.selector}" for field "${fieldComparison.field}"`);
+              }
+            } catch (error) {
+              logger.warn(`${logPrefix} Error applying target selector "${fieldComparison.selector}": ${(error as Error).message}`);
+            }
+          }
+        }
 
         // Perform the comparison using our utility
         const comparisonResult = compareEntities(
@@ -204,6 +216,33 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
     }
 
     return matches;
+  }
+
+  /**
+   * Extract text content using a selector from an element
+   */
+  private async getTargetContent(
+    element: any,
+    selector: string,
+    logger: ILogger,
+    logPrefix: string
+  ): Promise<string> {
+    try {
+      // Find the element using the selector
+      const targetElement = await element.$(selector);
+
+      if (!targetElement) {
+        logger.debug(`${logPrefix} Target selector "${selector}" did not match any elements`);
+        return '';
+      }
+
+      // Get the text content
+      const textContent = await targetElement.evaluate((el: Element) => el.textContent || '');
+      return textContent.trim();
+    } catch (error) {
+      logger.warn(`${logPrefix} Error extracting content with selector "${selector}": ${(error as Error).message}`);
+      return '';
+    }
   }
 
   /**
