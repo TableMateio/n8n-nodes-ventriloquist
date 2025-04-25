@@ -390,6 +390,31 @@ export const description: INodeProperties[] = [
 						required: true,
 					},
 					{
+						displayName: "Reference Format",
+						name: "referenceFormat",
+						type: "options",
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+								includeReferenceContext: [true],
+							},
+						},
+						options: [
+							{
+								name: "Text",
+								value: "text",
+								description: "Extract text content only",
+							},
+							{
+								name: "HTML",
+								value: "html",
+								description: "Extract HTML content including tags",
+							},
+						],
+						default: "text",
+						description: "Format to use when extracting reference content",
+					},
+					{
 						displayName: "Strategy",
 						name: "strategy",
 						type: "options",
@@ -901,6 +926,7 @@ export async function execute(
 				includeReferenceContext: boolean;
 				referenceSelector: string;
 				referenceName: string;
+				referenceFormat: string;
 			} | undefined = undefined;
 
 			if (enableAiFormatting) {
@@ -946,6 +972,7 @@ export async function execute(
 
 				let referenceSelector = '';
 				let referenceName = 'referenceContext';
+				let referenceFormat = 'text';
 
 				if (includeReferenceContext) {
 					referenceSelector = this.getNodeParameter(
@@ -958,6 +985,12 @@ export async function execute(
 						`extractionItems.items[${extractionItems.indexOf(item)}].referenceName`,
 						index,
 						'referenceContext'
+					) as string;
+
+					referenceFormat = this.getNodeParameter(
+						`extractionItems.items[${extractionItems.indexOf(item)}].referenceFormat`,
+						index,
+						'text'
 					) as string;
 				}
 
@@ -985,7 +1018,8 @@ export async function execute(
 					includeRawData,
 					includeReferenceContext,
 					referenceSelector,
-					referenceName
+					referenceName,
+					referenceFormat
 				};
 			}
 

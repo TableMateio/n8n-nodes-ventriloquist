@@ -50,6 +50,7 @@ export interface IAIExtractionOptions {
   includeRawData: boolean;
   includeReferenceContext?: boolean;
   referenceName?: string;
+  referenceFormat?: string;
   referenceContent?: string;
 }
 

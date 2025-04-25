@@ -17,6 +17,7 @@ export interface ISmartExtractionOptions {
   includeReferenceContext?: boolean;
   referenceSelector?: string;
   referenceName?: string;
+  referenceFormat?: string;
   referenceContent?: string;
 }
 
@@ -44,6 +45,7 @@ export interface IAIFormattingOptions {
   includeReferenceContext?: boolean;
   referenceSelector?: string;
   referenceName?: string;
+  referenceFormat?: string;
   referenceContent?: string;
 }
 
@@ -217,6 +219,7 @@ export async function extractSmartContent(
       includeRawData: options.includeRawData,
       includeReferenceContext: options.includeReferenceContext,
       referenceName: options.referenceName,
+      referenceFormat: options.referenceFormat,
       referenceContent: options.referenceContent
     };
 
@@ -228,7 +231,7 @@ export async function extractSmartContent(
           nodeName,
           nodeId,
           itemIndex,
-          `Including reference context: ${options.referenceName || 'referenceContext'} (${options.referenceContent.length} chars)`
+          `Including reference context: ${options.referenceName || 'referenceContext'} (${options.referenceContent.length} chars) with format: ${options.referenceFormat || 'text'}`
         )
       );
     }

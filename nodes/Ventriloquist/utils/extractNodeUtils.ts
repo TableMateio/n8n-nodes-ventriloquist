@@ -25,6 +25,7 @@ export interface IExtractionNodeOptions {
   includeReferenceContext?: boolean;
   referenceSelector?: string;
   referenceName?: string;
+  referenceFormat?: string;
   aiFields?: {
     items?: Array<{
       name: string;
@@ -96,7 +97,8 @@ export interface IExtractItem {
     includeReferenceContext?: boolean;
     referenceSelector?: string;
     referenceName?: string;
-    referenceContent?: string; // Will store the extracted reference content
+    referenceFormat?: string;
+    referenceContent?: string;
   };
   aiFields?: Array<{
     name: string;
@@ -184,7 +186,8 @@ export async function processExtractionItems(
         includeRawData: extractionItem.aiFormatting.includeRawData === true || extractionNodeOptions.includeRawData === true,
         includeReferenceContext: extractionItem.aiFormatting.includeReferenceContext === true || extractionNodeOptions.includeReferenceContext === true,
         referenceSelector: extractionItem.aiFormatting.referenceSelector || extractionNodeOptions.referenceSelector || '',
-        referenceName: extractionItem.aiFormatting.referenceName || extractionNodeOptions.referenceName || 'referenceContext'
+        referenceName: extractionItem.aiFormatting.referenceName || extractionNodeOptions.referenceName || 'referenceContext',
+        referenceFormat: extractionItem.aiFormatting.referenceFormat || extractionNodeOptions.referenceFormat || 'json'
       };
 
       // Add AI fields if provided
@@ -302,27 +305,46 @@ export async function processExtractionItems(
             extractionItem.aiFormatting?.includeReferenceContext &&
             extractionItem.aiFormatting?.referenceSelector) {
           try {
+            const referenceFormat = extractionItem.aiFormatting.referenceFormat || 'text';
+
             logger.debug(
               formatOperationLog(
                 'aiFormatting',
                 nodeName,
                 nodeId,
                 i,
-                `Extracting reference context using selector: ${extractionItem.aiFormatting.referenceSelector}`
+                `Extracting reference context using selector: ${extractionItem.aiFormatting.referenceSelector} (format: ${referenceFormat})`
               )
             );
 
-            // Extract the reference content as text
-            const referenceContent = await extractionItem.puppeteerPage.evaluate(
-              (selector: string) => {
-                const element = document.querySelector(selector);
-                if (element) {
-                  return element.textContent || '';
-                }
-                return '';
-              },
-              extractionItem.aiFormatting.referenceSelector
-            );
+            // Extract the reference content based on the specified format
+            let referenceContent = '';
+
+            if (referenceFormat === 'html') {
+              // Extract HTML content
+              referenceContent = await extractionItem.puppeteerPage.evaluate(
+                (selector: string) => {
+                  const element = document.querySelector(selector);
+                  if (element) {
+                    return element.outerHTML || '';
+                  }
+                  return '';
+                },
+                extractionItem.aiFormatting.referenceSelector
+              );
+            } else {
+              // Default to text extraction
+              referenceContent = await extractionItem.puppeteerPage.evaluate(
+                (selector: string) => {
+                  const element = document.querySelector(selector);
+                  if (element) {
+                    return element.textContent || '';
+                  }
+                  return '';
+                },
+                extractionItem.aiFormatting.referenceSelector
+              );
+            }
 
             // Store the reference content in the AI formatting options
             if (referenceContent) {
@@ -339,7 +361,7 @@ export async function processExtractionItems(
                   nodeName,
                   nodeId,
                   i,
-                  `Reference context extracted successfully (${referenceContent.length} chars)`
+                  `Reference context extracted successfully as ${referenceFormat} (${referenceContent.length} chars)`
                 )
               );
             } else {
