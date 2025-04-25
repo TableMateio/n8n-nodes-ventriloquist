@@ -144,14 +144,14 @@ export const description: INodeProperties[] = [
 		type: "options",
 		options: [
 			{
-				name: "Container with Items",
+				name: "Container with auto-detected children",
 				value: "containerItems",
-				description: "Select a container of multiple items to compare against",
+				description: "Select a container element whose children will be auto-detected for matching",
 			},
 			{
 				name: "Direct Items",
 				value: "directItems",
-				description: "Select items directly with a single selector",
+				description: "Select items directly with a specific selector (no auto-detection)",
 			},
 		],
 		default: "containerItems",
@@ -187,18 +187,6 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ["matcher"],
 				selectionMethod: ["directItems"],
-			},
-		},
-	},
-	{
-		displayName: "Auto-detect Children",
-		name: "autoDetectChildren",
-		type: "boolean",
-		default: true,
-		description: "Automatically detect child elements for extraction",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
 			},
 		},
 	},
@@ -917,8 +905,8 @@ export async function execute(
 		// Create entity matcher configuration
 		const matcherConfig: IEntityMatcherConfig = {
 			resultsSelector: selectionMethod === 'containerItems' ? resultsSelector : directItemSelector,
-			itemSelector,
-			autoDetectChildren: true,
+			itemSelector: selectionMethod === 'directItems' ? '' : itemSelector,
+			autoDetectChildren: selectionMethod === 'containerItems',
 			threshold: Number(matchCriteria[0].threshold) || 0.3,
 			matchMode: matchMode as 'best' | 'all' | 'firstAboveThreshold',
 			limitResults: matchMode === 'all' ? Math.max(10, maxItems) : maxItems,

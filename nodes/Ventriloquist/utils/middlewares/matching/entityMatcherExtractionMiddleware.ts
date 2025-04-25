@@ -289,6 +289,17 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
             } else {
                 logger.warn(`${logPrefix} Container has no direct children for auto-detection`);
             }
+        } else {
+            // For direct items selector without auto-detection, use the elements matched by resultsSelector directly
+            logger.info(`${logPrefix} Using direct items matched by selector: ${config.resultsSelector}`);
+
+            try {
+                // When in direct items mode, the resultsSelector itself targets the items we want
+                itemElements = await page.$$(config.resultsSelector);
+                logger.info(`${logPrefix} Found ${itemElements.length} direct items using selector: ${config.resultsSelector}`);
+            } catch (directItemsError) {
+                logger.warn(`${logPrefix} Error finding direct items: ${(directItemsError as Error).message}`);
+            }
         }
 
         // If no items found, return empty array
