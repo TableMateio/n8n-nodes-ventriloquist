@@ -2793,9 +2793,65 @@ export async function execute(
 											)
 										);
 
-										// If continueOnFail is true, we'll continue with the matched route
-										// Otherwise throw an error to stop execution
-										if (continueOnFail) {
+										// If continueOnFail is true, we'll force an immediate return with the matched route
+										if (continueOnFail && enableRouting) {
+											this.logger.info(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`CRITICAL FIX: Forcing return to route ${routeIndex + 1} despite click error [ADDED CODE]`
+												)
+											);
+
+											// Create output structure
+											const routeCount = this.getNodeParameter(
+												"routeCount",
+												index,
+												2,
+											) as number;
+
+											// Prepare routes array
+											const routes: INodeExecutionData[][] = Array(routeCount)
+												.fill(null)
+												.map(() => []);
+
+											// Add actionDetails to resultData
+											resultData.actionDetails = {
+												selectorFound: true, // We got to click, so selector was found
+												actionType: actionPerformed,
+												actionSuccess: false,
+												actionError: actionResult.error,
+											} as IDataObject;
+
+											// Place data in correct route despite error
+											if (routeIndex < routeCount) {
+												routes[routeIndex].push({
+													json: resultData,
+													pairedItem: { item: index },
+												});
+												this.logger.info(
+													formatOperationLog(
+														"Decision",
+														nodeName,
+														nodeId,
+														index,
+														`Forcing route ${routeIndex + 1} even with click error`
+													)
+												);
+											} else {
+												// Fallback to first route if index out of bounds
+												routes[0].push({
+													json: resultData,
+													pairedItem: { item: index },
+												});
+											}
+
+											// IMMEDIATE RETURN to prevent any other processing
+											return routes;
+										} else if (continueOnFail) {
+											// continueOnFail=true but routing disabled
 											this.logger.info(
 												formatOperationLog(
 													"Decision",
@@ -2805,9 +2861,6 @@ export async function execute(
 													`Continuing despite error (continueOnFail=true)`
 												)
 											);
-
-											// Important: Don't throw error, just break and continue
-											// This preserves the routeIndex that was determined by conditions
 											break;
 										} else {
 											throw new Error(
@@ -2825,6 +2878,73 @@ export async function execute(
 											`[Decision][clickAction] Click action completed successfully using action utility`,
 										),
 									);
+
+									// CRITICAL FIX: Immediately after successful click, handle routing
+									if (enableRouting && routeIndex >= 0) {
+										this.logger.info(
+											formatOperationLog(
+												"Decision",
+												nodeName,
+												nodeId,
+												index,
+												`CRITICAL FIX: Explicit return after click action with route ${routeIndex + 1} [ADDED CODE]`,
+											),
+										);
+
+										// Create output structure
+										const routeCount = this.getNodeParameter(
+											"routeCount",
+											index,
+											2,
+										) as number;
+
+										// Prepare routes array
+										const routes: INodeExecutionData[][] = Array(routeCount)
+											.fill(null)
+											.map(() => []);
+
+										// Add actionDetails to resultData
+										resultData.actionDetails = {
+											selectorFound: true,
+											actionType: actionPerformed,
+											actionSuccess: true,
+										} as IDataObject;
+
+										// Place data in correct route
+										if (routeIndex < routeCount) {
+											routes[routeIndex].push({
+												json: resultData,
+												pairedItem: { item: index },
+											});
+											this.logger.info(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`Sending to route ${routeIndex + 1} with data: ${JSON.stringify(resultData.actionDetails)}`,
+												),
+											);
+										} else {
+											// Fallback to first route if index out of bounds
+											routes[0].push({
+												json: resultData,
+												pairedItem: { item: index },
+											});
+											this.logger.warn(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`Index ${routeIndex} out of bounds, using route 1`,
+												),
+											);
+										}
+
+										// IMMEDIATE RETURN to prevent any further processing
+										return routes;
+									}
 
 									// Check if the context was destroyed or navigation happened
 									// Cast to IClickActionResult to access the urlChanged property
