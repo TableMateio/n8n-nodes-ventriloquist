@@ -2757,9 +2757,53 @@ export async function execute(
 
 									// Handle action failures
 									if (!actionResult.success) {
-										throw new Error(
-											`Decision action failed: ${actionResult.error}`,
+										// Update the error in the result data
+										resultData.success = false;
+										resultData.error = `Action error: ${actionResult.error}`;
+										resultData.actionError = true;
+
+										// Log the error but mention we'll maintain the route if continueOnFail is true
+										this.logger.error(
+											formatOperationLog(
+												"Decision",
+												nodeName,
+												nodeId,
+												index,
+												`Error during click action: ${actionResult.error}`
+											)
 										);
+
+										this.logger.info(
+											formatOperationLog(
+												"Decision",
+												nodeName,
+												nodeId,
+												index,
+												`Current page when error occurred - URL: ${resultData.currentUrl}, Title: ${resultData.pageTitle}`
+											)
+										);
+
+										// If continueOnFail is true, we'll continue with the matched route
+										// Otherwise throw an error to stop execution
+										if (continueOnFail) {
+											this.logger.info(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`Continuing despite error (continueOnFail=true)`
+												)
+											);
+
+											// Important: Don't throw error, just break and continue
+											// This preserves the routeIndex that was determined by conditions
+											break;
+										} else {
+											throw new Error(
+												`Decision action failed: ${actionResult.error}`,
+											);
+										}
 									}
 
 									this.logger.info(
