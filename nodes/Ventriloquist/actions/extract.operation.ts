@@ -393,26 +393,46 @@ export const description: INodeProperties[] = [
 						displayName: "Reference Format",
 						name: "referenceFormat",
 						type: "options",
+						options: [
+							{
+								name: "Text",
+								value: "text",
+								description: "Extract plain text content",
+							},
+							{
+								name: "HTML",
+								value: "html",
+								description: "Extract HTML content",
+							},
+							{
+								name: "Attribute",
+								value: "attribute",
+								description: "Extract a specific attribute value",
+							},
+						],
 						displayOptions: {
 							show: {
 								enableAiFormatting: [true],
 								includeReferenceContext: [true],
 							},
 						},
-						options: [
-							{
-								name: "Text",
-								value: "text",
-								description: "Extract text content only",
-							},
-							{
-								name: "HTML",
-								value: "html",
-								description: "Extract HTML content including tags",
-							},
-						],
 						default: "text",
-						description: "Format to use when extracting reference content",
+						description: "Format to extract from the reference element",
+					},
+					{
+						displayName: "Attribute Name",
+						name: "referenceAttribute",
+						type: "string",
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+								includeReferenceContext: [true],
+								referenceFormat: ["attribute"],
+							},
+						},
+						default: "href",
+						placeholder: "href, src, data-url",
+						description: "Name of the attribute to extract",
 					},
 					{
 						displayName: "Strategy",
@@ -927,6 +947,7 @@ export async function execute(
 				referenceSelector: string;
 				referenceName: string;
 				referenceFormat: string;
+				referenceAttribute: string;
 			} | undefined = undefined;
 
 			if (enableAiFormatting) {
@@ -973,6 +994,7 @@ export async function execute(
 				let referenceSelector = '';
 				let referenceName = 'referenceContext';
 				let referenceFormat = 'text';
+				let referenceAttribute = '';
 
 				if (includeReferenceContext) {
 					referenceSelector = this.getNodeParameter(
@@ -987,11 +1009,21 @@ export async function execute(
 						'referenceContext'
 					) as string;
 
+					// Get the reference format
 					referenceFormat = this.getNodeParameter(
 						`extractionItems.items[${extractionItems.indexOf(item)}].referenceFormat`,
 						index,
 						'text'
 					) as string;
+
+					// Get the attribute name if format is 'attribute'
+					if (referenceFormat === 'attribute') {
+						referenceAttribute = this.getNodeParameter(
+							`extractionItems.items[${extractionItems.indexOf(item)}].referenceAttribute`,
+							index,
+							'href'
+						) as string;
+					}
 				}
 
 				// Get AI fields if manual strategy is selected
@@ -1019,7 +1051,8 @@ export async function execute(
 					includeReferenceContext,
 					referenceSelector,
 					referenceName,
-					referenceFormat
+					referenceFormat,
+					referenceAttribute
 				};
 			}
 
@@ -1067,12 +1100,12 @@ export async function execute(
 						console.log('====================================');
 
 						return {
-							name: field.name as string,
+						name: field.name as string,
 							// Instructions from UI map directly to instructions property in the IField interface
 							// which will become the description in the OpenAI schema
 							instructions: field.instructions as string,
-							type: field.type as string,
-							required: field.format === 'required'
+						type: field.type as string,
+						required: field.format === 'required'
 						};
 					}) : undefined,
 				// Only set hasOpenAiApiKey when AI formatting is actually enabled for this item
@@ -1207,3 +1240,4 @@ export async function execute(
 		};
 	}
 }
+
