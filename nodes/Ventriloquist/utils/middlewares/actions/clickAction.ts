@@ -886,18 +886,14 @@ export async function executeClickAction(
 						details: {
 							error: `Element not found: ${selector}`,
 							selector,
+							selectorFound: false
 						},
 						error: new Error(`Element not found: ${selector}`),
 					};
 				}
 
-				// Set an increased timeout for the click operation to prevent protocol timeouts
-				await page.setDefaultTimeout(60000); // 60 seconds timeout for noWait operations
-
+				// Just click - no timeout manipulation needed for noWait
 				await element.click(); // Await click here for noWait case
-
-				// Restore default timeout
-				await page.setDefaultTimeout(30000);
 
 				// We've clicked, now return success without waiting for anything
 				return {
@@ -906,6 +902,7 @@ export async function executeClickAction(
 						selector,
 						waitAfterAction,
 						waitTime,
+						selectorFound: true
 					},
 				};
 			} catch (clickError) {
@@ -919,13 +916,6 @@ export async function executeClickAction(
 					),
 				);
 
-				// Restore default timeout even on error
-				try {
-					await page.setDefaultTimeout(30000);
-				} catch (timeoutError) {
-					// Ignore errors when resetting timeout
-				}
-
 				return {
 					success: false,
 					details: {
@@ -933,6 +923,7 @@ export async function executeClickAction(
 						waitAfterAction,
 						waitTime,
 						error: (clickError as Error).message,
+						selectorFound: false
 					},
 					error: clickError as Error,
 				};

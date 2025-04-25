@@ -2575,6 +2575,16 @@ export async function execute(
 										`Using route: ${routeNumber} (index: ${routeIndex})`,
 									),
 								);
+								// Add debug checkpoint for route selection
+								this.logger.info(
+									formatOperationLog(
+										"Decision",
+										nodeName,
+										nodeId,
+										index,
+										`ROUTE DEBUG: After condition match, routeIndex=${routeIndex}`,
+									),
+								);
 							} else {
 								this.logger.warn(
 									formatOperationLog(
@@ -4901,8 +4911,26 @@ export async function execute(
 				),
 			);
 
+			// CRITICAL FIX: Add explicit debugging of route information
+			this.logger.info(
+				formatOperationLog(
+					"Decision",
+					nodeName,
+					nodeId,
+					index,
+					`ROUTE DEBUG: Final return - routeIndex=${routeIndex}, routeTaken="${routeTaken}", conditions evaluated`,
+				),
+			);
+
 			// Put the item in the correct route
 			if (routeIndex >= 0 && routeIndex < routeCount) {
+				// Add action success/selector info to output
+				if (!returnItem.json.actionDetails) {
+					returnItem.json.actionDetails = {} as IDataObject;
+				}
+				(returnItem.json.actionDetails as IDataObject).selectorFound = true; // We would only get here if selector was found
+				(returnItem.json.actionDetails as IDataObject).actionType = actionPerformed;
+
 				routes[routeIndex].push(returnItem);
 				this.logger.info(
 					formatOperationLog(
@@ -4926,9 +4954,11 @@ export async function execute(
 						),
 					);
 				}
+
+				// CRITICAL FIX: Return the routes IMMEDIATELY to prevent any further code changing routeIndex
+				return routes;
 			} else {
-				// Default to route 0 if routeIndex is out of bounds
-				routes[0].push(returnItem);
+				// Log warning but still use fallback
 				this.logger.warn(
 					formatOperationLog(
 						"Decision",
@@ -4938,12 +4968,32 @@ export async function execute(
 						`Route index ${routeIndex} out of bounds, defaulting to route 1`,
 					),
 				);
+
+				// Add action success/selector info even in fallback case
+				if (!returnItem.json.actionDetails) {
+					returnItem.json.actionDetails = {} as IDataObject;
+				}
+				(returnItem.json.actionDetails as IDataObject).selectorFound = true;
+				(returnItem.json.actionDetails as IDataObject).actionType = actionPerformed;
+
+				routes[0].push(returnItem);
+
+				// CRITICAL FIX: Return immediately here too
+				return routes;
 			}
 
-			return routes;
+			// Remove this line - it should never be reached due to the immediate returns above
+			// return routes;
 		}
 
-		// Single output case - no else needed as the if block returns
+		// Single output case
+		// Add action success/selector info here too
+		if (!returnItem.json.actionDetails) {
+			returnItem.json.actionDetails = {} as IDataObject;
+		}
+		(returnItem.json.actionDetails as IDataObject).selectorFound = true;
+		(returnItem.json.actionDetails as IDataObject).actionType = actionPerformed;
+
 		return [returnItem];
 	} catch (error) {
 		// Use standardized error response utility
