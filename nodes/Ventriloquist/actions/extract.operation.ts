@@ -375,6 +375,31 @@ export const description: INodeProperties[] = [
 						required: true,
 					},
 					{
+						displayName: "Selector Scope",
+						name: "selectorScope",
+						type: "options",
+						options: [
+							{
+								name: "Global (Whole Page)",
+								value: "global",
+								description: "Search for the reference selector in the entire page",
+							},
+							{
+								name: "Relative (Within Parent Element)",
+								value: "relative",
+								description: "Search for the reference selector only within the parent/comparison element",
+							},
+						],
+						displayOptions: {
+							show: {
+								enableAiFormatting: [true],
+								includeReferenceContext: [true],
+							},
+						},
+						default: "global",
+						description: "Scope for the reference selector",
+					},
+					{
 						displayName: "Reference Name",
 						name: "referenceName",
 						type: "string",
@@ -948,6 +973,7 @@ export async function execute(
 				referenceName: string;
 				referenceFormat: string;
 				referenceAttribute: string;
+				selectorScope: string;
 			} | undefined = undefined;
 
 			if (enableAiFormatting) {
@@ -995,6 +1021,7 @@ export async function execute(
 				let referenceName = 'referenceContext';
 				let referenceFormat = 'text';
 				let referenceAttribute = '';
+				let selectorScope = 'global';
 
 				if (includeReferenceContext) {
 					referenceSelector = this.getNodeParameter(
@@ -1014,6 +1041,13 @@ export async function execute(
 						`extractionItems.items[${extractionItems.indexOf(item)}].referenceFormat`,
 						index,
 						'text'
+					) as string;
+
+					// Get the selector scope
+					selectorScope = this.getNodeParameter(
+						`extractionItems.items[${extractionItems.indexOf(item)}].selectorScope`,
+						index,
+						'global'
 					) as string;
 
 					// Get the attribute name if format is 'attribute'
@@ -1052,7 +1086,8 @@ export async function execute(
 					referenceSelector,
 					referenceName,
 					referenceFormat,
-					referenceAttribute
+					referenceAttribute,
+					selectorScope
 				};
 			}
 

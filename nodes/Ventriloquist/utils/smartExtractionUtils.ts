@@ -17,6 +17,9 @@ export interface ISmartExtractionOptions {
   includeReferenceContext?: boolean;
   referenceSelector?: string;
   referenceName?: string;
+  referenceFormat?: string;
+  referenceAttribute?: string;
+  selectorScope?: string;
   referenceContent?: string;
 }
 
@@ -46,6 +49,7 @@ export interface IAIFormattingOptions {
   referenceName?: string;
   referenceFormat?: string;
   referenceAttribute?: string;
+  selectorScope?: string;
   referenceContent?: string;
 }
 
@@ -332,6 +336,19 @@ export async function processWithAI(
       prompt = buildAutoPrompt(contentString, options);
     } else {
       prompt = buildManualPrompt(contentString, options, fields);
+    }
+
+    // Log details about reference format if applicable
+    if (options.includeReferenceContext && options.referenceContent) {
+      logger?.debug(
+        formatOperationLog(
+          'aiProcessing',
+          nodeName,
+          nodeId,
+          index,
+          `Including reference context (${options.referenceName}) with format: ${options.referenceFormat || 'text'}`
+        )
+      );
     }
 
     logger?.debug(

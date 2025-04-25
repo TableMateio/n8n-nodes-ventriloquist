@@ -51,6 +51,8 @@ export interface IAIExtractionOptions {
   includeReferenceContext?: boolean;
   referenceName?: string;
   referenceFormat?: string;
+  referenceAttribute?: string;
+  selectorScope?: string;
   referenceContent?: string;
 }
 
@@ -323,7 +325,7 @@ export class AIService {
 
       // Process the response
       if (result.success && result.data) {
-        const data = JSON.parse(result.data);
+          const data = JSON.parse(result.data);
 
         // Log the parsed result for debugging
         this.logger.debug(
@@ -336,9 +338,9 @@ export class AIService {
           )
         );
 
-        // Generate schema if requested
+          // Generate schema if requested
         let outputSchema: any = null;
-        if (options.includeSchema) {
+          if (options.includeSchema) {
           // Make sure descriptions from fields are available
           this.options = options; // Set options to include field definitions
 
@@ -365,14 +367,14 @@ export class AIService {
               `Generated schema: ${JSON.stringify(outputSchema, null, 2)}`
             )
           );
-        }
+          }
 
-        return {
-          success: true,
-          data,
+          return {
+            success: true,
+            data,
           schema: outputSchema,
-          rawData: options.includeRawData ? content : undefined,
-        };
+            rawData: options.includeRawData ? content : undefined,
+          };
       } else {
         throw new Error(result.error || 'Failed to get response from AI assistant');
       }
@@ -407,10 +409,10 @@ export class AIService {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         // Get run status
-        const run = await this.openai.beta.threads.runs.retrieve(threadId, runId);
+      const run = await this.openai.beta.threads.runs.retrieve(threadId, runId);
 
         // Check if completed
-        if (run.status === 'completed') {
+      if (run.status === 'completed') {
           // Get messages from the thread (newest first)
           const messages = await this.openai.beta.threads.messages.list(threadId, {
             order: 'desc',
@@ -454,13 +456,13 @@ export class AIService {
 
                 // Handle text responses
                 if (content.type === 'text') {
-                  return {
-                    success: true,
+              return {
+                success: true,
                     data: content.text.value,
-                  };
-                }
-              }
+              };
             }
+          }
+        }
 
             // No usable content found
             return {
@@ -477,8 +479,8 @@ export class AIService {
 
         // Check for failures
         if (['failed', 'cancelled', 'expired'].includes(run.status)) {
-          return {
-            success: false,
+        return {
+          success: false,
             error: `Run ${run.status}: ${run.last_error?.message || 'Unknown error'}`,
           };
         }
@@ -523,7 +525,7 @@ export class AIService {
         );
 
         // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, delayMs));
+      await new Promise(resolve => setTimeout(resolve, delayMs));
       }
     }
 

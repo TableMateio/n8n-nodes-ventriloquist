@@ -41,6 +41,8 @@ export interface IExtractionConfig {
     referenceSelector?: string;
     referenceName?: string;
     referenceFormat?: string;
+    referenceAttribute?: string;
+    selectorScope?: string;
     referenceContent?: string;
   };
   // Fields for manual strategy in smart extraction
@@ -200,6 +202,8 @@ export class BasicExtraction implements IExtraction {
               referenceSelector: this.config.smartOptions.referenceSelector || '',
               referenceName: this.config.smartOptions.referenceName || 'referenceContext',
               referenceFormat: this.config.smartOptions.referenceFormat || '',
+              referenceAttribute: this.config.smartOptions.referenceAttribute || '',
+              selectorScope: this.config.smartOptions.selectorScope || '',
               referenceContent: this.config.smartOptions.referenceContent || ''
             };
 

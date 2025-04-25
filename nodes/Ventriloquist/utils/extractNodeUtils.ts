@@ -27,6 +27,7 @@ export interface IExtractionNodeOptions {
   referenceName?: string;
   referenceFormat?: string;
   referenceAttribute?: string;
+  selectorScope?: string;
   aiFields?: {
     items?: Array<{
       name: string;
@@ -100,6 +101,7 @@ export interface IExtractItem {
     referenceName?: string;
     referenceFormat?: string;
     referenceAttribute?: string;
+    selectorScope?: string;
     referenceContent?: string; // Will store the extracted reference content
   };
   aiFields?: Array<{
@@ -129,29 +131,58 @@ async function extractReferenceContent(
   selector: string,
   format: string = 'text',
   attribute: string = '',
+  parentSelector: string = '',
+  selectorScope: string = 'global',
   context: string = ''
 ): Promise<string> {
   try {
-    // Extract based on format
-    if (format === 'text') {
-      return await page.evaluate((selector: string) => {
-        const element = document.querySelector(selector);
-        return element ? element.textContent || '' : '';
-      }, selector);
-    } else if (format === 'html') {
-      return await page.evaluate((selector: string) => {
-        const element = document.querySelector(selector);
-        return element ? element.outerHTML || '' : '';
-      }, selector);
-    } else if (format === 'attribute' && attribute) {
-      return await page.evaluate((selector: string, attr: string) => {
-        const element = document.querySelector(selector);
-        return element ? element.getAttribute(attr) || '' : '';
-      }, selector, attribute);
+    // Extract based on format and scope
+    if (selectorScope === 'global') {
+      // Global selector - search in the entire page
+      if (format === 'text') {
+        return await page.evaluate((selector: string) => {
+          const element = document.querySelector(selector);
+          return element ? element.textContent || '' : '';
+        }, selector);
+      } else if (format === 'html') {
+        return await page.evaluate((selector: string) => {
+          const element = document.querySelector(selector);
+          return element ? element.outerHTML || '' : '';
+        }, selector);
+      } else if (format === 'attribute' && attribute) {
+        return await page.evaluate((selector: string, attr: string) => {
+          const element = document.querySelector(selector);
+          return element ? element.getAttribute(attr) || '' : '';
+        }, selector, attribute);
+      }
+    } else if (selectorScope === 'relative' && parentSelector) {
+      // Relative selector - search within the parent element
+      if (format === 'text') {
+        return await page.evaluate((parentSel: string, childSel: string) => {
+          const parent = document.querySelector(parentSel);
+          if (!parent) return '';
+          const element = parent.querySelector(childSel);
+          return element ? element.textContent || '' : '';
+        }, parentSelector, selector);
+      } else if (format === 'html') {
+        return await page.evaluate((parentSel: string, childSel: string) => {
+          const parent = document.querySelector(parentSel);
+          if (!parent) return '';
+          const element = parent.querySelector(childSel);
+          return element ? element.outerHTML || '' : '';
+        }, parentSelector, selector);
+      } else if (format === 'attribute' && attribute) {
+        return await page.evaluate((parentSel: string, childSel: string, attr: string) => {
+          const parent = document.querySelector(parentSel);
+          if (!parent) return '';
+          const element = parent.querySelector(childSel);
+          return element ? element.getAttribute(attr) || '' : '';
+        }, parentSelector, selector, attribute);
+      }
     }
     return '';
   } catch (error) {
-    console.error(`Error extracting reference content (${format}): ${error}`);
+    console.error(`Error extracting reference content (${format}, scope: ${selectorScope}): ${error}`);
     return '';
   }
 }
@@ -226,6 +257,7 @@ export async function processExtractionItems(
         referenceName: extractionItem.aiFormatting.referenceName || extractionNodeOptions.referenceName || 'referenceContext',
         referenceFormat: extractionItem.aiFormatting.referenceFormat || extractionNodeOptions.referenceFormat || '',
         referenceAttribute: extractionItem.aiFormatting.referenceAttribute || extractionNodeOptions.referenceAttribute || '',
+        selectorScope: extractionItem.aiFormatting.selectorScope || extractionNodeOptions.selectorScope || 'global',
       };
 
       // Add AI fields if provided
@@ -235,16 +267,19 @@ export async function processExtractionItems(
 
       // Configure the smart extraction options
       extractionConfig.smartOptions = {
-        extractionFormat: extractionItem.aiFormatting.extractionFormat,
+        extractionFormat: extractionItem.aiFormatting.extractionFormat || 'json',
         enableAiFormatter: true,
-        aiModel: extractionItem.aiFormatting.aiModel,
-        generalInstructions: extractionItem.aiFormatting.generalInstructions,
-        strategy: extractionItem.aiFormatting.strategy,
-        includeSchema: extractionItem.aiFormatting.includeSchema,
-        includeRawData: extractionItem.aiFormatting.includeRawData,
-        includeReferenceContext: extractionItem.aiFormatting.includeReferenceContext,
-        referenceSelector: extractionItem.aiFormatting.referenceSelector,
-        referenceName: extractionItem.aiFormatting.referenceName
+        aiModel: extractionItem.aiFormatting.aiModel || 'gpt-4',
+        generalInstructions: extractionItem.aiFormatting.generalInstructions || '',
+        strategy: extractionItem.aiFormatting.strategy || 'auto',
+        includeSchema: extractionItem.aiFormatting.includeSchema === true,
+        includeRawData: extractionItem.aiFormatting.includeRawData === true,
+        includeReferenceContext: extractionItem.aiFormatting.includeReferenceContext === true,
+        referenceSelector: extractionItem.aiFormatting.referenceSelector || '',
+        referenceName: extractionItem.aiFormatting.referenceName || 'referenceContext',
+        referenceFormat: extractionItem.aiFormatting.referenceFormat || 'text',
+        referenceAttribute: extractionItem.aiFormatting.referenceAttribute || '',
+        selectorScope: extractionItem.aiFormatting.selectorScope || 'global'
       };
 
       // Add fields for manual strategy
@@ -346,6 +381,7 @@ export async function processExtractionItems(
             const referenceSelector = extractionItem.aiFormatting.referenceSelector;
             const referenceFormat = extractionItem.aiFormatting.referenceFormat || 'text';
             const referenceAttribute = extractionItem.aiFormatting.referenceAttribute || '';
+            const selectorScope = extractionItem.aiFormatting.selectorScope || 'global';
 
             logger.debug(
               formatOperationLog(
@@ -353,7 +389,7 @@ export async function processExtractionItems(
                 nodeName,
                 nodeId,
                 i,
-                `Extracting reference context using selector "${referenceSelector}" (format: ${referenceFormat}${referenceFormat === 'attribute' ? `, attribute: ${referenceAttribute}` : ''})`
+                `Extracting reference context using selector "${referenceSelector}" (format: ${referenceFormat}, scope: ${selectorScope}${referenceFormat === 'attribute' ? `, attribute: ${referenceAttribute}` : ''})`
               )
             );
 
@@ -361,48 +397,107 @@ export async function processExtractionItems(
             let referenceContent = '';
 
             try {
-              // Using ElementHandle's $ method to search relative to the element instead of page-wide
-              // This ensures we find elements within the context of the item, not the entire page
+              if (selectorScope === 'global') {
+                // Global selector - search in the entire page
+                if (referenceFormat === 'text') {
+                  // Extract as text content
+                  referenceContent = await extractionItem.puppeteerPage.evaluate((selector: string) => {
+                    try {
+                      const element = document.querySelector(selector);
+                      if (element) {
+                        return element.textContent || '';
+                      }
+                    } catch (err) {
+                      console.error('Error in text extraction:', err);
+                    }
+                    return '';
+                  }, referenceSelector);
+                } else if (referenceFormat === 'html') {
+                  // Extract as HTML
+                  referenceContent = await extractionItem.puppeteerPage.evaluate((selector: string) => {
+                    try {
+                      const element = document.querySelector(selector);
+                      if (element) {
+                        return element.outerHTML || '';
+                      }
+                    } catch (err) {
+                      console.error('Error in HTML extraction:', err);
+                    }
+                    return '';
+                  }, referenceSelector);
+                } else if (referenceFormat === 'attribute' && referenceAttribute) {
+                  // Extract attribute value
+                  referenceContent = await extractionItem.puppeteerPage.evaluate((selector: string, attribute: string) => {
+                    try {
+                      const element = document.querySelector(selector);
+                      if (element) {
+                        return element.getAttribute(attribute) || '';
+                      }
+                    } catch (err) {
+                      console.error('Error in attribute extraction:', err);
+                    }
+                    return '';
+                  }, referenceSelector, referenceAttribute);
+                }
+              } else {
+                // Relative selector - search within the parent element
+                // First get the main selector element
+                const mainSelector = extractionItem.selector;
 
-              if (referenceFormat === 'text') {
-                // Extract as text content
-                referenceContent = await extractionItem.puppeteerPage.evaluate((selector: string) => {
-                  try {
-                    const element = document.querySelector(selector);
-                    if (element) {
-                      return element.textContent || '';
+                if (referenceFormat === 'text') {
+                  // Extract as text content relative to main selector
+                  referenceContent = await extractionItem.puppeteerPage.evaluate((mainSel: string, refSel: string) => {
+                    try {
+                      const parentElement = document.querySelector(mainSel);
+                      if (parentElement) {
+                        const element = parentElement.querySelector(refSel);
+                        if (element) {
+                          return element.textContent || '';
+                        }
+                      }
+                    } catch (err) {
+                      console.error('Error in relative text extraction:', err);
                     }
-                  } catch (err) {
-                    console.error('Error in text extraction:', err);
-                  }
-                  return '';
-                }, referenceSelector);
-              } else if (referenceFormat === 'html') {
-                // Extract as HTML
-                referenceContent = await extractionItem.puppeteerPage.evaluate((selector: string) => {
-                  try {
-                    const element = document.querySelector(selector);
-                    if (element) {
-                      return element.outerHTML || '';
+                    return '';
+                  }, mainSelector, referenceSelector);
+                } else if (referenceFormat === 'html') {
+                  // Extract as HTML relative to main selector
+                  referenceContent = await extractionItem.puppeteerPage.evaluate((mainSel: string, refSel: string) => {
+                    try {
+                      const parentElement = document.querySelector(mainSel);
+                      if (parentElement) {
+                        const element = parentElement.querySelector(refSel);
+                        if (element) {
+                          return element.outerHTML || '';
+                        }
+                      }
+                    } catch (err) {
+                      console.error('Error in relative HTML extraction:', err);
                     }
-                  } catch (err) {
-                    console.error('Error in HTML extraction:', err);
-                  }
-                  return '';
-                }, referenceSelector);
-              } else if (referenceFormat === 'attribute' && referenceAttribute) {
-                // Extract attribute value
-                referenceContent = await extractionItem.puppeteerPage.evaluate((selector: string, attribute: string) => {
-                  try {
-                    const element = document.querySelector(selector);
-                    if (element) {
-                      return element.getAttribute(attribute) || '';
-                    }
-                  } catch (err) {
-                    console.error('Error in attribute extraction:', err);
-                  }
-                  return '';
-                }, referenceSelector, referenceAttribute);
+                    return '';
+                  }, mainSelector, referenceSelector);
+                } else if (referenceFormat === 'attribute' && referenceAttribute) {
+                  // Extract attribute value relative to main selector
+                  referenceContent = await extractionItem.puppeteerPage.evaluate(
+                    (mainSel: string, refSel: string, attribute: string) => {
+                      try {
+                        const parentElement = document.querySelector(mainSel);
+                        if (parentElement) {
+                          const element = parentElement.querySelector(refSel);
+                          if (element) {
+                            return element.getAttribute(attribute) || '';
+                          }
+                        }
+                      } catch (err) {
+                        console.error('Error in relative attribute extraction:', err);
+                      }
+                      return '';
+                    },
+                    mainSelector,
+                    referenceSelector,
+                    referenceAttribute
+                  );
+                }
               }
             } catch (error) {
               logger.warn(
