@@ -1153,8 +1153,8 @@ export async function execute(
 						result[item.name] = item.extractedData;
 					}
 
-					// Include schema if it exists
-					if (item.schema) {
+					// Include schema if it exists and includeSchema is set to true
+					if (item.schema && item.aiFormatting?.includeSchema === true) {
 						// Add schema to the output with a _schema suffix
 						this.logger.info(
 							formatOperationLog(
@@ -1168,8 +1168,8 @@ export async function execute(
 						result[`${item.name}_schema`] = item.schema;
 					}
 
-					// Include raw data if we have AI-processed data and raw data
-					if (item.aiFormatting?.enabled && item.rawData) {
+					// Include raw data if we have AI-processed data, raw data, and includeRawData is set to true
+					if (item.aiFormatting?.enabled && item.rawData && item.aiFormatting?.includeRawData === true) {
 						// Add raw data to the output with a _raw suffix
 						this.logger.info(
 							formatOperationLog(
