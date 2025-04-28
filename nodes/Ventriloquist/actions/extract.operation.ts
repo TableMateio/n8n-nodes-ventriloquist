@@ -412,62 +412,31 @@ export const description: INodeProperties[] = [
 										description: "Enable AI assistance for this field (shows Instructions field)",
 									},
 									{
-										displayName: "Options",
-										name: "fieldOptions",
-										type: "collection",
-										placeholder: "Add Option",
-										default: {},
-										typeOptions: { multipleValues: false },
+										displayName: "Relative Selector",
+										name: "relativeSelector",
+										type: "string",
+										default: "",
+										placeholder: ".price, .title, span.value",
+										description: "CSS selector to extract data relative to the parent element",
+										displayOptions: {
+											show: {
+												aiAssisted: [false],
+											},
+										},
+										required: true,
+									},
+									{
+										displayName: "Relative Selector (Optional)",
+										name: "relativeSelectorOptional",
+										type: "string",
+										default: "",
+										placeholder: ".price, .title, span.value",
+										description: "Optional CSS selector to extract data relative to the parent element (AI Assisted)",
 										displayOptions: {
 											show: {
 												aiAssisted: [true],
 											},
 										},
-										options: [
-											{
-												displayName: "Relative Selector",
-												name: "relativeSelector",
-												type: "string",
-												default: "",
-												placeholder: ".price, .title, span.value",
-												description: "CSS selector to extract data relative to the parent element.",
-											},
-											{
-												displayName: "Extraction Type",
-												name: "extractionType",
-												type: "options",
-												options: [
-													{ name: "Text Content", value: "text" },
-													{ name: "HTML", value: "html" },
-													{ name: "Attribute", value: "attribute" },
-													{ name: "Value", value: "value" },
-												],
-												default: "text",
-											},
-											{
-												displayName: "Attribute Name",
-												name: "attributeName",
-												type: "string",
-												default: "",
-												placeholder: "href, src, data-id",
-												description: "Name of the attribute to extract (only needed when Extraction Type is set to Attribute)",
-												displayOptions: {
-													show: {
-														extractionType: ["attribute"],
-													},
-												},
-											},
-											{
-												displayName: "Format",
-												name: "format",
-												type: "options",
-												options: [
-													{ name: "Default", value: "default" },
-													{ name: "Custom", value: "custom" },
-												],
-												default: "default",
-											},
-										],
 									},
 									{
 										displayName: "Instructions",
@@ -481,6 +450,50 @@ export const description: INodeProperties[] = [
 												aiAssisted: [true],
 											},
 										},
+									},
+									{
+										displayName: "Options",
+										name: "fieldOptions",
+										type: "collection",
+										placeholder: "Add Option",
+										default: {},
+										typeOptions: { multipleValues: false },
+										options: [
+											{
+												displayName: "Extraction Type",
+												name: "extractionType",
+												type: "options",
+												options: [
+													{ name: "Text Content", value: "text" },
+													{ name: "HTML", value: "html" },
+													{ name: "Attribute", value: "attribute" },
+													{ name: "Value", value: "value" },
+												],
+												default: "text",
+												description: "Requires a selector to be set for this option to take effect."
+											},
+											{
+												displayName: "Attribute Name",
+												name: "attributeName",
+												type: "string",
+												default: "",
+												placeholder: "href, src, data-id",
+												description: "Name of the attribute to extract (only needed when Extraction Type is set to Attribute)"
+											},
+											{
+												displayName: "Format",
+												name: "format",
+												type: "options",
+												options: [
+													{ name: "Default", value: "default" },
+													{ name: "Trimmed", value: "trimmed" },
+													{ name: "Raw", value: "raw" },
+													{ name: "Custom", value: "custom" },
+												],
+												default: "default",
+												description: "Requires a selector to be set for this option to take effect."
+											},
+										],
 									},
 								],
 							},
@@ -1183,4 +1196,5 @@ export async function execute(
 		};
 	}
 }
+
 
