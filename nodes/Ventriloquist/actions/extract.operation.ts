@@ -412,6 +412,19 @@ export const description: INodeProperties[] = [
 										description: "Enable AI assistance for this field (shows Instructions field)",
 									},
 									{
+										displayName: "Sub-selector within item",
+										name: "subSelector",
+										type: "string",
+										default: "",
+										placeholder: ".price, .title, span.value",
+										description: "CSS selector to extract data relative to the parent element (only used when AI Assisted is off)",
+										displayOptions: {
+											show: {
+												aiAssisted: [false],
+											},
+										},
+									},
+									{
 										displayName: "Instructions",
 										name: "instructions",
 										type: "string",
