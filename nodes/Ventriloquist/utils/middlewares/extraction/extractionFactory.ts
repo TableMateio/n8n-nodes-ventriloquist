@@ -132,21 +132,53 @@ export class BasicExtraction implements IExtraction {
 
       switch (this.config.extractionType) {
         case 'text':
-          rawContent = await this.page.$eval(this.config.selector, (el) => el.textContent?.trim() || '');
-          data = rawContent;
+          // Changed from $eval to $$eval to get all matching elements
+          const textElements = await this.page.$$eval(this.config.selector, (els) =>
+            els.map(el => el.textContent?.trim() || '')
+          );
+
+          // Store all raw content joined together for compatibility
+          rawContent = textElements.join('\n');
+
+          // If only one result was found, keep backwards compatibility by returning a string
+          // Otherwise, return an array of results
+          data = textElements.length === 1 ? textElements[0] : textElements;
 
           // Clean text if the option is enabled
           if (this.config.cleanText) {
-            logger.info(`${logPrefix} Cleaning text content - original length: ${data.length}`);
-            // First replace all whitespace (including non-breaking spaces, tabs, etc.) with regular spaces
-            data = data.replace(/[\s\n\r\t\f\v]+/g, ' ');
-            // Then replace multiple consecutive spaces with a single space
-            data = data.replace(/ {2,}/g, ' ');
-            // Replace newlines around spaces/whitespace
-            data = data.replace(/\s*\n\s*/g, '\n');
-            // Finally replace multiple consecutive newlines
-            data = data.replace(/\n{2,}/g, '\n');
-            logger.info(`${logPrefix} Text cleaned - new length: ${data.length}`);
+            logger.info(`${logPrefix} Cleaning text content`);
+
+            if (Array.isArray(data)) {
+              // Clean each element in the array
+              data = data.map(item => {
+                // First replace all whitespace with regular spaces
+                let cleaned = item.replace(/[\s\n\r\t\f\v]+/g, ' ');
+                // Then replace multiple consecutive spaces with a single space
+                cleaned = cleaned.replace(/ {2,}/g, ' ');
+                // Replace newlines around spaces/whitespace
+                cleaned = cleaned.replace(/\s*\n\s*/g, '\n');
+                // Finally replace multiple consecutive newlines
+                cleaned = cleaned.replace(/\n{2,}/g, '\n');
+                return cleaned;
+              });
+
+              // Update rawContent to reflect cleaned data
+              rawContent = data.join('\n');
+            } else {
+              // First replace all whitespace with regular spaces
+              data = data.replace(/[\s\n\r\t\f\v]+/g, ' ');
+              // Then replace multiple consecutive spaces with a single space
+              data = data.replace(/ {2,}/g, ' ');
+              // Replace newlines around spaces/whitespace
+              data = data.replace(/\s*\n\s*/g, '\n');
+              // Finally replace multiple consecutive newlines
+              data = data.replace(/\n{2,}/g, '\n');
+
+              // Update rawContent
+              rawContent = data;
+            }
+
+            logger.info(`${logPrefix} Text cleaned successfully`);
           }
           break;
 
@@ -154,22 +186,48 @@ export class BasicExtraction implements IExtraction {
           if (!this.config.attributeName) {
             throw new Error('Attribute name is required for attribute extraction');
           }
-          rawContent = await this.page.$eval(
+
+          // Changed from $eval to $$eval to get all matching elements
+          const attributeValues = await this.page.$$eval(
             this.config.selector,
-            (el, attr) => el.getAttribute(attr) || '',
+            (els, attr) => els.map(el => el.getAttribute(attr) || ''),
             this.config.attributeName
           );
-          data = rawContent;
+
+          // Store all raw content joined together for compatibility
+          rawContent = attributeValues.join('\n');
+
+          // If only one result was found, keep backwards compatibility by returning a string
+          // Otherwise, return an array of results
+          data = attributeValues.length === 1 ? attributeValues[0] : attributeValues;
           break;
 
         case 'html':
-          rawContent = await this.page.$eval(this.config.selector, (el) => el.innerHTML);
-          data = rawContent;
+          // Changed from $eval to $$eval to get all matching elements
+          const htmlContents = await this.page.$$eval(this.config.selector, (els) =>
+            els.map(el => el.innerHTML)
+          );
+
+          // Store all raw content joined together for compatibility
+          rawContent = htmlContents.join('\n');
+
+          // If only one result was found, keep backwards compatibility by returning a string
+          // Otherwise, return an array of results
+          data = htmlContents.length === 1 ? htmlContents[0] : htmlContents;
           break;
 
         case 'outerHtml':
-          rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
-          data = rawContent;
+          // Changed from $eval to $$eval to get all matching elements
+          const outerHtmlContents = await this.page.$$eval(this.config.selector, (els) =>
+            els.map(el => el.outerHTML)
+          );
+
+          // Store all raw content joined together for compatibility
+          rawContent = outerHtmlContents.join('\n');
+
+          // If only one result was found, keep backwards compatibility by returning a string
+          // Otherwise, return an array of results
+          data = outerHtmlContents.length === 1 ? outerHtmlContents[0] : outerHtmlContents;
           break;
 
         case 'smart':
@@ -322,13 +380,21 @@ export class BasicExtraction implements IExtraction {
 
         case 'value':
           // Handle input value extraction
-          rawContent = await this.page.$eval(this.config.selector, (el) => {
-            if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
-              return el.value;
-            }
-            return '';
+          const inputValues = await this.page.$$eval(this.config.selector, (els) => {
+            return els.map(el => {
+              if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+                return el.value;
+              }
+              return '';
+            });
           });
-          data = rawContent;
+
+          // Store all raw content joined together for compatibility
+          rawContent = inputValues.join('\n');
+
+          // If only one result was found, keep backwards compatibility by returning a string
+          // Otherwise, return an array of results
+          data = inputValues.length === 1 ? inputValues[0] : inputValues;
           break;
 
         case 'multiple':
