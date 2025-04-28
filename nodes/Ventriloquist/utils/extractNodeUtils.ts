@@ -15,7 +15,7 @@ import { IMiddlewareContext } from './middlewares/middleware';
 export interface IExtractionNodeOptions {
   nodeName?: string;
   nodeId?: string;
-  enableAiFormatting?: boolean;
+  aiAssistance?: boolean;
   extractionFormat?: string;
   aiModel?: string;
   generalInstructions?: string;
@@ -231,7 +231,7 @@ export async function processExtractionItems(
       cleanText: extractionItem.textOptions?.cleanText,
       // Initialize smartOptions based on the item's own AI formatting setting, not the node-level setting
       smartOptions: extractionItem.aiFormatting?.enabled === true ? {
-        enableAiFormatter: true,
+        aiAssistance: true,
         extractionFormat: 'json',
         aiModel: 'gpt-3.5-turbo',
         generalInstructions: '',
@@ -266,9 +266,29 @@ export async function processExtractionItems(
       }
 
       // Configure the smart extraction options
+      // Map extractionType to extractionFormat for AI Assistance
+      const extractionTypeToFormat: Record<string, string> = {
+        text: 'text',
+        html: 'html',
+        table: 'table',
+        csv: 'csv',
+        multiple: 'array',
+        attribute: 'attribute',
+        value: 'value',
+      };
+      const mappedExtractionFormat = extractionTypeToFormat[extractionItem.extractionType] || 'json';
+      logger.debug(
+        formatOperationLog(
+          'aiFormatting',
+          nodeName,
+          nodeId,
+          i,
+          `Mapped extractionType '${extractionItem.extractionType}' to extractionFormat '${mappedExtractionFormat}'`
+        )
+      );
       extractionConfig.smartOptions = {
-        extractionFormat: extractionItem.aiFormatting.extractionFormat || 'json',
-        enableAiFormatter: true,
+        extractionFormat: mappedExtractionFormat,
+        aiAssistance: true,
         aiModel: extractionItem.aiFormatting.aiModel || 'gpt-4',
         generalInstructions: extractionItem.aiFormatting.generalInstructions || '',
         strategy: extractionItem.aiFormatting.strategy || 'auto',

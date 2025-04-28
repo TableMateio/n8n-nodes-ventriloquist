@@ -31,7 +31,7 @@ export interface IExtractionConfig {
   // Additional properties for Smart extraction
   smartOptions?: {
     extractionFormat?: string;
-    enableAiFormatter?: boolean;
+    aiAssistance?: boolean;
     aiModel?: string;
     generalInstructions?: string;
     strategy?: string;
@@ -486,7 +486,7 @@ export class BasicExtraction implements IExtraction {
       logger.debug(`${logPrefix} Extraction successful:`, typeof data === 'string' ? data.substring(0, 50) + '...' : data);
 
       // Apply AI formatting if enabled
-      if (this.config.smartOptions?.enableAiFormatter && this.config.openaiApiKey) {
+      if (this.config.smartOptions?.aiAssistance && this.config.openaiApiKey) {
         // Prepare AI formatting options
         const aiFormattingOptions: IAIFormattingOptions = {
           enabled: true,
