@@ -412,17 +412,62 @@ export const description: INodeProperties[] = [
 										description: "Enable AI assistance for this field (shows Instructions field)",
 									},
 									{
-										displayName: "Sub-selector within item",
-										name: "subSelector",
-										type: "string",
-										default: "",
-										placeholder: ".price, .title, span.value",
-										description: "CSS selector to extract data relative to the parent element (only used when AI Assisted is off)",
+										displayName: "Options",
+										name: "fieldOptions",
+										type: "collection",
+										placeholder: "Add Option",
+										default: {},
+										typeOptions: { multipleValues: false },
 										displayOptions: {
 											show: {
-												aiAssisted: [false],
+												aiAssisted: [true],
 											},
 										},
+										options: [
+											{
+												displayName: "Relative Selector",
+												name: "relativeSelector",
+												type: "string",
+												default: "",
+												placeholder: ".price, .title, span.value",
+												description: "CSS selector to extract data relative to the parent element.",
+											},
+											{
+												displayName: "Extraction Type",
+												name: "extractionType",
+												type: "options",
+												options: [
+													{ name: "Text Content", value: "text" },
+													{ name: "HTML", value: "html" },
+													{ name: "Attribute", value: "attribute" },
+													{ name: "Value", value: "value" },
+												],
+												default: "text",
+											},
+											{
+												displayName: "Attribute Name",
+												name: "attributeName",
+												type: "string",
+												default: "",
+												placeholder: "href, src, data-id",
+												description: "Name of the attribute to extract (only needed when Extraction Type is set to Attribute)",
+												displayOptions: {
+													show: {
+														extractionType: ["attribute"],
+													},
+												},
+											},
+											{
+												displayName: "Format",
+												name: "format",
+												type: "options",
+												options: [
+													{ name: "Default", value: "default" },
+													{ name: "Custom", value: "custom" },
+												],
+												default: "default",
+											},
+										],
 									},
 									{
 										displayName: "Instructions",
