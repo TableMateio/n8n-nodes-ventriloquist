@@ -231,8 +231,8 @@ export const description: INodeProperties[] = [
 						description: "Enable AI assistance for data extraction and formatting",
 					},
 					{
-						displayName: "Assistant Type",
-						name: "assistantType",
+						displayName: "Strategy",
+						name: "strategy",
 						type: "options",
 						displayOptions: {
 							show: {
@@ -243,16 +243,16 @@ export const description: INodeProperties[] = [
 							{
 								name: "Auto",
 								value: "auto",
-								description: "Automatically detect fields and structure (asst_YOKjWiQPTTeg3OvDV6D8984n)",
+								description: "Automatically determine fields from content",
 							},
 							{
 								name: "Manual",
 								value: "manual",
-								description: "Manually define fields to extract (asst_p65Hrk79gidj5thHqgs4W1lK)",
+								description: "Define specific fields to extract",
 							},
 						],
 						default: "auto",
-						description: "Type of assistant to use for extraction",
+						description: "Strategy to use for extraction",
 					},
 					{
 						displayName: "General Instructions",
@@ -380,102 +380,6 @@ export const description: INodeProperties[] = [
 						default: "href",
 						placeholder: "href, src, data-url",
 						description: "Name of the attribute to extract",
-					},
-					{
-						displayName: "Strategy",
-						name: "strategy",
-						type: "options",
-						displayOptions: {
-							show: {
-								aiAssistance: [true],
-							},
-						},
-						options: [
-							{
-								name: "Auto",
-								value: "auto",
-								description: "Automatically determine fields from content",
-							},
-							{
-								name: "Manual",
-								value: "manual",
-								description: "Define specific fields to extract",
-							},
-						],
-						default: "auto",
-						description: "Strategy to use for extraction",
-					},
-					{
-						displayName: "Fields",
-						name: "aiFields",
-						placeholder: "Add Field",
-						type: "fixedCollection",
-						typeOptions: {
-							multipleValues: true,
-							sortable: true,
-						},
-						displayOptions: {
-							show: {
-								aiAssistance: [true],
-								strategy: ["manual"],
-							},
-						},
-						default: { items: [{ name: "", type: "string", instructions: "" }] },
-						options: [
-							{
-								name: "items",
-								displayName: "Items",
-								values: [
-									{
-										displayName: "Name",
-										name: "name",
-										type: "string",
-										default: "",
-										description: "Name of the field to extract",
-										required: true,
-									},
-									{
-										displayName: "Type",
-										name: "type",
-										type: "options",
-										options: [
-											{
-												name: "String",
-												value: "string",
-											},
-											{
-												name: "Number",
-												value: "number",
-											},
-											{
-												name: "Boolean",
-												value: "boolean",
-											},
-											{
-												name: "Object",
-												value: "object",
-											},
-											{
-												name: "Array",
-												value: "array",
-											},
-										],
-										default: "string",
-										description: "Type of the field to extract",
-									},
-									{
-										displayName: "Instructions",
-										name: "instructions",
-										type: "string",
-										default: "",
-										description: "Instructions for the AI on how to extract this field",
-										typeOptions: {
-											rows: 2,
-										},
-									},
-								],
-							},
-						],
 					},
 					{
 						displayName: "Output Schema",
@@ -675,6 +579,61 @@ export const description: INodeProperties[] = [
 								default: "value",
 								description:
 									"The name of the key to use in the output objects (only applies when Output as Objects is enabled and Output Format is set to Array)",
+							},
+						],
+					},
+					{
+						displayName: "Fields",
+						name: "aiFields",
+						placeholder: "Add Field",
+						type: "fixedCollection",
+						typeOptions: {
+							multipleValues: true,
+							sortable: true,
+						},
+						displayOptions: {
+							show: {
+								aiAssistance: [true],
+								strategy: ["manual"],
+							},
+						},
+						default: { items: [{ name: "", type: "string", instructions: "" }] },
+						options: [
+							{
+								name: "items",
+								displayName: "Items",
+								values: [
+									{
+										displayName: "Name",
+										name: "name",
+										type: "string",
+										default: "",
+										description: "Name of the field to extract",
+										required: true,
+									},
+									{
+										displayName: "Type",
+										name: "type",
+										type: "options",
+										options: [
+											{ name: "String", value: "string" },
+											{ name: "Number", value: "number" },
+											{ name: "Boolean", value: "boolean" },
+											{ name: "Object", value: "object" },
+											{ name: "Array", value: "array" },
+										],
+										default: "string",
+										description: "Type of the field to extract",
+									},
+									{
+										displayName: "Instructions",
+										name: "instructions",
+										type: "string",
+										default: "",
+										description: "Instructions for the AI on how to extract this field",
+										typeOptions: { rows: 2 },
+									},
+								],
 							},
 						],
 					},
@@ -885,7 +844,6 @@ export async function execute(
 			let aiFormatting: {
 				enabled: boolean;
 				extractionFormat: string;
-				assistantType: string;
 				generalInstructions: string;
 				strategy: string;
 				includeSchema: boolean;
@@ -906,19 +864,17 @@ export async function execute(
 					'json'
 				) as string;
 
-				const assistantType = this.getNodeParameter(
-					`extractionItems.items[${extractionItems.indexOf(item)}].assistantType`,
-					index,
-					'auto'
-				) as string;
-
 				const generalInstructions = this.getNodeParameter(
 					`extractionItems.items[${extractionItems.indexOf(item)}].generalInstructions`,
 					index,
 					''
 				) as string;
 
-				const strategy = assistantType; // Use assistantType as strategy (auto/manual)
+				const strategy = this.getNodeParameter(
+					`extractionItems.items[${extractionItems.indexOf(item)}].strategy`,
+					index,
+					'auto'
+				) as string;
 
 				const includeSchema = this.getNodeParameter(
 					`extractionItems.items[${extractionItems.indexOf(item)}].includeSchema`,
@@ -983,7 +939,7 @@ export async function execute(
 				}
 
 				// Get AI fields if manual strategy is selected
-				if (assistantType === 'manual') {
+				if (strategy === 'manual') {
 					try {
 						aiFields = this.getNodeParameter(
 							`extractionItems.items[${extractionItems.indexOf(item)}].aiFields.items`,
@@ -999,9 +955,8 @@ export async function execute(
 				aiFormatting = {
 					enabled: true,
 					extractionFormat,
-					assistantType,
 					generalInstructions,
-					strategy: assistantType, // Use assistantType as strategy
+					strategy,
 					includeSchema,
 					includeRawData,
 					includeReferenceContext,
