@@ -198,7 +198,11 @@ export async function processExtractionItems(
 ): Promise<IExtractItem[]> {
   const nodeName = extractionNodeOptions.nodeName || 'Ventriloquist';
   const nodeId = extractionNodeOptions.nodeId || 'unknown';
-  logger.debug(formatOperationLog('extraction', nodeName, nodeId, 0, `Starting extraction process with ${extractionItems.length} items`));
+
+  // Log the OpenAI API key status for debugging
+  logger.debug(formatOperationLog('extraction', nodeName, nodeId, 0,
+    `Starting extraction process with API key ${openAiApiKey ? 'provided' : 'not provided'}`
+  ));
 
   // Return early if there are no extraction items
   if (!extractionItems || extractionItems.length === 0) {
@@ -241,54 +245,43 @@ export async function processExtractionItems(
       } : undefined
     };
 
-    // Handle AI formatting settings if enabled - fix indentation
+    // Configure the smart extraction options
+    // Map extractionType to extractionFormat for AI Assistance
+    const extractionTypeToFormat: Record<string, string> = {
+      text: 'text',
+      html: 'html',
+      table: 'table',
+      csv: 'csv',
+      multiple: 'array',
+      attribute: 'attribute',
+      value: 'value',
+    };
+    const mappedExtractionFormat = extractionTypeToFormat[extractionItem.extractionType] || 'json';
+    logger.debug(
+      formatOperationLog(
+        'aiFormatting',
+        nodeName,
+        nodeId,
+        i,
+        `Mapped extractionType '${extractionItem.extractionType}' to extractionFormat '${mappedExtractionFormat}'`
+      )
+    );
+
+    // Make sure AI is only enabled when specifically requested
     if (extractionItem.aiFormatting?.enabled === true) {
-      // Ensure the AI formatting settings are properly set
-      extractionItem.aiFormatting = {
-        enabled: true,
-        extractionFormat: extractionItem.aiFormatting.extractionFormat || extractionNodeOptions.extractionFormat || 'json',
-        aiModel: extractionItem.aiFormatting.aiModel || extractionNodeOptions.aiModel || 'gpt-3.5-turbo',
-        generalInstructions: extractionItem.aiFormatting.generalInstructions || extractionNodeOptions.generalInstructions || '',
-        strategy: extractionItem.aiFormatting.strategy || extractionNodeOptions.strategy || 'auto',
-        includeSchema: extractionItem.aiFormatting.includeSchema === true || extractionNodeOptions.includeSchema === true,
-        includeRawData: extractionItem.aiFormatting.includeRawData === true || extractionNodeOptions.includeRawData === true,
-        includeReferenceContext: extractionItem.aiFormatting.includeReferenceContext === true || extractionNodeOptions.includeReferenceContext === true,
-        referenceSelector: extractionItem.aiFormatting.referenceSelector || extractionNodeOptions.referenceSelector || '',
-        referenceName: extractionItem.aiFormatting.referenceName || extractionNodeOptions.referenceName || 'referenceContext',
-        referenceFormat: extractionItem.aiFormatting.referenceFormat || extractionNodeOptions.referenceFormat || '',
-        referenceAttribute: extractionItem.aiFormatting.referenceAttribute || extractionNodeOptions.referenceAttribute || '',
-        selectorScope: extractionItem.aiFormatting.selectorScope || extractionNodeOptions.selectorScope || 'global',
-      };
-
-      // Add AI fields if provided
-      if (extractionNodeOptions.aiFields && extractionNodeOptions.aiFields.items) {
-        extractionItem.aiFields = extractionNodeOptions.aiFields.items;
-      }
-
-      // Configure the smart extraction options
-      // Map extractionType to extractionFormat for AI Assistance
-      const extractionTypeToFormat: Record<string, string> = {
-        text: 'text',
-        html: 'html',
-        table: 'table',
-        csv: 'csv',
-        multiple: 'array',
-        attribute: 'attribute',
-        value: 'value',
-      };
-      const mappedExtractionFormat = extractionTypeToFormat[extractionItem.extractionType] || 'json';
-      logger.debug(
+      logger.info(
         formatOperationLog(
           'aiFormatting',
           nodeName,
           nodeId,
           i,
-          `Mapped extractionType '${extractionItem.extractionType}' to extractionFormat '${mappedExtractionFormat}'`
+          `Setting up AI formatting for item ${extractionItem.name} (strategy: ${extractionItem.aiFormatting.strategy || 'auto'})`
         )
       );
+
       extractionConfig.smartOptions = {
+        aiAssistance: true, // This is the key property that was missing
         extractionFormat: mappedExtractionFormat,
-        aiAssistance: true,
         aiModel: extractionItem.aiFormatting.aiModel || 'gpt-4',
         generalInstructions: extractionItem.aiFormatting.generalInstructions || '',
         strategy: extractionItem.aiFormatting.strategy || 'auto',
@@ -304,55 +297,60 @@ export async function processExtractionItems(
 
       // Add fields for manual strategy
       if (extractionItem.aiFields && extractionItem.aiFormatting.strategy === 'manual') {
-        console.log('FIELDS BEFORE MAPPING:', JSON.stringify(extractionItem.aiFields, null, 2));
-
-        extractionConfig.fields = {
-          items: extractionItem.aiFields.map(field => {
-            // Debug log field mapping
-            console.log(`MAPPING FIELD [${field.name}]: instructions=${field.instructions || field.description || 'none'}`);
-
-            return {
-              name: field.name,
-              type: field.type || 'string',
-              // Map field.instructions directly to instructions (not through description)
-              instructions: field.instructions || field.description || '',
-              format: 'default'
-            };
-          })
-        };
-
-        console.log('FIELDS AFTER MAPPING:', JSON.stringify(extractionConfig.fields.items, null, 2));
-      }
-
-      // Auto-detect content type if set to 'auto'
-      if (extractionItem.aiFormatting.extractionFormat === 'auto' && extractionItem.extractedData) {
-        const detectedType = detectContentType(extractionItem.extractedData);
         logger.debug(
           formatOperationLog(
             'aiFormatting',
             nodeName,
             nodeId,
             i,
-            `Auto-detected content type: ${detectedType}`
+            `Using manual strategy with ${extractionItem.aiFields.length} fields`
           )
         );
-        extractionItem.aiFormatting.extractionFormat = detectedType;
+
+        extractionConfig.fields = {
+          items: extractionItem.aiFields.map(field => {
+            return {
+              name: field.name,
+              type: field.type || 'string',
+              // Map field.instructions directly to instructions (not through description)
+              instructions: field.instructions || field.description || '',
+              format: field.required ? 'required' : 'default'
+            };
+          })
+        };
       }
 
-      // Set OpenAI API key for processing (not for output)
-      // The actual key should not be exposed in the result
+      // Set OpenAI API key if provided
       if (openAiApiKey) {
-        // Only store a boolean flag in the extractionItem for output
-        // Only set hasOpenAiApiKey when AI formatting is enabled for this specific item
-        extractionItem.hasOpenAiApiKey = true;
-        // Use the actual key only in the extraction config which won't be included in output
         extractionConfig.openaiApiKey = openAiApiKey;
+        extractionItem.hasOpenAiApiKey = true;
+        // Store a copy of the API key directly in the extraction item for use in later processing
+        extractionItem.openAiApiKey = openAiApiKey;
+        logger.info(
+          formatOperationLog(
+            'aiFormatting',
+            nodeName,
+            nodeId,
+            i,
+            `OpenAI API key provided for extraction (length: ${openAiApiKey.length})`
+          )
+        );
+      } else {
+        // Log a warning if no API key is available
+        logger.warn(
+          formatOperationLog(
+            'aiFormatting',
+            nodeName,
+            nodeId,
+            i,
+            `No OpenAI API key provided - AI processing will be skipped`
+          )
+        );
       }
     } else {
-      // Ensure hasOpenAiApiKey is not set when AI formatting is not enabled
+      // Ensure AI processing is disabled when not explicitly enabled
+      extractionConfig.smartOptions = undefined;
       extractionItem.hasOpenAiApiKey = false;
-      // Also ensure aiFormatting is properly set to disabled
-      extractionItem.aiFormatting = { enabled: false };
     }
 
     // Add specific options for different extraction types
@@ -575,6 +573,22 @@ export async function processExtractionItems(
 
         // Create and execute the extraction
         const extraction = createExtraction(extractionItem.puppeteerPage, extractionConfig, context);
+
+        // If there's an API key in the extraction item, make sure it's copied to the extraction config
+        // This ensures it's available during execution
+        if (extractionItem.openAiApiKey && !extractionConfig.openaiApiKey) {
+          logger.debug(
+            formatOperationLog(
+              'extraction',
+              nodeName,
+              nodeId,
+              i,
+              `Adding OpenAI API key from extraction item to extraction config`
+            )
+          );
+          extractionConfig.openaiApiKey = extractionItem.openAiApiKey;
+        }
+
         const result = await extraction.execute();
 
         if (result.success) {

@@ -900,8 +900,14 @@ export async function execute(
 
 		// Convert extraction items to properly typed items
 		const typedExtractionItems: IExtractItem[] = extractionItems.map((item) => {
+			// Log debug information about the item
+			this.logger.debug(`Processing extraction item with name: ${item.name}, type: ${item.extractionType}, schema: ${item.schema}`);
+
 			// Add AI formatting options from parameters
 			const schema = this.getNodeParameter(`extractionItems.items[${extractionItems.indexOf(item)}].schema`, index, "none") as string;
+
+			// Log schema and AI settings
+			this.logger.debug(`Item ${item.name} - schema setting: "${schema}", AI enabled: ${schema !== "none"}`);
 
 			let aiFields: IDataObject[] = [];
 			let aiFormatting: {
@@ -919,8 +925,8 @@ export async function execute(
 				selectorScope: string;
 			} | undefined = undefined;
 
-			if (schema === "manual") {
-				// Get AI specific parameters only if schema is manual
+			if (schema === "manual" || schema === "auto") {
+				// Get AI specific parameters only if schema is manual or auto
 				const extractionFormat = this.getNodeParameter(
 					`extractionItems.items[${extractionItems.indexOf(item)}].extractionFormat`,
 					index,
@@ -984,15 +990,19 @@ export async function execute(
 				}
 
 				// Get AI fields if manual strategy is selected
-				if (generalInstructions === 'manual') {
+				if (schema === 'manual') {
 					try {
 						aiFields = this.getNodeParameter(
 							`extractionItems.items[${extractionItems.indexOf(item)}].aiFields.items`,
 							index,
 							[]
 						) as IDataObject[];
+
+						// Log the number of AI fields found
+						this.logger.debug(`Found ${aiFields.length} AI fields for item ${item.name}`);
 					} catch (error) {
 						// Handle the case where aiFields might not exist
+						this.logger.warn(`Error getting AI fields for item ${item.name}: ${(error as Error).message}`);
 						aiFields = [];
 					}
 				}
@@ -1001,7 +1011,7 @@ export async function execute(
 					enabled: true,
 					extractionFormat,
 					generalInstructions,
-					strategy: generalInstructions,
+					strategy: schema, // 'manual' or 'auto'
 					includeSchema: true,
 					includeRawData: true,
 					includeReferenceContext,
@@ -1011,6 +1021,11 @@ export async function execute(
 					referenceAttribute,
 					selectorScope
 				};
+
+				// Log AI formatting settings
+				this.logger.debug(`AI formatting enabled for ${item.name} - strategy: ${schema}, format: ${extractionFormat}`);
+			} else {
+				this.logger.debug(`AI formatting not enabled for ${item.name} - schema: ${schema}`);
 			}
 
 			const extractItem: IExtractItem = {
@@ -1044,33 +1059,33 @@ export async function execute(
 					cleanText?: boolean;
 				} | undefined,
 				// Add AI formatting options if enabled
-				aiFormatting: schema === "manual" ? aiFormatting : undefined,
+				aiFormatting: schema === "manual" || schema === "auto" ? aiFormatting : undefined,
 				// Add AI fields if using manual strategy
 				aiFields: schema === "manual" ?
 					aiFields.map((field) => {
-						// More detailed debugging of UI field data
-						console.log('========== UI FIELD DATA ==========');
-						console.log(`Field name: ${field.name}`);
-						console.log(`Field type: ${field.type}`);
-						console.log(`Field instructions: "${field.instructions || 'UNDEFINED'}"`);
-						console.log(`Field format: ${field.format || 'UNDEFINED'}`);
-						console.log('====================================');
-
 						return {
-						name: field.name as string,
+							name: field.name as string,
 							// Instructions from UI map directly to instructions property in the IField interface
 							// which will become the description in the OpenAI schema
 							instructions: field.instructions as string,
-						type: field.type as string,
-						required: field.format === 'required'
+							type: field.type as string,
+							required: field.format === 'required'
 						};
 					}) : undefined,
 				// Only set hasOpenAiApiKey when AI formatting is actually enabled for this item
-				hasOpenAiApiKey: schema === "manual" && !!openAiApiKey,
+				hasOpenAiApiKey: (schema === "manual" || schema === "auto") && !!openAiApiKey,
 				// Add page and session information
 				puppeteerPage: page,
 				puppeteerSessionId: sessionId,
 			};
+
+			// If we have an OpenAI API key and AI is enabled, store the key for use in processing
+			if (openAiApiKey && (schema === "manual" || schema === "auto")) {
+				extractItem.openAiApiKey = openAiApiKey;
+			}
+
+			// Log the extract item configuration (without sensitive info)
+			this.logger.debug(`Extract item ${extractItem.name} config: AI enabled=${!!extractItem.aiFormatting?.enabled}, hasKey=${extractItem.hasOpenAiApiKey}, strategy=${extractItem.aiFormatting?.strategy || 'none'}`);
 
 			return extractItem;
 		});
@@ -1092,42 +1107,49 @@ export async function execute(
 			openAiApiKey
 		);
 
+		console.log('==== extractionData after processExtractionItems ====', JSON.stringify(extractionData, null, 2));
+
 		// Store all extraction results
 		const extractionResults: IDataObject = {
 			// Only include extractedData array when debug mode is enabled
 			...(debugMode && { extractedData: extractionData }),
-			// Always include the more accessible data format
+			// Instead of passing all data as is, create a properly mapped output based on the extraction configuration
 			data: extractionData.reduce((result: IDataObject, item: IExtractItem) => {
 				// Only include items that have extracted data
 				if (item.extractedData !== undefined) {
-					result[item.name] = item.extractedData;
+					// Use item.name as the key for the extracted data
+					// This maps each field in the UI to a property in the output
+					if (item.aiFormatting?.enabled && item.extractedData) {
+						// When AI formatting is enabled, use the AI-processed data
+						result[item.name] = item.extractedData;
+					} else {
+						// When AI formatting is not enabled, just use the raw extracted data
+						result[item.name] = item.extractedData;
+					}
 
-					// Include schema if it exists and includeSchema was enabled for this item
-					if (item.schema && item.aiFormatting?.includeSchema) {
+					// Include schema if it exists and includeSchema was EXPLICITLY enabled for this item
+					if (item.schema && item.aiFormatting?.includeSchema === true) {
+						// Log what we're doing with schema
+						this.logger.info(`Including schema for item ${item.name} because includeSchema=${item.aiFormatting?.includeSchema}`);
+
 						// Log the original schema before adding it to the output
 						this.logger.debug(`Original schema structure: ${JSON.stringify(item.schema, null, 2)}`);
-
-						// Additional debug information about schema structure
-						console.log('SCHEMA BEFORE OUTPUT:', JSON.stringify(item.schema, null, 2));
-						console.log('SCHEMA TYPE:', typeof item.schema);
-						console.log('SCHEMA PROPERTIES:', Object.keys(item.schema));
-						if (item.schema.properties) {
-							console.log('SCHEMA PROPERTY KEYS:', Object.keys(item.schema.properties));
-						}
 
 						// Preserve the full schema structure including descriptions
 						result[`${item.name}_schema`] = item.schema;
 
 						// Log what was actually added to the output
 						this.logger.debug(`Schema added to output: ${JSON.stringify(result[`${item.name}_schema`], null, 2)}`);
-
-						// Additional debug information about output schema
-						console.log('FINAL SCHEMA IN OUTPUT:', JSON.stringify(result[`${item.name}_schema`], null, 2));
+					} else if (item.schema) {
+						this.logger.info(`NOT including schema for item ${item.name} because includeSchema=${item.aiFormatting?.includeSchema}`);
 					}
 
-					// Include raw data if includeRawData was enabled for this item
-					if (item.aiFormatting?.includeRawData) {
+					// Include raw data ONLY if includeRawData was EXPLICITLY enabled for this item
+					if (item.aiFormatting?.includeRawData === true) {
+						this.logger.info(`Including raw data for item ${item.name} because includeRawData=${item.aiFormatting?.includeRawData}`);
 						result[`${item.name}_raw`] = item.rawData || item.extractedData;
+					} else {
+						this.logger.info(`NOT including raw data for item ${item.name} because includeRawData=${item.aiFormatting?.includeRawData}`);
 					}
 				}
 				return result;

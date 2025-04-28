@@ -767,14 +767,16 @@ export class Ventriloquist implements INodeType {
 
 		// Only get OpenAI credentials if we're doing an extract operation
 		if (operation === 'extract') {
-			// Get the extraction items to check if any use smart extraction
+			// Get the extraction items to check if any use AI formatting
 			const extractionItems = this.getNodeParameter('extractionItems.items', 0, []) as IDataObject[];
 
-			// Look for both smart extraction type AND AI formatting being enabled
-			const needsOpenAI = extractionItems.some(item =>
-				item.extractionType === 'smart' ||
-				item.enableAiFormatting === true
-			);
+			// Check if any extraction item has schema set to 'manual' or 'auto' which indicates AI is needed
+			const needsOpenAI = extractionItems.some(item => {
+				const schema = item.schema as string;
+				return schema === 'manual' || schema === 'auto';
+			});
+
+			this.logger.info(`Checking if OpenAI is needed for extraction: ${needsOpenAI}`);
 
 			if (needsOpenAI) {
 				try {
@@ -782,9 +784,9 @@ export class Ventriloquist implements INodeType {
 
 					if (openAiCredentials && openAiCredentials.apiKey) {
 						openAiApiKey = openAiCredentials.apiKey as string;
-						this.logger.debug('OpenAI credentials loaded successfully');
+						this.logger.info(`OpenAI credentials loaded successfully (key length: ${openAiApiKey.length})`);
 					} else {
-						this.logger.warn('Smart extraction or AI formatting is being used, but OpenAI API key was not found in credentials');
+						this.logger.warn('AI formatting is being used, but OpenAI API key was not found in credentials');
 					}
 				} catch (error) {
 					// Don't fail the node if credentials aren't found - we'll handle this in the extract operation
@@ -947,21 +949,24 @@ export class Ventriloquist implements INodeType {
 						}
 					}
 				} else if (operation === 'extract') {
-					// Execute extract operation
+					// Log that we're going to use the OpenAI API key (if available)
+					if (openAiApiKey) {
+						this.logger.info(`OpenAI API key is available for extract operation (key length: ${openAiApiKey.length})`);
+					} else {
+						this.logger.warn(`No OpenAI API key available for extract operation`);
+					}
+
+					// Make sure to pass openAiApiKey to the extract operation
 					const result = await extractOperation.execute.call(
 						this,
 						i,
 						websocketEndpoint,
 						workflowId,
-						openAiApiKey // Pass the OpenAI API key to the extract operation
+						openAiApiKey // Ensure this is being passed correctly
 					);
 
-					// Add execution duration to the result
-					if (result.json) {
-						result.json.executionDuration = Date.now() - startTime;
-					}
-
 					returnData[0].push(result);
+					continue;
 				} else if (operation === 'authenticate') {
 					// Execute authenticate operation
 					const result = await authenticateOperation.execute.call(

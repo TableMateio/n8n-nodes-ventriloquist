@@ -261,6 +261,12 @@ export class AIService {
   ): Promise<IAIExtractionResult> {
     const { nodeName, nodeId, index } = this.context;
 
+    // Debug: Entry and input
+    console.log('=== [processManualStrategy] Entered function ===');
+    console.log('Options:', JSON.stringify(options, null, 2));
+    console.log('Fields:', JSON.stringify(options.fields, null, 2));
+    console.log('Content:', typeof content === 'string' ? content.substring(0, 500) : '[non-string content]');
+
     try {
       this.logger.info(
         formatOperationLog(
@@ -280,9 +286,12 @@ export class AIService {
       const thread = await this.openai.beta.threads.create();
 
       // Add a message to the thread with the content and instructions
+      const manualPrompt = this.buildManualPrompt(content, options);
+      console.log('=== [processManualStrategy] Prompt sent to OpenAI ===');
+      console.log(manualPrompt);
       await this.openai.beta.threads.messages.create(thread.id, {
         role: "user",
-        content: this.buildManualPrompt(content, options),
+        content: manualPrompt,
       });
 
       // Generate schema for function calling
@@ -323,9 +332,17 @@ export class AIService {
       // Poll for completion
       const result = await this.pollRunCompletion(thread.id, run.id);
 
+      // Debug: Log the raw AI response
+      console.log('=== [processManualStrategy] Raw AI response from pollRunCompletion ===');
+      console.log(JSON.stringify(result, null, 2));
+
       // Process the response
       if (result.success && result.data) {
-          const data = JSON.parse(result.data);
+        const data = JSON.parse(result.data);
+
+        // Debug: Log the parsed result
+        console.log('=== [processManualStrategy] Parsed AI response ===');
+        console.log(JSON.stringify(data, null, 2));
 
         // Log the parsed result for debugging
         this.logger.debug(
@@ -338,9 +355,9 @@ export class AIService {
           )
         );
 
-          // Generate schema if requested
+        // Generate schema if requested
         let outputSchema: any = null;
-          if (options.includeSchema) {
+        if (options.includeSchema) {
           // Make sure descriptions from fields are available
           this.options = options; // Set options to include field definitions
 
@@ -367,14 +384,14 @@ export class AIService {
               `Generated schema: ${JSON.stringify(outputSchema, null, 2)}`
             )
           );
-          }
+        }
 
-          return {
-            success: true,
-            data,
+        return {
+          success: true,
+          data,
           schema: outputSchema,
-            rawData: options.includeRawData ? content : undefined,
-          };
+          rawData: options.includeRawData ? content : undefined,
+        };
       } else {
         throw new Error(result.error || 'Failed to get response from AI assistant');
       }
@@ -388,6 +405,9 @@ export class AIService {
           `Manual strategy processing error: ${(error as Error).message}`
         )
       );
+      // Debug: Log the error
+      console.log('=== [processManualStrategy] Error ===');
+      console.log((error as Error).message);
       return {
         success: false,
         error: (error as Error).message,

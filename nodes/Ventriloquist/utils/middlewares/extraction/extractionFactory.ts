@@ -104,6 +104,9 @@ export class BasicExtraction implements IExtraction {
     const { logger, nodeName } = this.context;
     const logPrefix = `[Extraction][${nodeName}]`;
 
+    // TOP-LEVEL DEBUG LOG
+    logger.info('=== [DEBUG] BasicExtraction.execute() called ===');
+
     try {
       logger.debug(`${logPrefix} Extracting data with config: ${JSON.stringify(this.config)}`);
 
@@ -139,6 +142,7 @@ export class BasicExtraction implements IExtraction {
 
           // Store all raw content joined together for compatibility
           rawContent = textElements.join('\n');
+          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
 
           // If only one result was found, keep backwards compatibility by returning a string
           // Otherwise, return an array of results
@@ -196,6 +200,7 @@ export class BasicExtraction implements IExtraction {
 
           // Store all raw content joined together for compatibility
           rawContent = attributeValues.join('\n');
+          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
 
           // If only one result was found, keep backwards compatibility by returning a string
           // Otherwise, return an array of results
@@ -210,6 +215,7 @@ export class BasicExtraction implements IExtraction {
 
           // Store all raw content joined together for compatibility
           rawContent = htmlContents.join('\n');
+          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
 
           // If only one result was found, keep backwards compatibility by returning a string
           // Otherwise, return an array of results
@@ -224,6 +230,7 @@ export class BasicExtraction implements IExtraction {
 
           // Store all raw content joined together for compatibility
           rawContent = outerHtmlContents.join('\n');
+          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
 
           // If only one result was found, keep backwards compatibility by returning a string
           // Otherwise, return an array of results
@@ -246,6 +253,7 @@ export class BasicExtraction implements IExtraction {
           try {
             // Get raw content from the element
             rawContent = await this.page.$eval(this.config.selector, (el) => el.textContent?.trim() || '');
+            if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
 
             // Create properly typed smart options
             const smartOptions: ISmartExtractionOptions = {
@@ -317,6 +325,7 @@ export class BasicExtraction implements IExtraction {
               // Just return the HTML if that's what was requested
               logger.info(`${logPrefix} Extracting table as HTML`);
               rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
               data = rawContent;
               logger.info(`${logPrefix} Table HTML extracted successfully, length: ${data.length}`);
             } else {
@@ -338,6 +347,7 @@ export class BasicExtraction implements IExtraction {
 
               // Get the raw HTML for raw content
               rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
 
               data = await this.page.$$eval(
                 `${this.config.selector} ${rowSelector}`,
@@ -391,6 +401,7 @@ export class BasicExtraction implements IExtraction {
 
           // Store all raw content joined together for compatibility
           rawContent = inputValues.join('\n');
+          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
 
           // If only one result was found, keep backwards compatibility by returning a string
           // Otherwise, return an array of results
@@ -422,6 +433,7 @@ export class BasicExtraction implements IExtraction {
             const elements = document.querySelectorAll(selector);
             return Array.from(elements).map(el => el.outerHTML).join('\n');
           }, this.config.selector);
+          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
 
           // Limit the number of elements if requested
           const limitedElements = limit > 0 ? elements.slice(0, limit) : elements;
@@ -485,8 +497,21 @@ export class BasicExtraction implements IExtraction {
 
       logger.debug(`${logPrefix} Extraction successful:`, typeof data === 'string' ? data.substring(0, 50) + '...' : data);
 
-      // Apply AI formatting if enabled
-      if (this.config.smartOptions?.aiAssistance && this.config.openaiApiKey) {
+      // Apply AI formatting if enabled and API key is provided
+      if (this.config.smartOptions?.aiAssistance === true && this.config.openaiApiKey) {
+        // Log the presence of the API key for debugging
+        logger.info(`${logPrefix} Using OpenAI API key for AI processing. Key length: ${this.config.openaiApiKey.length}`);
+
+        // Verify API key is valid (sufficient length)
+        if (this.config.openaiApiKey.length < 20) {
+          logger.warn(`${logPrefix} OpenAI API key appears to be invalid (length: ${this.config.openaiApiKey.length}) - skipping AI processing`);
+          return {
+            success: true,
+            data,
+            rawContent
+          };
+        }
+
         // Prepare AI formatting options
         const aiFormattingOptions: IAIFormattingOptions = {
           enabled: true,
@@ -495,43 +520,89 @@ export class BasicExtraction implements IExtraction {
           generalInstructions: this.config.smartOptions.generalInstructions || '',
           strategy: this.config.smartOptions.strategy || 'auto',
           includeSchema: this.config.smartOptions.includeSchema === true,
-          includeRawData: this.config.smartOptions.includeRawData === true
+          includeRawData: this.config.smartOptions.includeRawData === true,
+          includeReferenceContext: this.config.smartOptions.includeReferenceContext === true,
+          referenceSelector: this.config.smartOptions.referenceSelector || '',
+          referenceName: this.config.smartOptions.referenceName || 'referenceContext',
+          referenceFormat: this.config.smartOptions.referenceFormat || 'text',
+          referenceAttribute: this.config.smartOptions.referenceAttribute || '',
+          selectorScope: this.config.smartOptions.selectorScope || 'global',
+          referenceContent: this.config.smartOptions.referenceContent || ''
         };
 
         logger.info(`${logPrefix} Applying AI formatting with ${aiFormattingOptions.strategy} strategy, format: ${aiFormattingOptions.extractionFormat}`);
+        logger.info(`${logPrefix} AI options: includeSchema=${aiFormattingOptions.includeSchema}, includeRawData=${aiFormattingOptions.includeRawData}`);
 
-        // Process with AI
-        const aiResult = await processWithAI(
-          data,
-          aiFormattingOptions,
-          this.config.fields?.items || [],
-          this.config.openaiApiKey,
-          {
-            logger,
-            nodeName,
-            nodeId: this.context.nodeId,
-            index: this.context.index || 0
+        // Determine what content to send to AI based on extraction type and strategy
+        let contentForAI = data;
+
+        // For HTML content, sometimes we need the raw HTML instead of parsed text
+        if (this.config.extractionType === 'html' ||
+            (this.config.extractionType === 'multiple' &&
+             this.config.extractionProperty === 'outerHTML')) {
+          contentForAI = rawContent;
+          logger.info(`${logPrefix} Using raw HTML content for AI processing`);
+        }
+
+        // Log the field definitions for manual strategy
+        if (aiFormattingOptions.strategy === 'manual' && this.config.fields?.items) {
+          logger.info(`${logPrefix} Using manual strategy with ${this.config.fields.items.length} field definitions`);
+        }
+
+        try {
+          // Process with AI - ensure we're passing the API key correctly
+          const apiKey = this.config.openaiApiKey;
+          if (!apiKey) {
+            logger.error(`${logPrefix} OpenAI API key is missing before AI processing`);
           }
-        );
 
-        // Check if AI processing was successful
-        if (aiResult.success) {
-          logger.info(`${logPrefix} AI formatting successful`);
-          return {
-            success: true,
-            data: aiResult.data,
-            schema: aiResult.schema,
-            rawContent
-          };
-        } else {
-          // Log AI processing error but return original content
-          logger.warn(`${logPrefix} AI formatting failed: ${aiResult.error}. Returning original extracted content.`);
+          const aiResult = await processWithAI(
+            contentForAI,
+            aiFormattingOptions,
+            this.config.fields?.items || [],
+            apiKey, // Explicitly use the local variable to ensure it's passed correctly
+            {
+              logger,
+              nodeName,
+              nodeId: this.context.nodeId,
+              index: this.context.index || 0
+            }
+          );
+
+          // Check if AI processing was successful
+          if (aiResult.success) {
+            logger.info(`${logPrefix} AI formatting successful`);
+            return {
+              success: true,
+              data: aiResult.data,
+              schema: aiResult.schema,
+              rawContent
+            };
+          } else {
+            // Log AI processing error but return original content
+            logger.warn(`${logPrefix} AI formatting failed: ${aiResult.error}. Returning original extracted content.`);
+            return {
+              success: true,
+              data,
+              rawContent
+            };
+          }
+        } catch (error) {
+          // If AI processing fails, log the error but continue with the original data
+          logger.error(`${logPrefix} AI processing error: ${(error as Error).message}`);
           return {
             success: true,
             data,
-            rawContent
+            rawContent,
+            error: {
+              message: `AI processing failed: ${(error as Error).message}`,
+              details: error
+            }
           };
         }
+      } else if (this.config.smartOptions?.aiAssistance === true) {
+        // Log that we're missing the API key
+        logger.warn(`${logPrefix} AI processing was requested but no OpenAI API key was provided`);
       }
 
       return {

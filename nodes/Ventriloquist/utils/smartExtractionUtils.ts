@@ -294,21 +294,21 @@ export async function processWithAI(
   const nodeId = context?.nodeId || 'unknown';
   const index = context?.index ?? 0;
 
-  // Check if API key is provided
-  if (!apiKey) {
-    const error = 'OpenAI API key is required for AI processing';
+  // More robust API key validation - check if it's a string and has a minimum length
+  if (!apiKey || typeof apiKey !== 'string' || apiKey.length < 10) {
+    const error = `OpenAI API key is ${!apiKey ? 'missing' : 'invalid'} - length: ${apiKey ? apiKey.length : 0}`;
     logger?.error(formatOperationLog('aiProcessing', nodeName, nodeId, index, error));
     return { success: false, error };
   }
 
-  // Log the start of AI processing
-  logger?.debug(
+  // Log the start of AI processing with key information
+  logger?.info(
     formatOperationLog(
       'aiProcessing',
       nodeName,
       nodeId,
       index,
-      `Starting AI processing with ${options.strategy} strategy, format: ${options.extractionFormat}`
+      `Starting AI processing with ${options.strategy} strategy, model: ${options.aiModel}, API key available: true (length: ${apiKey.length})`
     )
   );
 
@@ -361,78 +361,89 @@ export async function processWithAI(
       )
     );
 
-    // Create completion with OpenAI
-    const response = await openai.chat.completions.create({
-      model: options.aiModel,
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a data extraction and formatting assistant. Extract and format the provided content according to the instructions. Always respond with valid JSON. Do not include code blocks or explanations in your response.',
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      response_format: options.aiModel.includes('gpt-4-turbo') || options.aiModel.includes('gpt-3.5-turbo')
-        ? { type: 'json_object' }
-        : undefined,
-    });
-
-    // Process the response
-    if (!response.choices || response.choices.length === 0) {
-      throw new Error('Invalid response from OpenAI API');
-    }
-
-    const aiResponse = response.choices[0].message.content;
-    if (!aiResponse) {
-      throw new Error('Empty response from OpenAI API');
-    }
-
-    // Parse the JSON response
-    let parsedResponse;
     try {
-      parsedResponse = JSON.parse(aiResponse);
-    } catch (error) {
-      // If the response is not valid JSON, try to extract JSON from the text
-      // This handles cases where the model might include explanations
-      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        try {
-          parsedResponse = JSON.parse(jsonMatch[0]);
-        } catch {
+      // Create completion with OpenAI
+      const response = await openai.chat.completions.create({
+        model: options.aiModel,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a data extraction and formatting assistant. Extract and format the provided content according to the instructions. Always respond with valid JSON. Do not include code blocks or explanations in your response.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        response_format: options.aiModel.includes('gpt-4-turbo') || options.aiModel.includes('gpt-3.5-turbo')
+          ? { type: 'json_object' }
+          : undefined,
+      });
+
+      // Check if we have a valid response
+      if (!response.choices || response.choices.length === 0) {
+        throw new Error('Invalid response from OpenAI API');
+      }
+
+      const aiResponse = response.choices[0].message.content;
+      if (!aiResponse) {
+        throw new Error('Empty response from OpenAI API');
+      }
+
+      // Parse the JSON response
+      let parsedResponse;
+      try {
+        parsedResponse = JSON.parse(aiResponse);
+      } catch (error) {
+        // If the response is not valid JSON, try to extract JSON from the text
+        // This handles cases where the model might include explanations
+        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            parsedResponse = JSON.parse(jsonMatch[0]);
+          } catch {
+            throw new Error(`Failed to parse AI response as JSON: ${(error as Error).message}`);
+          }
+        } else {
           throw new Error(`Failed to parse AI response as JSON: ${(error as Error).message}`);
         }
-      } else {
-        throw new Error(`Failed to parse AI response as JSON: ${(error as Error).message}`);
       }
+
+      // Extract data and schema from the response
+      let data = parsedResponse.data || parsedResponse;
+      const schema = parsedResponse.schema;
+
+      // If we have a schema and this is manual mode with fields, enrich the schema with field descriptions
+      const enrichedSchema = options.strategy === 'manual' && schema && fields.length > 0
+        ? enrichSchemaWithFieldDescriptions(schema, fields)
+        : schema;
+
+      // Log success
+      logger?.info(
+        formatOperationLog(
+          'aiProcessing',
+          nodeName,
+          nodeId,
+          index,
+          `AI processing completed successfully with model ${options.aiModel}`
+        )
+      );
+
+      return {
+        success: true,
+        data,
+        schema: enrichedSchema,
+      };
+    } catch (error) {
+      // Handle OpenAI API errors specifically
+      if (error.response && error.response.status) {
+        const statusCode = error.response.status;
+        const message = error.response.data?.error?.message || 'Unknown OpenAI API error';
+        throw new Error(`OpenAI API error (${statusCode}): ${message}`);
+      }
+      // Re-throw other errors
+      throw error;
     }
-
-    // Extract data and schema from the response
-    let data = parsedResponse.data || parsedResponse;
-    const schema = parsedResponse.schema;
-
-    // If we have a schema and this is manual mode with fields, enrich the schema with field descriptions
-    const enrichedSchema = options.strategy === 'manual' && schema && fields.length > 0
-      ? enrichSchemaWithFieldDescriptions(schema, fields)
-      : schema;
-
-    // Log success
-    logger?.debug(
-      formatOperationLog(
-        'aiProcessing',
-        nodeName,
-        nodeId,
-        index,
-        `AI processing completed successfully`
-      )
-    );
-
-    return {
-      success: true,
-      data,
-      schema: enrichedSchema,
-    };
   } catch (error) {
     const errorMessage = `AI processing failed: ${(error as Error).message}`;
     logger?.error(formatOperationLog('aiProcessing', nodeName, nodeId, index, errorMessage));
