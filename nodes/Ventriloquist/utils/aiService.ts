@@ -1,5 +1,6 @@
 import type { Logger as ILogger } from 'n8n-workflow';
 import { formatOperationLog } from './resultUtils';
+import { processFieldsWithReferenceContent } from './processOpenAISchema';
 
 /**
  * This is a workaround for TypeScript errors when importing OpenAI
@@ -282,6 +283,29 @@ export class AIService {
         throw new Error('Manual strategy requires at least one field definition');
       }
 
+      // Process fields with reference content if provided
+      if (options.includeReferenceContext && options.referenceContent) {
+        // Transform IField array to ensure compatibility with IOpenAIField
+        const fieldsForProcessing = options.fields.map(field => ({
+          ...field,
+          instructions: field.instructions || '',
+        }));
+
+        // Process the fields with reference content
+        const processedFields = processFieldsWithReferenceContent(
+          fieldsForProcessing,
+          options.referenceContent,
+          options.includeReferenceContext
+        );
+
+        // Copy enhanced instructions back to the original fields
+        for (let i = 0; i < options.fields.length; i++) {
+          if (i < processedFields.length) {
+            options.fields[i].instructions = processedFields[i].instructions;
+          }
+        }
+      }
+
       // Create a new thread (no tracking or management, just create a fresh one)
       const thread = await this.openai.beta.threads.create();
 
@@ -294,7 +318,11 @@ export class AIService {
         content: manualPrompt,
       });
 
-      // Generate schema for function calling
+      // Generate schema for function calling with the processed fields
+      if (!options.fields) {
+        throw new Error('Field definitions required for manual strategy');
+      }
+
       const functionDef = this.generateOpenAISchema(options.fields);
 
       // More detailed logging to see exactly what's being sent to OpenAI
@@ -357,7 +385,7 @@ export class AIService {
 
         // Generate schema if requested
         let outputSchema: any = null;
-        if (options.includeSchema) {
+        if (options.includeSchema && options.fields) {
           // Make sure descriptions from fields are available
           this.options = options; // Set options to include field definitions
 
@@ -597,6 +625,11 @@ export class AIService {
     // Add reference context if available
     if (options.includeReferenceContext && options.referenceContent) {
       prompt += `\nREFERENCE CONTEXT (${options.referenceName || 'referenceContext'}):\n${options.referenceContent}\n\n`;
+      console.log(`=== [buildManualPrompt] Adding reference context ===`);
+      console.log(`Reference name: ${options.referenceName || 'referenceContext'}`);
+      console.log(`Reference content: ${options.referenceContent}`);
+    } else if (options.includeReferenceContext) {
+      console.log(`=== [buildManualPrompt] Reference context enabled but content is empty ===`);
     }
 
     // Add the main content
@@ -615,6 +648,17 @@ export class AIService {
         prompt += `\n${index + 1}. ${field.name} (${field.type})`;
         if (field.instructions && field.instructions.trim()) {
           prompt += `:\n   INSTRUCTIONS: ${field.instructions}\n`;
+
+          // Check if this is a URL field and we have reference content
+          const isUrlField = field.name.toLowerCase().includes('url') ||
+                           field.name.toLowerCase().includes('link') ||
+                           field.instructions.toLowerCase().includes('url') ||
+                           field.instructions.toLowerCase().includes('link');
+
+          if (isUrlField && options.includeReferenceContext && options.referenceContent) {
+            console.log(`=== [buildManualPrompt] Field ${field.name} identified as URL field ===`);
+            prompt += `   REFERENCE: Use this URL as reference: "${options.referenceContent}"\n`;
+          }
         } else {
           prompt += '\n';
         }

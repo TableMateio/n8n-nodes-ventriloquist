@@ -1063,13 +1063,23 @@ export async function execute(
 				// Add AI fields if using manual strategy
 				aiFields: schema === "manual" ?
 					aiFields.map((field) => {
+						// Get relativeSelectorOptional for this field if it exists
+						const relativeSelectorOptional = field.relativeSelectorOptional as string;
+						let enhancedInstructions = field.instructions as string;
+
+						// Add the relativeSelectorOptional information to the instructions if available
+						if (relativeSelectorOptional && relativeSelectorOptional.trim() !== '') {
+							// Don't add the selector text - the content will be added by enhanceFieldsWithRelativeSelectorContent
+							this.logger.debug(`Field ${field.name} has selector: ${relativeSelectorOptional} - content will be extracted later`);
+						}
+
 						return {
 							name: field.name as string,
-							// Instructions from UI map directly to instructions property in the IField interface
-							// which will become the description in the OpenAI schema
-							instructions: field.instructions as string,
+							instructions: enhancedInstructions,
 							type: field.type as string,
-							required: field.format === 'required'
+							required: field.format === 'required',
+							// Explicitly pass the relativeSelectorOptional property
+							relativeSelectorOptional: relativeSelectorOptional
 						};
 					}) : undefined,
 				// Only set hasOpenAiApiKey when AI formatting is actually enabled for this item
