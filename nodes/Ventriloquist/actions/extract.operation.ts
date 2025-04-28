@@ -376,7 +376,7 @@ export const description: INodeProperties[] = [
 								schema: ["manual"],
 							},
 						},
-						default: { items: [{ name: "", type: "string", instructions: "" }] },
+						default: { items: [{ name: "", type: "string", aiAssisted: true, instructions: "" }] },
 						options: [
 							{
 								name: "items",
@@ -405,12 +405,24 @@ export const description: INodeProperties[] = [
 										description: "Type of the field to extract",
 									},
 									{
+										displayName: "AI Assisted",
+										name: "aiAssisted",
+										type: "boolean",
+										default: true,
+										description: "Enable AI assistance for this field (shows Instructions field)",
+									},
+									{
 										displayName: "Instructions",
 										name: "instructions",
 										type: "string",
 										default: "",
 										description: "Instructions for the AI on how to extract this field",
 										typeOptions: { rows: 2 },
+										displayOptions: {
+											show: {
+												aiAssisted: [true],
+											},
+										},
 									},
 								],
 							},
