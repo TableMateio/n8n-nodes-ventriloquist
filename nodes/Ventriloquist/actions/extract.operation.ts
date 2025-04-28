@@ -241,7 +241,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						displayOptions: {
 							show: {
-								schema: ["manual"],
+								schema: ["auto", "manual"],
 							},
 						},
 						default: "",
@@ -256,7 +256,7 @@ export const description: INodeProperties[] = [
 						type: "boolean",
 						displayOptions: {
 							show: {
-								schema: ["manual"],
+								schema: ["auto", "manual"],
 							},
 						},
 						default: false,
@@ -268,7 +268,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						displayOptions: {
 							show: {
-								schema: ["manual"],
+								schema: ["auto", "manual"],
 								includeReferenceContext: [true],
 							},
 						},
@@ -295,7 +295,7 @@ export const description: INodeProperties[] = [
 						],
 						displayOptions: {
 							show: {
-								schema: ["manual"],
+								schema: ["auto", "manual"],
 								includeReferenceContext: [true],
 							},
 						},
@@ -308,7 +308,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						displayOptions: {
 							show: {
-								schema: ["manual"],
+								schema: ["auto", "manual"],
 								includeReferenceContext: [true],
 							},
 						},
@@ -340,7 +340,7 @@ export const description: INodeProperties[] = [
 						],
 						displayOptions: {
 							show: {
-								schema: ["manual"],
+								schema: ["auto", "manual"],
 								includeReferenceContext: [true],
 							},
 						},
@@ -353,7 +353,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						displayOptions: {
 							show: {
-								schema: ["manual"],
+								schema: ["auto", "manual"],
 								includeReferenceContext: [true],
 								referenceFormat: ["attribute"],
 							},
@@ -368,7 +368,7 @@ export const description: INodeProperties[] = [
 						type: "boolean",
 						displayOptions: {
 							show: {
-								schema: ["manual"],
+								schema: ["auto", "manual"],
 							},
 						},
 						default: false,
@@ -380,7 +380,7 @@ export const description: INodeProperties[] = [
 						type: "boolean",
 						displayOptions: {
 							show: {
-								schema: ["manual"],
+								schema: ["auto", "manual"],
 							},
 						},
 						default: false,
