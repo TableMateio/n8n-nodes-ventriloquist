@@ -363,6 +363,60 @@ export const description: INodeProperties[] = [
 						description: "Name of the attribute to extract",
 					},
 					{
+						displayName: "Fields",
+						name: "aiFields",
+						placeholder: "Add Field",
+						type: "fixedCollection",
+						typeOptions: {
+							multipleValues: true,
+							sortable: true,
+						},
+						displayOptions: {
+							show: {
+								schema: ["manual"],
+							},
+						},
+						default: { items: [{ name: "", type: "string", instructions: "" }] },
+						options: [
+							{
+								name: "items",
+								displayName: "Items",
+								values: [
+									{
+										displayName: "Name",
+										name: "name",
+										type: "string",
+										default: "",
+										description: "Name of the field to extract",
+										required: true,
+									},
+									{
+										displayName: "Type",
+										name: "type",
+										type: "options",
+										options: [
+											{ name: "String", value: "string" },
+											{ name: "Number", value: "number" },
+											{ name: "Boolean", value: "boolean" },
+											{ name: "Object", value: "object" },
+											{ name: "Array", value: "array" },
+										],
+										default: "string",
+										description: "Type of the field to extract",
+									},
+									{
+										displayName: "Instructions",
+										name: "instructions",
+										type: "string",
+										default: "",
+										description: "Instructions for the AI on how to extract this field",
+										typeOptions: { rows: 2 },
+									},
+								],
+							},
+						],
+					},
+					{
 						displayName: "Output Schema",
 						name: "includeSchema",
 						type: "boolean",
@@ -560,60 +614,6 @@ export const description: INodeProperties[] = [
 								default: "value",
 								description:
 									"The name of the key to use in the output objects (only applies when Output as Objects is enabled and Output Format is set to Array)",
-							},
-						],
-					},
-					{
-						displayName: "Fields",
-						name: "aiFields",
-						placeholder: "Add Field",
-						type: "fixedCollection",
-						typeOptions: {
-							multipleValues: true,
-							sortable: true,
-						},
-						displayOptions: {
-							show: {
-								schema: ["manual"],
-							},
-						},
-						default: { items: [{ name: "", type: "string", instructions: "" }] },
-						options: [
-							{
-								name: "items",
-								displayName: "Items",
-								values: [
-									{
-										displayName: "Name",
-										name: "name",
-										type: "string",
-										default: "",
-										description: "Name of the field to extract",
-										required: true,
-									},
-									{
-										displayName: "Type",
-										name: "type",
-										type: "options",
-										options: [
-											{ name: "String", value: "string" },
-											{ name: "Number", value: "number" },
-											{ name: "Boolean", value: "boolean" },
-											{ name: "Object", value: "object" },
-											{ name: "Array", value: "array" },
-										],
-										default: "string",
-										description: "Type of the field to extract",
-									},
-									{
-										displayName: "Instructions",
-										name: "instructions",
-										type: "string",
-										default: "",
-										description: "Instructions for the AI on how to extract this field",
-										typeOptions: { rows: 2 },
-									},
-								],
 							},
 						],
 					},
