@@ -939,6 +939,19 @@ export async function execute(
 					''
 				) as string;
 
+				// Get includeSchema and includeRawData parameters
+				const includeSchema = this.getNodeParameter(
+					`extractionItems.items[${extractionItems.indexOf(item)}].includeSchema`,
+					index,
+					false
+				) as boolean;
+
+				const includeRawData = this.getNodeParameter(
+					`extractionItems.items[${extractionItems.indexOf(item)}].includeRawData`,
+					index,
+					false
+				) as boolean;
+
 				// Handle reference context parameters
 				const includeReferenceContext = this.getNodeParameter(
 					`extractionItems.items[${extractionItems.indexOf(item)}].includeReferenceContext`,
@@ -1012,8 +1025,8 @@ export async function execute(
 					extractionFormat,
 					generalInstructions,
 					strategy: schema, // 'manual' or 'auto'
-					includeSchema: true,
-					includeRawData: true,
+					includeSchema,
+					includeRawData,
 					includeReferenceContext,
 					referenceSelector,
 					referenceName,
