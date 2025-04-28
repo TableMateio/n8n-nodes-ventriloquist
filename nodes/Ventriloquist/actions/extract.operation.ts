@@ -470,14 +470,14 @@ export const description: INodeProperties[] = [
 													{ name: "Value", value: "value" },
 												],
 												default: "text",
-												description: "Requires a selector to be set for this option to take effect."
+												description: "Requires a selector to be set for this option to take effect"
 											},
 											{
 												displayName: "Attribute Name",
 												name: "attributeName",
 												type: "string",
 												default: "",
-												placeholder: "href, src, data-id",
+												placeholder: "href, src, data-ID",
 												description: "Name of the attribute to extract (only needed when Extraction Type is set to Attribute)"
 											},
 											{
@@ -491,7 +491,7 @@ export const description: INodeProperties[] = [
 													{ name: "Custom", value: "custom" },
 												],
 												default: "default",
-												description: "Requires a selector to be set for this option to take effect."
+												description: "Requires a selector to be set for this option to take effect"
 											},
 										],
 									},
@@ -1107,8 +1107,6 @@ export async function execute(
 			openAiApiKey
 		);
 
-		console.log('==== extractionData after processExtractionItems ====', JSON.stringify(extractionData, null, 2));
-
 		// Store all extraction results
 		const extractionResults: IDataObject = {
 			// Only include extractedData array when debug mode is enabled
@@ -1119,37 +1117,60 @@ export async function execute(
 				if (item.extractedData !== undefined) {
 					// Use item.name as the key for the extracted data
 					// This maps each field in the UI to a property in the output
-					if (item.aiFormatting?.enabled && item.extractedData) {
+					if (item.aiFormatting?.enabled) {
 						// When AI formatting is enabled, use the AI-processed data
+						this.logger.info(
+							formatOperationLog(
+								'extraction',
+								nodeName,
+								nodeId,
+								index,
+								`Using AI-processed data for [${item.name}]`
+							)
+						);
 						result[item.name] = item.extractedData;
 					} else {
 						// When AI formatting is not enabled, just use the raw extracted data
+						this.logger.info(
+							formatOperationLog(
+								'extraction',
+								nodeName,
+								nodeId,
+								index,
+								`Using raw extracted data for [${item.name}]`
+							)
+						);
 						result[item.name] = item.extractedData;
 					}
 
-					// Include schema if it exists and includeSchema was EXPLICITLY enabled for this item
-					if (item.schema && item.aiFormatting?.includeSchema === true) {
-						// Log what we're doing with schema
-						this.logger.info(`Including schema for item ${item.name} because includeSchema=${item.aiFormatting?.includeSchema}`);
-
-						// Log the original schema before adding it to the output
-						this.logger.debug(`Original schema structure: ${JSON.stringify(item.schema, null, 2)}`);
-
-						// Preserve the full schema structure including descriptions
+					// Include schema if it exists
+					if (item.schema) {
+						// Add schema to the output with a _schema suffix
+						this.logger.info(
+							formatOperationLog(
+								'extraction',
+								nodeName,
+								nodeId,
+								index,
+								`Including schema for [${item.name}]`
+							)
+						);
 						result[`${item.name}_schema`] = item.schema;
-
-						// Log what was actually added to the output
-						this.logger.debug(`Schema added to output: ${JSON.stringify(result[`${item.name}_schema`], null, 2)}`);
-					} else if (item.schema) {
-						this.logger.info(`NOT including schema for item ${item.name} because includeSchema=${item.aiFormatting?.includeSchema}`);
 					}
 
-					// Include raw data ONLY if includeRawData was EXPLICITLY enabled for this item
-					if (item.aiFormatting?.includeRawData === true) {
-						this.logger.info(`Including raw data for item ${item.name} because includeRawData=${item.aiFormatting?.includeRawData}`);
-						result[`${item.name}_raw`] = item.rawData || item.extractedData;
-					} else {
-						this.logger.info(`NOT including raw data for item ${item.name} because includeRawData=${item.aiFormatting?.includeRawData}`);
+					// Include raw data if we have AI-processed data and raw data
+					if (item.aiFormatting?.enabled && item.rawData) {
+						// Add raw data to the output with a _raw suffix
+						this.logger.info(
+							formatOperationLog(
+								'extraction',
+								nodeName,
+								nodeId,
+								index,
+								`Including raw data for [${item.name}]`
+							)
+						);
+						result[`${item.name}_raw`] = item.rawData;
 					}
 				}
 				return result;

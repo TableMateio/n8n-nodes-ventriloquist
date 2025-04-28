@@ -104,11 +104,18 @@ export class BasicExtraction implements IExtraction {
     const { logger, nodeName } = this.context;
     const logPrefix = `[Extraction][${nodeName}]`;
 
-    // TOP-LEVEL DEBUG LOG
-    logger.info('=== [DEBUG] BasicExtraction.execute() called ===');
-
     try {
       logger.debug(`${logPrefix} Extracting data with config: ${JSON.stringify(this.config)}`);
+
+      // Check and log field definitions for manual strategy if present
+      if (this.config.smartOptions?.strategy === 'manual' && this.config.fields?.items && this.config.fields.items.length > 0) {
+        logger.debug(`${logPrefix} Using ${this.config.fields.items.length} field definitions for manual strategy`);
+
+        // Map field.instructions to instructions property for OpenAI schema (not through description)
+        if (this.config.fields.items.some(field => typeof field.instructions !== 'string')) {
+          logger.warn(`${logPrefix} Some fields have missing instructions, ensure all fields have instructions for optimal extraction`);
+        }
+      }
 
       // Wait for selector if configured
       if (this.config.waitForSelector) {
@@ -290,7 +297,6 @@ export class BasicExtraction implements IExtraction {
             // Log fields for debugging
             if (this.config.fields?.items && this.config.fields.items.length > 0) {
               logger.debug(`${logPrefix} Using ${this.config.fields.items.length} field definitions for manual strategy`);
-              console.log('FIELD DEFINITIONS BEING PASSED:', JSON.stringify(this.config.fields.items, null, 2));
             }
 
             const smartResult = await extractSmartContent(
@@ -572,6 +578,12 @@ export class BasicExtraction implements IExtraction {
           // Check if AI processing was successful
           if (aiResult.success) {
             logger.info(`${logPrefix} AI formatting successful`);
+
+            // Make sure we return the schema even if there's no data
+            if (aiResult.schema) {
+              logger.info(`${logPrefix} Schema provided by AI processing, including in result`);
+            }
+
             return {
               success: true,
               data: aiResult.data,

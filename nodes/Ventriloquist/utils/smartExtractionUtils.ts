@@ -294,6 +294,13 @@ export async function processWithAI(
   const nodeId = context?.nodeId || 'unknown';
   const index = context?.index ?? 0;
 
+  // Attempt to recover API key from options if not provided directly
+  if (!apiKey && options.hasOwnProperty('openaiApiKey')) {
+    logger?.debug(formatOperationLog('aiProcessing', nodeName, nodeId, index,
+      'Recovered API key from options object'));
+    apiKey = (options as any).openaiApiKey;
+  }
+
   // More robust API key validation - check if it's a string and has a minimum length
   if (!apiKey || typeof apiKey !== 'string' || apiKey.length < 10) {
     const error = `OpenAI API key is ${!apiKey ? 'missing' : 'invalid'} - length: ${apiKey ? apiKey.length : 0}`;
@@ -313,19 +320,33 @@ export async function processWithAI(
   );
 
   try {
-    // Try to dynamically import OpenAI
+    // Try to dynamically import OpenAI - simplified approach to avoid import issues
     let OpenAI;
     try {
-      const { default: openai } = await import('openai');
-      OpenAI = openai;
+      // First try CommonJS require if available
+      try {
+        OpenAI = require('openai');
+        // The import structure changed in newer versions of the OpenAI package
+        if (OpenAI.default) {
+          OpenAI = OpenAI.default;
+        }
+      } catch (reqError) {
+        // Fall back to dynamic import
+        const openaiModule = await import('openai');
+        OpenAI = openaiModule.default || openaiModule;
+      }
+
+      if (!OpenAI) {
+        throw new Error('Failed to import OpenAI package');
+      }
     } catch (err) {
+      logger?.error(formatOperationLog('aiProcessing', nodeName, nodeId, index,
+        `Failed to import OpenAI: ${err.message}`));
       throw new Error(`OpenAI package not installed. Please run: npm install openai`);
     }
 
-    // Create an OpenAI instance
-    const openai = new OpenAI({
-      apiKey,
-    });
+    // Create an OpenAI instance - handle both newer and older API formats
+    const openai = typeof OpenAI === 'function' ? new OpenAI({ apiKey }) : new OpenAI.OpenAI({ apiKey });
 
     // Convert content to string if needed
     const contentString = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
@@ -520,9 +541,6 @@ ${content}
 function enrichSchemaWithFieldDescriptions(schema: any, fields: IAIField[]): any {
   if (!schema) return schema;
 
-  console.log('ENRICHING SCHEMA - ORIGINAL:', JSON.stringify(schema, null, 2));
-  console.log('FIELD DEFINITIONS:', JSON.stringify(fields, null, 2));
-
   // If schema is just a simple type map like { "field1": "string", "field2": "number" }
   // Convert it to a proper schema object
   if (typeof schema === 'object' && !schema.type && !schema.properties) {
@@ -543,20 +561,16 @@ function enrichSchemaWithFieldDescriptions(schema: any, fields: IAIField[]): any
         // Use instructions directly as the schema description
         if (fieldDef.instructions) {
           properSchema.properties[key].description = fieldDef.instructions;
-          console.log(`Added description to field ${key}: ${fieldDef.instructions.substring(0, 50)}...`);
         } else {
           // Add default description only if no instructions available
           properSchema.properties[key].description = `The ${key} field`;
-          console.log(`No instructions found for field ${key}, using default`);
         }
       } else {
         // Field not found in definitions
         properSchema.properties[key].description = `The ${key} field`;
-        console.log(`No field definition found for ${key}, using default description`);
       }
     }
 
-    console.log('ENRICHED SIMPLE SCHEMA:', JSON.stringify(properSchema, null, 2));
     return properSchema;
   }
 
@@ -567,16 +581,13 @@ function enrichSchemaWithFieldDescriptions(schema: any, fields: IAIField[]): any
       if (schema.properties[field.name]) {
         if (field.instructions) {
           schema.properties[field.name].description = field.instructions;
-          console.log(`Added description to field ${field.name}: ${field.instructions.substring(0, 50)}...`);
         } else {
           // Only set default if no instructions available
           schema.properties[field.name].description = `The ${field.name} field`;
-          console.log(`No instructions found for field ${field.name}, using default`);
         }
       }
     }
   }
 
-  console.log('ENRICHED SCHEMA:', JSON.stringify(schema, null, 2));
   return schema;
 }

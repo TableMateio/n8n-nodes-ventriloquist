@@ -198,20 +198,23 @@ export async function processExtractionItems(
 ): Promise<IExtractItem[]> {
   const nodeName = extractionNodeOptions.nodeName || 'Ventriloquist';
   const nodeId = extractionNodeOptions.nodeId || 'unknown';
-
-  // Log the OpenAI API key status for debugging
-  logger.debug(formatOperationLog('extraction', nodeName, nodeId, 0,
-    `Starting extraction process with API key ${openAiApiKey ? 'provided' : 'not provided'}`
-  ));
-
-  // Return early if there are no extraction items
-  if (!extractionItems || extractionItems.length === 0) {
-    logger.debug(formatOperationLog('extraction', nodeName, nodeId, 0, 'No extraction items to process'));
-    return [];
-  }
-
-  // Process each extraction item
   const typedExtractionItems: IExtractItem[] = [];
+
+  // Log global extraction options
+  logger.info(
+    formatOperationLog(
+      'extraction',
+      nodeName,
+      nodeId,
+      0,
+      `Processing ${extractionItems.length} extraction items with options: ${JSON.stringify({
+        waitForSelector: extractionNodeOptions.waitForSelector,
+        timeout: extractionNodeOptions.timeout,
+        continueOnFail: extractionNodeOptions.continueOnFail,
+        debugMode: extractionNodeOptions.debugMode,
+      })}`
+    )
+  );
 
   for (let i = 0; i < extractionItems.length; i++) {
     const extractionItem = extractionItems[i];
@@ -225,6 +228,19 @@ export async function processExtractionItems(
       )
     );
 
+    // Log if this item has AI formatting enabled and API key
+    if (extractionItem.aiFormatting?.enabled) {
+      logger.debug(
+        formatOperationLog(
+          'aiFormatting',
+          nodeName,
+          nodeId,
+          i,
+          `Item ${extractionItem.name} has AI formatting enabled, API key available: ${!!extractionItem.openAiApiKey}`
+        )
+      );
+    }
+
     // Create extraction configuration based on the extraction type
     let extractionConfig: IExtractionConfig = {
       extractionType: extractionItem.extractionType,
@@ -235,14 +251,23 @@ export async function processExtractionItems(
       cleanText: extractionItem.textOptions?.cleanText,
       // Initialize smartOptions based on the item's own AI formatting setting, not the node-level setting
       smartOptions: extractionItem.aiFormatting?.enabled === true ? {
-        aiAssistance: true,
-        extractionFormat: 'json',
-        aiModel: 'gpt-3.5-turbo',
-        generalInstructions: '',
-        strategy: 'auto',
-        includeSchema: false,
-        includeRawData: false
-      } : undefined
+        aiAssistance: true, // Explicitly set to true
+        extractionFormat: extractionItem.aiFormatting.extractionFormat || 'json',
+        aiModel: extractionItem.aiFormatting.aiModel || 'gpt-3.5-turbo',
+        generalInstructions: extractionItem.aiFormatting.generalInstructions || '',
+        strategy: extractionItem.aiFormatting.strategy || 'auto',
+        includeSchema: extractionItem.aiFormatting.includeSchema === true,
+        includeRawData: extractionItem.aiFormatting.includeRawData === true,
+        includeReferenceContext: extractionItem.aiFormatting.includeReferenceContext === true,
+        referenceSelector: extractionItem.aiFormatting.referenceSelector || '',
+        referenceName: extractionItem.aiFormatting.referenceName || 'referenceContext',
+        referenceFormat: extractionItem.aiFormatting.referenceFormat || 'text',
+        referenceAttribute: extractionItem.aiFormatting.referenceAttribute || '',
+        selectorScope: extractionItem.aiFormatting.selectorScope || 'global',
+        referenceContent: extractionItem.aiFormatting.referenceContent || ''
+      } : undefined,
+      // Directly set the OpenAI API key in the extraction config
+      openaiApiKey: (extractionItem.aiFormatting?.enabled && openAiApiKey) ? openAiApiKey : undefined
     };
 
     // Configure the smart extraction options
@@ -279,22 +304,6 @@ export async function processExtractionItems(
         )
       );
 
-      extractionConfig.smartOptions = {
-        aiAssistance: true, // This is the key property that was missing
-        extractionFormat: mappedExtractionFormat,
-        aiModel: extractionItem.aiFormatting.aiModel || 'gpt-4',
-        generalInstructions: extractionItem.aiFormatting.generalInstructions || '',
-        strategy: extractionItem.aiFormatting.strategy || 'auto',
-        includeSchema: extractionItem.aiFormatting.includeSchema === true,
-        includeRawData: extractionItem.aiFormatting.includeRawData === true,
-        includeReferenceContext: extractionItem.aiFormatting.includeReferenceContext === true,
-        referenceSelector: extractionItem.aiFormatting.referenceSelector || '',
-        referenceName: extractionItem.aiFormatting.referenceName || 'referenceContext',
-        referenceFormat: extractionItem.aiFormatting.referenceFormat || 'text',
-        referenceAttribute: extractionItem.aiFormatting.referenceAttribute || '',
-        selectorScope: extractionItem.aiFormatting.selectorScope || 'global'
-      };
-
       // Add fields for manual strategy
       if (extractionItem.aiFields && extractionItem.aiFormatting.strategy === 'manual') {
         logger.debug(
@@ -320,9 +329,8 @@ export async function processExtractionItems(
         };
       }
 
-      // Set OpenAI API key if provided
+      // Log API key status
       if (openAiApiKey) {
-        extractionConfig.openaiApiKey = openAiApiKey;
         extractionItem.hasOpenAiApiKey = true;
         // Store a copy of the API key directly in the extraction item for use in later processing
         extractionItem.openAiApiKey = openAiApiKey;
@@ -574,86 +582,73 @@ export async function processExtractionItems(
         // Create and execute the extraction
         const extraction = createExtraction(extractionItem.puppeteerPage, extractionConfig, context);
 
-        // If there's an API key in the extraction item, make sure it's copied to the extraction config
-        // This ensures it's available during execution
-        if (extractionItem.openAiApiKey && !extractionConfig.openaiApiKey) {
-          logger.debug(
-            formatOperationLog(
-              'extraction',
-              nodeName,
-              nodeId,
-              i,
-              `Adding OpenAI API key from extraction item to extraction config`
-            )
-          );
-          extractionConfig.openaiApiKey = extractionItem.openAiApiKey;
-        }
+        try {
+          // Execute the extraction
+          const result = await extraction.execute();
 
-        const result = await extraction.execute();
+          // Store the raw data before any AI processing
+          extractionItem.rawData = result.rawContent;
 
-        if (result.success) {
-          // Store the original raw text before AI processing if raw data is requested
-          if (extractionItem.aiFormatting?.includeRawData) {
-            extractionItem.rawData = result.rawContent;
-          }
-
-          // Store the extracted data in the extraction item
-          extractionItem.extractedData = result.data;
-
-          // Store schema if available and includeSchema is true
-          if (result.schema && extractionItem.aiFormatting?.includeSchema) {
-            // Keep the full schema format with descriptions
-            extractionItem.schema = result.schema;
-
-            // Log the schema structure for debugging
-            logger.debug(
+          if (result.success) {
+            // Log extraction success
+            logger.info(
               formatOperationLog(
                 'extraction',
                 nodeName,
                 nodeId,
                 i,
-                `Schema for [${extractionItem.name}]: ${JSON.stringify(result.schema, null, 2)}`
+                `Extraction successful for [${extractionItem.name}]`
+              )
+            );
+
+            // Store extracted data
+            extractionItem.extractedData = result.data;
+
+            // If we have a schema from the extraction, store it
+            if (result.schema) {
+              logger.debug(
+                formatOperationLog(
+                  'extraction',
+                  nodeName,
+                  nodeId,
+                  i,
+                  `Schema found for [${extractionItem.name}]`
+                )
+              );
+              extractionItem.schema = result.schema;
+            }
+          } else {
+            logger.warn(
+              formatOperationLog(
+                'extraction',
+                nodeName,
+                nodeId,
+                i,
+                `Extraction failed for [${extractionItem.name}]`
               )
             );
           }
-
-          logger.debug(
-            formatOperationLog(
-              'extraction',
-              nodeName,
-              nodeId,
-              i,
-              `Extraction successful for [${extractionItem.name}]`
-            )
-          );
-        } else {
-          // Log extraction failure
+        } catch (error) {
           logger.warn(
             formatOperationLog(
               'extraction',
               nodeName,
               nodeId,
               i,
-              `Extraction failed for [${extractionItem.name}]: ${result.error?.message}`
+              `Error executing extraction: ${(error as Error).message}`
             )
           );
-
-          // Store error message if extraction failed
-          extractionItem.extractedData = { error: result.error?.message };
         }
       } catch (error) {
-        logger.error(
+        logger.warn(
           formatOperationLog(
             'extraction',
             nodeName,
             nodeId,
             i,
-            `Error during extraction for [${extractionItem.name}]: ${(error as Error).message}`
+            `Error processing extraction item: ${(error as Error).message}`
           )
         );
-
-        // Store error message if exception occurred
-        extractionItem.extractedData = { error: (error as Error).message };
       }
     } else {
       logger.warn(
@@ -662,31 +657,12 @@ export async function processExtractionItems(
           nodeName,
           nodeId,
           i,
-          `No puppeteer page available for [${extractionItem.name}]`
+          `No puppeteer page available for extraction item: ${extractionItem.name}`
         )
       );
-
-      // Store error message if no puppeteer page
-      extractionItem.extractedData = { error: 'No puppeteer page available' };
     }
 
-    // Remove API key from the output
-    if (extractionItem.openAiApiKey) {
-      delete extractionItem.openAiApiKey;
-    }
-
-    // Add extraction item to the list of typed extraction items
     typedExtractionItems.push(extractionItem);
-
-    logger.debug(
-      formatOperationLog(
-        'extraction',
-        nodeName,
-        nodeId,
-        i,
-        `Successfully processed extraction item [${extractionItem.name}]`
-      )
-    );
   }
 
   return typedExtractionItems;
