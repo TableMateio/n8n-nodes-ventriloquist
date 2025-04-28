@@ -231,12 +231,49 @@ export const description: INodeProperties[] = [
 						description: "Whether to use AI to format and structure the extracted data",
 					},
 					{
+						displayName: "Schema Method",
+						name: "schemaMethod",
+						type: "options",
+						options: [
+							{
+								name: "No Schema",
+								value: "noSchema",
+								description: "Extract data without applying a schema structure",
+							},
+							{
+								name: "Auto",
+								value: "auto",
+								description: "Automatically detect fields and structure",
+							},
+							{
+								name: "Field-by-Field",
+								value: "fieldByField",
+								description: "Manually define specific fields to extract",
+							},
+						],
+						default: "noSchema",
+						description: "Method to use for structuring the extracted data",
+					},
+					{
+						displayName: "AI Assistance",
+						name: "aiAssistance",
+						type: "boolean",
+						default: true,
+						description: "Whether to use AI to assist with data extraction and formatting",
+						displayOptions: {
+							show: {
+								schemaMethod: ["fieldByField"],
+							},
+						},
+					},
+					{
 						displayName: "Extraction Format",
 						name: "extractionFormat",
 						type: "options",
 						displayOptions: {
 							show: {
-								enableAiFormatting: [true],
+								aiAssistance: [true],
+								schemaMethod: ["auto", "fieldByField"],
 							},
 						},
 						options: [
@@ -280,7 +317,8 @@ export const description: INodeProperties[] = [
 						type: "options",
 						displayOptions: {
 							show: {
-								enableAiFormatting: [true],
+								aiAssistance: [true],
+								schemaMethod: ["auto", "fieldByField"],
 							},
 						},
 						options: [
@@ -309,36 +347,13 @@ export const description: INodeProperties[] = [
 						description: "AI model to use for processing the extraction",
 					},
 					{
-						displayName: "Assistant Type",
-						name: "assistantType",
-						type: "options",
-						displayOptions: {
-							show: {
-								enableAiFormatting: [true],
-							},
-						},
-						options: [
-							{
-								name: "Auto",
-								value: "auto",
-								description: "Automatically detect fields and structure (asst_YOKjWiQPTTeg3OvDV6D8984n)",
-							},
-							{
-								name: "Manual",
-								value: "manual",
-								description: "Manually define fields to extract (asst_p65Hrk79gidj5thHqgs4W1lK)",
-							},
-						],
-						default: "auto",
-						description: "Type of assistant to use for extraction",
-					},
-					{
 						displayName: "General Instructions",
 						name: "generalInstructions",
 						type: "string",
 						displayOptions: {
 							show: {
-								enableAiFormatting: [true],
+								aiAssistance: [true],
+								schemaMethod: ["auto", "fieldByField"],
 							},
 						},
 						default: "",
@@ -353,7 +368,8 @@ export const description: INodeProperties[] = [
 						type: "boolean",
 						displayOptions: {
 							show: {
-								enableAiFormatting: [true],
+								aiAssistance: [true],
+								schemaMethod: ["auto", "fieldByField"],
 							},
 						},
 						default: false,
@@ -365,7 +381,8 @@ export const description: INodeProperties[] = [
 						type: "string",
 						displayOptions: {
 							show: {
-								enableAiFormatting: [true],
+								aiAssistance: [true],
+								schemaMethod: ["auto", "fieldByField"],
 								includeReferenceContext: [true],
 							},
 						},
@@ -392,7 +409,8 @@ export const description: INodeProperties[] = [
 						],
 						displayOptions: {
 							show: {
-								enableAiFormatting: [true],
+								aiAssistance: [true],
+								schemaMethod: ["auto", "fieldByField"],
 								includeReferenceContext: [true],
 							},
 						},
@@ -405,7 +423,8 @@ export const description: INodeProperties[] = [
 						type: "string",
 						displayOptions: {
 							show: {
-								enableAiFormatting: [true],
+								aiAssistance: [true],
+								schemaMethod: ["auto", "fieldByField"],
 								includeReferenceContext: [true],
 							},
 						},
@@ -437,7 +456,8 @@ export const description: INodeProperties[] = [
 						],
 						displayOptions: {
 							show: {
-								enableAiFormatting: [true],
+								aiAssistance: [true],
+								schemaMethod: ["auto", "fieldByField"],
 								includeReferenceContext: [true],
 							},
 						},
@@ -450,7 +470,8 @@ export const description: INodeProperties[] = [
 						type: "string",
 						displayOptions: {
 							show: {
-								enableAiFormatting: [true],
+								aiAssistance: [true],
+								schemaMethod: ["auto", "fieldByField"],
 								includeReferenceContext: [true],
 								referenceFormat: ["attribute"],
 							},
@@ -458,30 +479,6 @@ export const description: INodeProperties[] = [
 						default: "href",
 						placeholder: "href, src, data-url",
 						description: "Name of the attribute to extract",
-					},
-					{
-						displayName: "Strategy",
-						name: "strategy",
-						type: "options",
-						displayOptions: {
-							show: {
-								enableAiFormatting: [true],
-							},
-						},
-						options: [
-							{
-								name: "Auto",
-								value: "auto",
-								description: "Automatically determine fields from content",
-							},
-							{
-								name: "Manual",
-								value: "manual",
-								description: "Define specific fields to extract",
-							},
-						],
-						default: "auto",
-						description: "Strategy to use for extraction",
 					},
 					{
 						displayName: "Fields",
@@ -494,8 +491,7 @@ export const description: INodeProperties[] = [
 						},
 						displayOptions: {
 							show: {
-								enableAiFormatting: [true],
-								strategy: ["manual"],
+								schemaMethod: ["fieldByField"],
 							},
 						},
 						default: { items: [{ name: "", type: "string", instructions: "" }] },
@@ -550,30 +546,35 @@ export const description: INodeProperties[] = [
 										typeOptions: {
 											rows: 2,
 										},
+										displayOptions: {
+											show: {
+												"/aiAssistance": [true],
+											},
+										},
 									},
 								],
 							},
 						],
 					},
 					{
-						displayName: "Include Schema",
+						displayName: "Output Schema",
 						name: "includeSchema",
 						type: "boolean",
 						displayOptions: {
 							show: {
-								enableAiFormatting: [true],
+								schemaMethod: ["auto", "fieldByField"],
 							},
 						},
 						default: false,
 						description: "Whether to include the generated schema in the output",
 					},
 					{
-						displayName: "Include Raw Data",
+						displayName: "Output Raw Data",
 						name: "includeRawData",
 						type: "boolean",
 						displayOptions: {
 							show: {
-								enableAiFormatting: [true],
+								schemaMethod: ["auto", "fieldByField"],
 							},
 						},
 						default: false,
@@ -956,9 +957,28 @@ export async function execute(
 
 		// Convert extraction items to properly typed items
 		const typedExtractionItems: IExtractItem[] = extractionItems.map((item) => {
-			// Add AI formatting options from parameters
+			// Check for old enableAiFormatting parameter (for backward compatibility)
 			const enableAiFormatting = this.getNodeParameter(`extractionItems.items[${extractionItems.indexOf(item)}].enableAiFormatting`, index, false) as boolean;
 
+			// Get the new schema method parameter or default to noSchema
+			let schemaMethod: string;
+			try {
+				schemaMethod = this.getNodeParameter(`extractionItems.items[${extractionItems.indexOf(item)}].schemaMethod`, index, 'noSchema') as string;
+			} catch (error) {
+				// For backward compatibility, default to auto if enableAiFormatting is true, otherwise noSchema
+				schemaMethod = enableAiFormatting ? 'auto' : 'noSchema';
+			}
+
+			// Get AI assistance parameter or default based on compatibility logic
+			let aiAssistance: boolean;
+			try {
+				aiAssistance = this.getNodeParameter(`extractionItems.items[${extractionItems.indexOf(item)}].aiAssistance`, index, true) as boolean;
+			} catch (error) {
+				// Default to true for backward compatibility
+				aiAssistance = true;
+			}
+
+			// Initialize variables
 			let aiFields: IDataObject[] = [];
 			let aiFormatting: {
 				enabled: boolean;
@@ -976,19 +996,27 @@ export async function execute(
 				selectorScope: string;
 			} | undefined = undefined;
 
-			if (enableAiFormatting) {
-				// Get AI specific parameters only if enableAiFormatting is true
+			// Process formatting options when using a schema method with AI assistance
+			if (schemaMethod !== 'noSchema' && aiAssistance) {
+				// Get AI specific parameters
 				const extractionFormat = this.getNodeParameter(
 					`extractionItems.items[${extractionItems.indexOf(item)}].extractionFormat`,
 					index,
 					'json'
 				) as string;
 
-				const assistantType = this.getNodeParameter(
-					`extractionItems.items[${extractionItems.indexOf(item)}].assistantType`,
-					index,
-					'auto'
-				) as string;
+				// Try to get assistantType for backward compatibility
+				let assistantType: string;
+				try {
+					assistantType = this.getNodeParameter(
+						`extractionItems.items[${extractionItems.indexOf(item)}].assistantType`,
+						index,
+						schemaMethod === 'fieldByField' ? 'manual' : 'auto'
+					) as string;
+				} catch (error) {
+					// Map schemaMethod to assistantType for backward compatibility
+					assistantType = schemaMethod === 'fieldByField' ? 'manual' : 'auto';
+				}
 
 				const generalInstructions = this.getNodeParameter(
 					`extractionItems.items[${extractionItems.indexOf(item)}].generalInstructions`,
@@ -996,7 +1024,8 @@ export async function execute(
 					''
 				) as string;
 
-				const strategy = assistantType; // Use assistantType as strategy (auto/manual)
+				// Map schema method to strategy for backward compatibility
+				const strategy = schemaMethod === 'fieldByField' ? 'manual' : 'auto';
 
 				const includeSchema = this.getNodeParameter(
 					`extractionItems.items[${extractionItems.indexOf(item)}].includeSchema`,
@@ -1060,8 +1089,8 @@ export async function execute(
 					}
 				}
 
-				// Get AI fields if manual strategy is selected
-				if (assistantType === 'manual') {
+				// Get AI fields if field-by-field schema method is selected
+				if (schemaMethod === 'fieldByField') {
 					try {
 						aiFields = this.getNodeParameter(
 							`extractionItems.items[${extractionItems.indexOf(item)}].aiFields.items`,
@@ -1079,7 +1108,7 @@ export async function execute(
 					extractionFormat,
 					assistantType,
 					generalInstructions,
-					strategy: assistantType, // Use assistantType as strategy
+					strategy, // Use mapped strategy
 					includeSchema,
 					includeRawData,
 					includeReferenceContext,
@@ -1122,9 +1151,9 @@ export async function execute(
 					cleanText?: boolean;
 				} | undefined,
 				// Add AI formatting options if enabled
-				aiFormatting: enableAiFormatting ? aiFormatting : undefined,
-				// Add AI fields if using manual strategy
-				aiFields: enableAiFormatting && aiFormatting && aiFormatting.strategy === 'manual' ?
+				aiFormatting: (schemaMethod !== 'noSchema' && aiAssistance) ? aiFormatting : undefined,
+				// Add AI fields if using field-by-field schema method
+				aiFields: (schemaMethod === 'fieldByField' && aiFormatting) ?
 					aiFields.map((field) => {
 						// More detailed debugging of UI field data
 						console.log('========== UI FIELD DATA ==========');
@@ -1135,16 +1164,16 @@ export async function execute(
 						console.log('====================================');
 
 						return {
-						name: field.name as string,
+							name: field.name as string,
 							// Instructions from UI map directly to instructions property in the IField interface
 							// which will become the description in the OpenAI schema
 							instructions: field.instructions as string,
-						type: field.type as string,
-						required: field.format === 'required'
+							type: field.type as string,
+							required: field.format === 'required'
 						};
 					}) : undefined,
-				// Only set hasOpenAiApiKey when AI formatting is actually enabled for this item
-				hasOpenAiApiKey: enableAiFormatting && !!openAiApiKey,
+				// Only set hasOpenAiApiKey when AI formatting is actually enabled
+				hasOpenAiApiKey: (schemaMethod !== 'noSchema' && aiAssistance) && !!openAiApiKey,
 				// Add page and session information
 				puppeteerPage: page,
 				puppeteerSessionId: sessionId,
