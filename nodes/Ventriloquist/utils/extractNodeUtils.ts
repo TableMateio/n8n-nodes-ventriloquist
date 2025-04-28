@@ -457,7 +457,9 @@ export async function processExtractionItems(
                     try {
                       const element = document.querySelector(selector);
                       if (element) {
-                        return element.getAttribute(attribute) || '';
+                        const attributeValue = element.getAttribute(attribute) || '';
+                        // Add context information about the attribute
+                        return `Element <${element.tagName.toLowerCase()}> "${element.textContent?.trim()}" has ${attribute} = "${attributeValue}"`;
                       }
                     } catch (err) {
                       console.error('Error in attribute extraction:', err);
@@ -511,7 +513,9 @@ export async function processExtractionItems(
                         if (parentElement) {
                           const element = parentElement.querySelector(refSel);
                           if (element) {
-                            return element.getAttribute(attribute) || '';
+                            const attributeValue = element.getAttribute(attribute) || '';
+                            // Add context about the element and its attribute
+                            return `Within parent element, found <${element.tagName.toLowerCase()}> "${element.textContent?.trim()}" with ${attribute} = "${attributeValue}"`;
                           }
                         }
                       } catch (err) {
@@ -546,15 +550,28 @@ export async function processExtractionItems(
                 extractionConfig.smartOptions.referenceContent = referenceContent.trim();
               }
 
-              logger.debug(
-                formatOperationLog(
-                  'aiFormatting',
-                  nodeName,
-                  nodeId,
-                  i,
-                  `Reference context extracted successfully as ${referenceFormat} (${referenceContent.length} chars)`
-                )
-              );
+              // Log more detailed info for attribute extractions
+              if (referenceFormat === 'attribute') {
+                logger.info(
+                  formatOperationLog(
+                    'aiFormatting',
+                    nodeName,
+                    nodeId,
+                    i,
+                    `Attribute "${referenceAttribute}" extracted successfully: ${referenceContent.substring(0, 100)}${referenceContent.length > 100 ? '...' : ''}`
+                  )
+                );
+              } else {
+                logger.debug(
+                  formatOperationLog(
+                    'aiFormatting',
+                    nodeName,
+                    nodeId,
+                    i,
+                    `Reference context extracted successfully as ${referenceFormat} (${referenceContent.length} chars)`
+                  )
+                );
+              }
             } else {
               logger.warn(
                 formatOperationLog(

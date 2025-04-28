@@ -389,7 +389,11 @@ export async function processWithAI(
         messages: [
           {
             role: 'system',
-            content: 'You are a data extraction and formatting assistant. Extract and format the provided content according to the instructions. Always respond with valid JSON. Do not include code blocks or explanations in your response.',
+            content: `You are a data extraction and formatting assistant. Extract and format the provided content according to the instructions.
+${options.referenceContent && options.referenceContent.includes('has href =') ? 'Pay special attention to URLs, links, and href attributes mentioned in the reference context.' : ''}
+${options.referenceContent && options.referenceContent.includes('has src =') ? 'Pay special attention to image sources, src attributes, and media references mentioned in the reference context.' : ''}
+${options.referenceContent && options.referenceContent.includes('has data-') ? 'Pay special attention to data attributes mentioned in the reference context.' : ''}
+Always respond with valid JSON. Do not include code blocks or explanations in your response.`,
           },
           {
             role: 'user',
@@ -435,9 +439,41 @@ export async function processWithAI(
       const schema = parsedResponse.schema;
 
       // If we have a schema and this is manual mode with fields, enrich the schema with field descriptions
-      const enrichedSchema = options.strategy === 'manual' && schema && fields.length > 0
-        ? enrichSchemaWithFieldDescriptions(schema, fields)
-        : schema;
+      let enrichedSchema = schema;
+      if (schema) {
+        if (options.strategy === 'manual' && fields.length > 0) {
+          enrichedSchema = enrichSchemaWithFieldDescriptions(schema, fields);
+        }
+
+        // If we have attribute information in the reference content, add it to the schema
+        if (options.referenceContent && options.referenceContent.includes('has ') && typeof enrichedSchema === 'object') {
+          // Add attribute information to schema description if present
+          const attributeMatch = options.referenceContent.match(/has (\w+) = "([^"]*)"/);
+          if (attributeMatch && attributeMatch.length >= 3) {
+            const [, attributeName, attributeValue] = attributeMatch;
+
+            // Add attribute information to the schema description
+            if (enrichedSchema.type === 'object' && enrichedSchema.properties) {
+              // Find properties that might be related to this attribute
+              Object.keys(enrichedSchema.properties).forEach(key => {
+                // If property name contains words related to the attribute (URL, link, etc.)
+                if (
+                  (attributeName === 'href' && /url|link|href/i.test(key)) ||
+                  (attributeName === 'src' && /src|image|picture|source/i.test(key)) ||
+                  key.toLowerCase().includes(attributeName.toLowerCase())
+                ) {
+                  // Add attribute information to the property description
+                  const propDesc = enrichedSchema.properties[key].description || '';
+                  if (!propDesc.includes(`${attributeName} attribute`)) {
+                    enrichedSchema.properties[key].description =
+                      `${propDesc}${propDesc ? ' ' : ''}This value may come from the ${attributeName} attribute with value: "${attributeValue}".`;
+                  }
+                }
+              });
+            }
+          }
+        }
+      }
 
       // Log success
       logger?.info(
@@ -486,8 +522,19 @@ function buildAutoPrompt(content: string, options: ISmartExtractionOptions): str
 Extract and format the following content as ${options.extractionFormat.toUpperCase()}.
 ${options.generalInstructions ? options.generalInstructions + '\n' : ''}
 
-${options.includeSchema ? 'Include a "schema" field in your response that describes the structure of the data.\n' : ''}
+${options.includeSchema ? 'Include a "schema" field in your response that describes the structure of the data.\n' : ''}`;
 
+  // Add reference context if available
+  if (options.includeReferenceContext && options.referenceContent) {
+    prompt += `
+Additional reference context (${options.referenceName || 'referenceContext'}):
+\`\`\`
+${options.referenceContent}
+\`\`\`
+`;
+  }
+
+  prompt += `
 Please format your response as a valid JSON object, with the extracted data in a "data" field.
 
 Content to extract:
@@ -518,6 +565,11 @@ Fields to extract:
   fields.forEach((field) => {
     prompt += `- ${field.name}${field.required ? ' (Required)' : ''}: ${field.instructions || ''} (Type: ${field.type || 'string'})\n`;
   });
+
+  // Add reference context if available
+  if (options.includeReferenceContext && options.referenceContent) {
+    prompt += `\nAdditional reference context (${options.referenceName || 'referenceContext'}):\n\`\`\`\n${options.referenceContent}\n\`\`\`\n`;
+  }
 
   prompt += `\n${options.includeSchema ? 'Include a "schema" field in your response that describes the structure of the data.\n' : ''}
 
