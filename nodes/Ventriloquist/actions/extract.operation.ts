@@ -224,35 +224,16 @@ export const description: INodeProperties[] = [
 						],
 					},
 					{
-						displayName: "AI Assistance",
-						name: "aiAssistance",
-						type: "boolean",
-						default: false,
-						description: "Enable AI assistance for data extraction and formatting",
-					},
-					{
-						displayName: "Strategy",
-						name: "strategy",
+						displayName: "Schema",
+						name: "schema",
 						type: "options",
-						displayOptions: {
-							show: {
-								aiAssistance: [true],
-							},
-						},
 						options: [
-							{
-								name: "Auto",
-								value: "auto",
-								description: "Automatically determine fields from content",
-							},
-							{
-								name: "Manual",
-								value: "manual",
-								description: "Define specific fields to extract",
-							},
+							{ name: "No Schema", value: "none", description: "No schema or AI assistance" },
+							{ name: "Auto-Schema", value: "auto", description: "AI-assisted schema extraction (auto)" },
+							{ name: "Field-by-Field Schema", value: "manual", description: "Field-by-field schema extraction (manual)" },
 						],
-						default: "auto",
-						description: "Strategy to use for extraction",
+						default: "none",
+						description: "Schema extraction method to use",
 					},
 					{
 						displayName: "General Instructions",
@@ -260,7 +241,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						displayOptions: {
 							show: {
-								aiAssistance: [true],
+								schema: ["manual"],
 							},
 						},
 						default: "",
@@ -275,7 +256,7 @@ export const description: INodeProperties[] = [
 						type: "boolean",
 						displayOptions: {
 							show: {
-								aiAssistance: [true],
+								schema: ["manual"],
 							},
 						},
 						default: false,
@@ -287,7 +268,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						displayOptions: {
 							show: {
-								aiAssistance: [true],
+								schema: ["manual"],
 								includeReferenceContext: [true],
 							},
 						},
@@ -314,7 +295,7 @@ export const description: INodeProperties[] = [
 						],
 						displayOptions: {
 							show: {
-								aiAssistance: [true],
+								schema: ["manual"],
 								includeReferenceContext: [true],
 							},
 						},
@@ -327,7 +308,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						displayOptions: {
 							show: {
-								aiAssistance: [true],
+								schema: ["manual"],
 								includeReferenceContext: [true],
 							},
 						},
@@ -359,7 +340,7 @@ export const description: INodeProperties[] = [
 						],
 						displayOptions: {
 							show: {
-								aiAssistance: [true],
+								schema: ["manual"],
 								includeReferenceContext: [true],
 							},
 						},
@@ -372,7 +353,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						displayOptions: {
 							show: {
-								aiAssistance: [true],
+								schema: ["manual"],
 								includeReferenceContext: [true],
 								referenceFormat: ["attribute"],
 							},
@@ -387,7 +368,7 @@ export const description: INodeProperties[] = [
 						type: "boolean",
 						displayOptions: {
 							show: {
-								aiAssistance: [true],
+								schema: ["manual"],
 							},
 						},
 						default: false,
@@ -399,7 +380,7 @@ export const description: INodeProperties[] = [
 						type: "boolean",
 						displayOptions: {
 							show: {
-								aiAssistance: [true],
+								schema: ["manual"],
 							},
 						},
 						default: false,
@@ -593,8 +574,7 @@ export const description: INodeProperties[] = [
 						},
 						displayOptions: {
 							show: {
-								aiAssistance: [true],
-								strategy: ["manual"],
+								schema: ["manual"],
 							},
 						},
 						default: { items: [{ name: "", type: "string", instructions: "" }] },
@@ -838,7 +818,7 @@ export async function execute(
 		// Convert extraction items to properly typed items
 		const typedExtractionItems: IExtractItem[] = extractionItems.map((item) => {
 			// Add AI formatting options from parameters
-			const aiAssistance = this.getNodeParameter(`extractionItems.items[${extractionItems.indexOf(item)}].aiAssistance`, index, false) as boolean;
+			const schema = this.getNodeParameter(`extractionItems.items[${extractionItems.indexOf(item)}].schema`, index, "none") as string;
 
 			let aiFields: IDataObject[] = [];
 			let aiFormatting: {
@@ -856,8 +836,8 @@ export async function execute(
 				selectorScope: string;
 			} | undefined = undefined;
 
-			if (aiAssistance) {
-				// Get AI specific parameters only if aiAssistance is true
+			if (schema === "manual") {
+				// Get AI specific parameters only if schema is manual
 				const extractionFormat = this.getNodeParameter(
 					`extractionItems.items[${extractionItems.indexOf(item)}].extractionFormat`,
 					index,
@@ -869,24 +849,6 @@ export async function execute(
 					index,
 					''
 				) as string;
-
-				const strategy = this.getNodeParameter(
-					`extractionItems.items[${extractionItems.indexOf(item)}].strategy`,
-					index,
-					'auto'
-				) as string;
-
-				const includeSchema = this.getNodeParameter(
-					`extractionItems.items[${extractionItems.indexOf(item)}].includeSchema`,
-					index,
-					false
-				) as boolean;
-
-				const includeRawData = this.getNodeParameter(
-					`extractionItems.items[${extractionItems.indexOf(item)}].includeRawData`,
-					index,
-					false
-				) as boolean;
 
 				// Handle reference context parameters
 				const includeReferenceContext = this.getNodeParameter(
@@ -939,7 +901,7 @@ export async function execute(
 				}
 
 				// Get AI fields if manual strategy is selected
-				if (strategy === 'manual') {
+				if (generalInstructions === 'manual') {
 					try {
 						aiFields = this.getNodeParameter(
 							`extractionItems.items[${extractionItems.indexOf(item)}].aiFields.items`,
@@ -956,9 +918,9 @@ export async function execute(
 					enabled: true,
 					extractionFormat,
 					generalInstructions,
-					strategy,
-					includeSchema,
-					includeRawData,
+					strategy: generalInstructions,
+					includeSchema: true,
+					includeRawData: true,
 					includeReferenceContext,
 					referenceSelector,
 					referenceName,
@@ -999,9 +961,9 @@ export async function execute(
 					cleanText?: boolean;
 				} | undefined,
 				// Add AI formatting options if enabled
-				aiFormatting: aiAssistance ? aiFormatting : undefined,
+				aiFormatting: schema === "manual" ? aiFormatting : undefined,
 				// Add AI fields if using manual strategy
-				aiFields: aiAssistance && aiFormatting && aiFormatting.strategy === 'manual' ?
+				aiFields: schema === "manual" ?
 					aiFields.map((field) => {
 						// More detailed debugging of UI field data
 						console.log('========== UI FIELD DATA ==========');
@@ -1021,7 +983,7 @@ export async function execute(
 						};
 					}) : undefined,
 				// Only set hasOpenAiApiKey when AI formatting is actually enabled for this item
-				hasOpenAiApiKey: aiAssistance && !!openAiApiKey,
+				hasOpenAiApiKey: schema === "manual" && !!openAiApiKey,
 				// Add page and session information
 				puppeteerPage: page,
 				puppeteerSessionId: sessionId,
@@ -1041,7 +1003,6 @@ export async function execute(
 				nodeName,
 				nodeId,
 				// Add AI formatting options - these get checked for each item individually
-				aiAssistance: true, // We handle aiAssistance per item in the typedExtractionItems array
 				debugMode: debugMode || debugPageContent, // Pass the debug mode option to control output format, including backward compatibility
 			},
 			this.logger,
