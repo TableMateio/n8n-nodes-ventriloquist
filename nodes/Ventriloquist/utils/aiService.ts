@@ -328,7 +328,7 @@ export class AIService {
       // Process fields with reference content if provided
       // This adds the reference content to the instructions for URL-related fields
       const processedFields = options.includeReferenceContext && options.referenceContent
-        ? processFieldsWithReferenceContent(fields, options.referenceContent, true)
+        ? processFieldsWithReferenceContent(fields, options.referenceContent, true, this.logger, this.context)
         : fields;
 
       // Log the field instructions after processing to verify reference content is included

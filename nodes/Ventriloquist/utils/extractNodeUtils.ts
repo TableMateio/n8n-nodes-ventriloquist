@@ -768,7 +768,9 @@ export async function processExtractionItems(
             const enhancedFields = await enhanceFieldsWithRelativeSelectorContent(
               transformedFields,
               extractionItem.puppeteerPage,
-              extractionItem.selector
+              extractionItem.selector,
+              logger,
+              { nodeName, nodeId, index: i }
             );
 
             // Log the enhanced fields to check if content was properly added
