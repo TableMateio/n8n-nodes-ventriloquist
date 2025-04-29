@@ -287,24 +287,14 @@ export class AIService {
       // Create a result object to store field-by-field responses
       const result: Record<string, any> = {};
 
-      // Create a shared thread for fields that don't need separate threads
-      const sharedThread = await this.openai.beta.threads.create();
-      this.logger.debug(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `Created shared thread for standard fields: ${sharedThread.id}`
-        )
-      );
-
-      // Process fields - logical analysis fields and fields that request a separate thread
-      // will get their own threads, while others will share the thread
+      // Process each field with the appropriate thread management strategy
       for (const field of processedFields) {
-        // Determine if this field needs a separate thread
-        const needsSeparateThread = field.useLogicAnalysis === true || field.useSeparateThread === true;
-        const threadToUse = needsSeparateThread ? null : sharedThread.id; // null means create a new thread
+        // Determine if this field should share a thread
+        const requestsSeparateThread = field.useLogicAnalysis === true || field.useSeparateThread === true;
+
+        // Create a fresh thread for this field if needed
+        // null means the processFieldWithAI method will create a new thread
+        const threadToUse = requestsSeparateThread ? null : null;
 
         this.logger.debug(
           formatOperationLog(
@@ -312,11 +302,11 @@ export class AIService {
             nodeName,
             nodeId,
             index,
-            `Processing field "${field.name}" (type: ${field.type}, separate thread: ${needsSeparateThread})`
+            `Processing field "${field.name}" (type: ${field.type}, using: ${field.useLogicAnalysis ? 'LOGICAL' : 'STANDARD'} assistant)`
           )
         );
 
-        // Process the field with the appropriate thread
+        // Process the field
         const fieldResult = await this.processFieldWithAI(threadToUse, content, field);
 
         if (fieldResult.success && fieldResult.data) {
