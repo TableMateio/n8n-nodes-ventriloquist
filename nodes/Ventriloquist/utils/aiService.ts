@@ -350,23 +350,9 @@ export class AIService {
           )
         );
 
-        // Check if this field has a direct attribute value to return (from enhanceFieldsWithRelativeSelectorContent)
-        if (extendedField.returnDirectAttribute === true && extendedField.referenceContent) {
-          const directValue = extendedField.referenceContent;
-          this.logger.info(
-            formatOperationLog(
-              "SmartExtraction",
-              nodeName,
-              nodeId,
-              index,
-              `Using direct attribute value for field "${field.name}": ${directValue}`
-            )
-          );
-
-          // Store the direct value without processing through AI
-          result[field.name] = directValue;
-          continue; // Skip AI processing for this field
-        }
+        // NOTE: We always process fields with AI when AI is enabled
+        // Any attribute values from relative selectors are already included in the instructions
+        // by the enhanceFieldsWithRelativeSelectorContent function
 
         // Process the field with the appropriate thread
         const fieldResult = await this.processFieldWithAI(threadToUse, content, field);
