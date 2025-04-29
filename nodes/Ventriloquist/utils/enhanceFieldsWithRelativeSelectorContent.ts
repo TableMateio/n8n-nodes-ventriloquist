@@ -141,6 +141,38 @@ export async function enhanceFieldsWithRelativeSelectorContent(
       } else {
         console.log(`No content extracted for field "${field.name}" using selector: ${field.relativeSelectorOptional}`);
       }
+    } else {
+      // Check if this field already has href information in the instructions
+      // This handles cases where the instructions already include "The value of the href attribute is: URL"
+      if (field.instructions && field.instructions.includes('The value of the href attribute is:')) {
+        console.log(`Field "${field.name}" already has href information in instructions`);
+
+        // Extract the URL from the instructions - using a more robust regex
+        // This regex will find URLs after "The value of the href attribute is:" until the end of the line or string
+        const hrefMatch = field.instructions.match(/The value of the href attribute is:\s*((?:https?:\/\/|www\.)[^\s\n]+)/);
+
+        if (hrefMatch && hrefMatch[1]) {
+          const hrefValue = hrefMatch[1].trim();
+          console.log(`Extracted href value from instructions: ${hrefValue}`);
+
+          // Set the direct attribute flags
+          field.returnDirectAttribute = true;
+          field.referenceContent = hrefValue;
+        } else {
+          // Try an alternative regex for more complex URLs (with special characters)
+          const alternativeMatch = field.instructions.match(/The value of the href attribute is:[\s\n]*(.*?)(?:[\n]|$)/);
+          if (alternativeMatch && alternativeMatch[1]) {
+            const hrefValue = alternativeMatch[1].trim();
+            console.log(`Extracted complex href value from instructions: ${hrefValue}`);
+
+            // Set the direct attribute flags
+            field.returnDirectAttribute = true;
+            field.referenceContent = hrefValue;
+          } else {
+            console.log(`Unable to extract href value from instructions for field "${field.name}"`);
+          }
+        }
+      }
     }
   }
 
