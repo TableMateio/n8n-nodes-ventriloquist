@@ -222,6 +222,8 @@ export async function extractTableData(
 		rowSelector: string,
 		cellSelector: string,
 		outputFormat: string,
+		extractAttributes?: boolean,
+		attributeName?: string,
 	},
 	logger: ILogger,
 	nodeName: string,
@@ -239,17 +241,30 @@ export async function extractTableData(
 		const tableData = await page.$$eval(
 			`${selector} ${options.rowSelector}`,
 			(rows, opts) => {
-				const { cellSelector } = opts as {
+				const { cellSelector, extractAttributes, attributeName } = opts as {
 					cellSelector: string;
+					extractAttributes?: boolean;
+					attributeName?: string;
 				};
 
 				// Extract all rows
 				return Array.from(rows).map((row) => {
 					const cells = Array.from(row.querySelectorAll(cellSelector));
-					return cells.map((cell) => cell.textContent?.trim() || '');
+					return cells.map((cell) => {
+						// If extracting attributes, get the specified attribute value
+						if (extractAttributes && attributeName) {
+							return cell.getAttribute(attributeName) || '';
+						}
+						// Otherwise get the text content
+						return cell.textContent?.trim() || '';
+					});
 				});
 			},
-			{ cellSelector: options.cellSelector }
+			{
+				cellSelector: options.cellSelector,
+				extractAttributes: options.extractAttributes,
+				attributeName: options.attributeName
+			}
 		);
 
 		if (tableData.length === 0) {

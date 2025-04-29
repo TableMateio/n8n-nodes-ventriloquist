@@ -112,8 +112,9 @@ export interface IExtractItem {
     type?: string;
     required?: boolean;
     relativeSelectorOptional?: string;
-    returnDirectAttribute?: boolean;
-    referenceContent?: string;
+    relativeSelector?: string;       // For non-AI field extraction
+    returnDirectAttribute?: boolean; // Flag to indicate the extracted value should be returned directly
+    referenceContent?: string;      // Stores the extracted content for reference
     fieldOptions?: {
       aiProcessingMode?: 'standard' | 'logical';
       threadManagement?: 'shared' | 'separate';
@@ -281,25 +282,24 @@ export async function processExtractionItems(
       openaiApiKey: (extractionItem.aiFormatting?.enabled && openAiApiKey) ? openAiApiKey : undefined
     };
 
-    // IMPORTANT: Handle attribute extraction for link fields even when AI is disabled
-    // Check if this is a href attribute extraction
-    if (extractionItem.extractionType === 'attribute' && extractionItem.attribute === 'href') {
+    // Handle attribute extraction for all attribute types, not just href
+    if (extractionItem.extractionType === 'attribute' && extractionItem.attribute) {
       // Set up field information for direct attribute handling
       if (!extractionItem.aiFields) {
         extractionItem.aiFields = [];
       }
 
       // Only add if not already in aiFields
-      const hasHrefField = extractionItem.aiFields.some(f =>
+      const hasAttributeField = extractionItem.aiFields.some(f =>
         f.fieldOptions?.extractionType === 'attribute' &&
-        f.fieldOptions?.attributeName === 'href');
+        f.fieldOptions?.attributeName === extractionItem.attribute);
 
-      if (!hasHrefField) {
-        // Add a special field for href attribute handling
+      if (!hasAttributeField) {
+        // Add a special field for attribute handling
         extractionItem.aiFields.push({
           name: extractionItem.name,
           type: 'string',
-          instructions: `Extract the href attribute from the element.`,
+          instructions: `Extract the ${extractionItem.attribute} attribute from the element.`,
           returnDirectAttribute: true, // This is a special property we'll look for later
           relativeSelectorOptional: '', // We don't need this for non-AI extraction
         });
@@ -310,7 +310,7 @@ export async function processExtractionItems(
             nodeName,
             nodeId,
             i,
-            `Added special href field handling for non-AI extraction: ${extractionItem.name}`
+            `Added special attribute field handling for non-AI extraction: ${extractionItem.name} (${extractionItem.attribute})`
           )
         );
       }
@@ -451,7 +451,7 @@ export async function processExtractionItems(
 
         // Extract reference context if enabled
         if (extractionItem.aiFormatting?.enabled &&
-            extractionItem.aiFormatting?.includeReferenceContext) {
+          extractionItem.aiFormatting?.includeReferenceContext) {
           try {
             const referenceSelector = extractionItem.aiFormatting.referenceSelector;
             const referenceFormat = extractionItem.aiFormatting.referenceFormat || 'text';
@@ -681,7 +681,8 @@ export async function processExtractionItems(
           try {
             // Add additional logging to see if fields have relativeSelectorOptional property
             const fieldsWithRelativeSelectors = extractionItem.aiFields.filter(f =>
-              f.relativeSelectorOptional && typeof f.relativeSelectorOptional === 'string' && f.relativeSelectorOptional.trim() !== '');
+              (f.relativeSelectorOptional && typeof f.relativeSelectorOptional === 'string' && f.relativeSelectorOptional.trim() !== '') ||
+              (f.relativeSelector && typeof f.relativeSelector === 'string' && f.relativeSelector.trim() !== ''));
 
             logger.info(
               formatOperationLog(
@@ -690,18 +691,49 @@ export async function processExtractionItems(
                 nodeId,
                 i,
                 `Found ${fieldsWithRelativeSelectors.length} fields with relative selectors: ${fieldsWithRelativeSelectors.map(f =>
-                  `${f.name}:${f.relativeSelectorOptional}`).join(', ')}`
+                  `${f.name}:${f.relativeSelectorOptional || f.relativeSelector}`).join(', ')}`
               )
             );
 
             // Transform the fields to ensure they match the IOpenAIField interface
-            const transformedFields = extractionItem.aiFields.map(field => ({
-              ...field,
-              instructions: field.instructions || field.description || '',
-              relativeSelectorOptional: field.relativeSelectorOptional || '',
-              format: field.fieldOptions?.format || 'string',
-              type: field.type || 'string',
-            }));
+            const transformedFields = extractionItem.aiFields.map(field => {
+              // Get extraction type and attribute name from field options
+              const fieldOptions = field.fieldOptions || {};
+              const extractionType = fieldOptions.extractionType || 'text';
+              const attributeName = fieldOptions.attributeName || '';
+              // Check if this is an AI-assisted field by looking at relativeSelectorOptional instead of aiAssisted
+              const aiAssisted = !!field.relativeSelectorOptional;
+
+              // Log detailed information about the field
+              logger.debug(
+                formatOperationLog(
+                  'aiFormatting',
+                  nodeName,
+                  nodeId,
+                  i,
+                  `Field "${field.name}": ` +
+                  `selector="${field.relativeSelectorOptional || field.relativeSelector || ''}", ` +
+                  `type="${extractionType}", ` +
+                  `attribute="${attributeName}", ` +
+                  `aiAssisted=${aiAssisted}`
+                )
+              );
+
+              return {
+                ...field,
+                instructions: field.instructions || field.description || '',
+                // Explicitly pass both selector types to preserve field mode (AI vs non-AI)
+                relativeSelectorOptional: field.relativeSelectorOptional || '',
+                relativeSelector: field.relativeSelector || '',
+                // Store the aiAssisted flag to help with processing
+                aiAssisted: aiAssisted,
+                format: fieldOptions.format || 'string',
+                type: field.type || 'string',
+                // Always pass the extraction type and attribute name from field options
+                extractionType: extractionType,
+                attributeName: attributeName,
+              };
+            });
 
             logger.debug(
               formatOperationLog(
@@ -713,6 +745,25 @@ export async function processExtractionItems(
               )
             );
 
+            // Add more detailed logging for field options
+            transformedFields.forEach(field => {
+              if (field.relativeSelectorOptional) {
+                logger.debug(
+                  formatOperationLog(
+                    'aiFormatting',
+                    nodeName,
+                    nodeId,
+                    i,
+                    `Field "${field.name}" config: ` +
+                    `selector="${field.relativeSelectorOptional}", ` +
+                    `type="${field.extractionType || 'text'}", ` +
+                    `attribute="${field.attributeName || 'none'}", ` +
+                    `AIMode=${!!field.relativeSelectorOptional}`
+                  )
+                );
+              }
+            });
+
             // Enhance fields with content from relative selectors
             const enhancedFields = await enhanceFieldsWithRelativeSelectorContent(
               transformedFields,
@@ -720,21 +771,70 @@ export async function processExtractionItems(
               extractionItem.selector
             );
 
+            // Log the enhanced fields to check if content was properly added
+            logger.info(
+              formatOperationLog(
+                'aiFormatting',
+                nodeName,
+                nodeId,
+                i,
+                `Enhanced fields result: ${enhancedFields.length} fields processed`
+              )
+            );
+
+            enhancedFields.forEach(field => {
+              const hasRefContent = !!(field as any).referenceContent;
+              const isDirectAttr = !!(field as any).returnDirectAttribute;
+
+              logger.debug(
+                formatOperationLog(
+                  'aiFormatting',
+                  nodeName,
+                  nodeId,
+                  i,
+                  `Field "${field.name}": hasReferenceContent=${hasRefContent}, directAttribute=${isDirectAttr}, ` +
+                  `instructionsLength=${field.instructions?.length || 0}`
+                )
+              );
+            });
+
             // Copy the enhanced instructions back to the original aiFields
-            for (let i = 0; i < extractionItem.aiFields.length; i++) {
-              if (i < enhancedFields.length) {
-                if (extractionItem.aiFields[i].instructions !== enhancedFields[i].instructions) {
-                  logger.info(
+            for (let j = 0; j < extractionItem.aiFields.length; j++) {
+              if (j < enhancedFields.length) {
+                // Log when instructions are enhanced
+                if (extractionItem.aiFields[j].instructions !== enhancedFields[j].instructions) {
+                  logger.debug(
                     formatOperationLog(
                       'aiFormatting',
                       nodeName,
                       nodeId,
                       i,
-                      `Field "${extractionItem.aiFields[i].name}" instructions were enhanced with content`
+                      `Field "${extractionItem.aiFields[j].name}" instructions were enhanced: ` +
+                      `original length=${extractionItem.aiFields[j].instructions?.length || 0}, ` +
+                      `new length=${enhancedFields[j].instructions?.length || 0}`
                     )
                   );
                 }
-                extractionItem.aiFields[i].instructions = enhancedFields[i].instructions;
+
+                // ALWAYS copy these properties, regardless of whether it's an AI field or not
+                // These properties are critical for both types of fields
+                extractionItem.aiFields[j].instructions = enhancedFields[j].instructions;
+                extractionItem.aiFields[j].referenceContent = enhancedFields[j].referenceContent;
+                extractionItem.aiFields[j].returnDirectAttribute = enhancedFields[j].returnDirectAttribute;
+
+                // Provide detailed log about what's being copied
+                logger.debug(
+                  formatOperationLog(
+                    'aiFormatting',
+                    nodeName,
+                    nodeId,
+                    i,
+                    `Field "${extractionItem.aiFields[j].name}" properties:` +
+                    ` referenceContent=${!!enhancedFields[j].referenceContent},` +
+                    ` returnDirectAttribute=${!!enhancedFields[j].returnDirectAttribute},` +
+                    ` aiAssisted=${!!enhancedFields[j].relativeSelectorOptional}`
+                  )
+                );
               }
             }
 

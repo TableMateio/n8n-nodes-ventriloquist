@@ -3,6 +3,14 @@ import { formatOperationLog } from './resultUtils';
 import { processFieldsWithReferenceContent } from './processOpenAISchema';
 
 /**
+ * Extended field interface to handle fields with direct attribute references
+ */
+interface IExtendedField extends IField {
+  returnDirectAttribute?: boolean;
+  referenceContent?: string;
+}
+
+/**
  * This is a workaround for TypeScript errors when importing OpenAI
  * We need to install the package with npm install openai first
  */
@@ -280,9 +288,32 @@ export class AIService {
       const fields = options.fields ? [...options.fields] : [];
 
       // Process fields with reference content if provided
+      // This adds the reference content to the instructions for URL-related fields
       const processedFields = options.includeReferenceContext && options.referenceContent
         ? processFieldsWithReferenceContent(fields, options.referenceContent, true)
         : fields;
+
+      // Log the field instructions after processing to verify reference content is included
+      this.logger.debug(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Field instructions after processing with reference content:`
+        )
+      );
+      processedFields.forEach(field => {
+        this.logger.debug(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `Field "${field.name}" instructions: ${field.instructions?.substring(0, 50)}${field.instructions?.length > 50 ? '...' : ''}`
+          )
+        );
+      });
 
       // Create a result object to store field-by-field responses
       const result: Record<string, any> = {};
@@ -302,6 +333,9 @@ export class AIService {
       // Process fields - logical analysis fields and fields that request a separate thread
       // will get their own threads, while others will share the thread
       for (const field of processedFields) {
+        // Cast to extended field type to handle attribute properties
+        const extendedField = field as IExtendedField;
+
         // Determine if this field needs a separate thread
         const needsSeparateThread = field.useLogicAnalysis === true || field.useSeparateThread === true;
         const threadToUse = needsSeparateThread ? null : sharedThread.id; // null means create a new thread
@@ -315,6 +349,24 @@ export class AIService {
             `Processing field "${field.name}" (type: ${field.type}, separate thread: ${needsSeparateThread})`
           )
         );
+
+        // Check if this field has a direct attribute value to return (from enhanceFieldsWithRelativeSelectorContent)
+        if (extendedField.returnDirectAttribute === true && extendedField.referenceContent) {
+          const directValue = extendedField.referenceContent;
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Using direct attribute value for field "${field.name}": ${directValue}`
+            )
+          );
+
+          // Store the direct value without processing through AI
+          result[field.name] = directValue;
+          continue; // Skip AI processing for this field
+        }
 
         // Process the field with the appropriate thread
         const fieldResult = await this.processFieldWithAI(threadToUse, content, field);
@@ -607,16 +659,9 @@ export class AIService {
         if (field.instructions && field.instructions.trim()) {
           prompt += `:\n   INSTRUCTIONS: ${field.instructions}\n`;
 
-          // Check if this is a URL field and we have reference content
-          const isUrlField = field.name.toLowerCase().includes('url') ||
-                           field.name.toLowerCase().includes('link') ||
-                           field.instructions.toLowerCase().includes('url') ||
-                           field.instructions.toLowerCase().includes('link');
-
-          if (isUrlField && options.includeReferenceContext && options.referenceContent) {
-            console.log(`=== [buildManualPrompt] Field ${field.name} identified as URL field ===`);
-            prompt += `   REFERENCE: Use this URL as reference: "${options.referenceContent}"\n`;
-          }
+          // Note: The reference content is now included directly in the field instructions
+          // by the enhanceFieldsWithRelativeSelectorContent function, so we don't need
+          // special handling for URL fields anymore
         } else {
           prompt += '\n';
         }
@@ -642,6 +687,35 @@ export class AIService {
    * Build prompt for a specific field in manual strategy
    */
   private buildFieldPrompt(content: string, field: IField): string {
+    const { nodeName, nodeId, index } = this.context;
+
+    // Log the field instructions for debugging
+    this.logger.debug(
+      formatOperationLog(
+        "SmartExtraction",
+        nodeName,
+        nodeId,
+        index,
+        `Building prompt for field "${field.name}" with instructions: ${field.instructions?.substring(0, 100)}${field.instructions?.length > 100 ? '...' : ''}`
+      )
+    );
+
+    // Check for reference content
+    const hasReferenceContent = field.instructions &&
+      field.instructions.includes('Use this as reference:');
+
+    if (hasReferenceContent) {
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Field "${field.name}" contains reference content in instructions`
+        )
+      );
+    }
+
     // Build examples section if examples exist
     let examplesSection = '';
 
@@ -675,7 +749,7 @@ export class AIService {
         formatInstructions = 'Use default formatting appropriate for the data type';
     }
 
-    return `
+    const prompt = `
 TASK: Convert the provided extracted data into properly structured JSON according to the specifications below.
 
 INPUT DATA:
@@ -703,6 +777,19 @@ OUTPUT REQUIREMENTS:
 
 ${examplesSection}
 `;
+
+    // Log the final prompt for debugging
+    this.logger.debug(
+      formatOperationLog(
+        "SmartExtraction",
+        nodeName,
+        nodeId,
+        index,
+        `Generated prompt for field "${field.name}" (length: ${prompt.length} chars)`
+      )
+    );
+
+    return prompt;
   }
 
   /**
@@ -847,10 +934,11 @@ ${examplesSection}
           schemaType = 'string';
       }
 
-      // Create the property definition with description directly at the field level
+      // Create the property definition with description directly from instructions
+      // Preserve the complete instructions including any reference content
       const property: Record<string, any> = {
         type: schemaType,
-        description: field.instructions || `Extract the ${field.name}`
+        description: field.instructions
       };
 
       // Add format if applicable

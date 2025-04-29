@@ -35,19 +35,6 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Debug Mode",
-		name: "debugMode",
-		type: "boolean",
-		default: false,
-		description:
-			"Whether to include technical details in the output and page information in debug logs. When disabled, only extracted data and essential fields are returned.",
-		displayOptions: {
-			show: {
-				operation: ["extract"],
-			},
-		},
-	},
-	{
 		displayName: "Extractions",
 		name: "extractionItems",
 		type: "fixedCollection",
@@ -478,7 +465,7 @@ export const description: INodeProperties[] = [
 												type: "string",
 												default: "",
 												placeholder: "href, src, data-ID",
-												description: "Name of the attribute to extract (only needed when Extraction Type is set to Attribute)"
+												description: "Name of the attribute to extract. When AI Assisted is enabled, the attribute value will be included in the instructions as 'The value of the [attribute] attribute is: [value]'.",
 											},
 											{
 												displayName: "Format",
@@ -601,6 +588,26 @@ export const description: INodeProperties[] = [
 								],
 								default: "json",
 								description: "Format of the extracted table data",
+							},
+							{
+								displayName: "Extract Attributes",
+								name: "extractAttributes",
+								type: "boolean",
+								default: false,
+								description: "Whether to extract attributes from cells (like href from links)",
+							},
+							{
+								displayName: "Attribute Name",
+								name: "attributeName",
+								type: "string",
+								default: "href",
+								placeholder: "href, src, data-id",
+								description: "Name of the attribute to extract from cells (href is common for links)",
+								displayOptions: {
+									show: {
+										extractAttributes: [true],
+									},
+								},
 							},
 						],
 					},
@@ -753,18 +760,6 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Debug Page Content",
-		name: "debugPageContent",
-		type: "boolean",
-		default: false,
-		description: "Whether to include page information in debug logs",
-		displayOptions: {
-			show: {
-				operation: ["extract"],
-			},
-		},
-	},
-	{
 		displayName: "Use Human-Like Delays",
 		name: "useHumanDelays",
 		type: "boolean",
@@ -794,6 +789,19 @@ export const description: INodeProperties[] = [
 		type: "boolean",
 		default: false,
 		description: "Whether to capture a screenshot of the page after extraction",
+		displayOptions: {
+			show: {
+				operation: ["extract"],
+			},
+		},
+	},
+	{
+		displayName: "Debug Mode",
+		name: "debugMode",
+		type: "boolean",
+		default: false,
+		description:
+			"Whether to include technical details in the output, page information in debug logs, and verbose console logging. When disabled, only extracted data and essential fields are returned.",
 		displayOptions: {
 			show: {
 				operation: ["extract"],
@@ -840,13 +848,6 @@ export async function execute(
 	const takeScreenshotOption = this.getNodeParameter("takeScreenshot", index, false) as boolean;
 	const continueOnFail = this.getNodeParameter("continueOnFail", index, true) as boolean;
 	const debugMode = this.getNodeParameter("debugMode", index, false) as boolean;
-	// For backward compatibility
-	let debugPageContent = false;
-	try {
-		debugPageContent = this.getNodeParameter("debugPageContent", index, false) as boolean;
-	} catch (e) {
-		// Parameter might not exist in the UI anymore, ignore the error
-	}
 	const explicitSessionId = this.getNodeParameter("explicitSessionId", index, "") as string;
 
 	this.logger.info(
@@ -893,7 +894,7 @@ export async function execute(
 		}
 
 		// Debug page content if enabled
-		if (debugMode || debugPageContent) {
+		if (debugMode) {
 			await logPageDebugInfo(
 				page,
 				this.logger,
@@ -1098,23 +1099,40 @@ export async function execute(
 				// Add AI fields if using manual strategy
 				aiFields: schema === "manual" ?
 					aiFields.map((field) => {
-						// Get relativeSelectorOptional for this field if it exists
+						// Get relativeSelectorOptional or relativeSelector for this field if they exist
 						const relativeSelectorOptional = field.relativeSelectorOptional as string;
-						let enhancedInstructions = field.instructions as string;
+						const relativeSelector = field.relativeSelector as string;
 
-						// Add the relativeSelectorOptional information to the instructions if available
-						if (relativeSelectorOptional && relativeSelectorOptional.trim() !== '') {
-							// Don't add the selector text - the content will be added by enhanceFieldsWithRelativeSelectorContent
-							this.logger.debug(`Field ${field.name} has selector: ${relativeSelectorOptional} - content will be extracted later`);
-						}
+						// For non-AI fields, we need to properly capture and use the relativeSelector value
+						// For AI fields, we use relativeSelectorOptional
+						// This ensures proper handling regardless of AI mode
+						const aiAssisted = field.aiAssisted as boolean;
+						const actualSelector = aiAssisted ? relativeSelectorOptional : relativeSelector;
+
+						// Get the field options for extraction type and attribute name
+						const fieldOptions = field.fieldOptions as IDataObject || {};
+						const extractionType = fieldOptions.extractionType as string || 'text';
+						const attributeName = fieldOptions.attributeName as string || '';
+
+						// Add more debug information for better visibility
+						this.logger.debug(`Field ${field.name} AI=${aiAssisted}, using selector=${actualSelector}` +
+							(fieldOptions && fieldOptions.extractionType === 'attribute' ? `, attribute=${fieldOptions.attributeName || ''}` : ''));
 
 						return {
 							name: field.name as string,
-							instructions: enhancedInstructions,
+							instructions: field.instructions as string || '',
 							type: field.type as string,
 							required: field.format === 'required',
-							// Explicitly pass the relativeSelectorOptional property
-							relativeSelectorOptional: relativeSelectorOptional
+							// Pass BOTH selector types to ensure compatibility
+							relativeSelectorOptional: relativeSelectorOptional,
+							relativeSelector: relativeSelector,
+							// Pass the AI mode flag for clarity in processing
+							aiAssisted: aiAssisted,
+							// Add the extraction type and attribute name for proper handling
+							extractionType: extractionType,
+							attributeName: attributeName,
+							// Pass other field options as needed
+							fieldOptions: fieldOptions
 						};
 					}) : undefined,
 				// Only set hasOpenAiApiKey when AI formatting is actually enabled for this item
@@ -1146,7 +1164,7 @@ export async function execute(
 				nodeName,
 				nodeId,
 				// Add AI formatting options - these get checked for each item individually
-				debugMode: debugMode || debugPageContent, // Pass the debug mode option to control output format, including backward compatibility
+				debugMode: debugMode, // Single debug mode toggle
 			},
 			this.logger,
 			openAiApiKey
@@ -1175,17 +1193,65 @@ export async function execute(
 						);
 						result[item.name] = item.extractedData;
 					} else {
-						// When AI formatting is not enabled, just use the raw extracted data
-						this.logger.info(
-							formatOperationLog(
-								'extraction',
-								nodeName,
-								nodeId,
-								index,
-								`Using raw extracted data for [${item.name}]`
-							)
-						);
-						result[item.name] = item.extractedData;
+						// Check if this is a field that should return a direct attribute value
+						// This handles fields with returnDirectAttribute flag set by enhanceFieldsWithRelativeSelectorContent
+						const hasDirectAttributeValue = Array.isArray(item.aiFields) &&
+							item.aiFields.some(field => {
+								// Use type assertion to inform TypeScript about additional properties
+								const enhancedField = field as {
+									returnDirectAttribute?: boolean;
+									referenceContent?: string;
+								};
+								return enhancedField.returnDirectAttribute === true &&
+									enhancedField.referenceContent !== undefined;
+							});
+
+						if (hasDirectAttributeValue && Array.isArray(item.aiFields)) {
+							// Use the reference content from the first field with returnDirectAttribute
+							const fieldWithDirectAttr = item.aiFields.find(field => {
+								// Use type assertion to inform TypeScript about additional properties
+								const enhancedField = field as {
+									returnDirectAttribute?: boolean;
+									referenceContent?: string;
+								};
+								return enhancedField.returnDirectAttribute === true &&
+									enhancedField.referenceContent !== undefined;
+							});
+
+							// Use type assertion for fieldWithDirectAttr
+							const enhancedField = fieldWithDirectAttr as {
+								returnDirectAttribute?: boolean;
+								referenceContent?: string;
+							} | undefined;
+
+							if (enhancedField && enhancedField.referenceContent) {
+								this.logger.info(
+									formatOperationLog(
+										'extraction',
+										nodeName,
+										nodeId,
+										index,
+										`Using direct attribute value for [${item.name}]: ${enhancedField.referenceContent}`
+									)
+								);
+								result[item.name] = enhancedField.referenceContent;
+							} else {
+								// Fallback to extracted data if no reference content
+								result[item.name] = item.extractedData;
+							}
+						} else {
+							// When AI formatting is not enabled, just use the raw extracted data
+							this.logger.info(
+								formatOperationLog(
+									'extraction',
+									nodeName,
+									nodeId,
+									index,
+									`Using raw extracted data for [${item.name}]`
+								)
+							);
+							result[item.name] = item.extractedData;
+						}
 					}
 
 					// Include schema if it exists and includeSchema is set to true

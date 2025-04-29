@@ -18,7 +18,12 @@ export interface IOpenAIField {
     input: string;
     output: string;
   }>;
-  relativeSelectorOptional?: string;
+  relativeSelectorOptional?: string; // Used when AI is ON
+  relativeSelector?: string;       // Used when AI is OFF
+  extractionType?: string;        // Type of extraction (text, attribute, html)
+  attributeName?: string;         // Name of attribute to extract if extraction type is attribute
+  returnDirectAttribute?: boolean; // Flag to indicate if attribute value should be returned directly
+  referenceContent?: string;      // Stores extracted content for reference
 }
 
 /**
@@ -45,15 +50,8 @@ export function processFieldsWithReferenceContent<T extends IOpenAIField>(
     // Get the instruction or description text
     const instructionText = processedField.instructions || processedField.description || '';
 
-    // Check if this field is related to URL extraction
-    const isUrlField =
-      processedField.name.toLowerCase().includes('url') ||
-      processedField.name.toLowerCase().includes('link') ||
-      instructionText.toLowerCase().includes('url') ||
-      instructionText.toLowerCase().includes('link');
-
-    // Add reference content to URL-related fields
-    if (isUrlField) {
+    // Add reference content to all fields unless they already have referenceContent
+    if (!processedField.referenceContent) {
       // Add reference content to instructions
       const referenceNote = `\n\nUse this as reference: "${referenceContent}"`;
 
@@ -107,78 +105,111 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
   for (let i = 0; i < enhancedFields.length; i++) {
     const field = enhancedFields[i];
 
-    // Check if the field has a relativeSelectorOptional property
-    if (field.relativeSelectorOptional && typeof field.relativeSelectorOptional === 'string' && field.relativeSelectorOptional.trim() !== '') {
-      console.log(`Processing field "${field.name}" with relative selector: ${field.relativeSelectorOptional}`);
+    // Get the actual selector to use - prioritize relativeSelectorOptional (AI mode) but fallback to relativeSelector (non-AI mode)
+    const actualSelector = field.relativeSelectorOptional || field.relativeSelector;
+
+    // Check if the field has any relative selector property
+    if (actualSelector && typeof actualSelector === 'string' && actualSelector.trim() !== '') {
+      console.log(`Processing field "${field.name}" with relative selector: ${actualSelector}`);
+      console.log(`Field "${field.name}" config: AI=${!!field.relativeSelectorOptional || false}, relativeSelector=${field.relativeSelector || 'none'}, relativeSelectorOptional=${field.relativeSelectorOptional || 'none'}`);
 
       try {
-        // Check if the selector contains attribute extraction syntax (e.g., [href])
-        const attributeMatch = field.relativeSelectorOptional.match(/\[([^\]]+)\]$/);
-        let attributeName = '';
-        let cleanSelector = field.relativeSelectorOptional;
+        // Determine how to extract data - from the field's extractionType and attributeName
+        // or from the selector itself if it contains attribute syntax
+        let extractionType = field.extractionType || 'text';
+        let attributeName = field.attributeName || '';
+        let cleanSelector = actualSelector;
 
+        // Check if the selector contains attribute extraction syntax (e.g., [href])
+        const attributeMatch = actualSelector.match(/\[([^\]]+)\]$/);
         if (attributeMatch && attributeMatch[1]) {
           attributeName = attributeMatch[1];
-          cleanSelector = field.relativeSelectorOptional.replace(/\[([^\]]+)\]$/, '');
-          console.log(`Detected attribute extraction: ${attributeName} using selector: ${cleanSelector}`);
+          cleanSelector = actualSelector.replace(/\[([^\]]+)\]$/, '');
+          extractionType = 'attribute';
+          console.log(`Detected attribute extraction from selector: ${attributeName} using selector: ${cleanSelector}`);
         }
 
-        // Add more detailed logging before extraction
-        console.log(`About to extract content for field "${field.name}" using main selector: ${mainSelector} and relative selector: ${field.relativeSelectorOptional}`);
+        // Override with explicit extraction type if set in the field
+        if (field.extractionType === 'attribute' && field.attributeName) {
+          extractionType = 'attribute';
+          attributeName = field.attributeName;
+          console.log(`Using explicit attribute extraction: ${attributeName}`);
+        }
+
+        console.log(`About to extract content for field "${field.name}" using main selector: ${mainSelector} and relative selector: ${cleanSelector}, type: ${extractionType}, attribute: ${attributeName || 'none'}, AI mode: ${!!field.relativeSelectorOptional}`);
 
         // Extract content using the relative selector
         const content = await page.evaluate(
-          (mainSel: string, relSel: string, attrName: string) => {
+          (mainSel: string, relSel: string, attrName: string, extractType: string) => {
             try {
-              console.log(`In browser: Looking for parent element using selector: ${mainSel}`);
+              console.log(`[Browser] Finding parent element with selector: ${mainSel}`);
               const parentElement = document.querySelector(mainSel);
               if (!parentElement) {
-                console.log(`Parent element not found: ${mainSel}`);
+                console.log(`[Browser] Parent element not found: ${mainSel}`);
                 return '';
               }
 
-              console.log(`In browser: Parent element found, now looking for child element using selector: ${relSel}`);
+              console.log(`[Browser] Finding element with selector: ${relSel} within parent`);
               const element = parentElement.querySelector(relSel);
               if (!element) {
-                console.log(`Relative element not found: ${relSel}`);
+                console.log(`[Browser] Relative element not found: ${relSel}`);
                 return '';
               }
 
-              // Get the content based on whether we need an attribute or text
-              if (attrName) {
+              console.log(`[Browser] Element found: ${element.tagName}, extraction type: ${extractType}`);
+
+              // Get the content based on extraction type
+              if (extractType === 'attribute' && attrName) {
+                // Check if element has the attribute
+                if (!element.hasAttribute(attrName)) {
+                  console.log(`[Browser] Element does not have attribute: ${attrName}`);
+                  return '';
+                }
+
                 const attrValue = element.getAttribute(attrName) || '';
-                console.log(`In browser: Found attribute value: ${attrValue}`);
+                console.log(`[Browser] Found attribute ${attrName} value: ${attrValue}`);
                 return attrValue;
+              } else if (extractType === 'html') {
+                const htmlContent = element.innerHTML || '';
+                console.log(`[Browser] Found HTML content (truncated): ${htmlContent.substring(0, 100)}...`);
+                return htmlContent;
               } else {
                 const textContent = element.textContent || '';
-                console.log(`In browser: Found text content: ${textContent}`);
+                console.log(`[Browser] Found text content (truncated): ${textContent.substring(0, 100)}...`);
                 return textContent;
               }
             } catch (err) {
-              console.error('Error in relative selector extraction:', err);
+              console.error('[Browser] Error in relative selector extraction:', err);
               return '';
             }
           },
           mainSelector,
-          attributeName ? cleanSelector : field.relativeSelectorOptional,
-          attributeName
+          cleanSelector,
+          attributeName,
+          extractionType
         );
 
         if (content && content.trim() !== '') {
-          // Include the actual extracted content directly in the instructions
-          // Special handling for the Auction URL field
-          if (field.name.toLowerCase().includes('auction') && field.name.toLowerCase().includes('url')) {
-            // For Auction URL field, modify the instructions to include the actual URL
-            field.instructions = `Extract the auction URL. If the auction URL is "${content.trim()}", return this exact URL. If there is no valid URL, return an empty string.`;
-            console.log(`Enhanced Auction URL field with direct content: "${content.trim()}"`);
-          } else {
-            // For other fields, append the extracted content as reference
+          // Store the extracted content in the field for later reference
+          field.referenceContent = content.trim();
+
+          // For attribute extraction, mark to return the direct value
+          if (extractionType === 'attribute' && attributeName) {
+            field.returnDirectAttribute = true;
+            console.log(`Field "${field.name}" will return direct attribute value: "${content.trim()}"`);
+
+            // For attribute fields, use a more descriptive reference format
             const instructionText = field.instructions || field.description || '';
-            field.instructions = instructionText + `\n\nUse this as reference: "${content.trim()}"`;
-            console.log(`Enhanced field "${field.name}" with extracted content (${content.length} chars): "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}""`);
+            field.instructions = `${instructionText}\n\nThe value of the ${attributeName} attribute is: ${content.trim()}`;
+          } else {
+            // For non-attribute fields, use standard reference format
+            const instructionText = field.instructions || field.description || '';
+            field.instructions = `${instructionText}\n\nUse this as reference: "${content.trim()}"`;
           }
+
+          console.log(`Enhanced field "${field.name}" with extracted content (${content.length} chars): "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}""`);
         } else {
-          console.log(`No content extracted for field "${field.name}" using selector: ${field.relativeSelectorOptional}`);
+          console.log(`No content extracted for field "${field.name}" using selector: ${actualSelector}`);
         }
       } catch (error) {
         console.error(`Error enhancing field ${field.name} with relative selector content:`, error);
