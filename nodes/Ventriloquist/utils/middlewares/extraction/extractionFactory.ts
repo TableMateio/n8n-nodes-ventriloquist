@@ -5,6 +5,7 @@ import { extractSmartContent, type ISmartExtractionOptions } from '../../smartEx
 import { formatOperationLog } from '../../resultUtils';
 import { IExtractItem } from '../../extractNodeUtils';
 import { processWithAI, IAIFormattingOptions } from '../../smartExtractionUtils';
+import { extractTableData } from '../../extractionUtils';
 
 /**
  * Extraction configuration interface
@@ -20,6 +21,7 @@ export interface IExtractionConfig {
   rowSelector?: string;
   cellSelector?: string;
   outputFormat?: string;
+  extractAttributes?: boolean;
   // Additional properties needed for multiple extraction
   extractionProperty?: string;
   limit?: number;
@@ -101,7 +103,7 @@ export class BasicExtraction implements IExtraction {
   }
 
   async execute(): Promise<IExtractionResult> {
-    const { logger, nodeName } = this.context;
+    const { logger, nodeName, nodeId } = this.context;
     const logPrefix = `[Extraction][${nodeName}]`;
 
     try {
@@ -198,20 +200,66 @@ export class BasicExtraction implements IExtraction {
             throw new Error('Attribute name is required for attribute extraction');
           }
 
-          // Changed from $eval to $$eval to get all matching elements
-          const attributeValues = await this.page.$$eval(
-            this.config.selector,
-            (els, attr) => els.map(el => el.getAttribute(attr) || ''),
-            this.config.attributeName
-          );
+          try {
+            // More targeted extraction when selector is for an anchor and attribute is href
+            // This is a special case optimization for the common use case
+            if (this.config.attributeName === 'href' &&
+                (this.config.selector.toLowerCase().includes('a[') ||
+                 this.config.selector.toLowerCase().includes('a.') ||
+                 this.config.selector.toLowerCase() === 'a')) {
 
-          // Store all raw content joined together for compatibility
-          rawContent = attributeValues.join('\n');
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+              logger.info(
+                formatOperationLog(
+                  'extraction',
+                  nodeName,
+                  nodeId,
+                  0,
+                  `Special handling for href attribute on anchor element using selector: ${this.config.selector}`
+                )
+              );
 
-          // If only one result was found, keep backwards compatibility by returning a string
-          // Otherwise, return an array of results
-          data = attributeValues.length === 1 ? attributeValues[0] : attributeValues;
+              // Try to get direct href from anchor elements
+              const hrefValues = await this.page.$$eval(
+                this.config.selector,
+                (els) => els.map(el => el.getAttribute('href') || '')
+              );
+
+              // Store all raw content joined together for compatibility
+              rawContent = hrefValues.join('\n');
+              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+
+              // If only one result was found, keep backwards compatibility by returning a string
+              // Otherwise, return an array of results
+              data = hrefValues.length === 1 ? hrefValues[0] : hrefValues;
+            } else {
+              // Standard attribute extraction for other cases
+              // Changed from $eval to $$eval to get all matching elements
+              const attributeValues = await this.page.$$eval(
+                this.config.selector,
+                (els, attr) => els.map(el => el.getAttribute(attr) || ''),
+                this.config.attributeName
+              );
+
+              // Store all raw content joined together for compatibility
+              rawContent = attributeValues.join('\n');
+              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+
+              // If only one result was found, keep backwards compatibility by returning a string
+              // Otherwise, return an array of results
+              data = attributeValues.length === 1 ? attributeValues[0] : attributeValues;
+            }
+          } catch (error) {
+            logger.error(
+              formatOperationLog(
+                'extraction',
+                nodeName,
+                nodeId,
+                0,
+                `Error during attribute extraction: ${(error as Error).message}`
+              )
+            );
+            throw error;
+          }
           break;
 
         case 'html':
@@ -323,8 +371,10 @@ export class BasicExtraction implements IExtraction {
           const rowSelector = this.config.rowSelector || 'tr';
           const cellSelector = this.config.cellSelector || 'td, th';
           const tableOutputFormat = this.config.outputFormat || 'json';
+          const extractAttributes = this.config.extractAttributes === true;
+          const attributeName = this.config.attributeName || 'href';
 
-          logger.info(`${logPrefix} Table extraction starting: selector=${this.config.selector}, rowSelector=${rowSelector}, cellSelector=${cellSelector}, includeHeaders=${includeHeaders}, outputFormat=${tableOutputFormat}`);
+          logger.info(`${logPrefix} Table extraction starting: selector=${this.config.selector}, rowSelector=${rowSelector}, cellSelector=${cellSelector}, includeHeaders=${includeHeaders}, outputFormat=${tableOutputFormat}, extractAttributes=${extractAttributes}`);
 
           try {
             if (tableOutputFormat === 'html') {
@@ -355,42 +405,28 @@ export class BasicExtraction implements IExtraction {
               rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
               if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
 
-              data = await this.page.$$eval(
-                `${this.config.selector} ${rowSelector}`,
-                (rows, cellSel) => {
-                  // Get all rows
-                  const tableData = Array.from(rows).map((row) => {
-                    const cells = Array.from(row.querySelectorAll(cellSel as string));
-                    return cells.map((cell) => cell.textContent?.trim() || '');
-                  });
-                  return tableData;
+              // Use the extractTableData utility function from extractionUtils.ts
+              data = await extractTableData(
+                this.page,
+                this.config.selector,
+                {
+                  includeHeaders,
+                  rowSelector,
+                  cellSelector,
+                  outputFormat: tableOutputFormat,
+                  extractAttributes,
+                  attributeName: extractAttributes ? attributeName : undefined,
                 },
-                cellSelector
+                logger,
+                nodeName || 'Ventriloquist',
+                nodeId || 'unknown'
               );
 
-              logger.info(`${logPrefix} Table data extracted: ${data.length} rows found`);
-
-              // If outputFormat is 'json' and we have headers, convert to objects
-              if (tableOutputFormat === 'json' && includeHeaders && data.length > 1) {
-                const headers = data[0];
-                logger.info(`${logPrefix} Converting to JSON objects with headers: ${headers.join(', ')}`);
-
-                const jsonData = data.slice(1).map((row: string[]) => {
-                  const obj: { [key: string]: string } = {};
-                  headers.forEach((header: string, index: number) => {
-                    if (header && header.trim()) {
-                      obj[header] = row[index] || '';
-                    }
-                  });
-                  return obj;
-                });
-                data = jsonData;
-                logger.info(`${logPrefix} Converted to ${data.length} JSON objects`);
-              }
+              logger.info(`${logPrefix} Table data extracted: ${Array.isArray(data) ? data.length : 'object'} rows found`);
             }
-          } catch (error) {
-            logger.error(`${logPrefix} Table extraction failed: ${(error as Error).message}`);
-            throw error;
+          } catch (err) {
+            logger.error(`${logPrefix} Table extraction failed: ${(err as Error).message}`);
+            throw err;
           }
           break;
 

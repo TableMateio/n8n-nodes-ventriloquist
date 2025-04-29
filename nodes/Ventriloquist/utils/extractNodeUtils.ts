@@ -112,6 +112,8 @@ export interface IExtractItem {
     type?: string;
     required?: boolean;
     relativeSelectorOptional?: string;
+    returnDirectAttribute?: boolean;
+    referenceContent?: string;
     fieldOptions?: {
       aiProcessingMode?: 'standard' | 'logical';
       threadManagement?: 'shared' | 'separate';
@@ -278,6 +280,41 @@ export async function processExtractionItems(
       // Directly set the OpenAI API key in the extraction config
       openaiApiKey: (extractionItem.aiFormatting?.enabled && openAiApiKey) ? openAiApiKey : undefined
     };
+
+    // IMPORTANT: Handle attribute extraction for link fields even when AI is disabled
+    // Check if this is a href attribute extraction
+    if (extractionItem.extractionType === 'attribute' && extractionItem.attribute === 'href') {
+      // Set up field information for direct attribute handling
+      if (!extractionItem.aiFields) {
+        extractionItem.aiFields = [];
+      }
+
+      // Only add if not already in aiFields
+      const hasHrefField = extractionItem.aiFields.some(f =>
+        f.fieldOptions?.extractionType === 'attribute' &&
+        f.fieldOptions?.attributeName === 'href');
+
+      if (!hasHrefField) {
+        // Add a special field for href attribute handling
+        extractionItem.aiFields.push({
+          name: extractionItem.name,
+          type: 'string',
+          instructions: `Extract the href attribute from the element.`,
+          returnDirectAttribute: true, // This is a special property we'll look for later
+          relativeSelectorOptional: '', // We don't need this for non-AI extraction
+        });
+
+        logger.debug(
+          formatOperationLog(
+            'extraction',
+            nodeName,
+            nodeId,
+            i,
+            `Added special href field handling for non-AI extraction: ${extractionItem.name}`
+          )
+        );
+      }
+    }
 
     // Configure the smart extraction options
     // Map extractionType to extractionFormat for AI Assistance
@@ -657,41 +694,13 @@ export async function processExtractionItems(
               )
             );
 
-            // Add a special test for "Auction URL" field to see if we can find it
-            const auctionUrlField = extractionItem.aiFields.find(f => f.name === "Auction URL");
-            if (auctionUrlField) {
-              logger.info(
-                formatOperationLog(
-                  'aiFormatting',
-                  nodeName,
-                  nodeId,
-                  i,
-                  `Found Auction URL field with relativeSelectorOptional=${auctionUrlField.relativeSelectorOptional || 'undefined'}`
-                )
-              );
-
-              // If there's no relative selector defined, add a test one for debugging
-              if (!auctionUrlField.relativeSelectorOptional || auctionUrlField.relativeSelectorOptional.trim() === '') {
-                logger.info(
-                  formatOperationLog(
-                    'aiFormatting',
-                    nodeName,
-                    nodeId,
-                    i,
-                    `Adding test selector '.liveauc-intro' to Auction URL field for debugging`
-                  )
-                );
-
-                // Add the test selector to the field for debugging
-                auctionUrlField.relativeSelectorOptional = ".liveauc-intro";
-              }
-            }
-
             // Transform the fields to ensure they match the IOpenAIField interface
             const transformedFields = extractionItem.aiFields.map(field => ({
               ...field,
               instructions: field.instructions || field.description || '',
               relativeSelectorOptional: field.relativeSelectorOptional || '',
+              format: field.fieldOptions?.format || 'string',
+              type: field.type || 'string',
             }));
 
             logger.debug(
