@@ -39,7 +39,11 @@ export function processFieldsWithReferenceContent<T extends IOpenAIField>(
   referenceContent?: string,
   includeReferenceContext: boolean = false
 ): T[] {
+  console.log(`[processFieldsWithReferenceContent] Starting with ${fields.length} fields, includeReferenceContext=${includeReferenceContext}`);
+  console.log(`[processFieldsWithReferenceContent] Reference content (${referenceContent?.length || 0} chars): ${referenceContent?.substring(0, 100)}${referenceContent && referenceContent.length > 100 ? '...' : ''}`);
+
   if (!includeReferenceContext || !referenceContent || referenceContent.trim() === '') {
+    console.log(`[processFieldsWithReferenceContent] No reference context to add, returning original fields`);
     return fields;
   }
 
@@ -49,6 +53,7 @@ export function processFieldsWithReferenceContent<T extends IOpenAIField>(
 
     // Get the instruction or description text
     const instructionText = processedField.instructions || processedField.description || '';
+    console.log(`[processFieldsWithReferenceContent] Processing field "${field.name}" with original instructions (${instructionText.length} chars): ${instructionText.substring(0, 100)}${instructionText.length > 100 ? '...' : ''}`);
 
     // Add reference content to all fields unless they already have referenceContent
     if (!processedField.referenceContent) {
@@ -56,14 +61,20 @@ export function processFieldsWithReferenceContent<T extends IOpenAIField>(
       const referenceNote = `\n\nUse this as reference: "${referenceContent}"`;
 
       // Update instructions
+      const originalInstructionsLength = processedField.instructions?.length || 0;
       processedField.instructions += referenceNote;
+      console.log(`[processFieldsWithReferenceContent] Added reference note to field "${field.name}" instructions, new length: ${processedField.instructions.length} (was ${originalInstructionsLength})`);
 
       // Update description if it exists
       if (processedField.description) {
+        const originalDescriptionLength = processedField.description?.length || 0;
         processedField.description += referenceNote;
+        console.log(`[processFieldsWithReferenceContent] Added reference note to field "${field.name}" description, new length: ${processedField.description.length} (was ${originalDescriptionLength})`);
       }
 
-      console.log(`Enhanced field "${processedField.name}" with reference content`);
+      console.log(`[processFieldsWithReferenceContent] Enhanced field "${processedField.name}" with reference content. Final instructions (${processedField.instructions.length} chars): ${processedField.instructions.substring(0, 100)}${processedField.instructions.length > 100 ? '...' : ''}`);
+    } else {
+      console.log(`[processFieldsWithReferenceContent] Field "${processedField.name}" already has reference content, skipping`);
     }
 
     return processedField as T;

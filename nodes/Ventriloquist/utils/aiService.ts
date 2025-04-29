@@ -287,6 +287,44 @@ export class AIService {
       // Clone fields array to avoid modifying the original
       const fields = options.fields ? [...options.fields] : [];
 
+      // Log reference context details
+      if (options.includeReferenceContext) {
+        this.logger.info(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `Reference context enabled: ${options.includeReferenceContext}, content length: ${options.referenceContent?.length || 0} chars`
+          )
+        );
+
+        if (options.referenceContent) {
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Reference content sample: ${options.referenceContent?.substring(0, 100)}${options.referenceContent && options.referenceContent?.length > 100 ? '...' : ''}`
+            )
+          );
+        }
+      }
+
+      // Log original fields before processing
+      fields.forEach(field => {
+        this.logger.info(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `ORIGINAL Field "${field.name}" instructions (${field.instructions?.length || 0} chars): ${field.instructions?.substring(0, 100)}${field.instructions?.length > 100 ? '...' : ''}`
+          )
+        );
+      });
+
       // Process fields with reference content if provided
       // This adds the reference content to the instructions for URL-related fields
       const processedFields = options.includeReferenceContext && options.referenceContent
@@ -294,7 +332,7 @@ export class AIService {
         : fields;
 
       // Log the field instructions after processing to verify reference content is included
-      this.logger.debug(
+      this.logger.info(
         formatOperationLog(
           "SmartExtraction",
           nodeName,
@@ -303,16 +341,31 @@ export class AIService {
           `Field instructions after processing with reference content:`
         )
       );
+
       processedFields.forEach(field => {
-        this.logger.debug(
+        this.logger.info(
           formatOperationLog(
             "SmartExtraction",
             nodeName,
             nodeId,
             index,
-            `Field "${field.name}" instructions: ${field.instructions?.substring(0, 50)}${field.instructions?.length > 50 ? '...' : ''}`
+            `PROCESSED Field "${field.name}" instructions (${field.instructions?.length || 0} chars): ${field.instructions?.substring(0, 100)}${field.instructions?.length > 100 ? '...' : ''}`
           )
         );
+
+        // Log extended field properties
+        const extendedField = field as IExtendedField;
+        if (extendedField.returnDirectAttribute) {
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Field "${field.name}" has returnDirectAttribute = true, reference content: ${extendedField.referenceContent?.substring(0, 50) || 'none'}`
+            )
+          );
+        }
       });
 
       // Create a result object to store field-by-field responses
@@ -875,10 +928,27 @@ ${examplesSection}
    * Generate OpenAI function schema from field definitions
    */
   private generateOpenAISchema(fields: IField[]): any {
-    // Log incoming field definitions
-    console.log('FIELDS RECEIVED BY generateOpenAISchema:');
+    // Log incoming field definitions with more detail
+    this.logger.info(
+      formatOperationLog(
+        "SmartExtraction",
+        this.context.nodeName,
+        this.context.nodeId,
+        this.context.index,
+        `FIELDS RECEIVED BY generateOpenAISchema:`
+      )
+    );
+
     fields.forEach(field => {
-      console.log(`Field: ${field.name}, Type: ${field.type}, Instructions: "${field.instructions || 'none'}"`);
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          this.context.nodeName,
+          this.context.nodeId,
+          this.context.index,
+          `Field: "${field.name}", Type: "${field.type}", Instructions: "${field.instructions?.substring(0, 100)}${field.instructions?.length > 100 ? '...' : ''}"`
+        )
+      );
     });
 
     // Create properties object for the schema
@@ -943,7 +1013,7 @@ ${examplesSection}
     });
 
     // Create a function definition for OpenAI function calling
-    return {
+    const schema = {
       name: "extract_data",
       description: "Extract structured information from the provided text content according to the specified fields",
       parameters: {
@@ -952,6 +1022,19 @@ ${examplesSection}
         required: required
       }
     };
+
+    // Log the complete schema being sent to OpenAI
+    this.logger.info(
+      formatOperationLog(
+        "SmartExtraction",
+        this.context.nodeName,
+        this.context.nodeId,
+        this.context.index,
+        `COMPLETE SCHEMA for OpenAI:\n${JSON.stringify(schema, null, 2)}`
+      )
+    );
+
+    return schema;
   }
 
   /**
@@ -987,10 +1070,24 @@ ${examplesSection}
         actualThreadId = threadId;
       }
 
+      // Build the field prompt
+      const fieldPrompt = this.buildFieldPrompt(content, field);
+
+      // Log the complete prompt being sent to the AI for debugging
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `FULL AI PROMPT for field "${field.name}":\n${'-'.repeat(80)}\n${fieldPrompt}\n${'-'.repeat(80)}`
+        )
+      );
+
       // Add a message to the thread with the content and instructions
       await this.openai.beta.threads.messages.create(actualThreadId, {
         role: "user",
-        content: this.buildFieldPrompt(content, field),
+        content: fieldPrompt,
       });
 
       // Run the assistant on the thread - select appropriate assistant based on field options
