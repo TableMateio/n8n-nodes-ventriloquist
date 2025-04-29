@@ -83,6 +83,45 @@ export async function enhanceFieldsWithRelativeSelectorContent(
     if (field.relativeSelectorOptional) {
       console.log(`Processing field "${field.name}" with relative selector: ${field.relativeSelectorOptional}`);
 
+      // Check if this field is looking for an href attribute specifically
+      // Either from explicit extractionType/attributeName or field name containing 'link'/'url' with anchor selector
+      const isLookingForHref =
+        (field.extractionType === 'attribute' && field.attributeName === 'href') ||
+        ((field.name.toLowerCase().includes('link') || field.name.toLowerCase().includes('url')) &&
+          field.relativeSelectorOptional.toLowerCase() === 'a');
+
+      // If looking for href, make sure to extract it properly
+      if (isLookingForHref) {
+        console.log(`Field "${field.name}" is configured for href extraction`);
+
+        try {
+          // Directly extract the href attribute
+          const hrefValue = await page.evaluate((mainSel: string, relSel: string) => {
+            const mainEl = document.querySelector(mainSel);
+            if (!mainEl) return '';
+
+            const el = mainEl.querySelector(relSel);
+            if (!el) return '';
+
+            return el.getAttribute('href') || '';
+          }, mainSelector, field.relativeSelectorOptional);
+
+          if (hrefValue && hrefValue.trim() !== '') {
+            const instructionText = field.instructions || field.description || '';
+            field.instructions = `${instructionText}\n\nThe value of the href attribute is: ${hrefValue.trim()}`;
+            field.returnDirectAttribute = true;
+            field.referenceContent = hrefValue.trim();
+            console.log(`Enhanced href field "${field.name}" with direct href value: ${hrefValue.trim()}`);
+            continue; // Skip regular content extraction
+          } else {
+            console.log(`No href attribute found for field "${field.name}" using selector: ${field.relativeSelectorOptional}`);
+          }
+        } catch (err) {
+          console.error(`Error extracting href for field "${field.name}": ${(err as Error).message}`);
+        }
+      }
+
+      // For all other cases or as a fallback, extract content normally
       const content = await extractContentFromSelector(
         page,
         mainSelector,
@@ -92,45 +131,15 @@ export async function enhanceFieldsWithRelativeSelectorContent(
       );
 
       if (content && content.trim() !== '') {
-        // For fields with href attribute extraction, set up for direct attribute return
-        if (field.extractionType === 'attribute' && field.attributeName === 'href') {
+        // For fields extracting attributes (any attribute, not just href)
+        if (field.extractionType === 'attribute' && field.attributeName) {
           const instructionText = field.instructions || field.description || '';
-          field.instructions = `${instructionText}\n\nThe value of the href attribute is: ${content.trim()}`;
+          // Set the instructions with the attribute value clearly marked
+          field.instructions = `${instructionText}\n\nThe value of the ${field.attributeName} attribute is: ${content.trim()}`;
+          // Set flags for direct attribute return
           field.returnDirectAttribute = true;
           field.referenceContent = content.trim();
-          console.log(`Enhanced href attribute field "${field.name}" with direct href: ${content.trim()}`);
-        }
-        // For links in field name but not set for attribute extraction
-        else if ((field.name.toLowerCase().includes('link') || field.name.toLowerCase().includes('url')) &&
-                 field.relativeSelectorOptional.toLowerCase() === 'a' &&
-                 field.extractionType !== 'attribute') {
-          // For fields named as links but not properly configured, try to extract href
-          try {
-            const hrefValue = await page.evaluate((mainSel: string, relSel: string) => {
-              const mainEl = document.querySelector(mainSel);
-              if (!mainEl) return '';
-
-              const el = mainEl.querySelector(relSel);
-              if (!el) return '';
-
-              return el.getAttribute('href') || '';
-            }, mainSelector, field.relativeSelectorOptional);
-
-            if (hrefValue && hrefValue.trim() !== '') {
-              const instructionText = field.instructions || field.description || '';
-              field.instructions = `${instructionText}\n\nThe value of the href attribute is: ${hrefValue.trim()}`;
-              field.returnDirectAttribute = true;
-              field.referenceContent = hrefValue.trim();
-              console.log(`Enhanced link field "${field.name}" with direct href: ${hrefValue.trim()}`);
-              continue;
-            }
-          } catch (err) {
-            console.log(`Error extracting direct href for field "${field.name}": ${(err as Error).message}`);
-          }
-
-          // Fallback to normal processing
-          const instructionText = field.instructions || field.description || '';
-          field.instructions = `${instructionText}\n\nUse this as reference: "${content.trim()}"`;
+          console.log(`Enhanced attribute field "${field.name}" with ${field.attributeName}: ${content.trim()}`);
         }
         // For all other fields, just append the content as reference
         else {
@@ -142,35 +151,19 @@ export async function enhanceFieldsWithRelativeSelectorContent(
         console.log(`No content extracted for field "${field.name}" using selector: ${field.relativeSelectorOptional}`);
       }
     } else {
-      // Check if this field already has href information in the instructions
-      // This handles cases where the instructions already include "The value of the href attribute is: URL"
-      if (field.instructions && field.instructions.includes('The value of the href attribute is:')) {
-        console.log(`Field "${field.name}" already has href information in instructions`);
+      // Check if instructions already include attribute information
+      // This pattern matches "The value of the [attribute] attribute is: [value]"
+      if (field.instructions) {
+        const attributeMatch = field.instructions.match(/The value of the ([a-zA-Z0-9_-]+) attribute is:\s*(.*?)(?:\n|$)/);
+        if (attributeMatch && attributeMatch[1] && attributeMatch[2]) {
+          const attributeName = attributeMatch[1];
+          const attributeValue = attributeMatch[2].trim();
 
-        // Extract the URL from the instructions - using a more robust regex
-        // This regex will find URLs after "The value of the href attribute is:" until the end of the line or string
-        const hrefMatch = field.instructions.match(/The value of the href attribute is:\s*((?:https?:\/\/|www\.)[^\s\n]+)/);
-
-        if (hrefMatch && hrefMatch[1]) {
-          const hrefValue = hrefMatch[1].trim();
-          console.log(`Extracted href value from instructions: ${hrefValue}`);
+          console.log(`Field "${field.name}" has ${attributeName} information in instructions: ${attributeValue}`);
 
           // Set the direct attribute flags
           field.returnDirectAttribute = true;
-          field.referenceContent = hrefValue;
-        } else {
-          // Try an alternative regex for more complex URLs (with special characters)
-          const alternativeMatch = field.instructions.match(/The value of the href attribute is:[\s\n]*(.*?)(?:[\n]|$)/);
-          if (alternativeMatch && alternativeMatch[1]) {
-            const hrefValue = alternativeMatch[1].trim();
-            console.log(`Extracted complex href value from instructions: ${hrefValue}`);
-
-            // Set the direct attribute flags
-            field.returnDirectAttribute = true;
-            field.referenceContent = hrefValue;
-          } else {
-            console.log(`Unable to extract href value from instructions for field "${field.name}"`);
-          }
+          field.referenceContent = attributeValue;
         }
       }
     }
