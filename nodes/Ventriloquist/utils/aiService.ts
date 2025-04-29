@@ -22,6 +22,7 @@ try {
 const ASSISTANTS = {
   auto: 'asst_YOKjWiQPTTeg3OvDV6D8984n',   // Auto mode assistant
   manual: 'asst_p65Hrk79gidj5thHqgs4W1lK', // Manual mode assistant
+  logic: 'asst_zTIRLcYVwLPgZ93XeVDzbufs',  // Logic/numerical analysis assistant
 };
 
 /**
@@ -37,6 +38,8 @@ export interface IField {
     input: string;
     output: string;
   }>;
+  useLogicAnalysis?: boolean;  // Flag to use the logic assistant for this field
+  useSeparateThread?: boolean; // Flag to use a separate thread for this field
 }
 
 /**
@@ -254,19 +257,13 @@ export class AIService {
   }
 
   /**
-   * Process content using the manual strategy (fields defined by user)
+   * Process content using the manual strategy (field-by-field)
    */
   private async processManualStrategy(
     content: string,
     options: IAIExtractionOptions
   ): Promise<IAIExtractionResult> {
     const { nodeName, nodeId, index } = this.context;
-
-    // Debug: Entry and input
-    console.log('=== [processManualStrategy] Entered function ===');
-    console.log('Options:', JSON.stringify(options, null, 2));
-    console.log('Fields:', JSON.stringify(options.fields, null, 2));
-    console.log('Content:', typeof content === 'string' ? content.substring(0, 500) : '[non-string content]');
 
     try {
       this.logger.info(
@@ -275,154 +272,118 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          "Using Manual strategy - Processing with user-defined fields"
+          `Using Manual strategy with ${options.fields?.length || 0} fields`
         )
       );
 
-      if (!options.fields || options.fields.length === 0) {
-        throw new Error('Manual strategy requires at least one field definition');
-      }
+      // Clone fields array to avoid modifying the original
+      const fields = options.fields ? [...options.fields] : [];
 
       // Process fields with reference content if provided
-      if (options.includeReferenceContext && options.referenceContent) {
-        // Transform IField array to ensure compatibility with IOpenAIField
-        const fieldsForProcessing = options.fields.map(field => ({
-          ...field,
-          instructions: field.instructions || '',
-        }));
+      const processedFields = options.includeReferenceContext && options.referenceContent
+        ? processFieldsWithReferenceContent(fields, options.referenceContent, true)
+        : fields;
 
-        // Process the fields with reference content
-        const processedFields = processFieldsWithReferenceContent(
-          fieldsForProcessing,
-          options.referenceContent,
-          options.includeReferenceContext
-        );
+      // Create a result object to store field-by-field responses
+      const result: Record<string, any> = {};
 
-        // Copy enhanced instructions back to the original fields
-        for (let i = 0; i < options.fields.length; i++) {
-          if (i < processedFields.length) {
-            options.fields[i].instructions = processedFields[i].instructions;
-          }
-        }
-      }
-
-      // Create a new thread (no tracking or management, just create a fresh one)
-      const thread = await this.openai.beta.threads.create();
-
-      // Add a message to the thread with the content and instructions
-      const manualPrompt = this.buildManualPrompt(content, options);
-      console.log('=== [processManualStrategy] Prompt sent to OpenAI ===');
-      console.log(manualPrompt);
-      await this.openai.beta.threads.messages.create(thread.id, {
-        role: "user",
-        content: manualPrompt,
-      });
-
-      // Generate schema for function calling with the processed fields
-      if (!options.fields) {
-        throw new Error('Field definitions required for manual strategy');
-      }
-
-      const functionDef = this.generateOpenAISchema(options.fields);
-
-      // More detailed logging to see exactly what's being sent to OpenAI
-      console.log('OPENAI FUNCTION SCHEMA - FULL DETAILS:');
-      console.log('-------------------------------------');
-      console.log(JSON.stringify(functionDef, null, 2));
-
-      if (functionDef && functionDef.parameters && functionDef.parameters.properties) {
-        console.log('FIELD DESCRIPTIONS IN SCHEMA:');
-        Object.entries(functionDef.parameters.properties).forEach(([fieldName, fieldDef]: [string, any]) => {
-          console.log(`${fieldName}: "${fieldDef.description}"`);
-        });
-      }
-
-      // Log the function definition for debugging
+      // Create a shared thread for fields that don't need separate threads
+      const sharedThread = await this.openai.beta.threads.create();
       this.logger.debug(
         formatOperationLog(
           "SmartExtraction",
           nodeName,
           nodeId,
           index,
-          `Function definition: ${JSON.stringify(functionDef, null, 2)}`
+          `Created shared thread for standard fields: ${sharedThread.id}`
         )
       );
 
-      // Run the assistant on the thread with the schema
-      const run = await this.openai.beta.threads.runs.create(thread.id, {
-        assistant_id: ASSISTANTS.manual,
-        tools: [{
-          type: "function",
-          function: functionDef
-        }]
-      });
+      // Process fields - logical analysis fields and fields that request a separate thread
+      // will get their own threads, while others will share the thread
+      for (const field of processedFields) {
+        // Determine if this field needs a separate thread
+        const needsSeparateThread = field.useLogicAnalysis === true || field.useSeparateThread === true;
+        const threadToUse = needsSeparateThread ? null : sharedThread.id; // null means create a new thread
 
-      // Poll for completion
-      const result = await this.pollRunCompletion(thread.id, run.id);
-
-      // Debug: Log the raw AI response
-      console.log('=== [processManualStrategy] Raw AI response from pollRunCompletion ===');
-      console.log(JSON.stringify(result, null, 2));
-
-      // Process the response
-      if (result.success && result.data) {
-        const data = JSON.parse(result.data);
-
-        // Debug: Log the parsed result
-        console.log('=== [processManualStrategy] Parsed AI response ===');
-        console.log(JSON.stringify(data, null, 2));
-
-        // Log the parsed result for debugging
         this.logger.debug(
           formatOperationLog(
             "SmartExtraction",
             nodeName,
             nodeId,
             index,
-            `Parsed result data: ${JSON.stringify(data, null, 2)}`
+            `Processing field "${field.name}" (type: ${field.type}, separate thread: ${needsSeparateThread})`
           )
         );
 
-        // Generate schema if requested
-        let outputSchema: any = null;
-        if (options.includeSchema && options.fields) {
-          // Make sure descriptions from fields are available
-          this.options = options; // Set options to include field definitions
+        // Process the field with the appropriate thread
+        const fieldResult = await this.processFieldWithAI(threadToUse, content, field);
 
-          // Generate the schema with field descriptions
-          outputSchema = this.generateSchema(data);
+        if (fieldResult.success && fieldResult.data) {
+          try {
+            // Parse the result or use as is
+            let parsedValue;
+            try {
+              parsedValue = JSON.parse(fieldResult.data);
+            } catch (parseError) {
+              // If not JSON, use as is
+              parsedValue = fieldResult.data;
+            }
 
-          // Ensure all fields from the schema definition are properly described
-          if (outputSchema && outputSchema.type === 'object' && outputSchema.properties) {
-            options.fields.forEach(field => {
-              if (outputSchema.properties[field.name]) {
-                // Make sure every field has a description from the field definition
-                outputSchema.properties[field.name].description = field.instructions || `Extract the ${field.name}`;
-              }
-            });
+            // Store the value
+            result[field.name] = parsedValue;
+
+            this.logger.debug(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Successfully extracted field "${field.name}": ${
+                  typeof parsedValue === 'string'
+                    ? parsedValue
+                    : JSON.stringify(parsedValue)
+                }`
+              )
+            );
+          } catch (error) {
+            this.logger.warn(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Error parsing result for field "${field.name}": ${(error as Error).message}`
+              )
+            );
+            result[field.name] = fieldResult.data;
           }
-
-          // Log the generated schema for debugging
-          this.logger.debug(
+        } else {
+          this.logger.warn(
             formatOperationLog(
               "SmartExtraction",
               nodeName,
               nodeId,
               index,
-              `Generated schema: ${JSON.stringify(outputSchema, null, 2)}`
+              `Failed to extract field "${field.name}": ${fieldResult.error || 'Unknown error'}`
             )
           );
+          result[field.name] = null;
         }
-
-        return {
-          success: true,
-          data,
-          schema: outputSchema,
-          rawData: options.includeRawData ? content : undefined,
-        };
-      } else {
-        throw new Error(result.error || 'Failed to get response from AI assistant');
       }
+
+      // Generate schema if requested
+      let schema = null;
+      if (options.includeSchema) {
+        schema = this.generateOpenAISchema(processedFields);
+      }
+
+      return {
+        success: true,
+        data: result,
+        schema,
+        rawData: options.includeRawData ? content : undefined,
+      };
     } catch (error) {
       this.logger.error(
         formatOperationLog(
@@ -433,9 +394,6 @@ export class AIService {
           `Manual strategy processing error: ${(error as Error).message}`
         )
       );
-      // Debug: Log the error
-      console.log('=== [processManualStrategy] Error ===');
-      console.log((error as Error).message);
       return {
         success: false,
         error: (error as Error).message,
@@ -920,5 +878,80 @@ ${examplesSection}
         required: required
       }
     };
+  }
+
+  /**
+   * Process content using field-by-field extraction (manual strategy)
+   */
+  private async processFieldWithAI(
+    threadId: string | null,
+    content: string,
+    field: IField
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    const { nodeName, nodeId, index } = this.context;
+
+    try {
+      // Create a new thread if threadId is null or if we need a separate thread
+      let actualThreadId: string;
+      let createdNewThread = false;
+
+      if (threadId === null) {
+        const thread = await this.openai.beta.threads.create();
+        actualThreadId = thread.id;
+        createdNewThread = true;
+
+        this.logger.debug(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `Created new thread for field "${field.name}": ${actualThreadId}`
+          )
+        );
+      } else {
+        actualThreadId = threadId;
+      }
+
+      // Add a message to the thread with the content and instructions
+      await this.openai.beta.threads.messages.create(actualThreadId, {
+        role: "user",
+        content: this.buildFieldPrompt(content, field),
+      });
+
+      // Run the assistant on the thread - select appropriate assistant based on field options
+      const assistantId = field.useLogicAnalysis ? ASSISTANTS.logic : ASSISTANTS.manual;
+
+      this.logger.debug(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Using ${field.useLogicAnalysis ? 'LOGIC' : 'MANUAL'} assistant for field "${field.name}" (assistant ID: ${assistantId}${createdNewThread ? ', with new thread' : ', with shared thread'})`
+        )
+      );
+
+      const run = await this.openai.beta.threads.runs.create(actualThreadId, {
+        assistant_id: assistantId,
+      });
+
+      // Poll for completion
+      return await this.pollRunCompletion(actualThreadId, run.id);
+    } catch (error) {
+      this.logger.error(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Error processing field "${field.name}": ${(error as Error).message}`
+        )
+      );
+      return {
+        success: false,
+        error: (error as Error).message,
+      };
+    }
   }
 }

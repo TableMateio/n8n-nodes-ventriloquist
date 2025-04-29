@@ -493,6 +493,28 @@ export const description: INodeProperties[] = [
 												default: "default",
 												description: "Requires a selector to be set for this option to take effect"
 											},
+											{
+												displayName: "AI Processing Mode",
+												name: "aiProcessingMode",
+												type: "options",
+												options: [
+													{ name: "Standard Processing", value: "standard" },
+													{ name: "Logical/Numerical Analysis", value: "logical" },
+												],
+												default: "standard",
+												description: "Use specialized reasoning model for logical or numerical analysis"
+											},
+											{
+												displayName: "Thread Management",
+												name: "threadManagement",
+												type: "options",
+												options: [
+													{ name: "Use Shared Thread", value: "shared" },
+													{ name: "Use Separate Thread", value: "separate" },
+												],
+												default: "shared",
+												description: "Controls whether to use a shared thread or a separate thread for this field's processing"
+											},
 										],
 									},
 								],

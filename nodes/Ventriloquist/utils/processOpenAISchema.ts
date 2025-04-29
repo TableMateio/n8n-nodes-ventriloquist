@@ -148,7 +148,7 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
               if (attrName) {
                 const attrValue = element.getAttribute(attrName) || '';
                 console.log(`In browser: Found attribute value: ${attrValue}`);
-                return `${attrValue} (from ${attrName} attribute)`;
+                return attrValue;
               } else {
                 const textContent = element.textContent || '';
                 console.log(`In browser: Found text content: ${textContent}`);
@@ -165,14 +165,18 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
         );
 
         if (content && content.trim() !== '') {
-          // Add the extracted content to the field instructions
-          const instructionText = field.instructions || field.description || '';
-          const selectorNote = `\n\nUse this as reference: "${content.trim()}"`;
-
-          // Update instructions with the extracted content
-          field.instructions = instructionText + selectorNote;
-
-          console.log(`Enhanced field "${field.name}" with extracted content (${content.length} chars): "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}""`);
+          // Include the actual extracted content directly in the instructions
+          // Special handling for the Auction URL field
+          if (field.name.toLowerCase().includes('auction') && field.name.toLowerCase().includes('url')) {
+            // For Auction URL field, modify the instructions to include the actual URL
+            field.instructions = `Extract the auction URL. If the auction URL is "${content.trim()}", return this exact URL. If there is no valid URL, return an empty string.`;
+            console.log(`Enhanced Auction URL field with direct content: "${content.trim()}"`);
+          } else {
+            // For other fields, append the extracted content as reference
+            const instructionText = field.instructions || field.description || '';
+            field.instructions = instructionText + `\n\nUse this as reference: "${content.trim()}"`;
+            console.log(`Enhanced field "${field.name}" with extracted content (${content.length} chars): "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}""`);
+          }
         } else {
           console.log(`No content extracted for field "${field.name}" using selector: ${field.relativeSelectorOptional}`);
         }

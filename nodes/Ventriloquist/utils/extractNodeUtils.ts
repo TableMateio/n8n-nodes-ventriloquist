@@ -112,6 +112,13 @@ export interface IExtractItem {
     type?: string;
     required?: boolean;
     relativeSelectorOptional?: string;
+    fieldOptions?: {
+      aiProcessingMode?: 'standard' | 'logical';
+      threadManagement?: 'shared' | 'separate';
+      extractionType?: string;
+      attributeName?: string;
+      format?: string;
+    };
   }>;
 }
 
@@ -326,7 +333,10 @@ export async function processExtractionItems(
               // Map field.instructions directly to instructions property in the IField interface
               // which will become the description in the OpenAI schema
               instructions: field.instructions || field.description || '',
-              format: field.required ? 'required' : 'default'
+              format: field.required ? 'required' : 'default',
+              // Update to use the new field options
+              useLogicAnalysis: field.fieldOptions?.aiProcessingMode === 'logical',
+              useSeparateThread: field.fieldOptions?.threadManagement === 'separate'
             };
           })
         };
