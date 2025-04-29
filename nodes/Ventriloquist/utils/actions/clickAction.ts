@@ -32,6 +32,9 @@ export interface IClickActionResult {
   success: boolean;
   details: IDataObject;
   error?: Error;
+  contextDestroyed?: boolean;
+  urlChanged?: boolean;
+  navigationSuccessful?: boolean;
 }
 
 /**

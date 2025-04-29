@@ -90,6 +90,13 @@ export const description: INodeProperties[] = [
 		description:
 			"Whether to continue execution even when browser operations fail (cannot connect or navigate)",
 	},
+	{
+		displayName: "Take Screenshot",
+		name: "takeScreenshot",
+		type: "boolean",
+		default: false,
+		description: "Whether to capture a screenshot of the page after opening",
+	},
 ];
 
 /**
@@ -130,6 +137,11 @@ export async function execute(
 	) as boolean;
 	const enableDebug = this.getNodeParameter(
 		"enableDebug",
+		index,
+		false,
+	) as boolean;
+	const shouldTakeScreenshot = this.getNodeParameter(
+		"takeScreenshot",
 		index,
 		false,
 	) as boolean;
@@ -262,8 +274,11 @@ export async function execute(
 				// Get page information
 				const pageInfo = await browserTransport.getPageInfo(page, response);
 
-				// Take a screenshot
-				const screenshot = await takeScreenshot(page, this.logger);
+				// Take a screenshot only if enabled in the UI
+				let screenshot = null;
+				if (shouldTakeScreenshot) {
+					screenshot = await takeScreenshot(page, this.logger);
+				}
 
 				this.logger.info(
 					`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigation successful: ${pageInfo.url} (${pageInfo.title})`,
@@ -396,9 +411,12 @@ export async function execute(
 		// Try to take a screenshot if we have a page
 		if (page) {
 			try {
-				const errorScreenshot = await takeScreenshot(page, this.logger);
-				if (errorScreenshot) {
-					errorData.screenshot = errorScreenshot;
+				// Only take error screenshot if screenshots are enabled
+				if (shouldTakeScreenshot) {
+					const errorScreenshot = await takeScreenshot(page, this.logger);
+					if (errorScreenshot) {
+						errorData.screenshot = errorScreenshot;
+					}
 				}
 			} catch (screenshotError) {
 				this.logger.warn(

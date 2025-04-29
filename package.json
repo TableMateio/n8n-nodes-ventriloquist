@@ -62,9 +62,11 @@
 	},
 	"dependencies": {
 		"luxon": "^3.4.4",
+		"openai": "^4.95.0",
 		"puppeteer": "^24.6.0",
 		"puppeteer-core": "^24.4.0",
 		"speakeasy": "^2.0.0",
+		"uuid": "^11.1.0",
 		"ws": "^8.18.1"
 	}
 }

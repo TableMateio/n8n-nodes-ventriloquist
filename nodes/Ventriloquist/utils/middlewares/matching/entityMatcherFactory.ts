@@ -18,6 +18,7 @@ import {
     type IEntityMatcherActionOutput,
     type IEntityMatchResult
 } from '../types/entityMatcherTypes';
+import { generateUniqueSelector } from '../../selectorUtils';
 
 /**
  * Interface for the entity matcher configuration
@@ -351,6 +352,37 @@ export class EntityMatcherFactory {
                     }
 
                     logger.info(`[EntityMatcherFactory] Comparison succeeded: Found ${actualMatches.length} matches above threshold (out of ${allComparisons.length} total comparisons), selected: ${comparisonResult.selectedMatch ? 'Yes' : 'No'}`);
+
+                    // Generate unique selectors for matched elements
+                    logger.info(`[EntityMatcherFactory] Generating unique selectors for matched elements`);
+                    const selectorStart = Date.now();
+
+                    // Process selected match first to ensure it has a selector
+                    if (comparisonResult.selectedMatch && comparisonResult.selectedMatch.element) {
+                        try {
+                            const uniqueSelector = await generateUniqueSelector(page, comparisonResult.selectedMatch.element, logger);
+                            comparisonResult.selectedMatch.uniqueSelector = uniqueSelector;
+                            logger.debug(`[EntityMatcherFactory] Generated unique selector for selected match: ${uniqueSelector}`);
+                        } catch (error) {
+                            logger.warn(`[EntityMatcherFactory] Could not generate unique selector for selected match: ${(error as Error).message}`);
+                        }
+                    }
+
+                    // Process all actual matches (above threshold)
+                    for (const match of actualMatches) {
+                        if (match.element && !match.uniqueSelector) {
+                            try {
+                                const uniqueSelector = await generateUniqueSelector(page, match.element, logger);
+                                match.uniqueSelector = uniqueSelector;
+                                logger.debug(`[EntityMatcherFactory] Generated unique selector for match #${match.index}: ${uniqueSelector}`);
+                            } catch (error) {
+                                logger.warn(`[EntityMatcherFactory] Could not generate unique selector for match #${match.index}: ${(error as Error).message}`);
+                            }
+                        }
+                    }
+
+                    const selectorDuration = Date.now() - selectorStart;
+                    logger.info(`[EntityMatcherFactory] Selectors generated in ${selectorDuration}ms`);
 
                     // 5. Execute action if we have a selected match and an action to perform
                     let actionResult = { success: false, actionPerformed: false } as IEntityMatcherActionOutput;

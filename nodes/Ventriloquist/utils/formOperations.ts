@@ -339,21 +339,148 @@ export async function handleCheckboxField(
 	try {
 		logger.info(`Setting checkbox ${selector} to ${checked}`);
 
-		// Skip all visibility checks - just force the change directly through DOM
-		const success = await page.evaluate(
+		// Try using the click approach first for more natural interaction
+		try {
+			// Get current checked state
+			const currentlyChecked = await page.$eval(
+				selector,
+				(el) => (el as HTMLInputElement).checked
+			);
+
+			// Only click if we need to change the state
+			if (currentlyChecked !== checked) {
+				logger.debug(`Current checkbox state: ${currentlyChecked}, desired: ${checked}, clicking to toggle`);
+
+				// First ensure the element is visible and in viewport
+				await ensureElementInViewport(page, selector);
+
+				// Try to click the checkbox (this simulates user interaction better)
+				await page.click(selector);
+
+				// Verify the state changed as expected
+				const newState = await page.$eval(
+					selector,
+					(el) => (el as HTMLInputElement).checked
+				);
+
+				if (newState === checked) {
+					logger.info(`Successfully toggled checkbox state by clicking: ${selector}`);
+
+					// Trigger additional events to ensure form validation runs
+					await page.evaluate((sel) => {
+						const element = document.querySelector(sel);
+						if (element) {
+							// Dispatch additional events to ensure form validation runs
+							element.dispatchEvent(new Event("input", { bubbles: true }));
+							element.dispatchEvent(new Event("change", { bubbles: true }));
+						}
+					}, selector);
+
+					return true;
+				}
+
+				logger.warn(`Click did not change checkbox state as expected, falling back to DOM method`);
+			} else {
+				logger.debug(`Checkbox already in desired state (${checked}), no action needed`);
+
+				// Even though the state is already correct, trigger events to ensure form validation runs
+				await page.evaluate((sel) => {
+					const element = document.querySelector(sel);
+					if (element) {
+						// Dispatch events to ensure form validation runs
+						element.dispatchEvent(new Event("input", { bubbles: true }));
+						element.dispatchEvent(new Event("change", { bubbles: true }));
+					}
+				}, selector);
+
+				return true;
+			}
+		} catch (clickError) {
+			logger.warn(`Could not use click method: ${(clickError as Error).message}, using DOM method`);
+		}
+
+		// If click method failed or wasn't appropriate, use direct DOM manipulation with comprehensive event triggering
+		const result = await page.evaluate(
 			(sel, shouldBeChecked) => {
 				// Try to find the element first
 				const element = document.querySelector(sel);
 				if (!element) return { success: false, error: "Element not found" };
 
 				try {
-					// Force the checked state directly
+					// Create an event sequence that mimics real user interaction as closely as possible
+
+					// 1. Focus the element
+					element.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+					element.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+
+					// 2. Mouse interaction events
+					element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+					element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+					element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+
+					// 3. Force the checked state directly
 					(element as HTMLInputElement).checked = shouldBeChecked;
 
-					// Manually dispatch events to ensure the change is recognized
-					element.dispatchEvent(new Event("change", { bubbles: true }));
-					element.dispatchEvent(new Event("input", { bubbles: true }));
-					return { success: true };
+					// 4. Complete mouse interaction
+					element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+					element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+					element.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+					element.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+
+					// 5. Input and change events (critical for form validation)
+					element.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+					element.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
+
+					// 6. Blur events
+					element.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+					element.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+
+					// 7. Additional framework-specific events
+					if (typeof CustomEvent === 'function') {
+						// For React-style synthetic events
+						element.dispatchEvent(new CustomEvent('input', {
+							bubbles: true,
+							cancelable: true,
+							detail: {
+								isCheckbox: true,
+								value: shouldBeChecked,
+								target: element
+							}
+						}));
+
+						// For Angular-style events
+						document.dispatchEvent(new CustomEvent('input', { bubbles: true }));
+						document.dispatchEvent(new CustomEvent('change', { bubbles: true }));
+
+						// For Vue-style events
+						element.dispatchEvent(new CustomEvent('update:modelValue', {
+							bubbles: true,
+							detail: { value: shouldBeChecked }
+						}));
+					}
+
+					// 8. Try to find and trigger any form validation
+					try {
+						// Find closest form
+						const form = element.closest('form');
+						if (form) {
+							// Dispatch form input event
+							form.dispatchEvent(new Event('input', { bubbles: true }));
+							// Look for form validation methods
+							const formEl = form as any;
+							if (typeof formEl.checkValidity === 'function') {
+								formEl.checkValidity();
+							}
+						}
+					} catch (validationErr) {
+						// Just log the error but continue
+						console.error('Form validation trigger error:', validationErr);
+					}
+
+					return {
+						success: true,
+						finalCheckedState: (element as HTMLInputElement).checked
+					};
 				} catch (err) {
 					return {
 						success: false,
@@ -365,12 +492,12 @@ export async function handleCheckboxField(
 			checked,
 		);
 
-		if (!success) {
-			logger.error(`Failed to set checkbox state: ${JSON.stringify(success)}`);
+		if (!result || !result.success) {
+			logger.error(`Failed to set checkbox state: ${JSON.stringify(result)}`);
 			return false;
 		}
 
-		logger.info(`Successfully set checkbox ${selector} to ${checked}`);
+		logger.info(`Successfully set checkbox ${selector} to ${checked} (final state: ${result.finalCheckedState})`);
 		return true;
 	} catch (error) {
 		logger.error(`Error handling checkbox: ${(error as Error).message}`);

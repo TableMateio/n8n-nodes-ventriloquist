@@ -2466,11 +2466,21 @@ export async function execute(
 
 			// Get route if routing is enabled
 			if (enableRouting) {
-				const groupRoute = group.route as number;
-				if (groupRoute) {
-					// Route numbers are 1-based, but indexes are 0-based
-					routeIndex = groupRoute - 1;
-				}
+				// Get the route value and ensure we properly parse it
+				// Route might be a string or number depending on how n8n passes parameters
+				const groupRoute = group.route;
+
+				// REMOVED: Setting routeIndex before condition evaluation
+				// This was causing the issue where the last condition's route would override previous settings
+				this.logger.info(
+					formatOperationLog(
+						"Decision",
+						nodeName,
+						nodeId,
+						index,
+						`Group "${groupName}" has route: ${groupRoute} (will be set if condition matches)`,
+					),
+				);
 			}
 
 			this.logger.info(
@@ -2506,8 +2516,8 @@ export async function execute(
 					// Convert conditions collection if it exists
 					conditions:
 						group.conditions &&
-						typeof group.conditions === "object" &&
-						(group.conditions as IDataObject).condition
+							typeof group.conditions === "object" &&
+							(group.conditions as IDataObject).condition
 							? ((group.conditions as IDataObject).condition as IDataObject[])
 							: undefined,
 				};
@@ -2543,18 +2553,61 @@ export async function execute(
 					// For routing capability, store route information
 					if (enableRouting) {
 						const groupRoute = group.route as number;
-						if (groupRoute) {
-							// Route numbers are 1-based, but indexes are 0-based
-							routeIndex = groupRoute - 1;
-							this.logger.info(
+						if (groupRoute !== undefined && groupRoute !== null) {
+							// Convert to number regardless of original type
+							let routeNumber: number;
+							if (typeof groupRoute === 'string') {
+								routeNumber = parseInt(groupRoute, 10);
+							} else {
+								routeNumber = groupRoute as number;
+							}
+
+							// Ensure it's a valid number
+							if (!isNaN(routeNumber)) {
+								// Route numbers are 1-based, but indexes are 0-based
+								routeIndex = routeNumber - 1;
+								this.logger.info(
+									formatOperationLog(
+										"Decision",
+										nodeName,
+										nodeId,
+										index,
+										`Using route: ${routeNumber} (index: ${routeIndex})`,
+									),
+								);
+								// Add debug checkpoint for route selection
+								this.logger.info(
+									formatOperationLog(
+										"Decision",
+										nodeName,
+										nodeId,
+										index,
+										`ROUTE DEBUG: After condition match, routeIndex=${routeIndex}`,
+									),
+								);
+							} else {
+								this.logger.warn(
+									formatOperationLog(
+										"Decision",
+										nodeName,
+										nodeId,
+										index,
+										`Invalid route value: ${groupRoute}. Using default route 1.`,
+									),
+								);
+								routeIndex = 0; // Default to first route
+							}
+						} else {
+							this.logger.warn(
 								formatOperationLog(
 									"Decision",
 									nodeName,
 									nodeId,
 									index,
-									`Using route: ${groupRoute} (index: ${routeIndex})`,
+									`No route specified for group "${groupName}". Using default route 1.`,
 								),
 							);
+							routeIndex = 0; // Default to first route
 						}
 					}
 
@@ -2685,11 +2738,135 @@ export async function execute(
 										),
 									);
 
+									// Add detailed logging for URL change detection
+									this.logger.info(
+										formatOperationLog(
+											"Decision",
+											nodeName,
+											nodeId,
+											index,
+											`[Decision][clickAction] URL change details - urlChanged: ${actionResult.urlChanged}, navigationSuccessful: ${actionResult.navigationSuccessful}, contextDestroyed: ${actionResult.contextDestroyed}`,
+										),
+									);
+
+									// Update result data with navigation status from the click result
+									resultData.urlChangeDetected = !!actionResult.urlChanged;
+									resultData.navigationCompleted = !!actionResult.navigationSuccessful;
+									resultData.contextDestroyed = !!actionResult.contextDestroyed;
+
+									// Log the updated resultData
+									this.logger.info(
+										formatOperationLog(
+											"Decision",
+											nodeName,
+											nodeId,
+											index,
+											`[Decision][clickAction] Updated result data - urlChangeDetected: ${resultData.urlChangeDetected}, navigationCompleted: ${resultData.navigationCompleted}, contextDestroyed: ${resultData.contextDestroyed}`,
+										),
+									);
+
 									// Handle action failures
 									if (!actionResult.success) {
-										throw new Error(
-											`Decision action failed: ${actionResult.error}`,
+										// Update the error in the result data
+										resultData.success = false;
+										resultData.error = `Action error: ${actionResult.error}`;
+										resultData.actionError = true;
+
+										// Log the error but mention we'll maintain the route if continueOnFail is true
+										this.logger.error(
+											formatOperationLog(
+												"Decision",
+												nodeName,
+												nodeId,
+												index,
+												`Error during click action: ${actionResult.error}`
+											)
 										);
+
+										this.logger.info(
+											formatOperationLog(
+												"Decision",
+												nodeName,
+												nodeId,
+												index,
+												`Current page when error occurred - URL: ${resultData.currentUrl}, Title: ${resultData.pageTitle}`
+											)
+										);
+
+										// If continueOnFail is true, we'll force an immediate return with the matched route
+										if (continueOnFail && enableRouting) {
+											this.logger.info(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`CRITICAL FIX: Forcing return to route ${routeIndex + 1} despite click error [ADDED CODE]`
+												)
+											);
+
+											// Create output structure
+											const routeCount = this.getNodeParameter(
+												"routeCount",
+												index,
+												2,
+											) as number;
+
+											// Prepare routes array
+											const routes: INodeExecutionData[][] = Array(routeCount)
+												.fill(null)
+												.map(() => []);
+
+											// Add actionDetails to resultData
+											resultData.actionDetails = {
+												selectorFound: true, // We got to click, so selector was found
+												actionType: actionPerformed,
+												actionSuccess: false,
+												actionError: actionResult.error,
+											} as IDataObject;
+
+											// Place data in correct route despite error
+											if (routeIndex < routeCount) {
+												routes[routeIndex].push({
+													json: resultData,
+													pairedItem: { item: index },
+												});
+												this.logger.info(
+													formatOperationLog(
+														"Decision",
+														nodeName,
+														nodeId,
+														index,
+														`Forcing route ${routeIndex + 1} even with click error`
+													)
+												);
+											} else {
+												// Fallback to first route if index out of bounds
+												routes[0].push({
+													json: resultData,
+													pairedItem: { item: index },
+												});
+											}
+
+											// IMMEDIATE RETURN to prevent any other processing
+											return routes;
+										} else if (continueOnFail) {
+											// continueOnFail=true but routing disabled
+											this.logger.info(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`Continuing despite error (continueOnFail=true)`
+												)
+											);
+											break;
+										} else {
+											throw new Error(
+												`Decision action failed: ${actionResult.error}`,
+											);
+										}
 									}
 
 									this.logger.info(
@@ -2701,6 +2878,73 @@ export async function execute(
 											`[Decision][clickAction] Click action completed successfully using action utility`,
 										),
 									);
+
+									// CRITICAL FIX: Immediately after successful click, handle routing
+									if (enableRouting && routeIndex >= 0) {
+										this.logger.info(
+											formatOperationLog(
+												"Decision",
+												nodeName,
+												nodeId,
+												index,
+												`CRITICAL FIX: Explicit return after click action with route ${routeIndex + 1} [ADDED CODE]`,
+											),
+										);
+
+										// Create output structure
+										const routeCount = this.getNodeParameter(
+											"routeCount",
+											index,
+											2,
+										) as number;
+
+										// Prepare routes array
+										const routes: INodeExecutionData[][] = Array(routeCount)
+											.fill(null)
+											.map(() => []);
+
+										// Add actionDetails to resultData
+										resultData.actionDetails = {
+											selectorFound: true,
+											actionType: actionPerformed,
+											actionSuccess: true,
+										} as IDataObject;
+
+										// Place data in correct route
+										if (routeIndex < routeCount) {
+											routes[routeIndex].push({
+												json: resultData,
+												pairedItem: { item: index },
+											});
+											this.logger.info(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`Sending to route ${routeIndex + 1} with data: ${JSON.stringify(resultData.actionDetails)}`,
+												),
+											);
+										} else {
+											// Fallback to first route if index out of bounds
+											routes[0].push({
+												json: resultData,
+												pairedItem: { item: index },
+											});
+											this.logger.warn(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`Index ${routeIndex} out of bounds, using route 1`,
+												),
+											);
+										}
+
+										// IMMEDIATE RETURN to prevent any further processing
+										return routes;
+									}
 
 									// Check if the context was destroyed or navigation happened
 									// Cast to IClickActionResult to access the urlChanged property
@@ -2790,6 +3034,64 @@ export async function execute(
 													),
 												);
 
+												// Modified: respect routing configuration instead of returning directly
+												if (enableRouting) {
+													// Create an array for each possible output route
+													const routeCount = this.getNodeParameter(
+														"routeCount",
+														index,
+														2,
+													) as number;
+													const routes: INodeExecutionData[][] = Array(routeCount)
+														.fill(null)
+														.map(() => []);
+
+													// Add detailed debugging log
+													this.logger.info(
+														formatOperationLog(
+															"Decision",
+															nodeName,
+															nodeId,
+															index,
+															`[Decision][clickAction] Early return routing - routeIndex: ${routeIndex}, routeCount: ${routeCount}`,
+														),
+													);
+
+													// Put the item in the correct route
+													if (routeIndex >= 0 && routeIndex < routeCount) {
+														routes[routeIndex].push({
+															json: resultData,
+															pairedItem: { item: index },
+														});
+														this.logger.info(
+															formatOperationLog(
+																"Decision",
+																nodeName,
+																nodeId,
+																index,
+																`[Decision][clickAction] Sending output to route ${routeIndex + 1}`,
+															),
+														);
+													} else {
+														// Default to route 0 if routeIndex is out of bounds
+														routes[0].push({
+															json: resultData,
+															pairedItem: { item: index },
+														});
+														this.logger.warn(
+															formatOperationLog(
+																"Decision",
+																nodeName,
+																nodeId,
+																index,
+																`[Decision][clickAction] Route index ${routeIndex} out of bounds, defaulting to route 1`,
+															),
+														);
+													}
+
+													return routes;
+												}
+
 												return [this.helpers.returnJsonArray([resultData])];
 											} catch (pageError) {
 												// If we still can't access the page, return with limited data
@@ -2849,6 +3151,64 @@ export async function execute(
 													`[Decision][clickAction] Returning success with context destruction noted`,
 												),
 											);
+
+											// Modified: respect routing configuration instead of returning directly
+											if (enableRouting) {
+												// Create an array for each possible output route
+												const routeCount = this.getNodeParameter(
+													"routeCount",
+													index,
+													2,
+												) as number;
+												const routes: INodeExecutionData[][] = Array(routeCount)
+													.fill(null)
+													.map(() => []);
+
+												// Add detailed debugging log
+												this.logger.info(
+													formatOperationLog(
+														"Decision",
+														nodeName,
+														nodeId,
+														index,
+														`[Decision][clickAction] Early return routing (no-page) - routeIndex: ${routeIndex}, routeCount: ${routeCount}`,
+													),
+												);
+
+												// Put the item in the correct route
+												if (routeIndex >= 0 && routeIndex < routeCount) {
+													routes[routeIndex].push({
+														json: resultData,
+														pairedItem: { item: index },
+													});
+													this.logger.info(
+														formatOperationLog(
+															"Decision",
+															nodeName,
+															nodeId,
+															index,
+															`[Decision][clickAction] Sending output to route ${routeIndex + 1}`,
+														),
+													);
+												} else {
+													// Default to route 0 if routeIndex is out of bounds
+													routes[0].push({
+														json: resultData,
+														pairedItem: { item: index },
+													});
+													this.logger.warn(
+														formatOperationLog(
+															"Decision",
+															nodeName,
+															nodeId,
+															index,
+															`[Decision][clickAction] Route index ${routeIndex} out of bounds, defaulting to route 1`,
+														),
+													);
+												}
+
+												return routes;
+											}
 
 											return [this.helpers.returnJsonArray([resultData])];
 										}
@@ -3141,14 +3501,14 @@ export async function execute(
 											// Add options based on field type
 											...(fieldType === "text"
 												? {
-														clearField: true,
-														humanLike: useHumanDelays,
-													}
+													clearField: true,
+													humanLike: useHumanDelays,
+												}
 												: {}),
 											...(fieldType === "password"
 												? {
-														clearField: true,
-													}
+													clearField: true,
+												}
 												: {}),
 										};
 
@@ -3750,8 +4110,8 @@ export async function execute(
 																clickResult.error instanceof Error
 																	? clickResult.error.message
 																	: String(
-																			clickResult.error || "Unknown error",
-																		),
+																		clickResult.error || "Unknown error",
+																	),
 															submitSelector,
 															waitAfterSubmit,
 															waitSubmitTime,
@@ -4619,6 +4979,12 @@ export async function execute(
 				currentUrl: resultData.currentUrl,
 				pageTitle: resultData.pageTitle,
 				sessionId: sessionId || "",
+				navigationCompleted: resultData.navigationCompleted,
+				urlChangeDetected: resultData.urlChangeDetected,
+				contextDestroyed: resultData.contextDestroyed,
+				beforeUrl: resultData.beforeUrl,
+				afterUrl: resultData.afterUrl,
+				navigationError: resultData.navigationError,
 			},
 		});
 
@@ -4654,8 +5020,37 @@ export async function execute(
 				.fill(null)
 				.map(() => []);
 
+			// Add detailed debugging log
+			this.logger.info(
+				formatOperationLog(
+					"Decision",
+					nodeName,
+					nodeId,
+					index,
+					`Routing details - routeIndex: ${routeIndex}, routeCount: ${routeCount}, enableRouting: ${enableRouting}`,
+				),
+			);
+
+			// CRITICAL FIX: Add explicit debugging of route information
+			this.logger.info(
+				formatOperationLog(
+					"Decision",
+					nodeName,
+					nodeId,
+					index,
+					`ROUTE DEBUG: Final return - routeIndex=${routeIndex}, routeTaken="${routeTaken}", conditions evaluated`,
+				),
+			);
+
 			// Put the item in the correct route
 			if (routeIndex >= 0 && routeIndex < routeCount) {
+				// Add action success/selector info to output
+				if (!returnItem.json.actionDetails) {
+					returnItem.json.actionDetails = {} as IDataObject;
+				}
+				(returnItem.json.actionDetails as IDataObject).selectorFound = true; // We would only get here if selector was found
+				(returnItem.json.actionDetails as IDataObject).actionType = actionPerformed;
+
 				routes[routeIndex].push(returnItem);
 				this.logger.info(
 					formatOperationLog(
@@ -4663,12 +5058,27 @@ export async function execute(
 						nodeName,
 						nodeId,
 						index,
-						`Sending output to route ${routeIndex + 1}`,
+						`Sending output to route ${routeIndex + 1} (routes array length: ${routes.length})`,
 					),
 				);
+
+				// Debug each route's item count
+				for (let i = 0; i < routes.length; i++) {
+					this.logger.info(
+						formatOperationLog(
+							"Decision",
+							nodeName,
+							nodeId,
+							index,
+							`Route ${i + 1} has ${routes[i].length} items`,
+						),
+					);
+				}
+
+				// CRITICAL FIX: Return the routes IMMEDIATELY to prevent any further code changing routeIndex
+				return routes;
 			} else {
-				// Default to route 0 if routeIndex is out of bounds
-				routes[0].push(returnItem);
+				// Log warning but still use fallback
 				this.logger.warn(
 					formatOperationLog(
 						"Decision",
@@ -4678,12 +5088,32 @@ export async function execute(
 						`Route index ${routeIndex} out of bounds, defaulting to route 1`,
 					),
 				);
+
+				// Add action success/selector info even in fallback case
+				if (!returnItem.json.actionDetails) {
+					returnItem.json.actionDetails = {} as IDataObject;
+				}
+				(returnItem.json.actionDetails as IDataObject).selectorFound = true;
+				(returnItem.json.actionDetails as IDataObject).actionType = actionPerformed;
+
+				routes[0].push(returnItem);
+
+				// CRITICAL FIX: Return immediately here too
+				return routes;
 			}
 
-			return routes;
+			// Remove this line - it should never be reached due to the immediate returns above
+			// return routes;
 		}
 
-		// Single output case - no else needed as the if block returns
+		// Single output case
+		// Add action success/selector info here too
+		if (!returnItem.json.actionDetails) {
+			returnItem.json.actionDetails = {} as IDataObject;
+		}
+		(returnItem.json.actionDetails as IDataObject).selectorFound = true;
+		(returnItem.json.actionDetails as IDataObject).actionType = actionPerformed;
+
 		return [returnItem];
 	} catch (error) {
 		// Use standardized error response utility

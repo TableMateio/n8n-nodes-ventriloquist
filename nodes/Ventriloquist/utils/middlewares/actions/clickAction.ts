@@ -855,7 +855,7 @@ export async function executeClickAction(
 				}
 			}
 		} else {
-			// Simple click without waiting for navigation
+			// Simple click with no waiting
 			logger.info(
 				formatOperationLog(
 					"ClickAction",
@@ -866,116 +866,8 @@ export async function executeClickAction(
 				),
 			);
 
-			// Find the element
-			const element = await page.$(selector);
-			if (!element) {
-				return {
-					success: false,
-					details: {
-						error: `Element not found: ${selector}`,
-						selector,
-					},
-					error: new Error(`Element not found: ${selector}`),
-				};
-			}
-
-			// Click the element and wait if needed based on the strategy
-			if (waitAfterAction === "fixedTime" && waitTime) {
-				// CRUCIAL CHANGE: Initiate click without await, then start timer immediately
-				logger.info(
-					formatOperationLog(
-						"ClickAction",
-						nodeName,
-						nodeId,
-						index,
-						`${logPrefix} Initiating click on selector: "${selector}" (fixedTime wait)`,
-					),
-				);
-				element.click().catch((err) => {
-					// Log potential click errors occurring after the wait started, but don't block
-					logger.warn(
-						formatOperationLog(
-							"ClickAction",
-							nodeName,
-							nodeId,
-							index,
-							`${logPrefix} Non-blocking error during fixedTime click: ${(err as Error).message}`,
-						),
-					);
-				});
-
-				logger.info(
-					formatOperationLog(
-						"ClickAction",
-						nodeName,
-						nodeId,
-						index,
-						`${logPrefix} Waiting for fixed time: ${waitTime}ms`,
-					),
-				);
-				await new Promise((resolve) => setTimeout(resolve, waitTime));
-			} else if (waitAfterAction === "selector") {
-				// New logic for selector wait
-				logger.info(
-					formatOperationLog(
-						"ClickAction",
-						nodeName,
-						nodeId,
-						index,
-						`${logPrefix} Awaiting click on selector: "${selector}" (selector wait)`,
-					),
-				);
-				await element.click(); // Await the click first for this simple case
-
-				if (waitSelector) {
-					const effectiveWaitTime = waitTime || 10000; // Use waitTime if provided, else default
-					logger.info(
-						formatOperationLog(
-							"ClickAction",
-							nodeName,
-							nodeId,
-							index,
-							`${logPrefix} Waiting for selector: "${waitSelector}" (timeout: ${effectiveWaitTime}ms)`,
-						),
-					);
-					try {
-						await page.waitForSelector(waitSelector, {
-							timeout: effectiveWaitTime,
-						});
-						logger.info(
-							formatOperationLog(
-								"ClickAction",
-								nodeName,
-								nodeId,
-								index,
-								`${logPrefix} Selector "${waitSelector}" found.`,
-							),
-						);
-					} catch (selectorError) {
-						logger.warn(
-							formatOperationLog(
-								"ClickAction",
-								nodeName,
-								nodeId,
-								index,
-								`${logPrefix} Wait for selector "${waitSelector}" failed or timed out: ${(selectorError as Error).message}`,
-							),
-						);
-						// Don't fail the overall action, just log the warning
-					}
-				} else {
-					logger.warn(
-						formatOperationLog(
-							"ClickAction",
-							nodeName,
-							nodeId,
-							index,
-							`${logPrefix} waitAfterAction is 'selector' but no waitSelector parameter provided. Skipping wait.`,
-						),
-					);
-				}
-			} else {
-				// For 'noWait', await the click normally first
+			// For 'noWait', await the click normally first
+			try {
 				logger.info(
 					formatOperationLog(
 						"ClickAction",
@@ -985,27 +877,57 @@ export async function executeClickAction(
 						`${logPrefix} Awaiting click on selector: "${selector}" (noWait)`,
 					),
 				);
+
+				// Find the element first
+				const element = await page.$(selector);
+				if (!element) {
+					return {
+						success: false,
+						details: {
+							error: `Element not found: ${selector}`,
+							selector,
+							selectorFound: false
+						},
+						error: new Error(`Element not found: ${selector}`),
+					};
+				}
+
+				// Just click - no timeout manipulation needed for noWait
 				await element.click(); // Await click here for noWait case
+
+				// We've clicked, now return success without waiting for anything
+				return {
+					success: true,
+					details: {
+						selector,
+						waitAfterAction,
+						waitTime,
+						selectorFound: true
+					},
+				};
+			} catch (clickError) {
+				logger.error(
+					formatOperationLog(
+						"ClickAction",
+						nodeName,
+						nodeId,
+						index,
+						`${logPrefix} Click action error: ${(clickError as Error).message}`,
+					),
+				);
+
+				return {
+					success: false,
+					details: {
+						selector,
+						waitAfterAction,
+						waitTime,
+						error: (clickError as Error).message,
+						selectorFound: false
+					},
+					error: clickError as Error,
+				};
 			}
-
-			// Get final state and return success (common for all simple click paths)
-			const currentUrl = await page.url();
-			const currentTitle = await page.title();
-
-			return {
-				success: true,
-				urlChanged: beforeUrl !== currentUrl,
-				details: {
-					selector,
-					waitAfterAction,
-					waitTime,
-					beforeUrl,
-					currentUrl,
-					beforeTitle,
-					currentTitle,
-					urlChanged: beforeUrl !== currentUrl,
-				},
-			};
 		}
 	} catch (error) {
 		// Log and return error

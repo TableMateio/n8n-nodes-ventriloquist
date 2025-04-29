@@ -144,14 +144,14 @@ export const description: INodeProperties[] = [
 		type: "options",
 		options: [
 			{
-				name: "Container with Items",
+				name: "Container with auto-detected children",
 				value: "containerItems",
-				description: "Select a container of multiple items to compare against",
+				description: "Select a container element whose children will be auto-detected for matching",
 			},
 			{
 				name: "Direct Items",
 				value: "directItems",
-				description: "Select items directly with a single selector",
+				description: "Select items directly with a specific selector (no auto-detection)",
 			},
 		],
 		default: "containerItems",
@@ -187,18 +187,6 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ["matcher"],
 				selectionMethod: ["directItems"],
-			},
-		},
-	},
-	{
-		displayName: "Auto-detect Children",
-		name: "autoDetectChildren",
-		type: "boolean",
-		default: true,
-		description: "Automatically detect child elements for extraction",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
 			},
 		},
 	},
@@ -894,7 +882,8 @@ export async function execute(
 						weight: fieldConfig.weight !== undefined ? Number(fieldConfig.weight) : 0.5,
 						mustMatch: fieldConfig.mustMatch === true,
 						threshold: fieldConfig.threshold !== undefined ? Number(fieldConfig.threshold) : threshold,
-						algorithm: fieldConfig.algorithm as string || 'smart'
+						algorithm: fieldConfig.algorithm as string || 'smart',
+						selector: fieldConfig.selector as string || ''
 					});
 				}
 			}
@@ -917,8 +906,8 @@ export async function execute(
 		// Create entity matcher configuration
 		const matcherConfig: IEntityMatcherConfig = {
 			resultsSelector: selectionMethod === 'containerItems' ? resultsSelector : directItemSelector,
-			itemSelector,
-			autoDetectChildren: true,
+			itemSelector: selectionMethod === 'directItems' ? '' : itemSelector,
+			autoDetectChildren: selectionMethod === 'containerItems',
 			threshold: Number(matchCriteria[0].threshold) || 0.3,
 			matchMode: matchMode as 'best' | 'all' | 'firstAboveThreshold',
 			limitResults: matchMode === 'all' ? Math.max(10, maxItems) : maxItems,
@@ -1015,20 +1004,38 @@ export async function execute(
 		}
 
 		// Create output item with clearer structure
+		let matches = matchResult.matches || matchResult.comparisons || [];
+
+		// When using "best" match mode, filter matches to only include the selected match
+		if (matchMode === 'best' && matchResult.selectedMatch) {
+			// Keep only the selected match in the matches array
+			matches = matches.filter((m: IEntityMatchResult) => m.selected === true);
+			this.logger.info(`[Matcher] Filtered matches to only include the best match in "best" match mode`);
+		}
+
 		const item = {
 			json: {
 				...matchResult,
-				// For backward compatibility, keep the matches array if it exists
-				matches: matchResult.matches || matchResult.comparisons || [],
+				// For backward compatibility, keep the matches array, but filtered for best match mode
+				matches,
 				// Add clear distinction between matches and all comparisons
-				actualMatches: matchResult.matches || [],
+				actualMatches: matches,
 				allComparisons: matchResult.comparisons || [],
 				// Make it clearer if anything was actually matched
-				matchesFound: (matchResult.matches?.length || 0) > 0,
+				matchesFound: (matches.length || 0) > 0,
 				matchSelected: !!matchResult.selectedMatch,
 				// Add standardized formatting to match counts
-				matchCount: matchResult.matchCount || matchResult.matches?.length || 0,
+				matchCount: matches.length || 0,
 				totalCompared: matchResult.totalCompared || matchResult.comparisons?.length || matchResult.itemsFound || 0,
+				// Include unique selectors for matched elements
+				uniqueSelectors: {
+					selected: matchResult.selectedMatch?.uniqueSelector || null,
+					matches: matches.filter((m: IEntityMatchResult) => m.uniqueSelector).map((m: IEntityMatchResult) => ({
+						index: m.index,
+						selector: m.uniqueSelector,
+						similarity: m.overallSimilarity
+					})) || []
+				},
 				// Add information about matches that helps explain the selection
 				matchDetails: {
 					richestMatch: matchResult.comparisons?.sort((a: IEntityMatchResult, b: IEntityMatchResult) =>

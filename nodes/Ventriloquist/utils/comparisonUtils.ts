@@ -33,6 +33,7 @@ export interface IFieldComparisonConfig {
     threshold?: number;
     customComparator?: (a: string, b: string) => number;
     mustMatch?: boolean;
+    selector?: string; // Added to support target-specific element selection within items
 }
 
 /**
