@@ -1413,7 +1413,7 @@ export async function execute(
 					}
 
 					// Always include raw data if available, regardless of includeRawData setting
-					if (item.rawData) {
+					if (item.rawData !== undefined) {
 						this.logger.info(
 							formatOperationLog(
 								'extraction',
@@ -1425,6 +1425,19 @@ export async function execute(
 						);
 						result[`${item.name}_raw`] = item.rawData;
 					}
+				} else {
+					// Log warning for missing data
+					this.logger.warn(
+						formatOperationLog(
+							'extraction',
+							nodeName,
+							nodeId,
+							index,
+							`No extracted data found for [${item.name}]`
+						)
+					);
+					// Set a placehoder for the data to ensure the property exists
+					result[item.name] = null;
 				}
 				return result;
 			}, {}),

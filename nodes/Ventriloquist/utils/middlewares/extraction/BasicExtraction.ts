@@ -251,22 +251,54 @@ export class BasicExtraction implements IExtraction {
               // Extract as array of rows and cells
               logger.info(`${logPrefix} Extracting table as structured data`);
 
-              // First check if the selector exists
-              const tableExists = await this.page.$(this.config.selector);
-              if (!tableExists) {
+              // First check if the selector exists more thoroughly with content logging
+              const selectorInfo = await this.page.evaluate((selector) => {
+                // Test if the selector exists
+                const el = document.querySelector(selector);
+
+                if (!el) {
+                  // Try to get the HTML content of the page to help debug
+                  const bodyContent = document.body ? document.body.innerHTML.substring(0, 1000) : 'No body element';
+                  return {
+                    exists: false,
+                    message: `Selector '${selector}' not found on page.`,
+                    bodyPreview: bodyContent,
+                    html: '' // Add empty html property for type safety
+                  };
+                }
+
+                // Test if it's a table
+                const isTable = el.tagName.toLowerCase() === 'table';
+                const hasRows = el.querySelectorAll('tr').length > 0;
+
+                return {
+                  exists: true,
+                  isTable: isTable,
+                  hasRows: hasRows,
+                  rowCount: el.querySelectorAll('tr').length,
+                  html: el.outerHTML.substring(0, 200) + '...',
+                  tagName: el.tagName.toLowerCase()
+                };
+              }, this.config.selector);
+
+              // Log detailed selector information for debugging
+              if (selectorInfo.exists) {
+                logger.info(`${logPrefix} Table selector found: ${this.config.selector}`);
+                logger.info(`${logPrefix} Is table: ${selectorInfo.isTable}, Has rows: ${selectorInfo.hasRows}, Row count: ${selectorInfo.rowCount}`);
+                logger.debug(`${logPrefix} Element preview: ${selectorInfo.html}`);
+              } else {
                 logger.warn(`${logPrefix} Table selector not found: ${this.config.selector}`);
+                logger.debug(`${logPrefix} Page content preview: ${selectorInfo.bodyPreview}`);
                 throw new Error(`Table selector not found: ${this.config.selector}`);
               }
 
-              // Then check if rows exist
-              const rowsExist = await this.page.$(`${this.config.selector} ${rowSelector}`);
-              if (!rowsExist) {
-                logger.warn(`${logPrefix} No rows found in table with rowSelector: ${rowSelector}`);
-              }
-
               // Get the raw HTML for raw content
-              rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
-              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+              rawContent = selectorInfo.exists ? selectorInfo.html : '';
+              // Make sure rawContent is not undefined/falsy
+              if (!rawContent) {
+                rawContent = ''; // Ensure it's an empty string, not undefined
+                throw new Error(`Could not extract HTML content from table`);
+              }
 
               // Use the extractTableData utility function from extractionUtils.ts
               data = await extractTableData(
@@ -295,7 +327,7 @@ export class BasicExtraction implements IExtraction {
                   this.config.openaiApiKey) {
 
                 // Get the full HTML content (not truncated) for field enhancement
-                const fullHtmlContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+                const fullHtmlContent = selectorInfo.exists ? await this.page.$eval(this.config.selector, (el) => el.outerHTML) : '';
 
                 // Convert config fields to IOpenAIField format for the enhancement function
                 const convertedFields = this.config.fields.items.map(field => {

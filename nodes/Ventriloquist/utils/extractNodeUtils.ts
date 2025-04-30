@@ -1383,6 +1383,17 @@ export async function processExtractionItems(
                 `Extraction successful for [${extractionItem.name}]`,
                 'error'
               );
+              // Log the actual result data for debugging
+              logWithDebug(
+                logger,
+                true,
+                nodeName,
+                'extraction',
+                'extractNodeUtils',
+                'processExtractionItems',
+                `Extracted data: ${JSON.stringify(result.data).substring(0, 200)}${result.data && JSON.stringify(result.data).length > 200 ? '...' : ''}`,
+                'error'
+              );
               if (result.schema) {
                 logWithDebug(
                   logger,

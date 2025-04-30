@@ -192,11 +192,11 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
   context?: { nodeName: string; nodeId: string; index: number; debugMode?: boolean },
   rawHtml?: string
 ): Promise<T[]> {
-  const component = "processOpenAISchema";
-  const functionName = "enhanceFieldsWithRelativeSelectorContent";
   const nodeName = context?.nodeName || 'Ventriloquist';
   const nodeId = context?.nodeId || 'unknown';
-  const index = context?.index ?? 0;
+  const index = context?.index !== undefined ? context.index : 0;
+  const component = 'processOpenAISchema';
+  const functionName = 'enhanceFieldsWithRelativeSelectorContent';
 
   if (!page || !mainSelector || !fields || fields.length === 0) {
     if (logger) {
@@ -217,19 +217,17 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
 
   // Find fields with relative selectors
   const enhancedFields = [...fields];
-  let mainElementExists = false;
-  let mainElementHtml = '';
 
   try {
     if (logger) {
       logWithDebug(
         logger,
         !!context?.debugMode,
-        nodeName || 'Ventriloquist',
+        nodeName,
         'SmartExtraction',
         component,
         functionName,
-        `Enhancing ${fields.length} fields with relative selector content`,
+        `Enhancing ${fields.length} fields with relative selector content (main selector: ${mainSelector})`,
         'debug'
       );
 
@@ -251,12 +249,17 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
       });
     }
 
-    // If we have raw HTML content, use it, otherwise check if the selector exists on the page
-    if (rawHtml) {
+    // Determine if we have valid HTML content to work with
+    let mainElementHtml = '';
+    let mainElementExists = false;
+
+    // If raw HTML was provided, use it directly
+    if (rawHtml && rawHtml.length > 0) {
       mainElementHtml = rawHtml;
       mainElementExists = true;
+
       if (logger) {
-        logger.info(
+        logger.debug(
           formatOperationLog(
             "SmartExtraction",
             nodeName,
@@ -268,23 +271,68 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
           )
         );
       }
-      logWithDebug(
-        logger,
-        true,
-        nodeName || 'Ventriloquist',
-        'SmartExtraction',
-        component,
-        functionName,
-        `Using provided HTML content (${mainElementHtml.length} chars) for extraction`,
-        'info'
-      );
-    } else {
-      // Check if the main selector exists
-      mainElementExists = await page.evaluate((selector: string) => {
-        return document.querySelector(selector) !== null;
-      }, mainSelector);
+    }
+    // Otherwise, try to get the HTML from the page
+    else {
+      try {
+        // Check if selector exists and get its HTML content
+        const selectorInfo = await page.evaluate((selector: string) => {
+          const el = document.querySelector(selector);
+          if (!el) return { exists: false, message: `Selector not found: ${selector}` };
 
-      if (!mainElementExists) {
+          return {
+            exists: true,
+            html: el.outerHTML,
+            message: `Found element with tag ${el.tagName}`
+          };
+        }, mainSelector);
+
+        if (selectorInfo.exists) {
+          mainElementExists = true;
+          mainElementHtml = selectorInfo.html;
+
+          if (logger) {
+            logger.debug(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Found main selector: ${mainSelector}, HTML length: ${mainElementHtml.length}`,
+                component,
+                functionName
+              )
+            );
+          }
+        } else {
+          if (logger) {
+            logger.warn(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Main selector not found: ${mainSelector}`,
+                component,
+                functionName
+              )
+            );
+
+            // Even if main selector isn't found, try to find it with a less strict approach
+            logger.info(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Trying alternative approach to find selector elements`,
+                component,
+                functionName
+              )
+            );
+          }
+        }
+      } catch (error) {
         if (logger) {
           logger.warn(
             formatOperationLog(
@@ -292,57 +340,31 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
               nodeName,
               nodeId,
               index,
-              `Main selector not found: ${mainSelector}`,
+              `Error evaluating main selector: ${(error as Error).message}`,
               component,
               functionName
             )
           );
         }
-        logWithDebug(
-          logger,
-          true,
-          nodeName || 'Ventriloquist',
-          'SmartExtraction',
-          component,
-          functionName,
-          `Main selector not found globally: ${mainSelector}`,
-          'error'
-        );
-        return enhancedFields;
       }
+    }
 
-      // Get the HTML of the main element for processing
-      mainElementHtml = await page.evaluate((selector: string) => {
-        const element = document.querySelector(selector);
-        return element ? element.outerHTML : '';
-      }, mainSelector);
-
-      if (!mainElementHtml) {
-        if (logger) {
-          logger.warn(
-            formatOperationLog(
-              "SmartExtraction",
-              nodeName,
-              nodeId,
-              index,
-              `Failed to extract HTML content from main selector: ${mainSelector}`,
-              component,
-              functionName
-            )
-          );
-        }
-        logWithDebug(
-          logger,
-          true,
-          nodeName || 'Ventriloquist',
-          'SmartExtraction',
-          component,
-          functionName,
-          `Failed to extract HTML content from main selector: ${mainSelector}`,
-          'error'
+    // If we don't have HTML content to work with, return the original fields
+    if (!mainElementExists || !mainElementHtml) {
+      if (logger) {
+        logger.warn(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `Cannot enhance fields without HTML content to work with`,
+            component,
+            functionName
+          )
         );
-        return enhancedFields;
       }
+      return enhancedFields;
     }
 
     // Process each field for relative selector content
@@ -355,25 +377,13 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
       // Check if the field has any relative selector property
       if (actualSelector && typeof actualSelector === 'string' && actualSelector.trim() !== '') {
         if (logger) {
-          logger.info(
-            formatOperationLog(
-              "SmartExtraction",
-              nodeName,
-              nodeId,
-              index,
-              `Processing field "${field.name}" with relative selector: ${actualSelector}`,
-              component,
-              functionName
-            )
-          );
-
           logger.debug(
             formatOperationLog(
               "SmartExtraction",
               nodeName,
               nodeId,
               index,
-              `Field "${field.name}" config: AI=${!!field.relativeSelectorOptional || false}, relativeSelector=${field.relativeSelector || 'none'}, relativeSelectorOptional=${field.relativeSelectorOptional || 'none'}`,
+              `Processing field "${field.name}" with relative selector: ${actualSelector}`,
               component,
               functionName
             )
