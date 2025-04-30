@@ -7,6 +7,7 @@
  */
 import type { Logger } from 'n8n-workflow';
 import { formatOperationLog } from './resultUtils';
+import { logWithDebug } from './loggingUtils';
 
 export interface IOpenAIField {
   name: string;
@@ -221,16 +222,15 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
 
   try {
     if (logger) {
-      logger.info(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `Enhancing ${fields.length} fields with relative selector content (main selector: ${mainSelector})`,
-          component,
-          functionName
-        )
+      logWithDebug(
+        logger,
+        !!context?.debugMode,
+        nodeName || 'Ventriloquist',
+        'SmartExtraction',
+        component,
+        functionName,
+        `Enhancing ${fields.length} fields with relative selector content`,
+        'debug'
       );
 
       // Log each field that has a relative selector
@@ -268,7 +268,16 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
           )
         );
       }
-      console.error(`[${nodeName}][SmartExtraction][${component}][${functionName}] Using provided HTML content (${mainElementHtml.length} chars) for extraction`);
+      logWithDebug(
+        logger,
+        true,
+        nodeName || 'Ventriloquist',
+        'SmartExtraction',
+        component,
+        functionName,
+        `Using provided HTML content (${mainElementHtml.length} chars) for extraction`,
+        'info'
+      );
     } else {
       // Check if the main selector exists
       mainElementExists = await page.evaluate((selector: string) => {
@@ -289,7 +298,16 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
             )
           );
         }
-        console.error(`[${nodeName}][SmartExtraction][${component}][${functionName}] Main selector not found globally: ${mainSelector}`);
+        logWithDebug(
+          logger,
+          true,
+          nodeName || 'Ventriloquist',
+          'SmartExtraction',
+          component,
+          functionName,
+          `Main selector not found globally: ${mainSelector}`,
+          'error'
+        );
         return enhancedFields;
       }
 
@@ -313,7 +331,16 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
             )
           );
         }
-        console.error(`[${nodeName}][SmartExtraction][${component}][${functionName}] Failed to extract HTML content from main selector: ${mainSelector}`);
+        logWithDebug(
+          logger,
+          true,
+          nodeName || 'Ventriloquist',
+          'SmartExtraction',
+          component,
+          functionName,
+          `Failed to extract HTML content from main selector: ${mainSelector}`,
+          'error'
+        );
         return enhancedFields;
       }
     }
@@ -425,59 +452,194 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
 
                 // If we have HTML content, create a temporary element to query within
                 if (html) {
-                  console.log(`[Browser] Using provided HTML content (${html.length} chars)`);
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName || 'Ventriloquist',
+                    'SmartExtraction',
+                    component,
+                    functionName,
+                    `Using provided HTML content (${html.length} chars)`,
+                    'info'
+                  );
                   const tempContainer = document.createElement('div');
                   tempContainer.innerHTML = html;
                   parentElement = tempContainer;
                 } else {
                   // Otherwise, query the document directly (fallback)
-                  console.log(`[Browser] Finding parent element with selector: ${mainSel}`);
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName || 'Ventriloquist',
+                    'SmartExtraction',
+                    component,
+                    functionName,
+                    `Finding parent element with selector: ${mainSel}`,
+                    'info'
+                  );
                   parentElement = document.querySelector(mainSel);
                 }
 
                 if (!parentElement) {
-                  console.warn(`[Browser] Parent element not found or HTML content not valid`);
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName || 'Ventriloquist',
+                    'SmartExtraction',
+                    component,
+                    functionName,
+                    `Parent element not found or HTML content not valid`,
+                    'warn'
+                  );
                   return '';
                 }
 
-                console.log(`[Browser] Finding element with selector: ${relSel} within parent`);
+                logWithDebug(
+                  logger,
+                  true,
+                  nodeName || 'Ventriloquist',
+                  'SmartExtraction',
+                  component,
+                  functionName,
+                  `Finding element with selector: ${relSel} within parent`,
+                  'info'
+                );
                 const element = parentElement.querySelector(relSel);
                 if (!element) {
-                  console.warn(`[Browser] Relative element not found: ${relSel}`);
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName || 'Ventriloquist',
+                    'SmartExtraction',
+                    component,
+                    functionName,
+                    `Relative element not found: ${relSel}`,
+                    'warn'
+                  );
                   return '';
                 }
 
-                console.log(`[Browser] Element found: ${element.tagName}, extraction type: ${extractType}`);
+                logWithDebug(
+                  logger,
+                  true,
+                  nodeName || 'Ventriloquist',
+                  'SmartExtraction',
+                  component,
+                  functionName,
+                  `Element found: ${element.tagName}, extraction type: ${extractType}`,
+                  'info'
+                );
 
                 // Get the content based on extraction type
                 if (extractType === 'attribute' && attrName) {
                   // Check if element has the attribute
                   if (!element.hasAttribute(attrName)) {
-                    console.warn(`[Browser] Element does not have attribute: ${attrName}`);
+                    logWithDebug(
+                      logger,
+                      true,
+                      nodeName || 'Ventriloquist',
+                      'SmartExtraction',
+                      component,
+                      functionName,
+                      `Element does not have attribute: ${attrName}`,
+                      'warn'
+                    );
                     return '';
                   }
 
                   const attrValue = element.getAttribute(attrName) || '';
-                  console.log(`[Browser] Found attribute ${attrName} value: ${attrValue}`);
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName || 'Ventriloquist',
+                    'SmartExtraction',
+                    component,
+                    functionName,
+                    `Found attribute ${attrName} value: ${attrValue}`,
+                    'info'
+                  );
 
                   // Add additional debugging for attribute values
-                  console.log(`[Browser] ATTRIBUTE DEBUG - Element: ${element.tagName}`);
-                  console.log(`[Browser] ATTRIBUTE DEBUG - Attribute Name: ${attrName}`);
-                  console.log(`[Browser] ATTRIBUTE DEBUG - Attribute Value: ${attrValue}`);
-                  console.log(`[Browser] ATTRIBUTE DEBUG - Element HTML: ${element.outerHTML.substring(0, 150)}`);
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName || 'Ventriloquist',
+                    'SmartExtraction',
+                    component,
+                    functionName,
+                    `ATTRIBUTE DEBUG - Element: ${element.tagName}`,
+                    'debug'
+                  );
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName || 'Ventriloquist',
+                    'SmartExtraction',
+                    component,
+                    functionName,
+                    `ATTRIBUTE DEBUG - Attribute Name: ${attrName}`,
+                    'debug'
+                  );
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName || 'Ventriloquist',
+                    'SmartExtraction',
+                    component,
+                    functionName,
+                    `ATTRIBUTE DEBUG - Attribute Value: ${attrValue}`,
+                    'debug'
+                  );
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName || 'Ventriloquist',
+                    'SmartExtraction',
+                    component,
+                    functionName,
+                    `ATTRIBUTE DEBUG - Element HTML: ${element.outerHTML.substring(0, 150)}`,
+                    'debug'
+                  );
 
                   return attrValue;
                 } else if (extractType === 'html') {
                   const htmlContent = element.innerHTML || '';
-                  console.log(`[Browser] Found HTML content (truncated): ${htmlContent.substring(0, 100)}...`);
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName || 'Ventriloquist',
+                    'SmartExtraction',
+                    component,
+                    functionName,
+                    `Found HTML content (truncated): ${htmlContent.substring(0, 100)}...`,
+                    'info'
+                  );
                   return htmlContent;
                 } else {
                   const textContent = element.textContent || '';
-                  console.log(`[Browser] Found text content (truncated): ${textContent.substring(0, 100)}...`);
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName || 'Ventriloquist',
+                    'SmartExtraction',
+                    component,
+                    functionName,
+                    `Found text content (truncated): ${textContent.substring(0, 100)}...`,
+                    'info'
+                  );
                   return textContent;
                 }
               } catch (err: any) {
-                console.error(`[Browser] Error in relative selector extraction: ${err.message}`);
+                logWithDebug(
+                  logger,
+                  true,
+                  nodeName || 'Ventriloquist',
+                  'SmartExtraction',
+                  component,
+                  functionName,
+                  `Error in relative selector extraction: ${err.message}`,
+                  'error'
+                );
                 return '';
               }
             },

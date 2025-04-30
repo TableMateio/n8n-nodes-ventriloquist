@@ -9,6 +9,7 @@ import { Logger } from 'n8n-workflow';
 import { v4 as uuidv4 } from 'uuid';
 import { IMiddlewareContext } from './middlewares/middleware';
 import { enhanceFieldsWithRelativeSelectorContent } from './processOpenAISchema';
+import { logWithDebug } from './debugUtils';
 
 /**
  * Interface for extraction node options
@@ -194,7 +195,16 @@ async function extractReferenceContent(
     }
     return '';
   } catch (error) {
-    console.error(`Error extracting reference content (${format}, scope: ${selectorScope}): ${error}`);
+    logWithDebug(
+      logger,
+      extractionNodeOptions.debugMode,
+      extractionNodeOptions.nodeName,
+      'extraction',
+      'extractNodeUtils',
+      'extractReferenceContent',
+      `Error extracting reference content (${format}, scope: ${selectorScope}): ${error}`,
+      'error'
+    );
     return '';
   }
 }
@@ -215,7 +225,16 @@ export async function processExtractionItems(
 
   // Log global extraction options with direct console output for maximum visibility
   if (isDebugMode) {
-    console.error(`[${nodeName}][extraction][extractNodeUtils][processExtractionItems] Processing ${extractionItems.length} extraction items with debug mode ON (${nodeName}/${nodeId})`);
+    logWithDebug(
+      logger,
+      true,
+      nodeName,
+      'extraction',
+      'extractNodeUtils',
+      'processExtractionItems',
+      `Processing ${extractionItems.length} extraction items with debug mode ON`,
+      'error'
+    );
   }
 
   logger.info(
@@ -265,7 +284,16 @@ export async function processExtractionItems(
 
       // Log debug mode for this item with direct console output for maximum visibility
       if (isDebugMode) {
-        console.error(`[${nodeName}][extraction][extractNodeUtils][processExtractionItems] Item ${extractionItem.name} has AI formatting enabled (${extractionItem.aiFormatting.strategy} strategy)`);
+        logWithDebug(
+          logger,
+          true,
+          nodeName,
+          'extraction',
+          'extractNodeUtils',
+          'processExtractionItems',
+          `Item ${extractionItem.name} has AI formatting enabled (${extractionItem.aiFormatting.strategy} strategy)`,
+          'error'
+        );
       }
 
       // Add fields for manual strategy
@@ -442,7 +470,16 @@ export async function processExtractionItems(
                           return element.textContent || '';
                         }
                       } catch (err) {
-                        console.error('Error in text extraction:', err);
+                        logWithDebug(
+                          logger,
+                          isDebugMode,
+                          nodeName,
+                          'extraction',
+                          'extractNodeUtils',
+                          'extractText',
+                          `Error in text extraction: ${err}`,
+                          'error'
+                        );
                       }
                       return '';
                     }, referenceSelector);
@@ -455,7 +492,16 @@ export async function processExtractionItems(
                           return element.outerHTML || '';
                         }
                       } catch (err) {
-                        console.error('Error in HTML extraction:', err);
+                        logWithDebug(
+                          logger,
+                          isDebugMode,
+                          nodeName,
+                          'extraction',
+                          'extractNodeUtils',
+                          'extractText',
+                          `Error in HTML extraction: ${err}`,
+                          'error'
+                        );
                       }
                       return '';
                     }, referenceSelector);
@@ -470,7 +516,16 @@ export async function processExtractionItems(
                           return `Element <${element.tagName.toLowerCase()}> "${element.textContent?.trim()}" has ${attribute} = "${attributeValue}"`;
                         }
                       } catch (err) {
-                        console.error('Error in attribute extraction:', err);
+                        logWithDebug(
+                          logger,
+                          isDebugMode,
+                          nodeName,
+                          'extraction',
+                          'extractNodeUtils',
+                          'extractAttribute',
+                          `Error in attribute extraction: ${err}`,
+                          'error'
+                        );
                       }
                       return '';
                     }, referenceSelector, referenceAttribute);
@@ -492,7 +547,16 @@ export async function processExtractionItems(
                           }
                         }
                       } catch (err) {
-                        console.error('Error in relative text extraction:', err);
+                        logWithDebug(
+                          logger,
+                          isDebugMode,
+                          nodeName,
+                          'extraction',
+                          'extractNodeUtils',
+                          'extractRelativeText',
+                          `Error in relative text extraction: ${err}`,
+                          'error'
+                        );
                       }
                       return '';
                     }, mainSelector, referenceSelector);
@@ -508,7 +572,16 @@ export async function processExtractionItems(
                           }
                         }
                       } catch (err) {
-                        console.error('Error in relative HTML extraction:', err);
+                        logWithDebug(
+                          logger,
+                          isDebugMode,
+                          nodeName,
+                          'extraction',
+                          'extractNodeUtils',
+                          'extractRelativeText',
+                          `Error in relative HTML extraction: ${err}`,
+                          'error'
+                        );
                       }
                       return '';
                     }, mainSelector, referenceSelector);
@@ -527,7 +600,16 @@ export async function processExtractionItems(
                             }
                           }
                         } catch (err) {
-                          console.error('Error in relative attribute extraction:', err);
+                          logWithDebug(
+                            logger,
+                            isDebugMode,
+                            nodeName,
+                            'extraction',
+                            'extractNodeUtils',
+                            'extractRelativeAttribute',
+                            `Error in relative attribute extraction: ${err}`,
+                            'error'
+                          );
                         }
                         return '';
                       },
@@ -711,16 +793,79 @@ export async function processExtractionItems(
                 );
 
                 // TEMPORARY DEBUG: Log detailed field properties
-                console.error(`[DEBUG] BEFORE ENHANCEMENT - Field "${field.name}" config for attribute extraction:`);
-                console.error(`[DEBUG] selector="${field.relativeSelectorOptional}", type="${field.extractionType}", attribute="${field.attributeName}"`);
-                console.error(`[DEBUG] instructions="${field.instructions?.substring(0, 50)}..."`);
-                console.error(`[DEBUG] field object keys: ${Object.keys(field).join(', ')}`);
+                logWithDebug(
+                  logger,
+                  true,
+                  nodeName,
+                  'extraction',
+                  'extractNodeUtils',
+                  'processExtractionItems',
+                  `Field "${field.name}" config for attribute extraction:`,
+                  'error'
+                );
+                logWithDebug(
+                  logger,
+                  true,
+                  nodeName,
+                  'extraction',
+                  'extractNodeUtils',
+                  'processExtractionItems',
+                  `selector="${field.relativeSelectorOptional}", type="${field.extractionType}", attribute="${field.attributeName}"`,
+                  'error'
+                );
+                logWithDebug(
+                  logger,
+                  true,
+                  nodeName,
+                  'extraction',
+                  'extractNodeUtils',
+                  'processExtractionItems',
+                  `instructions="${field.instructions?.substring(0, 50)}..."`,
+                  'error'
+                );
+                logWithDebug(
+                  logger,
+                  true,
+                  nodeName,
+                  'extraction',
+                  'extractNodeUtils',
+                  'processExtractionItems',
+                  `field object keys: ${Object.keys(field).join(', ')}`,
+                  'error'
+                );
 
                 // CRITICAL DEBUG: Check specifically for attribute extraction type fields
                 if (field.extractionType === 'attribute' && field.attributeName) {
-                  console.error(`[DEBUG] CRITICAL: Found attribute extraction field "${field.name}"`);
-                  console.error(`[DEBUG] attribute=${field.attributeName}, selector=${field.relativeSelectorOptional}`);
-                  console.error(`[DEBUG] Will test if element exists and has this attribute...`);
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName,
+                    'extraction',
+                    'extractNodeUtils',
+                    'processExtractionItems',
+                    `CRITICAL: Found attribute extraction field "${field.name}"`,
+                    'error'
+                  );
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName,
+                    'extraction',
+                    'extractNodeUtils',
+                    'processExtractionItems',
+                    `attribute=${field.attributeName}, selector=${field.relativeSelectorOptional}`,
+                    'error'
+                  );
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName,
+                    'extraction',
+                    'extractNodeUtils',
+                    'processExtractionItems',
+                    `Will test if element exists and has this attribute...`,
+                    'error'
+                  );
 
                   // Add immediate test to see if the selector can find the element and attribute
                   try {
@@ -728,35 +873,98 @@ export async function processExtractionItems(
                       (mainSel: string, relSel: string, attr: string) => {
                         const parent = document.querySelector(mainSel);
                         if (!parent) {
-                          console.error(`[Browser] CRITICAL: Parent element not found: ${mainSel}`);
+                          logWithDebug(
+                            logger,
+                            true,
+                            nodeName,
+                            'extraction',
+                            'extractNodeUtils',
+                            'processExtractionItems',
+                            `CRITICAL: Parent element not found: ${mainSel}`,
+                            'error'
+                          );
                           return false;
                         }
 
                         const el = parent.querySelector(relSel);
                         if (!el) {
-                          console.error(`[Browser] CRITICAL: Element not found with selector: ${relSel}`);
+                          logWithDebug(
+                            logger,
+                            true,
+                            nodeName,
+                            'extraction',
+                            'extractNodeUtils',
+                            'processExtractionItems',
+                            `CRITICAL: Element not found with selector: ${relSel}`,
+                            'error'
+                          );
                           return false;
                         }
 
                         if (!el.hasAttribute(attr)) {
-                          console.error(`[Browser] CRITICAL: Element found but doesn't have attribute: ${attr}`);
+                          logWithDebug(
+                            logger,
+                            true,
+                            nodeName,
+                            'extraction',
+                            'extractNodeUtils',
+                            'processExtractionItems',
+                            `CRITICAL: Element found but doesn't have attribute: ${attr}`,
+                            'error'
+                          );
                           return false;
                         }
 
                         const value = el.getAttribute(attr);
-                        console.error(`[Browser] CRITICAL: Found element with ${attr}="${value}"`);
+                        logWithDebug(
+                          logger,
+                          true,
+                          nodeName,
+                          'extraction',
+                          'extractNodeUtils',
+                          'processExtractionItems',
+                          `CRITICAL: Found element with ${attr}="${value}"`,
+                          'error'
+                        );
                         return true;
                       },
                       extractionItem.selector,
                       field.relativeSelectorOptional,
                       field.attributeName
                     ).then((result: boolean) => {
-                      console.error(`[DEBUG] Selector test result: ${result ? 'SUCCESS' : 'FAILURE'}`);
+                      logWithDebug(
+                        logger,
+                        true,
+                        nodeName,
+                        'extraction',
+                        'extractNodeUtils',
+                        'processExtractionItems',
+                        `Selector test result: ${result ? 'SUCCESS' : 'FAILURE'}`,
+                        'error'
+                      );
                     }).catch((err: Error) => {
-                      console.error(`[DEBUG] Selector test error: ${err.message}`);
+                      logWithDebug(
+                        logger,
+                        true,
+                        nodeName,
+                        'extraction',
+                        'extractNodeUtils',
+                        'processExtractionItems',
+                        `Selector test error: ${err.message}`,
+                        'error'
+                      );
                     });
                   } catch (e: any) {
-                    console.error(`[DEBUG] Selector test exception: ${e.message}`);
+                    logWithDebug(
+                      logger,
+                      true,
+                      nodeName,
+                      'extraction',
+                      'extractNodeUtils',
+                      'processExtractionItems',
+                      `Selector test exception: ${e.message}`,
+                      'error'
+                    );
                   }
                 }
               }
@@ -770,14 +978,41 @@ export async function processExtractionItems(
                 try {
                   const element = document.querySelector(selector);
                   if (element) {
-                    console.error(`[Browser] Found main selector element, getting HTML content`);
+                    logWithDebug(
+                      logger,
+                      true,
+                      nodeName,
+                      'extraction',
+                      'extractNodeUtils',
+                      'processExtractionItems',
+                      `Found main selector element, getting HTML content`,
+                      'error'
+                    );
                     return element.outerHTML;
                   } else {
-                    console.error(`[Browser] Main selector element not found: ${selector}`);
+                    logWithDebug(
+                      logger,
+                      true,
+                      nodeName,
+                      'extraction',
+                      'extractNodeUtils',
+                      'processExtractionItems',
+                      `Main selector element not found: ${selector}`,
+                      'error'
+                    );
                     return '';
                   }
                 } catch (error) {
-                  console.error(`[Browser] Error getting HTML content: ${error}`);
+                  logWithDebug(
+                    logger,
+                    true,
+                    nodeName,
+                    'extraction',
+                    'extractNodeUtils',
+                    'processExtractionItems',
+                    `Error getting HTML content: ${error}`,
+                    'error'
+                  );
                   return '';
                 }
               }, extractionItem.selector);
@@ -794,7 +1029,16 @@ export async function processExtractionItems(
                     'processExtractionItems'
                   )
                 );
-                console.error(`[DEBUG] Successfully extracted HTML content from main selector (${mainSelectorHtml.length} chars)`);
+                logWithDebug(
+                  logger,
+                  true,
+                  nodeName,
+                  'extraction',
+                  'extractNodeUtils',
+                  'processExtractionItems',
+                  `Successfully extracted HTML content from main selector (${mainSelectorHtml.length} chars)`,
+                  'error'
+                );
               } else {
                 logger.warn(
                   formatOperationLog(
@@ -807,7 +1051,16 @@ export async function processExtractionItems(
                     'processExtractionItems'
                   )
                 );
-                console.error(`[DEBUG] Failed to extract HTML content from main selector: ${extractionItem.selector}`);
+                logWithDebug(
+                  logger,
+                  true,
+                  nodeName,
+                  'extraction',
+                  'extractNodeUtils',
+                  'processExtractionItems',
+                  `Failed to extract HTML content from main selector: ${extractionItem.selector}`,
+                  'error'
+                );
               }
             } catch (error) {
               logger.error(
@@ -821,7 +1074,16 @@ export async function processExtractionItems(
                   'processExtractionItems'
                 )
               );
-              console.error(`[DEBUG] Error extracting HTML content from main selector: ${(error as Error).message}`);
+              logWithDebug(
+                logger,
+                true,
+                nodeName,
+                'extraction',
+                'extractNodeUtils',
+                'processExtractionItems',
+                `Error extracting HTML content from main selector: ${(error as Error).message}`,
+                'error'
+              );
             }
 
             // Enhance fields with content from relative selectors
@@ -865,12 +1127,57 @@ export async function processExtractionItems(
               );
 
               // TEMPORARY DEBUG: Log enhanced field details
-              console.error(`[DEBUG] AFTER ENHANCEMENT - Field "${field.name}" enhancement results:`);
-              console.error(`[DEBUG] hasReferenceContent=${hasRefContent}, directAttribute=${isDirectAttr}`);
-              console.error(`[DEBUG] instructionsLength=${field.instructions?.length || 0}`);
-              console.error(`[DEBUG] instructions="${field.instructions?.substring(0, 100)}..."`);
+              logWithDebug(
+                logger,
+                true,
+                nodeName,
+                'extraction',
+                'extractNodeUtils',
+                'processExtractionItems',
+                `AFTER ENHANCEMENT - Field "${field.name}" enhancement results:`,
+                'error'
+              );
+              logWithDebug(
+                logger,
+                true,
+                nodeName,
+                'extraction',
+                'extractNodeUtils',
+                'processExtractionItems',
+                `hasReferenceContent=${hasRefContent}, directAttribute=${isDirectAttr}`,
+                'error'
+              );
+              logWithDebug(
+                logger,
+                true,
+                nodeName,
+                'extraction',
+                'extractNodeUtils',
+                'processExtractionItems',
+                `instructionsLength=${field.instructions?.length || 0}`,
+                'error'
+              );
+              logWithDebug(
+                logger,
+                true,
+                nodeName,
+                'extraction',
+                'extractNodeUtils',
+                'processExtractionItems',
+                `instructions="${field.instructions?.substring(0, 100)}..."`,
+                'error'
+              );
               if (hasRefContent) {
-                console.error(`[DEBUG] referenceContent="${(field as any).referenceContent?.substring(0, 50)}..."`);
+                logWithDebug(
+                  logger,
+                  true,
+                  nodeName,
+                  'extraction',
+                  'extractNodeUtils',
+                  'processExtractionItems',
+                  `referenceContent="${(field as any).referenceContent?.substring(0, 50)}..."`,
+                  'error'
+                );
               }
             });
 
@@ -947,9 +1254,27 @@ export async function processExtractionItems(
         try {
           // Add direct logging before extraction execution
           if (isDebugMode) {
-            console.error(`[${nodeName}][extraction][extractNodeUtils][processExtractionItems] Executing extraction for item ${extractionItem.name}, type: ${extractionItem.extractionType}`);
+            logWithDebug(
+              logger,
+              true,
+              nodeName,
+              'extraction',
+              'extractNodeUtils',
+              'processExtractionItems',
+              `Executing extraction for item ${extractionItem.name}, type: ${extractionItem.extractionType}`,
+              'error'
+            );
             if (extractionItem.aiFormatting.smartOptions?.aiAssistance) {
-              console.error(`[${nodeName}][extraction][extractNodeUtils][processExtractionItems] AI is enabled for this extraction with model: ${extractionItem.aiFormatting.smartOptions.aiModel}, debugMode: ${extractionItem.aiFormatting.smartOptions.debugMode}`);
+              logWithDebug(
+                logger,
+                true,
+                nodeName,
+                'extraction',
+                'extractNodeUtils',
+                'processExtractionItems',
+                `AI is enabled for this extraction with model: ${extractionItem.aiFormatting.smartOptions.aiModel}, debugMode: ${extractionItem.aiFormatting.smartOptions.debugMode}`,
+                'error'
+              );
             }
           }
 
@@ -975,9 +1300,27 @@ export async function processExtractionItems(
 
             // Direct log for visibility in debug mode
             if (isDebugMode) {
-              console.error(`[${nodeName}][extraction][extractNodeUtils][processExtractionItems] Extraction successful for [${extractionItem.name}]`);
+              logWithDebug(
+                logger,
+                true,
+                nodeName,
+                'extraction',
+                'extractNodeUtils',
+                'processExtractionItems',
+                `Extraction successful for [${extractionItem.name}]`,
+                'error'
+              );
               if (result.schema) {
-                console.error(`[${nodeName}][extraction][extractNodeUtils][processExtractionItems] Schema was returned for [${extractionItem.name}]`);
+                logWithDebug(
+                  logger,
+                  true,
+                  nodeName,
+                  'extraction',
+                  'extractNodeUtils',
+                  'processExtractionItems',
+                  `Schema was returned for [${extractionItem.name}]`,
+                  'error'
+                );
               }
             }
 

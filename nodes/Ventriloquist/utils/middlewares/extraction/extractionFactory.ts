@@ -6,6 +6,7 @@ import { formatOperationLog } from '../../resultUtils';
 import { IExtractItem } from '../../extractNodeUtils';
 import { processWithAI, IAIFormattingOptions } from '../../smartExtractionUtils';
 import { extractTableData } from '../../extractionUtils';
+import { logWithDebug } from '../../../loggingUtils';
 
 /**
  * Extraction configuration interface
@@ -549,8 +550,16 @@ export class BasicExtraction implements IExtraction {
         // Log debug mode state for maximum visibility
         const isDebugMode = this.config.smartOptions.debugMode === true;
         if (isDebugMode) {
-          console.error(`[EXTRACTION FACTORY DEBUG] AI processing requested with debug mode ON in ${this.context.nodeName}/${this.context.nodeId}`);
-          console.error(`[EXTRACTION FACTORY DEBUG] OpenAI API key available (length: ${this.config.openaiApiKey.length})`);
+          logWithDebug(
+            this.context.logger,
+            this.config.debugMode,
+            this.context.nodeName,
+            'extraction',
+            'extractionFactory',
+            'processWithAI',
+            `AI processing requested with debug mode ON`,
+            'error'
+          );
         }
 
         // Verify API key is valid (sufficient length)
@@ -587,7 +596,16 @@ export class BasicExtraction implements IExtraction {
 
         // Direct console log if debug mode is enabled
         if (isDebugMode) {
-          console.error(`[EXTRACTION FACTORY DEBUG] Calling processWithAI with model ${aiFormattingOptions.aiModel}`);
+          logWithDebug(
+            this.context.logger,
+            this.config.debugMode,
+            this.context.nodeName,
+            'extraction',
+            'extractionFactory',
+            'processWithAI',
+            `Calling processWithAI with model ${aiFormattingOptions.aiModel}`,
+            'error'
+          );
         }
 
         // Determine what content to send to AI based on extraction type and strategy

@@ -1115,9 +1115,36 @@ export async function execute(
 						aiFields.forEach(field => {
 							const fieldOptions = field.fieldOptions as IDataObject || {};
 							if (fieldOptions.extractionType === 'attribute') {
-								console.error(`[DEBUG] ATTRIBUTE EXTRACTION FIELD FOUND: "${field.name}"`);
-								console.error(`[DEBUG] Field details: attributeName=${fieldOptions.attributeName}, selector=${field.relativeSelectorOptional || field.relativeSelector}`);
-								console.error(`[DEBUG] Field object: ${JSON.stringify(field)}`);
+								logWithDebug(
+									this.logger,
+									true,
+									nodeName,
+									'Extract',
+									'extract.operation',
+									'execute',
+									`ATTRIBUTE EXTRACTION FIELD FOUND: "${field.name}"`,
+									'error'
+								);
+								logWithDebug(
+									this.logger,
+									true,
+									nodeName,
+									'Extract',
+									'extract.operation',
+									'execute',
+									`Field details: attributeName=${fieldOptions.attributeName}, selector=${field.relativeSelectorOptional || field.relativeSelector}`,
+									'error'
+								);
+								logWithDebug(
+									this.logger,
+									true,
+									nodeName,
+									'Extract',
+									'extract.operation',
+									'execute',
+									`Field object: ${JSON.stringify(field)}`,
+									'error'
+								);
 							}
 						});
 					} catch (error) {
@@ -1257,11 +1284,26 @@ export async function execute(
 		// Add direct logging about extraction items that had AI formatting enabled
 		if (debugMode) {
 			const aiEnabledItems = typedExtractionItems.filter(item => item.aiFormatting?.enabled);
-			console.error(`[EXTRACT NODE DEBUG] ${aiEnabledItems.length} items had AI formatting enabled out of ${typedExtractionItems.length} total items`);
-
-			if (aiEnabledItems.length > 0) {
-				console.error(`[EXTRACT NODE DEBUG] AI-enabled items: ${aiEnabledItems.map(i => i.name).join(', ')}`);
-			}
+			logWithDebug(
+				this.logger,
+				true,
+				nodeName,
+				'Extract',
+				'extract.operation',
+				'execute',
+				`${aiEnabledItems.length} items had AI formatting enabled out of ${typedExtractionItems.length} total items`,
+				'error'
+			);
+			logWithDebug(
+				this.logger,
+				true,
+				nodeName,
+				'Extract',
+				'extract.operation',
+				'execute',
+				`AI-enabled items: ${aiEnabledItems.map(i => i.name).join(', ')}`,
+				'error'
+			);
 		}
 
 		// Store all extraction results
