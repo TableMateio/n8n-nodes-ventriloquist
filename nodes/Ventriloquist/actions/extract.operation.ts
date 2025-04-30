@@ -1079,6 +1079,16 @@ export async function execute(
 
 						// Log the number of AI fields found
 						this.logger.debug(`Found ${aiFields.length} AI fields for item ${item.name}`);
+
+						// TEMPORARY DEBUG: Examine fields with attribute extraction type
+						aiFields.forEach(field => {
+							const fieldOptions = field.fieldOptions as IDataObject || {};
+							if (fieldOptions.extractionType === 'attribute') {
+								console.error(`[DEBUG] ATTRIBUTE EXTRACTION FIELD FOUND: "${field.name}"`);
+								console.error(`[DEBUG] Field details: attributeName=${fieldOptions.attributeName}, selector=${field.relativeSelectorOptional || field.relativeSelector}`);
+								console.error(`[DEBUG] Field object: ${JSON.stringify(field)}`);
+							}
+						});
 					} catch (error) {
 						// Handle the case where aiFields might not exist
 						this.logger.warn(`Error getting AI fields for item ${item.name}: ${(error as Error).message}`);

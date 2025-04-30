@@ -1099,6 +1099,22 @@ ${examplesSection}
           `Field: "${field.name}", Type: "${field.type}", Instructions: "${field.instructions?.substring(0, 100)}${field.instructions?.length > 100 ? '...' : ''}"`
         )
       );
+
+      // TEMPORARY DEBUG: Log more detailed field info
+      console.error(`[DEBUG] SCHEMA GENERATION - Field: "${field.name}"`);
+      console.error(`[DEBUG] Field type: ${field.type}`);
+      console.error(`[DEBUG] Instructions length: ${field.instructions?.length || 0}`);
+      console.error(`[DEBUG] Instructions preview: "${field.instructions?.substring(0, 150)}${field.instructions?.length > 150 ? '...' : ''}"`);
+      console.error(`[DEBUG] Field properties: ${Object.keys(field).join(', ')}`);
+
+      // Check for reference content (from IExtendedField)
+      const extendedField = field as IExtendedField;
+      if (extendedField.referenceContent) {
+        console.error(`[DEBUG] Has reference content: YES, length=${extendedField.referenceContent.length}`);
+        console.error(`[DEBUG] Is direct attribute: ${extendedField.returnDirectAttribute === true ? 'YES' : 'NO'}`);
+      } else {
+        console.error(`[DEBUG] Has reference content: NO`);
+      }
     });
 
     // Create properties object for the schema

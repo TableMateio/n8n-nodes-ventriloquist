@@ -772,6 +772,56 @@ export async function processExtractionItems(
                     `AIMode=${!!field.relativeSelectorOptional}`
                   )
                 );
+
+                // TEMPORARY DEBUG: Log detailed field properties
+                console.error(`[DEBUG] BEFORE ENHANCEMENT - Field "${field.name}" config for attribute extraction:`);
+                console.error(`[DEBUG] selector="${field.relativeSelectorOptional}", type="${field.extractionType}", attribute="${field.attributeName}"`);
+                console.error(`[DEBUG] instructions="${field.instructions?.substring(0, 50)}..."`);
+                console.error(`[DEBUG] field object keys: ${Object.keys(field).join(', ')}`);
+
+                // CRITICAL DEBUG: Check specifically for attribute extraction type fields
+                if (field.extractionType === 'attribute' && field.attributeName) {
+                  console.error(`[DEBUG] CRITICAL: Found attribute extraction field "${field.name}"`);
+                  console.error(`[DEBUG] attribute=${field.attributeName}, selector=${field.relativeSelectorOptional}`);
+                  console.error(`[DEBUG] Will test if element exists and has this attribute...`);
+
+                  // Add immediate test to see if the selector can find the element and attribute
+                  try {
+                    extractionItem.puppeteerPage.evaluate(
+                      (mainSel: string, relSel: string, attr: string) => {
+                        const parent = document.querySelector(mainSel);
+                        if (!parent) {
+                          console.error(`[Browser] CRITICAL: Parent element not found: ${mainSel}`);
+                          return false;
+                        }
+
+                        const el = parent.querySelector(relSel);
+                        if (!el) {
+                          console.error(`[Browser] CRITICAL: Element not found with selector: ${relSel}`);
+                          return false;
+                        }
+
+                        if (!el.hasAttribute(attr)) {
+                          console.error(`[Browser] CRITICAL: Element found but doesn't have attribute: ${attr}`);
+                          return false;
+                        }
+
+                        const value = el.getAttribute(attr);
+                        console.error(`[Browser] CRITICAL: Found element with ${attr}="${value}"`);
+                        return true;
+                      },
+                      extractionItem.selector,
+                      field.relativeSelectorOptional,
+                      field.attributeName
+                    ).then((result: boolean) => {
+                      console.error(`[DEBUG] Selector test result: ${result ? 'SUCCESS' : 'FAILURE'}`);
+                    }).catch((err: Error) => {
+                      console.error(`[DEBUG] Selector test error: ${err.message}`);
+                    });
+                  } catch (e: any) {
+                    console.error(`[DEBUG] Selector test exception: ${e.message}`);
+                  }
+                }
               }
             });
 
@@ -809,6 +859,15 @@ export async function processExtractionItems(
                   `instructionsLength=${field.instructions?.length || 0}`
                 )
               );
+
+              // TEMPORARY DEBUG: Log enhanced field details
+              console.error(`[DEBUG] AFTER ENHANCEMENT - Field "${field.name}" enhancement results:`);
+              console.error(`[DEBUG] hasReferenceContent=${hasRefContent}, directAttribute=${isDirectAttr}`);
+              console.error(`[DEBUG] instructionsLength=${field.instructions?.length || 0}`);
+              console.error(`[DEBUG] instructions="${field.instructions?.substring(0, 100)}..."`);
+              if (hasRefContent) {
+                console.error(`[DEBUG] referenceContent="${(field as any).referenceContent?.substring(0, 50)}..."`);
+              }
             });
 
             // Copy the enhanced instructions back to the original aiFields
