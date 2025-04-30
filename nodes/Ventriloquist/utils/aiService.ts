@@ -92,6 +92,7 @@ export class AIService {
     index: number;
   };
   private options?: IAIExtractionOptions;
+  private debugMode: boolean;
 
   /**
    * Create a new AI service
@@ -115,6 +116,7 @@ export class AIService {
     });
     this.logger = logger;
     this.context = context;
+    this.debugMode = debugMode;
 
     // Initialize options with debugMode
     this.options = {
@@ -128,95 +130,56 @@ export class AIService {
   }
 
   /**
-   * Process content using AI with the specified options
+   * Process content with OpenAI based on the provided options
+   * @param content Content to process
+   * @param options AI extraction options
+   * @returns Processed data
    */
-  async processContent(
+  public async processContent(
     content: string,
     options: IAIExtractionOptions
   ): Promise<IAIExtractionResult> {
-    const { nodeName, nodeId, index } = this.context;
-
-    // Reset options for this run (no connection to previous runs)
+    // Save options for internal use
     this.options = options;
 
-    // Log debug mode state at the start of processing
-    if (options.debugMode) {
-      console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] Starting AI processing with debug mode enabled`);
-      console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] IMPORTANT: Using OpenAI Assistants API with IDs: auto=${ASSISTANTS.auto}, manual=${ASSISTANTS.manual}`);
+    // Log processing start
+    this.logDebug(`Starting AI processing with debug mode ${this.debugMode ? 'enabled' : 'disabled'}`, 'info', 'processContent');
+
+    // Validate required options
+    if (!options.strategy) {
+      const error = 'Missing required option: strategy';
+      this.logDebug(error, 'error', 'processContent');
+      return { success: false, error };
     }
 
+    if (!options.model) {
+      const error = 'Missing required option: model';
+      this.logDebug(error, 'error', 'processContent');
+      return { success: false, error };
+    }
+
+    // Reference to OpenAI assistants IDs - hardcoded for now, but will be configurable in the future
+    this.logDebug(`IMPORTANT: Using OpenAI Assistants API with IDs: auto=${this.assistantIds.auto}, manual=${this.assistantIds.manual}`, 'info', 'processContent');
+
+    // Process content using the appropriate strategy
     try {
-      this.logger.info(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `Processing content with AI (strategy: ${options.strategy}, model: ${options.model}, debugMode: ${options.debugMode === true})`
-        )
-      );
-
-      // Explicitly log that we're using Assistants API
-      this.logger.info(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `Using OpenAI Assistants API with ID ${options.strategy === 'auto' ? ASSISTANTS.auto : ASSISTANTS.manual} and model ${options.model}`
-        )
-      );
-
-      // Log content length for debugging
-      this.logger.debug(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `Content length: ${content.length} characters`
-        )
-      );
-
-      // Log reference context if available
-      if (options.includeReferenceContext && options.referenceContent) {
-        this.logger.debug(
-          formatOperationLog(
-            "SmartExtraction",
-            nodeName,
-            nodeId,
-            index,
-            `Reference context included (${options.referenceName}): ${options.referenceContent?.substring(0, 50)}...`
-          )
-        );
+      switch (options.strategy) {
+        case 'auto':
+          return await this.processAutoStrategy(content, options);
+        case 'manual':
+          return await this.processManualStrategy(content, options);
+        case 'template':
+          // Not implemented yet
+          this.logDebug('Template strategy not implemented yet', 'warn', 'processContent');
+          return { success: false, error: 'Template strategy not implemented yet' };
+        default:
+          this.logDebug(`Unknown strategy: ${options.strategy}`, 'error', 'processContent');
+          return { success: false, error: `Unknown strategy: ${options.strategy}` };
       }
-
-      let result: IAIExtractionResult;
-
-      // Select processing method based on strategy
-      if (options.strategy === 'auto') {
-        result = await this.processAutoStrategy(content, options);
-      } else if (options.strategy === 'manual') {
-        result = await this.processManualStrategy(content, options);
-      } else {
-        throw new Error(`Strategy not implemented: ${options.strategy}`);
-      }
-
-      return result;
     } catch (error) {
-      this.logger.error(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `AI extraction error: ${(error as Error).message}`
-        )
-      );
-      return {
-        success: false,
-        error: (error as Error).message,
-      };
+      const errorMessage = `Error in AI processing: ${(error as Error).message}`;
+      this.logDebug(errorMessage, 'error', 'processContent');
+      return { success: false, error: errorMessage };
     }
   }
 
@@ -1289,6 +1252,43 @@ ${examplesSection}
         success: false,
         error: (error as Error).message,
       };
+    }
+  }
+
+  /**
+   * Debug log utility function for AIService
+   * @param context Context with logger and instance info
+   * @param message Message to log
+   * @param level Log level (info, debug, warn, error)
+   * @param functionName Optional function name
+   */
+  private logDebug(
+    message: string,
+    level: 'info' | 'debug' | 'warn' | 'error' = 'debug',
+    functionName?: string
+  ) {
+    const { nodeName, nodeId, index } = this.context;
+    const component = "aiService";
+    const fn = functionName || "unknown";
+
+    // Standard log via logger
+    if (this.logger) {
+      this.logger[level](
+        formatOperationLog(
+          'AIService',
+          nodeName,
+          nodeId,
+          index,
+          message,
+          component,
+          fn
+        )
+      );
+    }
+
+    // Direct console log for critical debug info (maximum visibility)
+    if (this.debugMode) {
+      console.error(`[${nodeName}][AIService][${component}][${fn}] ${message}`);
     }
   }
 }

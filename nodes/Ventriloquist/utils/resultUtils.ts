@@ -110,9 +110,15 @@ export function formatOperationLog(
   nodeName: string,
   nodeId: string,
   index: number,
-  message: string
+  message: string,
+  component?: string,
+  functionName?: string
 ): string {
-  return `[Ventriloquist][${nodeName}#${index}][${operation}][${nodeId}] ${message}`;
+  const operationStr = operation || 'Unknown';
+  const componentStr = component || 'Core';
+  const functionStr = functionName ? `${functionName}` : '';
+
+  return `[${nodeName}][${operationStr}][${componentStr}]${functionStr ? `[${functionStr}]` : ''} ${message}`;
 }
 
 /**
@@ -124,7 +130,9 @@ export function createTimingLog(
   logger: ILogger,
   nodeName: string = 'unknown',
   nodeId: string = 'unknown',
-  index: number = 0
+  index: number = 0,
+  component?: string,
+  functionName?: string
 ): void {
   const duration = Date.now() - startTime;
   logger.info(formatOperationLog(
@@ -132,7 +140,9 @@ export function createTimingLog(
     nodeName,
     nodeId,
     index,
-    `Operation completed in ${duration}ms`
+    `Operation completed in ${duration}ms`,
+    component,
+    functionName
   ));
 }
 

@@ -215,7 +215,7 @@ export async function processExtractionItems(
 
   // Log global extraction options with direct console output for maximum visibility
   if (isDebugMode) {
-    console.error(`[EXTRACTNODE UTILS DEBUG] Processing ${extractionItems.length} extraction items with debug mode ON (${nodeName}/${nodeId})`);
+    console.error(`[${nodeName}][extraction][extractNodeUtils][processExtractionItems] Processing ${extractionItems.length} extraction items with debug mode ON (${nodeName}/${nodeId})`);
   }
 
   logger.info(
@@ -229,7 +229,9 @@ export async function processExtractionItems(
         timeout: extractionNodeOptions.timeout,
         continueOnFail: extractionNodeOptions.continueOnFail,
         debugMode: extractionNodeOptions.debugMode,
-      })}`
+      })}`,
+      'extractNodeUtils',
+      'processExtractionItems'
     )
   );
 
@@ -241,7 +243,9 @@ export async function processExtractionItems(
         nodeName,
         nodeId,
         i,
-        `Processing extraction item [${extractionItem.name}] with type [${extractionItem.extractionType}]`
+        `Processing extraction item [${extractionItem.name}] with type [${extractionItem.extractionType}]`,
+        'extractNodeUtils',
+        'processExtractionItems'
       )
     );
 
@@ -253,112 +257,15 @@ export async function processExtractionItems(
           nodeName,
           nodeId,
           i,
-          `Item ${extractionItem.name} has AI formatting enabled, API key available: ${!!extractionItem.openAiApiKey}`
-        )
-      );
-    }
-
-    // Create extraction configuration based on the extraction type
-    let extractionConfig: IExtractionConfig = {
-      extractionType: extractionItem.extractionType,
-      selector: extractionItem.selector || '',
-      attributeName: extractionItem.attribute,
-      waitForSelector: extractionNodeOptions.waitForSelector,
-      selectorTimeout: extractionNodeOptions.timeout,
-      cleanText: extractionItem.textOptions?.cleanText,
-      // Initialize smartOptions based on the item's own AI formatting setting, not the node-level setting
-      smartOptions: extractionItem.aiFormatting?.enabled === true ? {
-        aiAssistance: true, // Explicitly set to true
-        extractionFormat: extractionItem.aiFormatting.extractionFormat || 'json',
-        aiModel: extractionItem.aiFormatting.aiModel || 'gpt-3.5-turbo',
-        generalInstructions: extractionItem.aiFormatting.generalInstructions || '',
-        strategy: extractionItem.aiFormatting.strategy || 'auto',
-        includeSchema: extractionItem.aiFormatting.includeSchema === true,
-        includeRawData: extractionItem.aiFormatting.includeRawData === true,
-        includeReferenceContext: extractionItem.aiFormatting.includeReferenceContext === true,
-        referenceSelector: extractionItem.aiFormatting.referenceSelector || '',
-        referenceName: extractionItem.aiFormatting.referenceName || 'referenceContext',
-        referenceFormat: extractionItem.aiFormatting.referenceFormat || 'text',
-        referenceAttribute: extractionItem.aiFormatting.referenceAttribute || '',
-        selectorScope: extractionItem.aiFormatting.selectorScope || 'global',
-        referenceContent: extractionItem.aiFormatting.referenceContent || '',
-        debugMode: extractionNodeOptions.debugMode === true, // Pass debug mode to AI processing
-      } : undefined,
-      // Directly set the OpenAI API key in the extraction config
-      openaiApiKey: (extractionItem.aiFormatting?.enabled && openAiApiKey) ? openAiApiKey : undefined
-    };
-
-    // Handle attribute extraction for all attribute types, not just href
-    if (extractionItem.extractionType === 'attribute' && extractionItem.attribute) {
-      // Set up field information for direct attribute handling
-      if (!extractionItem.aiFields) {
-        extractionItem.aiFields = [];
-      }
-
-      // Only add if not already in aiFields
-      const hasAttributeField = extractionItem.aiFields.some(f =>
-        f.fieldOptions?.extractionType === 'attribute' &&
-        f.fieldOptions?.attributeName === extractionItem.attribute);
-
-      if (!hasAttributeField) {
-        // Add a special field for attribute handling
-        extractionItem.aiFields.push({
-          name: extractionItem.name,
-          type: 'string',
-          instructions: `Extract the ${extractionItem.attribute} attribute from the element.`,
-          returnDirectAttribute: true, // This is a special property we'll look for later
-          relativeSelectorOptional: '', // We don't need this for non-AI extraction
-        });
-
-        logger.debug(
-          formatOperationLog(
-            'extraction',
-            nodeName,
-            nodeId,
-            i,
-            `Added special attribute field handling for non-AI extraction: ${extractionItem.name} (${extractionItem.attribute})`
-          )
-        );
-      }
-    }
-
-    // Configure the smart extraction options
-    // Map extractionType to extractionFormat for AI Assistance
-    const extractionTypeToFormat: Record<string, string> = {
-      text: 'text',
-      html: 'html',
-      table: 'table',
-      csv: 'csv',
-      multiple: 'array',
-      attribute: 'attribute',
-      value: 'value',
-    };
-    const mappedExtractionFormat = extractionTypeToFormat[extractionItem.extractionType] || 'json';
-    logger.debug(
-      formatOperationLog(
-        'aiFormatting',
-        nodeName,
-        nodeId,
-        i,
-        `Mapped extractionType '${extractionItem.extractionType}' to extractionFormat '${mappedExtractionFormat}'`
-      )
-    );
-
-    // Make sure AI is only enabled when specifically requested
-    if (extractionItem.aiFormatting?.enabled === true) {
-      logger.info(
-        formatOperationLog(
-          'aiFormatting',
-          nodeName,
-          nodeId,
-          i,
-          `Setting up AI formatting for item ${extractionItem.name} (strategy: ${extractionItem.aiFormatting.strategy || 'auto'})`
+          `Setting up AI formatting for item ${extractionItem.name} (strategy: ${extractionItem.aiFormatting.strategy})`,
+          'extractNodeUtils',
+          'processExtractionItems'
         )
       );
 
-      // Add direct visible logging
+      // Log debug mode for this item with direct console output for maximum visibility
       if (isDebugMode) {
-        console.error(`[EXTRACTNODE UTILS DEBUG] Item ${extractionItem.name} has AI formatting enabled (${extractionItem.aiFormatting.strategy || 'auto'} strategy)`);
+        console.error(`[${nodeName}][extraction][extractNodeUtils][processExtractionItems] Item ${extractionItem.name} has AI formatting enabled (${extractionItem.aiFormatting.strategy} strategy)`);
       }
 
       // Add fields for manual strategy
@@ -369,25 +276,29 @@ export async function processExtractionItems(
             nodeName,
             nodeId,
             i,
-            `Using manual strategy with ${extractionItem.aiFields.length} fields`
+            `Using manual strategy with ${extractionItem.aiFields.length} fields`,
+            'extractNodeUtils',
+            'processExtractionItems'
           )
         );
 
-        extractionConfig.fields = {
-          items: extractionItem.aiFields.map(field => {
-            return {
-              name: field.name,
-              type: field.type || 'string',
-              // Map field.instructions directly to instructions property in the IField interface
-              // which will become the description in the OpenAI schema
-              instructions: field.instructions || field.description || '',
-              format: field.required ? 'required' : 'default',
-              // Update to use the new field options
-              useLogicAnalysis: field.fieldOptions?.aiProcessingMode === 'logical',
-              useSeparateThread: field.fieldOptions?.threadManagement === 'separate'
-            };
-          })
-        };
+        extractionItem.aiFields.forEach(field => {
+          logger.debug(
+            formatOperationLog(
+              'aiFormatting',
+              nodeName,
+              nodeId,
+              i,
+              `Field "${field.name}": ` +
+              `selector="${field.relativeSelectorOptional || field.relativeSelector || ''}", ` +
+              `type="${field.type || 'string'}", ` +
+              `attribute="${field.attributeName || 'none'}", ` +
+              `aiAssisted=${!!field.relativeSelectorOptional}`,
+              'extractNodeUtils',
+              'processExtractionItems'
+            )
+          );
+        });
       }
 
       // Log API key status
@@ -401,7 +312,9 @@ export async function processExtractionItems(
             nodeName,
             nodeId,
             i,
-            `OpenAI API key provided for extraction (length: ${openAiApiKey.length})`
+            `OpenAI API key provided for extraction (length: ${openAiApiKey.length})`,
+            'extractNodeUtils',
+            'processExtractionItems'
           )
         );
       } else {
@@ -412,28 +325,29 @@ export async function processExtractionItems(
             nodeName,
             nodeId,
             i,
-            `No OpenAI API key provided - AI processing will be skipped`
+            `No OpenAI API key provided - AI processing will be skipped`,
+            'extractNodeUtils',
+            'processExtractionItems'
           )
         );
       }
     } else {
       // Ensure AI processing is disabled when not explicitly enabled
-      extractionConfig.smartOptions = undefined;
       extractionItem.hasOpenAiApiKey = false;
     }
 
     // Add specific options for different extraction types
     if (extractionItem.extractionType === 'table' && extractionItem.tableOptions) {
-      extractionConfig = {
-        ...extractionConfig,
+      extractionItem.tableOptions = {
+        ...extractionItem.tableOptions,
         includeHeaders: extractionItem.tableOptions.includeHeaders,
         rowSelector: extractionItem.tableOptions.rowSelector,
         cellSelector: extractionItem.tableOptions.cellSelector,
         outputFormat: extractionItem.tableOptions.outputFormat
       };
     } else if (extractionItem.extractionType === 'multiple' && extractionItem.multipleOptions) {
-      extractionConfig = {
-        ...extractionConfig,
+      extractionItem.multipleOptions = {
+        ...extractionItem.multipleOptions,
         extractionProperty: extractionItem.multipleOptions.extractionProperty,
         limit: extractionItem.multipleOptions.outputLimit,
         separator: extractionItem.multipleOptions.separator,
@@ -441,8 +355,8 @@ export async function processExtractionItems(
         cleanText: extractionItem.multipleOptions.cleanText
       };
     } else if (extractionItem.extractionType === 'html' && extractionItem.htmlOptions) {
-      extractionConfig = {
-        ...extractionConfig,
+      extractionItem.htmlOptions = {
+        ...extractionItem.htmlOptions,
         outputFormat: extractionItem.htmlOptions.outputFormat,
         includeMetadata: extractionItem.htmlOptions.includeMetadata
       };
@@ -484,7 +398,9 @@ export async function processExtractionItems(
                     nodeName,
                     nodeId,
                     i,
-                    `Using current page URL as reference context: ${referenceContent}`
+                    `Using current page URL as reference context: ${referenceContent}`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
                   )
                 );
               } catch (urlError) {
@@ -494,7 +410,9 @@ export async function processExtractionItems(
                     nodeName,
                     nodeId,
                     i,
-                    `Error getting current page URL: ${(urlError as Error).message}`
+                    `Error getting current page URL: ${(urlError as Error).message}`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
                   )
                 );
               }
@@ -506,7 +424,9 @@ export async function processExtractionItems(
                   nodeName,
                   nodeId,
                   i,
-                  `Extracting reference context using selector "${referenceSelector}" (format: ${referenceFormat}, scope: ${selectorScope}${referenceFormat === 'attribute' ? `, attribute: ${referenceAttribute}` : ''})`
+                  `Extracting reference context using selector "${referenceSelector}" (format: ${referenceFormat}, scope: ${selectorScope}${referenceFormat === 'attribute' ? `, attribute: ${referenceAttribute}` : ''})`,
+                  'extractNodeUtils',
+                  'processExtractionItems'
                 )
               );
 
@@ -624,7 +544,9 @@ export async function processExtractionItems(
                     nodeName,
                     nodeId,
                     i,
-                    `Error in reference extraction (${referenceFormat}): ${(extractionError as Error).message}`
+                    `Error in reference extraction (${referenceFormat}): ${(extractionError as Error).message}`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
                   )
                 );
               }
@@ -635,8 +557,8 @@ export async function processExtractionItems(
               extractionItem.aiFormatting.referenceContent = referenceContent.trim();
 
               // Add reference content to extraction config
-              if (extractionConfig.smartOptions) {
-                extractionConfig.smartOptions.referenceContent = referenceContent.trim();
+              if (extractionItem.aiFormatting.smartOptions) {
+                extractionItem.aiFormatting.smartOptions.referenceContent = referenceContent.trim();
               }
 
               // Log more detailed info for attribute extractions
@@ -647,7 +569,9 @@ export async function processExtractionItems(
                     nodeName,
                     nodeId,
                     i,
-                    `Attribute "${referenceAttribute}" extracted successfully: ${referenceContent.substring(0, 100)}${referenceContent.length > 100 ? '...' : ''}`
+                    `Attribute "${referenceAttribute}" extracted successfully: ${referenceContent.substring(0, 100)}${referenceContent.length > 100 ? '...' : ''}`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
                   )
                 );
               } else {
@@ -657,7 +581,9 @@ export async function processExtractionItems(
                     nodeName,
                     nodeId,
                     i,
-                    `Reference context extracted successfully as ${referenceSelector ? referenceFormat : 'URL'} (${referenceContent.length} chars)`
+                    `Reference context extracted successfully as ${referenceSelector ? referenceFormat : 'URL'} (${referenceContent.length} chars)`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
                   )
                 );
               }
@@ -669,8 +595,9 @@ export async function processExtractionItems(
                   nodeId,
                   i,
                   referenceSelector
-                    ? `No reference context found for selector: ${referenceSelector}`
-                    : 'Failed to get URL for reference context'
+                    ? `No reference context found for selector: ${referenceSelector}`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
                 )
               );
             }
@@ -681,7 +608,9 @@ export async function processExtractionItems(
                 nodeName,
                 nodeId,
                 i,
-                `Error extracting reference context: ${(error as Error).message}`
+                `Error extracting reference context: ${(error as Error).message}`,
+                'extractNodeUtils',
+                'processExtractionItems'
               )
             );
           }
@@ -702,7 +631,9 @@ export async function processExtractionItems(
                 nodeId,
                 i,
                 `Found ${fieldsWithRelativeSelectors.length} fields with relative selectors: ${fieldsWithRelativeSelectors.map(f =>
-                  `${f.name}:${f.relativeSelectorOptional || f.relativeSelector}`).join(', ')}`
+                  `${f.name}:${f.relativeSelectorOptional || f.relativeSelector}`).join(', ')}`,
+                'extractNodeUtils',
+                'processExtractionItems'
               )
             );
 
@@ -726,7 +657,9 @@ export async function processExtractionItems(
                   `selector="${field.relativeSelectorOptional || field.relativeSelector || ''}", ` +
                   `type="${extractionType}", ` +
                   `attribute="${attributeName}", ` +
-                  `aiAssisted=${aiAssisted}`
+                  `aiAssisted=${aiAssisted}`,
+                  'extractNodeUtils',
+                  'processExtractionItems'
                 )
               );
 
@@ -752,7 +685,9 @@ export async function processExtractionItems(
                 nodeName,
                 nodeId,
                 i,
-                `Enhancing fields with relative selector content using selector: ${extractionItem.selector}`
+                `Enhancing fields with relative selector content using selector: ${extractionItem.selector}`,
+                'extractNodeUtils',
+                'processExtractionItems'
               )
             );
 
@@ -769,7 +704,9 @@ export async function processExtractionItems(
                     `selector="${field.relativeSelectorOptional}", ` +
                     `type="${field.extractionType || 'text'}", ` +
                     `attribute="${field.attributeName || 'none'}", ` +
-                    `AIMode=${!!field.relativeSelectorOptional}`
+                    `AIMode=${!!field.relativeSelectorOptional}`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
                   )
                 );
 
@@ -825,13 +762,76 @@ export async function processExtractionItems(
               }
             });
 
+            // Extract the HTML content of the main selector to pass to the enhancement function
+            let mainSelectorHtml = '';
+            try {
+              // Get the HTML content of the main selector
+              mainSelectorHtml = await extractionItem.puppeteerPage.evaluate((selector: string) => {
+                try {
+                  const element = document.querySelector(selector);
+                  if (element) {
+                    console.error(`[Browser] Found main selector element, getting HTML content`);
+                    return element.outerHTML;
+                  } else {
+                    console.error(`[Browser] Main selector element not found: ${selector}`);
+                    return '';
+                  }
+                } catch (error) {
+                  console.error(`[Browser] Error getting HTML content: ${error}`);
+                  return '';
+                }
+              }, extractionItem.selector);
+
+              if (mainSelectorHtml) {
+                logger.debug(
+                  formatOperationLog(
+                    'aiFormatting',
+                    nodeName,
+                    nodeId,
+                    i,
+                    `Successfully extracted HTML content from main selector (${mainSelectorHtml.length} chars)`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
+                  )
+                );
+                console.error(`[DEBUG] Successfully extracted HTML content from main selector (${mainSelectorHtml.length} chars)`);
+              } else {
+                logger.warn(
+                  formatOperationLog(
+                    'aiFormatting',
+                    nodeName,
+                    nodeId,
+                    i,
+                    `Failed to extract HTML content from main selector: ${extractionItem.selector}`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
+                  )
+                );
+                console.error(`[DEBUG] Failed to extract HTML content from main selector: ${extractionItem.selector}`);
+              }
+            } catch (error) {
+              logger.error(
+                formatOperationLog(
+                  'aiFormatting',
+                  nodeName,
+                  nodeId,
+                  i,
+                  `Error extracting HTML content from main selector: ${(error as Error).message}`,
+                  'extractNodeUtils',
+                  'processExtractionItems'
+                )
+              );
+              console.error(`[DEBUG] Error extracting HTML content from main selector: ${(error as Error).message}`);
+            }
+
             // Enhance fields with content from relative selectors
             const enhancedFields = await enhanceFieldsWithRelativeSelectorContent(
               transformedFields,
               extractionItem.puppeteerPage,
               extractionItem.selector,
               logger,
-              { nodeName, nodeId, index: i }
+              { nodeName, nodeId, index: i },
+              mainSelectorHtml // Pass the HTML content to the enhancement function
             );
 
             // Log the enhanced fields to check if content was properly added
@@ -841,7 +841,9 @@ export async function processExtractionItems(
                 nodeName,
                 nodeId,
                 i,
-                `Enhanced fields result: ${enhancedFields.length} fields processed`
+                `Enhanced fields result: ${enhancedFields.length} fields processed`,
+                'extractNodeUtils',
+                'processExtractionItems'
               )
             );
 
@@ -856,7 +858,9 @@ export async function processExtractionItems(
                   nodeId,
                   i,
                   `Field "${field.name}": hasReferenceContent=${hasRefContent}, directAttribute=${isDirectAttr}, ` +
-                  `instructionsLength=${field.instructions?.length || 0}`
+                  `instructionsLength=${field.instructions?.length || 0}`,
+                  'extractNodeUtils',
+                  'processExtractionItems'
                 )
               );
 
@@ -883,7 +887,9 @@ export async function processExtractionItems(
                       i,
                       `Field "${extractionItem.aiFields[j].name}" instructions were enhanced: ` +
                       `original length=${extractionItem.aiFields[j].instructions?.length || 0}, ` +
-                      `new length=${enhancedFields[j].instructions?.length || 0}`
+                      `new length=${enhancedFields[j].instructions?.length || 0}`,
+                      'extractNodeUtils',
+                      'processExtractionItems'
                     )
                   );
                 }
@@ -901,10 +907,9 @@ export async function processExtractionItems(
                     nodeName,
                     nodeId,
                     i,
-                    `Field "${extractionItem.aiFields[j].name}" properties:` +
-                    ` referenceContent=${!!enhancedFields[j].referenceContent},` +
-                    ` returnDirectAttribute=${!!enhancedFields[j].returnDirectAttribute},` +
-                    ` aiAssisted=${!!enhancedFields[j].relativeSelectorOptional}`
+                    `Field "${extractionItem.aiFields[j].name}" properties:`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
                   )
                 );
               }
@@ -916,7 +921,9 @@ export async function processExtractionItems(
                 nodeName,
                 nodeId,
                 i,
-                `Enhanced ${extractionItem.aiFields.length} fields with relative selector content`
+                `Enhanced ${extractionItem.aiFields.length} fields with relative selector content`,
+                'extractNodeUtils',
+                'processExtractionItems'
               )
             );
           } catch (error) {
@@ -926,21 +933,23 @@ export async function processExtractionItems(
                 nodeName,
                 nodeId,
                 i,
-                `Error enhancing fields with relative selector content: ${(error as Error).message}`
+                `Error enhancing fields with relative selector content: ${(error as Error).message}`,
+                'extractNodeUtils',
+                'processExtractionItems'
               )
             );
           }
         }
 
         // Create and execute the extraction
-        const extraction = createExtraction(extractionItem.puppeteerPage, extractionConfig, context);
+        const extraction = createExtraction(extractionItem.puppeteerPage, extractionItem.aiFormatting.smartOptions, context);
 
         try {
           // Add direct logging before extraction execution
           if (isDebugMode) {
-            console.error(`[EXTRACTNODE UTILS DEBUG] Executing extraction for item ${extractionItem.name}, type: ${extractionItem.extractionType}`);
-            if (extractionConfig.smartOptions?.aiAssistance) {
-              console.error(`[EXTRACTNODE UTILS DEBUG] AI is enabled for this extraction with model: ${extractionConfig.smartOptions.aiModel}, debugMode: ${extractionConfig.smartOptions.debugMode}`);
+            console.error(`[${nodeName}][extraction][extractNodeUtils][processExtractionItems] Executing extraction for item ${extractionItem.name}, type: ${extractionItem.extractionType}`);
+            if (extractionItem.aiFormatting.smartOptions?.aiAssistance) {
+              console.error(`[${nodeName}][extraction][extractNodeUtils][processExtractionItems] AI is enabled for this extraction with model: ${extractionItem.aiFormatting.smartOptions.aiModel}, debugMode: ${extractionItem.aiFormatting.smartOptions.debugMode}`);
             }
           }
 
@@ -958,15 +967,17 @@ export async function processExtractionItems(
                 nodeName,
                 nodeId,
                 i,
-                `Extraction successful for [${extractionItem.name}]`
+                `Extraction successful for [${extractionItem.name}]`,
+                'extractNodeUtils',
+                'processExtractionItems'
               )
             );
 
             // Direct log for visibility in debug mode
             if (isDebugMode) {
-              console.error(`[EXTRACTNODE UTILS DEBUG] Extraction successful for [${extractionItem.name}]`);
+              console.error(`[${nodeName}][extraction][extractNodeUtils][processExtractionItems] Extraction successful for [${extractionItem.name}]`);
               if (result.schema) {
-                console.error(`[EXTRACTNODE UTILS DEBUG] Schema was returned for [${extractionItem.name}]`);
+                console.error(`[${nodeName}][extraction][extractNodeUtils][processExtractionItems] Schema was returned for [${extractionItem.name}]`);
               }
             }
 
@@ -981,7 +992,9 @@ export async function processExtractionItems(
                   nodeName,
                   nodeId,
                   i,
-                  `Schema found for [${extractionItem.name}]`
+                  `Schema found for [${extractionItem.name}]`,
+                  'extractNodeUtils',
+                  'processExtractionItems'
                 )
               );
               extractionItem.schema = result.schema;
@@ -993,7 +1006,9 @@ export async function processExtractionItems(
                 nodeName,
                 nodeId,
                 i,
-                `Extraction failed for [${extractionItem.name}]`
+                `Extraction failed for [${extractionItem.name}]`,
+                'extractNodeUtils',
+                'processExtractionItems'
               )
             );
           }
@@ -1004,7 +1019,9 @@ export async function processExtractionItems(
               nodeName,
               nodeId,
               i,
-              `Error executing extraction: ${(error as Error).message}`
+              `Error executing extraction: ${(error as Error).message}`,
+              'extractNodeUtils',
+              'processExtractionItems'
             )
           );
         }
@@ -1015,7 +1032,9 @@ export async function processExtractionItems(
             nodeName,
             nodeId,
             i,
-            `Error processing extraction item: ${(error as Error).message}`
+            `Error processing extraction item: ${(error as Error).message}`,
+            'extractNodeUtils',
+            'processExtractionItems'
           )
         );
       }
@@ -1026,7 +1045,9 @@ export async function processExtractionItems(
           nodeName,
           nodeId,
           i,
-          `No puppeteer page available for extraction item: ${extractionItem.name}`
+          `No puppeteer page available for extraction item: ${extractionItem.name}`,
+          'extractNodeUtils',
+          'processExtractionItems'
         )
       );
     }

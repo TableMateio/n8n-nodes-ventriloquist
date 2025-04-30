@@ -400,60 +400,77 @@ export async function processWithAI(
     index: number;
   }
 ): Promise<{ success: boolean; data?: any; error?: string; schema?: any }> {
+  const component = "smartExtractionUtils";
+  const functionName = "processWithAI";
   const logger = context?.logger;
-  const nodeName = context?.nodeName || 'Ventriloquist';
+  const nodeName = context?.nodeName || 'Extraction';
   const nodeId = context?.nodeId || 'unknown';
   const index = context?.index ?? 0;
   const isDebugMode = options.debugMode === true;
 
-  // DIRECT DEBUG OUTPUT - Always use console.error for maximum visibility
-  if (isDebugMode) {
-    console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Starting AI processing with model ${options.aiModel}`);
-    console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Debug mode: ${isDebugMode}, API key available: ${!!apiKey}`);
-    console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] IMPORTANT: REDIRECTING TO USE ASSISTANTS API INSTEAD OF CHAT COMPLETIONS`);
-  }
-
-  // Attempt to recover API key from options if not provided directly
-  if (!apiKey && options.hasOwnProperty('openaiApiKey')) {
-    logger?.debug(formatOperationLog('aiProcessing', nodeName, nodeId, index,
-      'Recovered API key from options object'));
-    apiKey = (options as any).openaiApiKey;
-  }
-
-  // More robust API key validation - check if it's a string and has a minimum length
-  if (!apiKey || typeof apiKey !== 'string' || apiKey.length < 10) {
-    const error = `OpenAI API key is ${!apiKey ? 'missing' : 'invalid'} - length: ${apiKey ? apiKey.length : 0}`;
-    logger?.error(formatOperationLog('aiProcessing', nodeName, nodeId, index, error));
-
-    if (isDebugMode) {
-      console.error(`!!! OPENAI API DEBUG ERROR !!! [${nodeName}/${nodeId}] ${error}`);
+  try {
+    // Log that we're processing with AI
+    if (logger) {
+      logger.info(
+        formatOperationLog(
+          'SmartExtraction',
+          nodeName,
+          nodeId,
+          index,
+          `Processing content with AI (strategy: ${options.strategy}, model: ${options.aiModel}, debugMode: ${isDebugMode})`,
+          component,
+          functionName
+        )
+      );
     }
 
-    return { success: false, error };
-  }
+    // Validate we have an API key
+    if (!apiKey) {
+      const error = 'Missing OpenAI API key for AI processing';
+      if (logger) {
+        logger.error(
+          formatOperationLog(
+            'SmartExtraction',
+            nodeName,
+            nodeId,
+            index,
+            error,
+            component,
+            functionName
+          )
+        );
+      }
+      return { success: false, error };
+    }
 
-  // Log the API redirect to ensure it's visible in the logs
-  logger?.info(
-    formatOperationLog(
-      'aiProcessing',
+    // Log the detection of content type
+    const contentType = detectContentType(content);
+    if (logger) {
+      logger.debug(
+        formatOperationLog(
+          'SmartExtraction',
+          nodeName,
+          nodeId,
+          index,
+          `Detected content type: ${contentType}`,
+          component,
+          functionName
+        )
+      );
+    }
+
+    // Create AIService instance with the provided context
+    const aiService = new AIService(apiKey, {
       nodeName,
       nodeId,
+      sessionId: context?.sessionId,
       index,
-      `Redirecting to use AIService with Assistants API instead of direct Chat Completions API calls`
-    )
-  );
+      logger,
+      debugMode: isDebugMode
+    });
 
-  try {
-    // Convert content to string if needed
-    const contentString = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
-
-    // Initialize AI service with the same context
-    const aiService = new AIService(
-      apiKey,
-      logger || console,
-      { nodeName, nodeId, index },
-      isDebugMode
-    );
+    // Ensure content is a string
+    const stringContent = typeof content === 'string' ? content : JSON.stringify(content);
 
     // Convert options to IAIExtractionOptions format
     const aiOptions: IAIExtractionOptions = {
@@ -522,7 +539,7 @@ export async function processWithAI(
     }
 
     // Process content with AIService
-    const result = await aiService.processContent(contentString, aiOptions);
+    const result = await aiService.processContent(stringContent, aiOptions);
 
     return {
       success: result.success,
