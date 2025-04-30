@@ -409,7 +409,7 @@ export async function processWithAI(
   fields: IAIField[] = [],
   apiKey?: string,
   context?: {
-    logger: Logger;
+    logger?: Logger | undefined;
     nodeName: string;
     nodeId: string;
     sessionId?: string;
@@ -476,14 +476,16 @@ export async function processWithAI(
     }
 
     // Create AIService instance with the provided context
-    const aiService = new AIService(apiKey, {
-      nodeName,
-      nodeId,
-      sessionId: context?.sessionId,
-      index,
-      logger,
-      debugMode: isDebugMode
-    });
+    const aiService = new AIService(
+      apiKey,
+      logger as Logger,
+      {
+        nodeName,
+        nodeId,
+        index,
+      },
+      isDebugMode
+    );
 
     // Ensure content is a string
     const stringContent = typeof content === 'string' ? content : JSON.stringify(content);

@@ -94,7 +94,7 @@ export function logError(
  * @param level The logging level to use
  */
 export function logWithDebug(
-  logger: ILogger,
+  logger: ILogger | undefined,
   debugMode: boolean,
   nodeName: string,
   operation: string,
@@ -106,8 +106,10 @@ export function logWithDebug(
   // Format the message with our standard format
   const formattedMessage = formatStandardLog(nodeName, operation, component, functionName, message);
 
-  // Always log through the normal logger interface
-  logger[level](formattedMessage);
+  // Always log through the normal logger interface if logger is available
+  if (logger) {
+    logger[level](formattedMessage);
+  }
 
   // If debug mode is enabled, also output to console.error for greater visibility
   // This should only be used during development and troubleshooting

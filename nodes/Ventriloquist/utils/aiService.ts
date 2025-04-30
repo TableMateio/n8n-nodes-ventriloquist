@@ -160,7 +160,7 @@ export class AIService {
     }
 
     // Reference to OpenAI assistants IDs - hardcoded for now, but will be configurable in the future
-    this.logDebug(`IMPORTANT: Using OpenAI Assistants API with IDs: auto=${this.assistantIds.auto}, manual=${this.assistantIds.manual}`, 'info', 'processContent');
+    this.logDebug(`IMPORTANT: Using OpenAI Assistants API with IDs: auto=${ASSISTANTS.auto}, manual=${ASSISTANTS.manual}`, 'info', 'processContent');
 
     // Process content using the appropriate strategy
     try {

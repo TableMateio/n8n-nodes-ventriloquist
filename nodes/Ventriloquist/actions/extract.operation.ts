@@ -1308,8 +1308,16 @@ export async function execute(
 
 		// Store all extraction results
 		const extractionResults: IDataObject = {
-			// Only include extractedData array when debug mode is enabled
-			...(debugMode && { extractedData: extractionData }),
+			// Always include extractedData array (not just in debug mode)
+			extractedData: extractionData.map(item => ({
+				id: item.id,
+				name: item.name,
+				extractionType: item.extractionType,
+				selector: item.selector,
+				extractedData: item.extractedData,
+				rawData: item.rawData,
+				schema: item.schema
+			})),
 			// Instead of passing all data as is, create a properly mapped output based on the extraction configuration
 			data: extractionData.reduce((result: IDataObject, item: IExtractItem) => {
 				// Only include items that have extracted data
@@ -1390,9 +1398,8 @@ export async function execute(
 						}
 					}
 
-					// Include schema if it exists and includeSchema is set to true
-					if (item.schema && item.aiFormatting?.includeSchema === true) {
-						// Add schema to the output with a _schema suffix
+					// Always include schema if it exists, regardless of includeSchema setting
+					if (item.schema) {
 						this.logger.info(
 							formatOperationLog(
 								'extraction',
@@ -1405,9 +1412,8 @@ export async function execute(
 						result[`${item.name}_schema`] = item.schema;
 					}
 
-					// Include raw data if we have AI-processed data, raw data, and includeRawData is set to true
-					if (item.aiFormatting?.enabled && item.rawData && item.aiFormatting?.includeRawData === true) {
-						// Add raw data to the output with a _raw suffix
+					// Always include raw data if available, regardless of includeRawData setting
+					if (item.rawData) {
 						this.logger.info(
 							formatOperationLog(
 								'extraction',

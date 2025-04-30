@@ -2,6 +2,8 @@ import type { Logger as ILogger } from 'n8n-workflow';
 import type { Page } from 'puppeteer-core';
 import { formatOperationLog } from './resultUtils';
 import { getPageInfo } from './extractionUtils';
+// Re-export logWithDebug from loggingUtils for backward compatibility
+export { logWithDebug } from './loggingUtils';
 
 /**
  * Interface for page info with body text

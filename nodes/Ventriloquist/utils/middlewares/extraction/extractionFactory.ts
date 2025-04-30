@@ -6,7 +6,7 @@ import { formatOperationLog } from '../../resultUtils';
 import { IExtractItem } from '../../extractNodeUtils';
 import { processWithAI, IAIFormattingOptions } from '../../smartExtractionUtils';
 import { extractTableData } from '../../extractionUtils';
-import { logWithDebug } from '../../../loggingUtils';
+import { logWithDebug } from '../../loggingUtils';
 
 /**
  * Extraction configuration interface
@@ -17,6 +17,7 @@ export interface IExtractionConfig {
   attributeName?: string;
   waitForSelector?: boolean;
   selectorTimeout?: number;
+  debugMode?: boolean;
   // Additional properties needed for table extraction
   includeHeaders?: boolean;
   rowSelector?: string;
@@ -584,11 +585,11 @@ export class BasicExtraction implements IExtraction {
         );
 
         // Log debug mode state for maximum visibility
-        const isDebugMode = this.config.smartOptions.debugMode === true;
+        const isDebugMode = this.config.smartOptions?.debugMode === true;
         if (isDebugMode) {
           logWithDebug(
             this.context.logger,
-            this.config.debugMode,
+            this.config.debugMode || false,
             this.context.nodeName,
             'extraction',
             'extractionFactory',
@@ -652,7 +653,7 @@ export class BasicExtraction implements IExtraction {
         if (isDebugMode) {
           logWithDebug(
             this.context.logger,
-            this.config.debugMode,
+            this.config.debugMode || false,
             this.context.nodeName,
             'extraction',
             'extractionFactory',
@@ -741,7 +742,7 @@ export class BasicExtraction implements IExtraction {
               'extractionFactory',
               'execute',
               `AI formatting failed: ${aiResult.error}. Returning original extracted content.`,
-              'warning'
+              'warn'
             );
             return {
               success: true,
@@ -781,7 +782,7 @@ export class BasicExtraction implements IExtraction {
           'extractionFactory',
           'execute',
           `AI processing was requested but no OpenAI API key was provided`,
-          'warning'
+          'warn'
         );
       }
 

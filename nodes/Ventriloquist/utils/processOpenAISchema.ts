@@ -43,8 +43,8 @@ export function processFieldsWithReferenceContent<T extends IOpenAIField>(
   fields: T[],
   referenceContent?: string,
   includeReferenceContext: boolean = false,
-  logger?: Logger,
-  context?: { nodeName: string; nodeId: string; index: number }
+  logger?: Logger | undefined,
+  context?: { nodeName: string; nodeId: string; index: number; debugMode?: boolean }
 ): T[] {
   const logTag = "SmartExtraction";
   const nodeName = context?.nodeName || 'Ventriloquist';
@@ -188,8 +188,8 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
   fields: T[],
   page: any,
   mainSelector: string,
-  logger?: Logger,
-  context?: { nodeName: string; nodeId: string; index: number },
+  logger?: Logger | undefined,
+  context?: { nodeName: string; nodeId: string; index: number; debugMode?: boolean },
   rawHtml?: string
 ): Promise<T[]> {
   const component = "processOpenAISchema";

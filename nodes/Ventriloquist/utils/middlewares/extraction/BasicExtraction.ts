@@ -8,7 +8,7 @@ import { formatOperationLog } from '../../resultUtils';
 import { extractTextContent, extractHtmlContent, extractAttributeValue, extractTableData, extractMultipleElements, extractInputValue } from '../../extractionUtils';
 import { processWithAI } from '../../smartExtractionUtils';
 import { enhanceFieldsWithRelativeSelectorContent } from '../../processOpenAISchema';
-import { logWithDebug } from '../../../loggingUtils';
+import { logWithDebug } from '../../loggingUtils';
 
 /**
  * Implements basic extraction functionality for common operations

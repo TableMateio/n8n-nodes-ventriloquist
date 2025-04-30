@@ -9,7 +9,7 @@ import { Logger } from 'n8n-workflow';
 import { v4 as uuidv4 } from 'uuid';
 import { IMiddlewareContext } from './middlewares/middleware';
 import { enhanceFieldsWithRelativeSelectorContent } from './processOpenAISchema';
-import { logWithDebug } from './debugUtils';
+import { logWithDebug } from './loggingUtils';
 
 /**
  * Interface for extraction node options
@@ -89,6 +89,7 @@ export interface IExtractItem {
     separator?: string;
     outputFormat?: string;
     cleanText?: boolean;
+    limit?: number;
   };
   aiFormatting?: {
     enabled: boolean;
@@ -105,6 +106,23 @@ export interface IExtractItem {
     referenceAttribute?: string;
     selectorScope?: string;
     referenceContent?: string; // Will store the extracted reference content
+    smartOptions?: {
+      extractionFormat?: string;
+      aiAssistance?: boolean;
+      aiModel?: string;
+      generalInstructions?: string;
+      strategy?: string;
+      includeSchema?: boolean;
+      includeRawData?: boolean;
+      includeReferenceContext?: boolean;
+      referenceSelector?: string;
+      referenceName?: string;
+      referenceFormat?: string;
+      referenceAttribute?: string;
+      selectorScope?: string;
+      referenceContent?: string;
+      debugMode?: boolean;
+    };
   };
   aiFields?: Array<{
     name: string;
@@ -146,7 +164,8 @@ async function extractReferenceContent(
   attribute: string = '',
   parentSelector: string = '',
   selectorScope: string = 'global',
-  context: string = ''
+  logger: Logger,
+  nodeOptions: IExtractionNodeOptions
 ): Promise<string> {
   try {
     // Extract based on format and scope
@@ -197,8 +216,8 @@ async function extractReferenceContent(
   } catch (error) {
     logWithDebug(
       logger,
-      extractionNodeOptions.debugMode,
-      extractionNodeOptions.nodeName,
+      nodeOptions.debugMode || false,
+      nodeOptions.nodeName || 'Ventriloquist',
       'extraction',
       'extractNodeUtils',
       'extractReferenceContent',
@@ -320,7 +339,7 @@ export async function processExtractionItems(
               `Field "${field.name}": ` +
               `selector="${field.relativeSelectorOptional || field.relativeSelector || ''}", ` +
               `type="${field.type || 'string'}", ` +
-              `attribute="${field.attributeName || 'none'}", ` +
+              `attribute="${(field.fieldOptions && field.fieldOptions.attributeName) || 'none'}", ` +
               `aiAssisted=${!!field.relativeSelectorOptional}`,
               'extractNodeUtils',
               'processExtractionItems'
@@ -677,9 +696,10 @@ export async function processExtractionItems(
                   nodeId,
                   i,
                   referenceSelector
-                    ? `No reference context found for selector: ${referenceSelector}`,
-                    'extractNodeUtils',
-                    'processExtractionItems'
+                    ? `No reference context found for selector: ${referenceSelector}`
+                    : 'No reference context found',
+                  'extractNodeUtils',
+                  'processExtractionItems'
                 )
               );
             }
@@ -737,9 +757,9 @@ export async function processExtractionItems(
                   i,
                   `Field "${field.name}": ` +
                   `selector="${field.relativeSelectorOptional || field.relativeSelector || ''}", ` +
-                  `type="${extractionType}", ` +
-                  `attribute="${attributeName}", ` +
-                  `aiAssisted=${aiAssisted}`,
+                  `type="${field.type || 'string'}", ` +
+                  `attribute="${(field.fieldOptions && field.fieldOptions.attributeName) || 'none'}", ` +
+                  `aiAssisted=${!!field.relativeSelectorOptional}`,
                   'extractNodeUtils',
                   'processExtractionItems'
                 )
@@ -971,60 +991,53 @@ export async function processExtractionItems(
             });
 
             // Extract the HTML content of the main selector to pass to the enhancement function
-            let mainSelectorHtml = '';
+            let rawHtml = '';
             try {
+              // Define the response type
+              interface HtmlEvaluateResult {
+                html: string;
+                success: boolean;
+                message: string;
+              }
+
               // Get the HTML content of the main selector
-              mainSelectorHtml = await extractionItem.puppeteerPage.evaluate((selector: string) => {
+              const evalResult = await extractionItem.puppeteerPage.evaluate((selector: string) => {
                 try {
                   const element = document.querySelector(selector);
                   if (element) {
-                    logWithDebug(
-                      logger,
-                      true,
-                      nodeName,
-                      'extraction',
-                      'extractNodeUtils',
-                      'processExtractionItems',
-                      `Found main selector element, getting HTML content`,
-                      'error'
-                    );
-                    return element.outerHTML;
+                    // Don't use logWithDebug in browser context
+                    return {
+                      html: element.outerHTML,
+                      success: true,
+                      message: 'Found main selector element, getting HTML content'
+                    };
                   } else {
-                    logWithDebug(
-                      logger,
-                      true,
-                      nodeName,
-                      'extraction',
-                      'extractNodeUtils',
-                      'processExtractionItems',
-                      `Main selector element not found: ${selector}`,
-                      'error'
-                    );
-                    return '';
+                    // Don't use logWithDebug in browser context
+                    return {
+                      html: '',
+                      success: false,
+                      message: `Main selector element not found: ${selector}`
+                    };
                   }
                 } catch (error) {
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName,
-                    'extraction',
-                    'extractNodeUtils',
-                    'processExtractionItems',
-                    `Error getting HTML content: ${error}`,
-                    'error'
-                  );
-                  return '';
+                  // Don't use logWithDebug in browser context
+                  return {
+                    html: '',
+                    success: false,
+                    message: `Error getting HTML content: ${error}`
+                  };
                 }
-              }, extractionItem.selector);
+              }, extractionItem.selector) as HtmlEvaluateResult;
 
-              if (mainSelectorHtml) {
+              // Process the result from evaluate
+              if (evalResult.success) {
                 logger.debug(
                   formatOperationLog(
                     'aiFormatting',
                     nodeName,
                     nodeId,
                     i,
-                    `Successfully extracted HTML content from main selector (${mainSelectorHtml.length} chars)`,
+                    `Successfully extracted HTML content from main selector (${evalResult.html.length} chars)`,
                     'extractNodeUtils',
                     'processExtractionItems'
                   )
@@ -1036,9 +1049,11 @@ export async function processExtractionItems(
                   'extraction',
                   'extractNodeUtils',
                   'processExtractionItems',
-                  `Successfully extracted HTML content from main selector (${mainSelectorHtml.length} chars)`,
+                  `Successfully extracted HTML content from main selector (${evalResult.html.length} chars)`,
                   'error'
                 );
+                // Assign the HTML content
+                rawHtml = evalResult.html;
               } else {
                 logger.warn(
                   formatOperationLog(
@@ -1046,7 +1061,7 @@ export async function processExtractionItems(
                     nodeName,
                     nodeId,
                     i,
-                    `Failed to extract HTML content from main selector: ${extractionItem.selector}`,
+                    `Failed to extract HTML content from main selector: ${evalResult.message}`,
                     'extractNodeUtils',
                     'processExtractionItems'
                   )
@@ -1058,9 +1073,10 @@ export async function processExtractionItems(
                   'extraction',
                   'extractNodeUtils',
                   'processExtractionItems',
-                  `Failed to extract HTML content from main selector: ${extractionItem.selector}`,
+                  `Failed to extract HTML content from main selector: ${evalResult.message}`,
                   'error'
                 );
+                rawHtml = '';
               }
             } catch (error) {
               logger.error(
@@ -1084,6 +1100,7 @@ export async function processExtractionItems(
                 `Error extracting HTML content from main selector: ${(error as Error).message}`,
                 'error'
               );
+              rawHtml = '';
             }
 
             // Enhance fields with content from relative selectors
@@ -1092,8 +1109,8 @@ export async function processExtractionItems(
               extractionItem.puppeteerPage,
               extractionItem.selector,
               logger,
-              { nodeName, nodeId, index: i },
-              mainSelectorHtml // Pass the HTML content to the enhancement function
+              { nodeName, nodeId, index: i, debugMode: isDebugMode },
+              rawHtml // Pass the HTML content to the enhancement function
             );
 
             // Log the enhanced fields to check if content was properly added
@@ -1248,8 +1265,58 @@ export async function processExtractionItems(
           }
         }
 
-        // Create and execute the extraction
-        const extraction = createExtraction(extractionItem.puppeteerPage, extractionItem.aiFormatting.smartOptions, context);
+        // Create extraction configuration based on AI formatting options
+        const aiConfig: IExtractionConfig = {
+          extractionType: extractionItem.extractionType, // Use the original extraction type (table, text, etc.)
+          selector: extractionItem.selector || '',
+          debugMode: extractionItem.aiFormatting?.smartOptions?.debugMode || false,
+          smartOptions: {
+            aiAssistance: true,
+            extractionFormat: extractionItem.aiFormatting?.extractionFormat || 'json',
+            aiModel: extractionItem.aiFormatting?.aiModel || 'gpt-3.5-turbo',
+            generalInstructions: extractionItem.aiFormatting?.generalInstructions || '',
+            strategy: extractionItem.aiFormatting?.strategy || 'manual',
+            includeSchema: extractionItem.aiFormatting?.includeSchema || false,
+            includeRawData: extractionItem.aiFormatting?.includeRawData || false,
+            includeReferenceContext: extractionItem.aiFormatting?.includeReferenceContext || false,
+            referenceSelector: extractionItem.aiFormatting?.referenceSelector || '',
+            referenceName: extractionItem.aiFormatting?.referenceName || 'referenceContext',
+            referenceFormat: extractionItem.aiFormatting?.referenceFormat || 'text',
+            referenceAttribute: extractionItem.aiFormatting?.referenceAttribute || '',
+            selectorScope: extractionItem.aiFormatting?.selectorScope || 'global',
+            debugMode: extractionItem.aiFormatting?.smartOptions?.debugMode || false
+          },
+          openaiApiKey: extractionItem.openAiApiKey,
+          waitForSelector: false,
+          selectorTimeout: 5000,
+          // Include table options if applicable
+          ...(extractionItem.tableOptions && {
+            includeHeaders: extractionItem.tableOptions.includeHeaders,
+            rowSelector: extractionItem.tableOptions.rowSelector,
+            cellSelector: extractionItem.tableOptions.cellSelector,
+            outputFormat: extractionItem.tableOptions.outputFormat
+          }),
+          // Include HTML options if applicable
+          ...(extractionItem.htmlOptions && {
+            outputFormat: extractionItem.htmlOptions.outputFormat,
+            includeMetadata: extractionItem.htmlOptions.includeMetadata
+          }),
+          // Include text options if applicable
+          ...(extractionItem.textOptions && {
+            cleanText: extractionItem.textOptions.cleanText
+          }),
+          // Include fields for AI processing
+          fields: {
+            items: extractionItem.aiFields?.map(field => ({
+              name: field.name,
+              type: field.type || 'string',
+              instructions: field.instructions || '',
+              format: (field.fieldOptions?.format as string) || 'default'
+            })) || []
+          }
+        };
+
+        const extraction = createExtraction(extractionItem.puppeteerPage, aiConfig, context);
 
         try {
           // Add direct logging before extraction execution
@@ -1264,16 +1331,22 @@ export async function processExtractionItems(
               `Executing extraction for item ${extractionItem.name}, type: ${extractionItem.extractionType}`,
               'error'
             );
-            if (extractionItem.aiFormatting.smartOptions?.aiAssistance) {
-              logWithDebug(
-                logger,
-                true,
-                nodeName,
-                'extraction',
-                'extractNodeUtils',
-                'processExtractionItems',
-                `AI is enabled for this extraction with model: ${extractionItem.aiFormatting.smartOptions.aiModel}, debugMode: ${extractionItem.aiFormatting.smartOptions.debugMode}`,
-                'error'
+            if (extractionItem.aiFormatting?.smartOptions?.aiAssistance) {
+              // Add info about the model and debug mode
+              // Add info about the model and debug mode if available
+              const aiModel = extractionItem.aiFormatting?.smartOptions?.aiModel || 'unknown';
+              const debugMode = extractionItem.aiFormatting?.smartOptions?.debugMode || false;
+
+              logger.debug(
+                formatOperationLog(
+                  'extraction',
+                  nodeName,
+                  nodeId,
+                  i,
+                  `AI is enabled for this extraction with model: ${aiModel}, debugMode: ${debugMode}`,
+                  'extractNodeUtils',
+                  'processExtractionItems'
+                )
               );
             }
           }
@@ -1349,11 +1422,25 @@ export async function processExtractionItems(
                 nodeName,
                 nodeId,
                 i,
-                `Extraction failed for [${extractionItem.name}]`,
+                `Extraction failed for [${extractionItem.name}]: ${result.error?.message || 'Unknown error'}`,
                 'extractNodeUtils',
                 'processExtractionItems'
               )
             );
+
+            // Log detailed error in debug mode
+            if (isDebugMode && result.error) {
+              logWithDebug(
+                logger,
+                true,
+                nodeName,
+                'extraction',
+                'extractNodeUtils',
+                'processExtractionItems',
+                `Extraction error details: ${JSON.stringify(result.error)}`,
+                'error'
+              );
+            }
           }
         } catch (error) {
           logger.warn(
