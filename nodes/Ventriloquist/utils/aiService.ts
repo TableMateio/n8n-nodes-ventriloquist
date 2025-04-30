@@ -66,6 +66,7 @@ export interface IAIExtractionOptions {
   referenceAttribute?: string;
   selectorScope?: string;
   referenceContent?: string;
+  debugMode?: boolean; // Whether debug mode is enabled
 }
 
 /**
@@ -102,7 +103,8 @@ export class AIService {
       nodeName: string;
       nodeId: string;
       index: number;
-    }
+    },
+    debugMode: boolean = false
   ) {
     if (!OpenAI) {
       throw new Error('OpenAI package not found. Please install it with: npm install openai');
@@ -113,6 +115,16 @@ export class AIService {
     });
     this.logger = logger;
     this.context = context;
+
+    // Initialize options with debugMode
+    this.options = {
+      strategy: 'auto',
+      model: 'gpt-3.5-turbo',
+      generalInstructions: '',
+      includeSchema: false,
+      includeRawData: false,
+      debugMode: debugMode
+    };
   }
 
   /**
@@ -127,6 +139,11 @@ export class AIService {
     // Reset options for this run (no connection to previous runs)
     this.options = options;
 
+    // Log debug mode state at the start of processing
+    if (options.debugMode) {
+      console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] Starting AI processing with debug mode enabled`);
+    }
+
     try {
       this.logger.info(
         formatOperationLog(
@@ -134,7 +151,7 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          `Processing content with AI (strategy: ${options.strategy}, model: ${options.model})`
+          `Processing content with AI (strategy: ${options.strategy}, model: ${options.model}, debugMode: ${options.debugMode === true})`
         )
       );
 
@@ -199,6 +216,7 @@ export class AIService {
     options: IAIExtractionOptions
   ): Promise<IAIExtractionResult> {
     const { nodeName, nodeId, index } = this.context;
+    const isDebugMode = options.debugMode === true;
 
     try {
       this.logger.info(
@@ -214,16 +232,100 @@ export class AIService {
       // Create a new thread (no tracking or management, just create a fresh one)
       const thread = await this.openai.beta.threads.create();
 
+      // Log thread creation in debug mode
+      if (isDebugMode) {
+        this.logger.info(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `Created OpenAI thread: ${thread.id}`
+          )
+        );
+      }
+
+      // Create the message content
+      const messageContent = this.buildAutoPrompt(content, options.generalInstructions);
+
+      // Log the message in debug mode - Log FULL content in debug mode
+      if (isDebugMode) {
+        this.logger.error(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `!!! OPENAI ASSISTANT API DEBUGGING !!! Debug mode is ON, about to send request to assistant`
+          )
+        );
+
+        // Also add console.error for maximum visibility
+        console.error(`!!!! OPENAI ASSISTANT DEBUG - ${nodeName}/${nodeId} - Sending Assistant API request`);
+
+        this.logger.error(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `!!! [OpenAI API Request] Full message content: ${JSON.stringify({
+              role: "user",
+              content: messageContent
+            }, null, 2)}`
+          )
+        );
+      }
+
       // Add a message to the thread with the content and instructions
-      await this.openai.beta.threads.messages.create(thread.id, {
+      const message = await this.openai.beta.threads.messages.create(thread.id, {
         role: "user",
-        content: this.buildAutoPrompt(content, options.generalInstructions),
+        content: messageContent,
       });
+
+      // Log the created message ID
+      if (isDebugMode) {
+        this.logger.info(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `[OpenAI API] Created message with ID: ${message.id} for thread: ${thread.id}`
+          )
+        );
+      }
+
+      // Log the assistant ID that will be used
+      if (isDebugMode) {
+        this.logger.info(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `[OpenAI API Request] Using OpenAI Assistant ID: ${ASSISTANTS.auto}`
+          )
+        );
+      }
 
       // Run the assistant on the thread
       const run = await this.openai.beta.threads.runs.create(thread.id, {
         assistant_id: ASSISTANTS.auto,
       });
+
+      // Log run creation in debug mode
+      if (isDebugMode) {
+        this.logger.info(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `[OpenAI API] Created run: ${run.id} for thread: ${thread.id} with assistant: ${ASSISTANTS.auto}`
+          )
+        );
+      }
 
       // Poll for completion
       const result = await this.pollRunCompletion(thread.id, run.id);
@@ -236,6 +338,19 @@ export class AIService {
         let schema = null;
         if (options.includeSchema) {
           schema = this.generateSchema(data);
+
+          // Log schema in debug mode
+          if (isDebugMode) {
+            this.logger.info(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Auto strategy generated schema: ${JSON.stringify(schema, null, 2)}`
+              )
+            );
+          }
         }
 
         return {
@@ -272,6 +387,7 @@ export class AIService {
     options: IAIExtractionOptions
   ): Promise<IAIExtractionResult> {
     const { nodeName, nodeId, index } = this.context;
+    const isDebugMode = options.debugMode === true;
 
     try {
       this.logger.info(
@@ -280,7 +396,7 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          `Using Manual strategy with ${options.fields?.length || 0} fields`
+          "Using Manual strategy - processing field-by-field"
         )
       );
 
@@ -467,6 +583,19 @@ export class AIService {
       let schema = null;
       if (options.includeSchema) {
         schema = this.generateOpenAISchema(processedFields);
+
+        // Log the generated schema in debug mode (already logged in generateOpenAISchema, but adding here for clarity)
+        if (isDebugMode) {
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Manual strategy final schema (post-processing): ${JSON.stringify(schema, null, 2)}`
+            )
+          );
+        }
       }
 
       return {
@@ -502,134 +631,115 @@ export class AIService {
     delayMs = 1000
   ): Promise<{ success: boolean; data?: string; error?: string }> {
     const { nodeName, nodeId, index } = this.context;
+    const isDebugMode = this.options?.debugMode === true;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
-        // Get run status
-      const run = await this.openai.beta.threads.runs.retrieve(threadId, runId);
+        // Check the run status
+        const run = await this.openai.beta.threads.runs.retrieve(threadId, runId);
 
-        // Check if completed
-      if (run.status === 'completed') {
-          // Get messages from the thread (newest first)
-          const messages = await this.openai.beta.threads.messages.list(threadId, {
-            order: 'desc',
-            limit: 5,
-          });
-
-          // Check for function call results
-          const lastMessage = messages.data[0];
-          if (lastMessage && lastMessage.role === 'assistant') {
-            // Check for function calls
-            if (lastMessage.content && lastMessage.content.length > 0) {
-              for (const content of lastMessage.content) {
-                // Handle function call responses
-                if (content.type === 'function_call' && content.function_call) {
-                  this.logger.debug(
-                    formatOperationLog(
-                      "SmartExtraction",
-                      nodeName,
-                      nodeId,
-                      index,
-                      `Received function call response: ${content.function_call.name}`
-                    )
-                  );
-
-                  // Log the arguments for debugging
-                  this.logger.debug(
-                    formatOperationLog(
-                      "SmartExtraction",
-                      nodeName,
-                      nodeId,
-                      index,
-                      `Function arguments: ${content.function_call.arguments}`
-                    )
-                  );
-
-                  return {
-                    success: true,
-                    data: content.function_call.arguments
-                  };
-                }
-
-                // Handle text responses
-                if (content.type === 'text') {
-              return {
-                success: true,
-                    data: content.text.value,
-              };
-            }
-          }
-        }
-
-            // No usable content found
-            return {
-              success: false,
-              error: 'No usable content in assistant response',
-            };
-          }
-
-          return {
-            success: false,
-            error: 'No response from assistant',
-          };
-        }
-
-        // Check for failures
-        if (['failed', 'cancelled', 'expired'].includes(run.status)) {
-        return {
-          success: false,
-            error: `Run ${run.status}: ${run.last_error?.message || 'Unknown error'}`,
-          };
-        }
-
-        // Check for tool calls that need responses
-        if (run.status === 'requires_action' && run.required_action?.type === 'submit_tool_outputs') {
-          // Get the tool calls
-          const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
-
-          // This shouldn't happen in our case since we don't have interactive tools,
-          // but we'll handle it gracefully anyway
-          this.logger.warn(
+        // Log the run status in debug mode
+        if (isDebugMode) {
+          this.logger.error(
             formatOperationLog(
               "SmartExtraction",
               nodeName,
               nodeId,
               index,
-              `Run requires tool outputs, but this isn't currently supported`
+              `[OpenAI API] Run status for ${runId}: ${run.status} (attempt ${attempt + 1}/${maxAttempts})`
             )
           );
-
-          // Submit empty tool outputs to allow the run to continue
-          await this.openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
-            tool_outputs: toolCalls.map((tc: any) => ({
-              tool_call_id: tc.id,
-              output: "{}",
-            })),
-          });
         }
 
-        // Wait before next attempt
+        if (run.status === 'completed') {
+          // Get the messages from the thread, specifying we want only those after the assistant's response
+          const response = await this.openai.beta.threads.messages.list(threadId, {
+            limit: 1,
+            order: 'desc',
+          });
+
+          // Log the full response in debug mode
+          if (isDebugMode) {
+            this.logger.error(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `[OpenAI API Response] Messages response data: ${JSON.stringify({
+                  first_id: response.data[0]?.id,
+                  message_count: response.data.length,
+                  response_preview: response.data[0]?.content[0]?.type === 'text' ?
+                    (response.data[0]?.content[0] as any).text.value.substring(0, 200) + '...' :
+                    'Non-text content'
+                }, null, 2)}`
+              )
+            );
+          }
+
+          // Extract the message content
+          if (response.data.length > 0 && response.data[0].role === 'assistant') {
+            const messageContent = response.data[0].content;
+
+            if (messageContent.length > 0) {
+              const content = messageContent[0];
+
+              if (content.type === 'text') {
+                const textContent = (content as any).text.value;
+
+                // Log the full text content in debug mode
+                if (isDebugMode) {
+                  this.logger.error(
+                    formatOperationLog(
+                      "SmartExtraction",
+                      nodeName,
+                      nodeId,
+                      index,
+                      `[OpenAI API Response] Full text content: ${JSON.stringify(textContent, null, 2)}`
+                    )
+                  );
+                }
+
+                return { success: true, data: textContent };
+              }
+            }
+          }
+
+          return { success: false, error: 'No valid response content found' };
+        } else if (run.status === 'failed') {
+          return { success: false, error: `Run failed: ${run.last_error?.message || 'Unknown error'}` };
+        } else if (run.status === 'expired') {
+          return { success: false, error: 'Run expired' };
+        } else if (run.status === 'cancelled') {
+          return { success: false, error: 'Run was cancelled' };
+        }
+
+        // Wait before checking again
         await new Promise(resolve => setTimeout(resolve, delayMs));
       } catch (error) {
-        this.logger.error(
-          formatOperationLog(
-            "SmartExtraction",
-            nodeName,
-            nodeId,
-            index,
-            `Error polling run: ${(error as Error).message}`
-          )
-        );
+        if (isDebugMode) {
+          this.logger.error(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `[OpenAI API Error] Error polling run completion: ${(error as Error).message}`
+            )
+          );
+        }
 
-        // Wait before retry
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+        // If we're on the last attempt, throw the error
+        if (attempt === maxAttempts - 1) {
+          return { success: false, error: (error as Error).message };
+        }
+
+        // Otherwise wait and try again
+        await new Promise(resolve => setTimeout(resolve, delayMs));
       }
     }
 
-    return {
-      success: false,
-      error: `Timed out after ${maxAttempts} attempts`,
-    };
+    return { success: false, error: `Timed out after ${maxAttempts} attempts` };
   }
 
   /**

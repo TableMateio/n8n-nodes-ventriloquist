@@ -46,6 +46,7 @@ export interface IExtractionConfig {
     referenceAttribute?: string;
     selectorScope?: string;
     referenceContent?: string;
+    debugMode?: boolean;
   };
   // Fields for manual strategy in smart extraction
   fields?: {
@@ -325,7 +326,8 @@ export class BasicExtraction implements IExtraction {
               referenceFormat: this.config.smartOptions.referenceFormat || '',
               referenceAttribute: this.config.smartOptions.referenceAttribute || '',
               selectorScope: this.config.smartOptions.selectorScope || '',
-              referenceContent: this.config.smartOptions.referenceContent || ''
+              referenceContent: this.config.smartOptions.referenceContent || '',
+              debugMode: this.config.smartOptions.debugMode === true,
             };
 
             // Log reference context if available
@@ -544,6 +546,13 @@ export class BasicExtraction implements IExtraction {
         // Log the presence of the API key for debugging
         logger.info(`${logPrefix} Using OpenAI API key for AI processing. Key length: ${this.config.openaiApiKey.length}`);
 
+        // Log debug mode state for maximum visibility
+        const isDebugMode = this.config.smartOptions.debugMode === true;
+        if (isDebugMode) {
+          console.error(`[EXTRACTION FACTORY DEBUG] AI processing requested with debug mode ON in ${this.context.nodeName}/${this.context.nodeId}`);
+          console.error(`[EXTRACTION FACTORY DEBUG] OpenAI API key available (length: ${this.config.openaiApiKey.length})`);
+        }
+
         // Verify API key is valid (sufficient length)
         if (this.config.openaiApiKey.length < 20) {
           logger.warn(`${logPrefix} OpenAI API key appears to be invalid (length: ${this.config.openaiApiKey.length}) - skipping AI processing`);
@@ -569,11 +578,17 @@ export class BasicExtraction implements IExtraction {
           referenceFormat: this.config.smartOptions.referenceFormat || 'text',
           referenceAttribute: this.config.smartOptions.referenceAttribute || '',
           selectorScope: this.config.smartOptions.selectorScope || 'global',
-          referenceContent: this.config.smartOptions.referenceContent || ''
+          referenceContent: this.config.smartOptions.referenceContent || '',
+          debugMode: isDebugMode  // Pass debug mode flag explicitly
         };
 
         logger.info(`${logPrefix} Applying AI formatting with ${aiFormattingOptions.strategy} strategy, format: ${aiFormattingOptions.extractionFormat}`);
-        logger.info(`${logPrefix} AI options: includeSchema=${aiFormattingOptions.includeSchema}, includeRawData=${aiFormattingOptions.includeRawData}`);
+        logger.info(`${logPrefix} AI options: includeSchema=${aiFormattingOptions.includeSchema}, includeRawData=${aiFormattingOptions.includeRawData}, debugMode=${aiFormattingOptions.debugMode}`);
+
+        // Direct console log if debug mode is enabled
+        if (isDebugMode) {
+          console.error(`[EXTRACTION FACTORY DEBUG] Calling processWithAI with model ${aiFormattingOptions.aiModel}`);
+        }
 
         // Determine what content to send to AI based on extraction type and strategy
         let contentForAI = data;

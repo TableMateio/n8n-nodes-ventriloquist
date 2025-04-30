@@ -211,8 +211,13 @@ export async function processExtractionItems(
   const nodeName = extractionNodeOptions.nodeName || 'Ventriloquist';
   const nodeId = extractionNodeOptions.nodeId || 'unknown';
   const typedExtractionItems: IExtractItem[] = [];
+  const isDebugMode = extractionNodeOptions.debugMode === true;
 
-  // Log global extraction options
+  // Log global extraction options with direct console output for maximum visibility
+  if (isDebugMode) {
+    console.error(`[EXTRACTNODE UTILS DEBUG] Processing ${extractionItems.length} extraction items with debug mode ON (${nodeName}/${nodeId})`);
+  }
+
   logger.info(
     formatOperationLog(
       'extraction',
@@ -276,7 +281,8 @@ export async function processExtractionItems(
         referenceFormat: extractionItem.aiFormatting.referenceFormat || 'text',
         referenceAttribute: extractionItem.aiFormatting.referenceAttribute || '',
         selectorScope: extractionItem.aiFormatting.selectorScope || 'global',
-        referenceContent: extractionItem.aiFormatting.referenceContent || ''
+        referenceContent: extractionItem.aiFormatting.referenceContent || '',
+        debugMode: extractionNodeOptions.debugMode === true, // Pass debug mode to AI processing
       } : undefined,
       // Directly set the OpenAI API key in the extraction config
       openaiApiKey: (extractionItem.aiFormatting?.enabled && openAiApiKey) ? openAiApiKey : undefined
@@ -349,6 +355,11 @@ export async function processExtractionItems(
           `Setting up AI formatting for item ${extractionItem.name} (strategy: ${extractionItem.aiFormatting.strategy || 'auto'})`
         )
       );
+
+      // Add direct visible logging
+      if (isDebugMode) {
+        console.error(`[EXTRACTNODE UTILS DEBUG] Item ${extractionItem.name} has AI formatting enabled (${extractionItem.aiFormatting.strategy || 'auto'} strategy)`);
+      }
 
       // Add fields for manual strategy
       if (extractionItem.aiFields && extractionItem.aiFormatting.strategy === 'manual') {
@@ -866,6 +877,14 @@ export async function processExtractionItems(
         const extraction = createExtraction(extractionItem.puppeteerPage, extractionConfig, context);
 
         try {
+          // Add direct logging before extraction execution
+          if (isDebugMode) {
+            console.error(`[EXTRACTNODE UTILS DEBUG] Executing extraction for item ${extractionItem.name}, type: ${extractionItem.extractionType}`);
+            if (extractionConfig.smartOptions?.aiAssistance) {
+              console.error(`[EXTRACTNODE UTILS DEBUG] AI is enabled for this extraction with model: ${extractionConfig.smartOptions.aiModel}, debugMode: ${extractionConfig.smartOptions.debugMode}`);
+            }
+          }
+
           // Execute the extraction
           const result = await extraction.execute();
 
@@ -883,6 +902,14 @@ export async function processExtractionItems(
                 `Extraction successful for [${extractionItem.name}]`
               )
             );
+
+            // Direct log for visibility in debug mode
+            if (isDebugMode) {
+              console.error(`[EXTRACTNODE UTILS DEBUG] Extraction successful for [${extractionItem.name}]`);
+              if (result.schema) {
+                console.error(`[EXTRACTNODE UTILS DEBUG] Schema was returned for [${extractionItem.name}]`);
+              }
+            }
 
             // Store extracted data
             extractionItem.extractedData = result.data;

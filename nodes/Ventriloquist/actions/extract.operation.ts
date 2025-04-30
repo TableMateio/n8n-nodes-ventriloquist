@@ -860,6 +860,24 @@ export async function execute(
 		),
 	);
 
+	// Log debug information about OpenAI API usage
+	if (debugMode) {
+		this.logger.error(
+			formatOperationLog(
+				"Extract",
+				nodeName,
+				nodeId,
+				index,
+				`!!! DEBUG MODE ENABLED !!! OPENAI API REQUEST LOGGING WILL BE ACTIVE !!!`
+			),
+		);
+
+		// Explicitly mark the beginning of a debug session
+		console.error(`[EXTRACT NODE DEBUG] Debug mode ON for ${nodeName}/${nodeId} - OpenAI requests will be logged`);
+		console.error(`>>> OpenAI API KEY available: ${!!openAiApiKey} (length: ${openAiApiKey?.length || 0})`);
+		console.error(`>>> Debug flags: debugMode=${debugMode}}`);
+	}
+
 	try {
 		// Use the centralized session management
 		const sessionResult = await SessionManager.getOrCreatePageSession(
@@ -1169,6 +1187,16 @@ export async function execute(
 			this.logger,
 			openAiApiKey
 		);
+
+		// Add direct logging about extraction items that had AI formatting enabled
+		if (debugMode) {
+			const aiEnabledItems = typedExtractionItems.filter(item => item.aiFormatting?.enabled);
+			console.error(`[EXTRACT NODE DEBUG] ${aiEnabledItems.length} items had AI formatting enabled out of ${typedExtractionItems.length} total items`);
+
+			if (aiEnabledItems.length > 0) {
+				console.error(`[EXTRACT NODE DEBUG] AI-enabled items: ${aiEnabledItems.map(i => i.name).join(', ')}`);
+			}
+		}
 
 		// Store all extraction results
 		const extractionResults: IDataObject = {

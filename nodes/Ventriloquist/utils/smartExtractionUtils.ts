@@ -21,6 +21,7 @@ export interface ISmartExtractionOptions {
   referenceAttribute?: string;
   selectorScope?: string;
   referenceContent?: string;
+  debugMode?: boolean;
 }
 
 /**
@@ -51,6 +52,7 @@ export interface IAIFormattingOptions {
   referenceAttribute?: string;
   selectorScope?: string;
   referenceContent?: string;
+  debugMode?: boolean;
 }
 
 /**
@@ -211,7 +213,8 @@ export async function extractSmartContent(
     const aiService = new AIService(
       openaiApiKey || '',
       logger || console,
-      { nodeName, nodeId, index: itemIndex }
+      { nodeName, nodeId, index: itemIndex },
+      options.debugMode === true
     );
 
     // Process content based on strategy
@@ -223,7 +226,8 @@ export async function extractSmartContent(
       includeRawData: options.includeRawData,
       includeReferenceContext: options.includeReferenceContext,
       referenceName: options.referenceName,
-      referenceContent: options.referenceContent
+      referenceContent: options.referenceContent,
+      debugMode: options.debugMode
     };
 
     // Log reference context if available
@@ -293,6 +297,13 @@ export async function processWithAI(
   const nodeName = context?.nodeName || 'Ventriloquist';
   const nodeId = context?.nodeId || 'unknown';
   const index = context?.index ?? 0;
+  const isDebugMode = options.debugMode === true;
+
+  // DIRECT DEBUG OUTPUT - Always use console.error for maximum visibility
+  if (isDebugMode) {
+    console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Starting AI processing with model ${options.aiModel}`);
+    console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Debug mode: ${isDebugMode}, API key available: ${!!apiKey}`);
+  }
 
   // Attempt to recover API key from options if not provided directly
   if (!apiKey && options.hasOwnProperty('openaiApiKey')) {
@@ -305,7 +316,17 @@ export async function processWithAI(
   if (!apiKey || typeof apiKey !== 'string' || apiKey.length < 10) {
     const error = `OpenAI API key is ${!apiKey ? 'missing' : 'invalid'} - length: ${apiKey ? apiKey.length : 0}`;
     logger?.error(formatOperationLog('aiProcessing', nodeName, nodeId, index, error));
+
+    if (isDebugMode) {
+      console.error(`!!! OPENAI API DEBUG ERROR !!! [${nodeName}/${nodeId}] ${error}`);
+    }
+
     return { success: false, error };
+  }
+
+  // Always log with console.error if debug mode is enabled (Max visibility)
+  if (isDebugMode) {
+    console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Process with API key length: ${apiKey.length}`);
   }
 
   // Log the start of AI processing with key information
@@ -323,6 +344,13 @@ export async function processWithAI(
     // Try to dynamically import OpenAI - simplified approach to avoid import issues
     let OpenAI;
     try {
+      // Add a direct console log here to verify the code is being executed
+      if (isDebugMode) {
+        logger?.error(formatOperationLog('aiProcessing', nodeName, nodeId, index,
+          `ABOUT TO LOAD OPENAI LIBRARY AND MAKE API CALL TO ${options.aiModel.toUpperCase()}`));
+        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] About to load OpenAI library and call API`);
+      }
+
       // First try CommonJS require if available
       try {
         OpenAI = require('openai');
@@ -330,23 +358,51 @@ export async function processWithAI(
         if (OpenAI.default) {
           OpenAI = OpenAI.default;
         }
+
+        if (isDebugMode) {
+          console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Used require() to load OpenAI library`);
+        }
       } catch (reqError) {
         // Fall back to dynamic import
+        if (isDebugMode) {
+          console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Require failed, using dynamic import: ${reqError.message}`);
+        }
+
         const openaiModule = await import('openai');
         OpenAI = openaiModule.default || openaiModule;
+
+        if (isDebugMode) {
+          console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Used dynamic import to load OpenAI library`);
+        }
       }
 
       if (!OpenAI) {
+        if (isDebugMode) {
+          console.error(`!!! OPENAI API DEBUG ERROR !!! [${nodeName}/${nodeId}] Failed to import OpenAI library`);
+        }
         throw new Error('Failed to import OpenAI package');
+      }
+
+      if (isDebugMode) {
+        logger?.error(formatOperationLog('aiProcessing', nodeName, nodeId, index,
+          `OPENAI LIBRARY LOADED SUCCESSFULLY`));
+        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] OpenAI library loaded successfully`);
       }
     } catch (err) {
       logger?.error(formatOperationLog('aiProcessing', nodeName, nodeId, index,
         `Failed to import OpenAI: ${err.message}`));
+      if (isDebugMode) {
+        console.error(`!!! OPENAI API DEBUG ERROR !!! [${nodeName}/${nodeId}] Failed to import OpenAI: ${err.message}`);
+      }
       throw new Error(`OpenAI package not installed. Please run: npm install openai`);
     }
 
     // Create an OpenAI instance - handle both newer and older API formats
     const openai = typeof OpenAI === 'function' ? new OpenAI({ apiKey }) : new OpenAI.OpenAI({ apiKey });
+
+    if (isDebugMode) {
+      console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Created OpenAI client instance`);
+    }
 
     // Convert content to string if needed
     const contentString = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
@@ -383,8 +439,15 @@ export async function processWithAI(
     );
 
     try {
-      // Create completion with OpenAI
-      const response = await openai.chat.completions.create({
+      // Build the request payload to log it before sending
+      const requestPayload: {
+        model: string;
+        messages: { role: string; content: string }[];
+        response_format?: { type: string };
+        functions?: any[];
+        tools?: any[];
+        [key: string]: any; // Allow for additional properties
+      } = {
         model: options.aiModel,
         messages: [
           {
@@ -403,7 +466,139 @@ Always respond with valid JSON. Do not include code blocks or explanations in yo
         response_format: options.aiModel.includes('gpt-4-turbo') || options.aiModel.includes('gpt-3.5-turbo')
           ? { type: 'json_object' }
           : undefined,
-      });
+      };
+
+      // Always log with console.error if debug mode is enabled (Max visibility)
+      if (isDebugMode) {
+        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] About to send request to ${options.aiModel}`);
+        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Request: model=${requestPayload.model}, messages=${requestPayload.messages.length}`);
+      }
+
+      // Log the OpenAI request in debug mode
+      if (isDebugMode && logger) {
+        // Extract schema information that might be in different formats
+        const functionSchema = requestPayload.functions ?
+          requestPayload.functions[0]?.parameters :
+          requestPayload.tools && requestPayload.tools[0]?.function?.parameters;
+
+        // First add a VERY visible marker in the logs using error level instead of info
+        logger.error(
+          formatOperationLog(
+            'aiProcessing',
+            nodeName,
+            nodeId,
+            index,
+            `!!! OPENAI REQUEST DEBUGGING !!! Debug mode is ON. About to send request to ${options.aiModel}`
+          )
+        );
+
+        // Also add console.error for maximum visibility
+        console.error(`!!!! OPENAI DEBUG - ${nodeName}/${nodeId} - Sending request to ${options.aiModel}`);
+
+        // Create a safe copy of the payload for logging that doesn't include the full messages
+        const loggablePayload = {
+          model: requestPayload.model,
+          response_format: requestPayload.response_format,
+          system_message_length: requestPayload.messages[0].content.length,
+          user_message_length: requestPayload.messages[1].content.length,
+          // Include part of the prompt for debugging but not the whole thing
+          prompt_preview: prompt.substring(0, 200) + (prompt.length > 200 ? '...' : ''),
+          // Include information about functions or tools if present
+          has_functions: !!requestPayload.functions,
+          has_tools: !!requestPayload.tools,
+          function_count: requestPayload.functions?.length || 0,
+          tool_count: requestPayload.tools?.length || 0
+        };
+
+        logger.error(
+          formatOperationLog(
+            'aiProcessing',
+            nodeName,
+            nodeId,
+            index,
+            `!!! OpenAI API Request: ${JSON.stringify(loggablePayload, null, 2)}`
+          )
+        );
+
+        // If there's a schema defined in functions, log it
+        if (requestPayload.functions && requestPayload.functions.length > 0) {
+          logger.error(
+            formatOperationLog(
+              'aiProcessing',
+              nodeName,
+              nodeId,
+              index,
+              `OpenAI API Function Schema: ${JSON.stringify(requestPayload.functions, null, 2)}`
+            )
+          );
+        }
+
+        // If there are tools defined, log them
+        if (requestPayload.tools && requestPayload.tools.length > 0) {
+          logger.error(
+            formatOperationLog(
+              'aiProcessing',
+              nodeName,
+              nodeId,
+              index,
+              `OpenAI API Tools Schema: ${JSON.stringify(requestPayload.tools, null, 2)}`
+            )
+          );
+        }
+      }
+
+      // Direct debug log right before the API call
+      if (isDebugMode) {
+        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Calling OpenAI completions API NOW`);
+      }
+
+      // Create completion with OpenAI
+      const response = await openai.chat.completions.create(requestPayload);
+
+      // Direct debug log right after the API call
+      if (isDebugMode) {
+        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Received response from OpenAI API`);
+      }
+
+      // Log the response in debug mode
+      if (isDebugMode && logger) {
+        // Create a safe copy of the response for logging (without too much detail)
+        const loggableResponse = {
+          id: response.id,
+          object: response.object,
+          created: response.created,
+          model: response.model,
+          choices_count: response.choices?.length || 0,
+          usage: response.usage,
+        };
+
+        logger.error(
+          formatOperationLog(
+            'aiProcessing',
+            nodeName,
+            nodeId,
+            index,
+            `!!! OpenAI API Response: ${JSON.stringify(loggableResponse, null, 2)}`
+          )
+        );
+
+        // Log a preview of the content
+        if (response.choices && response.choices.length > 0) {
+          const contentPreview = response.choices[0].message.content || '';
+          logger.error(
+            formatOperationLog(
+              'aiProcessing',
+              nodeName,
+              nodeId,
+              index,
+              `OpenAI Response Content Preview: ${contentPreview.substring(0, 200)}${contentPreview.length > 200 ? '...' : ''}`
+            )
+          );
+        }
+
+        // Also log directly to console for maximum visibility
+        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Response received with ID: ${response.id}, ${response.choices?.length || 0} choices`);
+      }
 
       // Check if we have a valid response
       if (!response.choices || response.choices.length === 0) {
@@ -486,6 +681,19 @@ Always respond with valid JSON. Do not include code blocks or explanations in yo
         )
       );
 
+      // Log the schema if present and debug mode is enabled
+      if (isDebugMode && logger && enrichedSchema) {
+        logger.info(
+          formatOperationLog(
+            'aiProcessing',
+            nodeName,
+            nodeId,
+            index,
+            `OpenAI Response Schema: ${JSON.stringify(enrichedSchema, null, 2)}`
+          )
+        );
+      }
+
       return {
         success: true,
         data,
@@ -547,32 +755,30 @@ ${content}
 }
 
 /**
- * Build a prompt for the manual strategy with field definitions
+ * Build a prompt for the manual strategy
  * @param content Content to process
  * @param options Processing options
- * @param fields Field definitions
+ * @param fields Fields for manual strategy
  */
 function buildManualPrompt(content: string, options: ISmartExtractionOptions, fields: IAIField[]): string {
-  // Base instructions with field definitions
+  // Base instructions
   let prompt = `
-Extract the following fields from the content below, using the format ${options.extractionFormat.toUpperCase()}.
+Extract and format the following content as ${options.extractionFormat.toUpperCase()}.
 ${options.generalInstructions ? options.generalInstructions + '\n' : ''}
 
-Fields to extract:
-`;
-
-  // Add each field definition
-  fields.forEach((field) => {
-    prompt += `- ${field.name}${field.required ? ' (Required)' : ''}: ${field.instructions || ''} (Type: ${field.type || 'string'})\n`;
-  });
+${options.includeSchema ? 'Include a "schema" field in your response that describes the structure of the data.\n' : ''}`;
 
   // Add reference context if available
   if (options.includeReferenceContext && options.referenceContent) {
-    prompt += `\nAdditional reference context (${options.referenceName || 'referenceContext'}):\n\`\`\`\n${options.referenceContent}\n\`\`\`\n`;
+    prompt += `
+Additional reference context (${options.referenceName || 'referenceContext'}):
+\`\`\`
+${options.referenceContent}
+\`\`\`
+`;
   }
 
-  prompt += `\n${options.includeSchema ? 'Include a "schema" field in your response that describes the structure of the data.\n' : ''}
-
+  prompt += `
 Please format your response as a valid JSON object, with the extracted data in a "data" field.
 
 Content to extract:
@@ -585,61 +791,19 @@ ${content}
 }
 
 /**
- * Enriches a schema with field descriptions from the field definitions
+ * Enrich a schema with field descriptions
  * @param schema The schema to enrich
- * @param fields Field definitions with descriptions
- * @returns Enriched schema with descriptions
+ * @param fields The field definitions
+ * @returns The enriched schema
  */
 function enrichSchemaWithFieldDescriptions(schema: any, fields: IAIField[]): any {
-  if (!schema) return schema;
-
-  // If schema is just a simple type map like { "field1": "string", "field2": "number" }
-  // Convert it to a proper schema object
-  if (typeof schema === 'object' && !schema.type && !schema.properties) {
-    const properSchema: any = {
-      type: 'object',
-      properties: {}
-    };
-
-    // Convert simple type map to proper schema
-    for (const [key, value] of Object.entries(schema)) {
-      properSchema.properties[key] = {
-        type: value,
-      };
-
-      // Find matching field definition and add description
-      const fieldDef = fields.find(f => f.name === key);
-      if (fieldDef) {
-        // Use instructions directly as the schema description
-        if (fieldDef.instructions) {
-          properSchema.properties[key].description = fieldDef.instructions;
-        } else {
-          // Add default description only if no instructions available
-          properSchema.properties[key].description = `The ${key} field`;
-        }
-      } else {
-        // Field not found in definitions
-        properSchema.properties[key].description = `The ${key} field`;
-      }
-    }
-
-    return properSchema;
-  }
-
-  // If we have a proper schema object with properties
   if (schema.type === 'object' && schema.properties) {
-    // Add descriptions to each property
-    for (const field of fields) {
-      if (schema.properties[field.name]) {
-        if (field.instructions) {
-          schema.properties[field.name].description = field.instructions;
-        } else {
-          // Only set default if no instructions available
-          schema.properties[field.name].description = `The ${field.name} field`;
-        }
+    Object.keys(schema.properties).forEach(key => {
+      const field = fields.find(f => f.name === key);
+      if (field) {
+        schema.properties[key].description = field.instructions || '';
       }
-    }
+    });
   }
-
   return schema;
 }
