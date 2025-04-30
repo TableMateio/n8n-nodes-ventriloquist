@@ -147,6 +147,7 @@ export async function extractSmartContent(
   const nodeName = context?.nodeName || 'Ventriloquist';
   const nodeId = context?.nodeId || 'unknown';
   const itemIndex = context?.index !== undefined ? context.index : 0;
+  const isDebugMode = options.debugMode === true;
 
   try {
     // Log the start of extraction
@@ -159,6 +160,20 @@ export async function extractSmartContent(
         `Starting smart extraction with selector: ${selector}`
       )
     );
+
+    // Log that we're using the Assistants API path
+    if (isDebugMode) {
+      logger?.error(
+        formatOperationLog(
+          'smartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `!!! IMPORTANT !!! Using AIService with OpenAI Assistants API path (not Chat Completions)`
+        )
+      );
+      console.error(`!!! EXTRACTION DEBUG !!! [${nodeName}/${nodeId}] Using AIService with Assistants API path`);
+    }
 
     // Extract raw content from the page
     let content = '';
@@ -217,6 +232,19 @@ export async function extractSmartContent(
       options.debugMode === true
     );
 
+    // Log the AIService initialization
+    if (isDebugMode) {
+      logger?.info(
+        formatOperationLog(
+          'smartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `Created AIService instance with API key (length: ${openaiApiKey?.length || 0}), model: ${options.aiModel}`
+        )
+      );
+    }
+
     // Process content based on strategy
     const aiOptions: IAIExtractionOptions = {
       strategy: options.strategy === 'auto' ? 'auto' : 'manual',
@@ -229,6 +257,19 @@ export async function extractSmartContent(
       referenceContent: options.referenceContent,
       debugMode: options.debugMode
     };
+
+    // Log field count if in manual strategy
+    if (options.strategy === 'manual' && fields) {
+      logger?.debug(
+        formatOperationLog(
+          'smartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `Manual strategy with ${fields.length} fields: ${fields.map(f => f.name).join(', ')}`
+        )
+      );
+    }
 
     // Log reference context if available
     if (options.includeReferenceContext && options.referenceContent) {
@@ -244,12 +285,76 @@ export async function extractSmartContent(
     }
 
     // Add fields for manual strategy
-    if (options.strategy === 'manual' && fields) {
-      aiOptions.fields = fields;
+    if (options.strategy === 'manual' && fields && fields.length > 0) {
+      // Convert IAIField[] to IField[] by creating properly typed objects with all required properties
+      const convertedFields = fields.map(field => {
+        // Get field options if they exist
+        const fieldOptions = (field as any).fieldOptions || {};
+
+        // Extract important properties from field options
+        const extractionType = fieldOptions.extractionType || 'text';
+        const attributeName = fieldOptions.attributeName || '';
+        const aiProcessingMode = fieldOptions.aiProcessingMode || 'standard';
+        const threadManagement = fieldOptions.threadManagement || 'shared';
+
+        // Check for reference content from enhanced fields
+        const referenceContent = (field as any).referenceContent;
+        const returnDirectAttribute = (field as any).returnDirectAttribute === true;
+
+        // Log field options in debug mode
+        if (isDebugMode) {
+          console.error(
+            `!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] ` +
+            `Field "${field.name}" options: extractionType=${extractionType}, ` +
+            `attributeName=${attributeName}, aiMode=${aiProcessingMode}, ` +
+            `threadMode=${threadManagement}, hasRefContent=${!!referenceContent}`
+          );
+        }
+
+        return {
+          name: field.name,
+          type: field.type || 'string',
+          instructions: field.instructions || '', // Instructions must be non-optional
+          format: 'default', // Add required format property
+          // Pass critical field options
+          useLogicAnalysis: aiProcessingMode === 'logical', // Use logic analysis assistant
+          useSeparateThread: threadManagement === 'separate', // Use separate thread
+          // Preserve extraction properties for aiService's reference
+          extractionType,
+          attributeName,
+          // Preserve any reference content and attribute flags
+          referenceContent,
+          returnDirectAttribute
+        };
+      });
+      aiOptions.fields = convertedFields;
     }
 
     // Process content with AI
+    logger?.info(
+      formatOperationLog(
+        'smartExtraction',
+        nodeName,
+        nodeId,
+        itemIndex,
+        `Calling AIService.processContent with ${content.length} chars, strategy: ${aiOptions.strategy}`
+      )
+    );
+
     const result = await aiService.processContent(content, aiOptions);
+
+    // Log result
+    if (isDebugMode) {
+      logger?.info(
+        formatOperationLog(
+          'smartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `AIService.processContent result: success=${result.success}, dataSize=${result.data ? JSON.stringify(result.data).length : 0}, hasSchema=${!!result.schema}`
+        )
+      );
+    }
 
     return result;
   } catch (error) {
@@ -303,6 +408,7 @@ export async function processWithAI(
   if (isDebugMode) {
     console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Starting AI processing with model ${options.aiModel}`);
     console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Debug mode: ${isDebugMode}, API key available: ${!!apiKey}`);
+    console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] IMPORTANT: REDIRECTING TO USE ASSISTANTS API INSTEAD OF CHAT COMPLETIONS`);
   }
 
   // Attempt to recover API key from options if not provided directly
@@ -324,416 +430,102 @@ export async function processWithAI(
     return { success: false, error };
   }
 
-  // Always log with console.error if debug mode is enabled (Max visibility)
-  if (isDebugMode) {
-    console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Process with API key length: ${apiKey.length}`);
-  }
-
-  // Log the start of AI processing with key information
+  // Log the API redirect to ensure it's visible in the logs
   logger?.info(
     formatOperationLog(
       'aiProcessing',
       nodeName,
       nodeId,
       index,
-      `Starting AI processing with ${options.strategy} strategy, model: ${options.aiModel}, API key available: true (length: ${apiKey.length})`
+      `Redirecting to use AIService with Assistants API instead of direct Chat Completions API calls`
     )
   );
 
   try {
-    // Try to dynamically import OpenAI - simplified approach to avoid import issues
-    let OpenAI;
-    try {
-      // Add a direct console log here to verify the code is being executed
-      if (isDebugMode) {
-        logger?.error(formatOperationLog('aiProcessing', nodeName, nodeId, index,
-          `ABOUT TO LOAD OPENAI LIBRARY AND MAKE API CALL TO ${options.aiModel.toUpperCase()}`));
-        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] About to load OpenAI library and call API`);
-      }
-
-      // First try CommonJS require if available
-      try {
-        OpenAI = require('openai');
-        // The import structure changed in newer versions of the OpenAI package
-        if (OpenAI.default) {
-          OpenAI = OpenAI.default;
-        }
-
-        if (isDebugMode) {
-          console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Used require() to load OpenAI library`);
-        }
-      } catch (reqError) {
-        // Fall back to dynamic import
-        if (isDebugMode) {
-          console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Require failed, using dynamic import: ${reqError.message}`);
-        }
-
-        const openaiModule = await import('openai');
-        OpenAI = openaiModule.default || openaiModule;
-
-        if (isDebugMode) {
-          console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Used dynamic import to load OpenAI library`);
-        }
-      }
-
-      if (!OpenAI) {
-        if (isDebugMode) {
-          console.error(`!!! OPENAI API DEBUG ERROR !!! [${nodeName}/${nodeId}] Failed to import OpenAI library`);
-        }
-        throw new Error('Failed to import OpenAI package');
-      }
-
-      if (isDebugMode) {
-        logger?.error(formatOperationLog('aiProcessing', nodeName, nodeId, index,
-          `OPENAI LIBRARY LOADED SUCCESSFULLY`));
-        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] OpenAI library loaded successfully`);
-      }
-    } catch (err) {
-      logger?.error(formatOperationLog('aiProcessing', nodeName, nodeId, index,
-        `Failed to import OpenAI: ${err.message}`));
-      if (isDebugMode) {
-        console.error(`!!! OPENAI API DEBUG ERROR !!! [${nodeName}/${nodeId}] Failed to import OpenAI: ${err.message}`);
-      }
-      throw new Error(`OpenAI package not installed. Please run: npm install openai`);
-    }
-
-    // Create an OpenAI instance - handle both newer and older API formats
-    const openai = typeof OpenAI === 'function' ? new OpenAI({ apiKey }) : new OpenAI.OpenAI({ apiKey });
-
-    if (isDebugMode) {
-      console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Created OpenAI client instance`);
-    }
-
     // Convert content to string if needed
     const contentString = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
 
-    // Build the appropriate prompt based on strategy
-    let prompt = '';
-    if (options.strategy === 'auto') {
-      prompt = buildAutoPrompt(contentString, options);
-    } else {
-      prompt = buildManualPrompt(contentString, options, fields);
-    }
-
-    // Log details about reference format if applicable
-    if (options.includeReferenceContext && options.referenceContent) {
-      logger?.debug(
-        formatOperationLog(
-          'aiProcessing',
-          nodeName,
-          nodeId,
-          index,
-          `Including reference context (${options.referenceName}) with format: ${options.referenceFormat || 'text'}`
-        )
-      );
-    }
-
-    logger?.debug(
-      formatOperationLog(
-        'aiProcessing',
-        nodeName,
-        nodeId,
-        index,
-        `Sending content to ${options.aiModel} with ${contentString.length} characters`
-      )
+    // Initialize AI service with the same context
+    const aiService = new AIService(
+      apiKey,
+      logger || console,
+      { nodeName, nodeId, index },
+      isDebugMode
     );
 
-    try {
-      // Build the request payload to log it before sending
-      const requestPayload: {
-        model: string;
-        messages: { role: string; content: string }[];
-        response_format?: { type: string };
-        functions?: any[];
-        tools?: any[];
-        [key: string]: any; // Allow for additional properties
-      } = {
-        model: options.aiModel,
-        messages: [
-          {
-            role: 'system',
-            content: `You are a data extraction and formatting assistant. Extract and format the provided content according to the instructions.
-${options.referenceContent && options.referenceContent.includes('has href =') ? 'Pay special attention to URLs, links, and href attributes mentioned in the reference context.' : ''}
-${options.referenceContent && options.referenceContent.includes('has src =') ? 'Pay special attention to image sources, src attributes, and media references mentioned in the reference context.' : ''}
-${options.referenceContent && options.referenceContent.includes('has data-') ? 'Pay special attention to data attributes mentioned in the reference context.' : ''}
-Always respond with valid JSON. Do not include code blocks or explanations in your response.`,
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-        response_format: options.aiModel.includes('gpt-4-turbo') || options.aiModel.includes('gpt-3.5-turbo')
-          ? { type: 'json_object' }
-          : undefined,
-      };
+    // Convert options to IAIExtractionOptions format
+    const aiOptions: IAIExtractionOptions = {
+      strategy: options.strategy === 'auto' ? 'auto' : 'manual',
+      model: options.aiModel,
+      generalInstructions: options.generalInstructions,
+      includeSchema: options.includeSchema,
+      includeRawData: options.includeRawData,
+      includeReferenceContext: options.includeReferenceContext,
+      referenceName: options.referenceName,
+      referenceContent: options.referenceContent,
+      debugMode: options.debugMode
+    };
 
-      // Always log with console.error if debug mode is enabled (Max visibility)
-      if (isDebugMode) {
-        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] About to send request to ${options.aiModel}`);
-        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Request: model=${requestPayload.model}, messages=${requestPayload.messages.length}`);
+    // Add fields for manual strategy
+    if (options.strategy === 'manual' && fields && fields.length > 0) {
+      // Convert IAIField[] to IField[] by creating properly typed objects with all required properties
+      const convertedFields = fields.map(field => {
+        // Get field options if they exist
+        const fieldOptions = (field as any).fieldOptions || {};
 
-        // Log the full system and user messages for debugging
-        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] System message: ${requestPayload.messages[0].content}`);
-        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] User message: ${prompt}`);
-      }
+        // Extract important properties from field options
+        const extractionType = fieldOptions.extractionType || 'text';
+        const attributeName = fieldOptions.attributeName || '';
+        const aiProcessingMode = fieldOptions.aiProcessingMode || 'standard';
+        const threadManagement = fieldOptions.threadManagement || 'shared';
 
-      // Log the OpenAI request in debug mode
-      if (isDebugMode && logger) {
-        // Extract schema information that might be in different formats
-        const functionSchema = requestPayload.functions ?
-          requestPayload.functions[0]?.parameters :
-          requestPayload.tools && requestPayload.tools[0]?.function?.parameters;
+        // Check for reference content from enhanced fields
+        const referenceContent = (field as any).referenceContent;
+        const returnDirectAttribute = (field as any).returnDirectAttribute === true;
 
-        // First add a VERY visible marker in the logs using error level instead of info
-        logger.error(
-          formatOperationLog(
-            'aiProcessing',
-            nodeName,
-            nodeId,
-            index,
-            `!!! OPENAI REQUEST DEBUGGING !!! Debug mode is ON. About to send request to ${options.aiModel}`
-          )
-        );
+        // Log field options in debug mode
+        if (isDebugMode) {
+          console.error(
+            `!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] ` +
+            `Field "${field.name}" options: extractionType=${extractionType}, ` +
+            `attributeName=${attributeName}, aiMode=${aiProcessingMode}, ` +
+            `threadMode=${threadManagement}, hasRefContent=${!!referenceContent}`
+          );
+        }
 
-        // Also add console.error for maximum visibility
-        console.error(`!!!! OPENAI DEBUG - ${nodeName}/${nodeId} - Sending request to ${options.aiModel}`);
-
-        // Create a safe copy of the payload for logging that doesn't include the full messages
-        const loggablePayload = {
-          model: requestPayload.model,
-          response_format: requestPayload.response_format,
-          system_message_length: requestPayload.messages[0].content.length,
-          user_message_length: requestPayload.messages[1].content.length,
-          // Include the FULL prompt for debugging - not just a preview
-          prompt_full: prompt,
-          // Include information about functions or tools if present
-          has_functions: !!requestPayload.functions,
-          has_tools: !!requestPayload.tools,
-          function_count: requestPayload.functions?.length || 0,
-          tool_count: requestPayload.tools?.length || 0
+        return {
+          name: field.name,
+          type: field.type || 'string',
+          instructions: field.instructions || '', // Instructions must be non-optional
+          format: 'default', // Add required format property
+          // Pass critical field options
+          useLogicAnalysis: aiProcessingMode === 'logical', // Use logic analysis assistant
+          useSeparateThread: threadManagement === 'separate', // Use separate thread
+          // Preserve extraction properties for aiService's reference
+          extractionType,
+          attributeName,
+          // Preserve any reference content and attribute flags
+          referenceContent,
+          returnDirectAttribute
         };
-
-        logger.error(
-          formatOperationLog(
-            'aiProcessing',
-            nodeName,
-            nodeId,
-            index,
-            `!!! OpenAI API Request: ${JSON.stringify(loggablePayload, null, 2)}`
-          )
-        );
-
-        // If there's a schema defined in functions, log it
-        if (requestPayload.functions && requestPayload.functions.length > 0) {
-          logger.error(
-            formatOperationLog(
-              'aiProcessing',
-              nodeName,
-              nodeId,
-              index,
-              `OpenAI API Function Schema: ${JSON.stringify(requestPayload.functions, null, 2)}`
-            )
-          );
-        }
-
-        // If there are tools defined, log them
-        if (requestPayload.tools && requestPayload.tools.length > 0) {
-          logger.error(
-            formatOperationLog(
-              'aiProcessing',
-              nodeName,
-              nodeId,
-              index,
-              `OpenAI API Tools Schema: ${JSON.stringify(requestPayload.tools, null, 2)}`
-            )
-          );
-        }
-      }
-
-      // Direct debug log right before the API call
-      if (isDebugMode) {
-        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Calling OpenAI completions API NOW`);
-      }
-
-      // Create completion with OpenAI
-      const response = await openai.chat.completions.create(requestPayload);
-
-      // Direct debug log right after the API call
-      if (isDebugMode) {
-        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Received response from OpenAI API`);
-      }
-
-      // Log the response in debug mode
-      if (isDebugMode && logger) {
-        // Create a safe copy of the response for logging (without too much detail)
-        const loggableResponse = {
-          id: response.id,
-          object: response.object,
-          created: response.created,
-          model: response.model,
-          choices_count: response.choices?.length || 0,
-          usage: response.usage,
-        };
-
-        logger.error(
-          formatOperationLog(
-            'aiProcessing',
-            nodeName,
-            nodeId,
-            index,
-            `!!! OpenAI API Response: ${JSON.stringify(loggableResponse, null, 2)}`
-          )
-        );
-
-        // Log the FULL content response for debugging
-        if (response.choices && response.choices.length > 0) {
-          const contentFull = response.choices[0].message.content || '';
-          logger.error(
-            formatOperationLog(
-              'aiProcessing',
-              nodeName,
-              nodeId,
-              index,
-              `OpenAI Response Content FULL: ${contentFull}`
-            )
-          );
-        }
-
-        // Also log directly to console for maximum visibility
-        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Response received with ID: ${response.id}, ${response.choices?.length || 0} choices`);
-        if (response.choices && response.choices.length > 0 && response.choices[0].message.content) {
-          console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] FULL Response content: ${response.choices[0].message.content}`);
-        }
-      }
-
-      // Check if we have a valid response
-      if (!response.choices || response.choices.length === 0) {
-        throw new Error('Invalid response from OpenAI API');
-      }
-
-      const aiResponse = response.choices[0].message.content;
-      if (!aiResponse) {
-        throw new Error('Empty response from OpenAI API');
-      }
-
-      // Parse the JSON response
-      let parsedResponse;
-      try {
-        parsedResponse = JSON.parse(aiResponse);
-      } catch (error) {
-        // If the response is not valid JSON, try to extract JSON from the text
-        // This handles cases where the model might include explanations
-        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            parsedResponse = JSON.parse(jsonMatch[0]);
-          } catch {
-            throw new Error(`Failed to parse AI response as JSON: ${(error as Error).message}`);
-          }
-        } else {
-          throw new Error(`Failed to parse AI response as JSON: ${(error as Error).message}`);
-        }
-      }
-
-      // Extract data and schema from the response
-      let data = parsedResponse.data || parsedResponse;
-      const schema = parsedResponse.schema;
-
-      // If we have a schema and this is manual mode with fields, enrich the schema with field descriptions
-      let enrichedSchema = schema;
-      if (schema) {
-        if (options.strategy === 'manual' && fields.length > 0) {
-          enrichedSchema = enrichSchemaWithFieldDescriptions(schema, fields);
-        }
-
-        // If we have attribute information in the reference content, add it to the schema
-        if (options.referenceContent && options.referenceContent.includes('has ') && typeof enrichedSchema === 'object') {
-          // Add attribute information to schema description if present
-          const attributeMatch = options.referenceContent.match(/has (\w+) = "([^"]*)"/);
-          if (attributeMatch && attributeMatch.length >= 3) {
-            const [, attributeName, attributeValue] = attributeMatch;
-
-            // Add attribute information to the schema description
-            if (enrichedSchema.type === 'object' && enrichedSchema.properties) {
-              // Find properties that might be related to this attribute
-              Object.keys(enrichedSchema.properties).forEach(key => {
-                // If property name contains words related to the attribute (URL, link, etc.)
-                if (
-                  (attributeName === 'href' && /url|link|href/i.test(key)) ||
-                  (attributeName === 'src' && /src|image|picture|source/i.test(key)) ||
-                  key.toLowerCase().includes(attributeName.toLowerCase())
-                ) {
-                  // Add attribute information to the property description
-                  const propDesc = enrichedSchema.properties[key].description || '';
-                  if (!propDesc.includes(`${attributeName} attribute`)) {
-                    enrichedSchema.properties[key].description =
-                      `${propDesc}${propDesc ? ' ' : ''}This value may come from the ${attributeName} attribute with value: "${attributeValue}".`;
-                  }
-                }
-              });
-            }
-          }
-        }
-      }
-
-      // Log success
-      logger?.info(
-        formatOperationLog(
-          'aiProcessing',
-          nodeName,
-          nodeId,
-          index,
-          `AI processing completed successfully with model ${options.aiModel}`
-        )
-      );
-
-      // Log the schema if present and debug mode is enabled
-      if (isDebugMode && logger && enrichedSchema) {
-        logger.error(
-          formatOperationLog(
-            'aiProcessing',
-            nodeName,
-            nodeId,
-            index,
-            `OpenAI Response Schema FULL: ${JSON.stringify(enrichedSchema, null, 2)}`
-          )
-        );
-
-        // Log the field descriptions separately for easier debugging
-        if (enrichedSchema.type === 'object' && enrichedSchema.properties) {
-          const fieldDescriptions = Object.keys(enrichedSchema.properties).reduce((acc, key) => {
-            acc[key] = enrichedSchema.properties[key].description || 'No description';
-            return acc;
-          }, {} as Record<string, string>);
-
-          logger.error(
-            formatOperationLog(
-              'aiProcessing',
-              nodeName,
-              nodeId,
-              index,
-              `Schema Field Descriptions: ${JSON.stringify(fieldDescriptions, null, 2)}`
-            )
-          );
-        }
-      }
-
-      return {
-        success: true,
-        data,
-        schema: enrichedSchema,
-      };
-    } catch (error) {
-      // Handle OpenAI API errors specifically
-      if (error.response && error.response.status) {
-        const statusCode = error.response.status;
-        const message = error.response.data?.error?.message || 'Unknown OpenAI API error';
-        throw new Error(`OpenAI API error (${statusCode}): ${message}`);
-      }
-      // Re-throw other errors
-      throw error;
+      });
+      aiOptions.fields = convertedFields;
     }
+
+    // Log that we're using the AIService
+    if (isDebugMode) {
+      console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Using AIService.processContent with ${fields.length} fields`);
+    }
+
+    // Process content with AIService
+    const result = await aiService.processContent(contentString, aiOptions);
+
+    return {
+      success: result.success,
+      data: result.data,
+      schema: result.schema,
+      error: result.error,
+    };
   } catch (error) {
     const errorMessage = `AI processing failed: ${(error as Error).message}`;
     logger?.error(formatOperationLog('aiProcessing', nodeName, nodeId, index, errorMessage));

@@ -877,8 +877,8 @@ export async function execute(
 		console.error(`>>> OpenAI API KEY available: ${!!openAiApiKey} (length: ${openAiApiKey?.length || 0})`);
 		console.error(`>>> Debug flags: debugMode=${debugMode}`);
 
-		// Make it clear we're using OpenAI Chat Completions API, not Assistants API
-		console.error(`[EXTRACT NODE DEBUG] IMPORTANT: Using OpenAI Chat Completions API (not Assistants API)`);
+		// Make it clear we're using OpenAI Assistants API
+		console.error(`[EXTRACT NODE DEBUG] IMPORTANT: Using OpenAI Assistants API with the AIService implementation`);
 
 		if (openAiApiKey) {
 			this.logger.error(
@@ -887,7 +887,7 @@ export async function execute(
 					nodeName,
 					nodeId,
 					index,
-					`Using OpenAI Chat Completions API with valid API key (${openAiApiKey.length} chars)`
+					`Using OpenAI Assistants API with valid API key (${openAiApiKey.length} chars)`
 				),
 			);
 		} else {

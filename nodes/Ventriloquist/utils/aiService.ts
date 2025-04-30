@@ -142,7 +142,7 @@ export class AIService {
     // Log debug mode state at the start of processing
     if (options.debugMode) {
       console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] Starting AI processing with debug mode enabled`);
-      console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] IMPORTANT: Using OpenAI Chat Completions API, NOT Assistants API`);
+      console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] IMPORTANT: Using OpenAI Assistants API with IDs: auto=${ASSISTANTS.auto}, manual=${ASSISTANTS.manual}`);
     }
 
     try {
@@ -156,14 +156,14 @@ export class AIService {
         )
       );
 
-      // Explicitly log that we're using Chat Completions API
+      // Explicitly log that we're using Assistants API
       this.logger.info(
         formatOperationLog(
           "SmartExtraction",
           nodeName,
           nodeId,
           index,
-          `Using OpenAI Chat Completions API (not Assistants API) with model ${options.model}`
+          `Using OpenAI Assistants API with ID ${options.strategy === 'auto' ? ASSISTANTS.auto : ASSISTANTS.manual} and model ${options.model}`
         )
       );
 
@@ -241,7 +241,7 @@ export class AIService {
         )
       );
 
-      // Log that we're using Chat Completions API, not the Assistants API referenced in the constants
+      // Log that we're using Assistants API with the provided constants
       if (isDebugMode) {
         this.logger.error(
           formatOperationLog(
@@ -249,10 +249,10 @@ export class AIService {
             nodeName,
             nodeId,
             index,
-            `NOTE: Despite 'ASSISTANTS' constant in code, we're using OpenAI Chat Completions API with model: ${options.model}`
+            `Using OpenAI Assistants API with assistant ID: ${ASSISTANTS.auto} for automatic extraction`
           )
         );
-        console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] Auto strategy uses Chat Completions API with model: ${options.model}`);
+        console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] Auto strategy uses OpenAI Assistants API with ID: ${ASSISTANTS.auto}`);
       }
 
       // Create a new thread (no tracking or management, just create a fresh one)
@@ -426,7 +426,7 @@ export class AIService {
         )
       );
 
-      // Log that we're using Chat Completions API, not the Assistants API referenced in the constants
+      // Log that we're using Assistants API with field-by-field extraction
       if (isDebugMode) {
         this.logger.error(
           formatOperationLog(
@@ -434,10 +434,10 @@ export class AIService {
             nodeName,
             nodeId,
             index,
-            `NOTE: Despite 'ASSISTANTS' constant in code, we're using OpenAI Chat Completions API with model: ${options.model}`
+            `Using OpenAI Assistants API for field-by-field extraction with IDs: manual=${ASSISTANTS.manual}, logic=${ASSISTANTS.logic}`
           )
         );
-        console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] Manual strategy uses Chat Completions API with model: ${options.model}`);
+        console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] Manual strategy uses OpenAI Assistants API with IDs: manual=${ASSISTANTS.manual}, logic=${ASSISTANTS.logic}`);
       }
 
       // Clone fields array to avoid modifying the original
