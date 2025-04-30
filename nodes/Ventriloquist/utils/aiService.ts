@@ -142,6 +142,7 @@ export class AIService {
     // Log debug mode state at the start of processing
     if (options.debugMode) {
       console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] Starting AI processing with debug mode enabled`);
+      console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] IMPORTANT: Using OpenAI Chat Completions API, NOT Assistants API`);
     }
 
     try {
@@ -152,6 +153,17 @@ export class AIService {
           nodeId,
           index,
           `Processing content with AI (strategy: ${options.strategy}, model: ${options.model}, debugMode: ${options.debugMode === true})`
+        )
+      );
+
+      // Explicitly log that we're using Chat Completions API
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Using OpenAI Chat Completions API (not Assistants API) with model ${options.model}`
         )
       );
 
@@ -228,6 +240,20 @@ export class AIService {
           "Using Auto strategy - AI will determine data structure"
         )
       );
+
+      // Log that we're using Chat Completions API, not the Assistants API referenced in the constants
+      if (isDebugMode) {
+        this.logger.error(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `NOTE: Despite 'ASSISTANTS' constant in code, we're using OpenAI Chat Completions API with model: ${options.model}`
+          )
+        );
+        console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] Auto strategy uses Chat Completions API with model: ${options.model}`);
+      }
 
       // Create a new thread (no tracking or management, just create a fresh one)
       const thread = await this.openai.beta.threads.create();
@@ -396,9 +422,23 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          "Using Manual strategy - processing field-by-field"
+          "Using Manual strategy - extracting specific fields"
         )
       );
+
+      // Log that we're using Chat Completions API, not the Assistants API referenced in the constants
+      if (isDebugMode) {
+        this.logger.error(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `NOTE: Despite 'ASSISTANTS' constant in code, we're using OpenAI Chat Completions API with model: ${options.model}`
+          )
+        );
+        console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] Manual strategy uses Chat Completions API with model: ${options.model}`);
+      }
 
       // Clone fields array to avoid modifying the original
       const fields = options.fields ? [...options.fields] : [];

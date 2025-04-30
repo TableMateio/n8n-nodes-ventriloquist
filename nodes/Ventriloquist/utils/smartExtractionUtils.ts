@@ -472,6 +472,10 @@ Always respond with valid JSON. Do not include code blocks or explanations in yo
       if (isDebugMode) {
         console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] About to send request to ${options.aiModel}`);
         console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Request: model=${requestPayload.model}, messages=${requestPayload.messages.length}`);
+
+        // Log the full system and user messages for debugging
+        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] System message: ${requestPayload.messages[0].content}`);
+        console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] User message: ${prompt}`);
       }
 
       // Log the OpenAI request in debug mode
@@ -501,8 +505,8 @@ Always respond with valid JSON. Do not include code blocks or explanations in yo
           response_format: requestPayload.response_format,
           system_message_length: requestPayload.messages[0].content.length,
           user_message_length: requestPayload.messages[1].content.length,
-          // Include part of the prompt for debugging but not the whole thing
-          prompt_preview: prompt.substring(0, 200) + (prompt.length > 200 ? '...' : ''),
+          // Include the FULL prompt for debugging - not just a preview
+          prompt_full: prompt,
           // Include information about functions or tools if present
           has_functions: !!requestPayload.functions,
           has_tools: !!requestPayload.tools,
@@ -582,22 +586,25 @@ Always respond with valid JSON. Do not include code blocks or explanations in yo
           )
         );
 
-        // Log a preview of the content
+        // Log the FULL content response for debugging
         if (response.choices && response.choices.length > 0) {
-          const contentPreview = response.choices[0].message.content || '';
+          const contentFull = response.choices[0].message.content || '';
           logger.error(
             formatOperationLog(
               'aiProcessing',
               nodeName,
               nodeId,
               index,
-              `OpenAI Response Content Preview: ${contentPreview.substring(0, 200)}${contentPreview.length > 200 ? '...' : ''}`
+              `OpenAI Response Content FULL: ${contentFull}`
             )
           );
         }
 
         // Also log directly to console for maximum visibility
         console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] Response received with ID: ${response.id}, ${response.choices?.length || 0} choices`);
+        if (response.choices && response.choices.length > 0 && response.choices[0].message.content) {
+          console.error(`!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] FULL Response content: ${response.choices[0].message.content}`);
+        }
       }
 
       // Check if we have a valid response
@@ -683,15 +690,33 @@ Always respond with valid JSON. Do not include code blocks or explanations in yo
 
       // Log the schema if present and debug mode is enabled
       if (isDebugMode && logger && enrichedSchema) {
-        logger.info(
+        logger.error(
           formatOperationLog(
             'aiProcessing',
             nodeName,
             nodeId,
             index,
-            `OpenAI Response Schema: ${JSON.stringify(enrichedSchema, null, 2)}`
+            `OpenAI Response Schema FULL: ${JSON.stringify(enrichedSchema, null, 2)}`
           )
         );
+
+        // Log the field descriptions separately for easier debugging
+        if (enrichedSchema.type === 'object' && enrichedSchema.properties) {
+          const fieldDescriptions = Object.keys(enrichedSchema.properties).reduce((acc, key) => {
+            acc[key] = enrichedSchema.properties[key].description || 'No description';
+            return acc;
+          }, {} as Record<string, string>);
+
+          logger.error(
+            formatOperationLog(
+              'aiProcessing',
+              nodeName,
+              nodeId,
+              index,
+              `Schema Field Descriptions: ${JSON.stringify(fieldDescriptions, null, 2)}`
+            )
+          );
+        }
       }
 
       return {

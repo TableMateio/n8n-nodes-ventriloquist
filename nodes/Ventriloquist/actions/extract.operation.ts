@@ -875,7 +875,32 @@ export async function execute(
 		// Explicitly mark the beginning of a debug session
 		console.error(`[EXTRACT NODE DEBUG] Debug mode ON for ${nodeName}/${nodeId} - OpenAI requests will be logged`);
 		console.error(`>>> OpenAI API KEY available: ${!!openAiApiKey} (length: ${openAiApiKey?.length || 0})`);
-		console.error(`>>> Debug flags: debugMode=${debugMode}}`);
+		console.error(`>>> Debug flags: debugMode=${debugMode}`);
+
+		// Make it clear we're using OpenAI Chat Completions API, not Assistants API
+		console.error(`[EXTRACT NODE DEBUG] IMPORTANT: Using OpenAI Chat Completions API (not Assistants API)`);
+
+		if (openAiApiKey) {
+			this.logger.error(
+				formatOperationLog(
+					"Extract",
+					nodeName,
+					nodeId,
+					index,
+					`Using OpenAI Chat Completions API with valid API key (${openAiApiKey.length} chars)`
+				),
+			);
+		} else {
+			this.logger.error(
+				formatOperationLog(
+					"Extract",
+					nodeName,
+					nodeId,
+					index,
+					`No OpenAI API key provided - AI processing will be skipped`
+				),
+			);
+		}
 	}
 
 	try {
