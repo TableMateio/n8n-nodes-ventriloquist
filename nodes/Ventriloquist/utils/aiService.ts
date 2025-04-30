@@ -216,7 +216,11 @@ export class AIService {
             `Using OpenAI Assistants API with assistant ID: ${ASSISTANTS.auto} for automatic extraction`
           )
         );
-        console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] Auto strategy uses OpenAI Assistants API with ID: ${ASSISTANTS.auto}`);
+        this.logDebug(
+          `Auto strategy uses OpenAI Assistants API with ID: ${ASSISTANTS.auto}`,
+          'info',
+          'processAutoStrategy'
+        );
       }
 
       // Create a new thread (no tracking or management, just create a fresh one)
@@ -251,7 +255,11 @@ export class AIService {
         );
 
         // Also add console.error for maximum visibility
-        console.error(`!!!! OPENAI ASSISTANT DEBUG - ${nodeName}/${nodeId} - Sending Assistant API request`);
+        this.logDebug(
+          `!!!! OPENAI ASSISTANT DEBUG - ${nodeName}/${nodeId} - Sending Assistant API request`,
+          'info',
+          'processAutoStrategy'
+        );
 
         this.logger.error(
           formatOperationLog(
@@ -401,7 +409,11 @@ export class AIService {
             `Using OpenAI Assistants API for field-by-field extraction with IDs: manual=${ASSISTANTS.manual}, logic=${ASSISTANTS.logic}`
           )
         );
-        console.error(`!!! AISERVICE DEBUG !!! [${nodeName}/${nodeId}] Manual strategy uses OpenAI Assistants API with IDs: manual=${ASSISTANTS.manual}, logic=${ASSISTANTS.logic}`);
+        this.logDebug(
+          `Manual strategy uses OpenAI Assistants API with IDs: manual=${ASSISTANTS.manual}, logic=${ASSISTANTS.logic}`,
+          'info',
+          'processManualStrategy'
+        );
       }
 
       // Clone fields array to avoid modifying the original
@@ -787,12 +799,27 @@ export class AIService {
 
     // Add reference context if available
     if (options.includeReferenceContext && options.referenceContent) {
-      prompt += `\nREFERENCE CONTEXT (${options.referenceName || 'referenceContext'}):\n${options.referenceContent}\n\n`;
-      console.log(`=== [buildManualPrompt] Adding reference context ===`);
-      console.log(`Reference name: ${options.referenceName || 'referenceContext'}`);
-      console.log(`Reference content: ${options.referenceContent}`);
+      this.logDebug(
+        `Adding reference context to prompt`,
+        'debug',
+        'buildManualPrompt'
+      );
+      this.logDebug(
+        `Reference name: ${options.referenceName || 'referenceContext'}`,
+        'debug',
+        'buildManualPrompt'
+      );
+      this.logDebug(
+        `Reference content: ${options.referenceContent.substring(0, 100)}${options.referenceContent.length > 100 ? '...' : ''}`,
+        'debug',
+        'buildManualPrompt'
+      );
     } else if (options.includeReferenceContext) {
-      console.log(`=== [buildManualPrompt] Reference context enabled but content is empty ===`);
+      this.logDebug(
+        `Reference context enabled but content is empty`,
+        'debug',
+        'buildManualPrompt'
+      );
     }
 
     // Add the main content
@@ -954,7 +981,16 @@ ${examplesSection}
     }
 
     // Debug the input data
-    console.log('GENERATING SCHEMA FOR DATA:', JSON.stringify(data, null, 2));
+    this.logDebug(
+      'GENERATING SCHEMA FOR DATA:',
+      'debug',
+      'generateSchema'
+    );
+    this.logDebug(
+      JSON.stringify(data, null, 2),
+      'debug',
+      'generateSchema'
+    );
 
     if (Array.isArray(data)) {
       let schema: any = { type: 'array' };
@@ -999,7 +1035,16 @@ ${examplesSection}
       }
 
       // Debug the generated object schema
-      console.log('GENERATED OBJECT SCHEMA:', JSON.stringify(schema, null, 2));
+      this.logDebug(
+        'GENERATED OBJECT SCHEMA:',
+        'debug',
+        'generateSchema'
+      );
+      this.logDebug(
+        JSON.stringify(schema, null, 2),
+        'debug',
+        'generateSchema'
+      );
       return schema;
     }
 
@@ -1019,7 +1064,16 @@ ${examplesSection}
     schema.description = `A ${type} value`;
 
     // Debug the generated primitive schema
-    console.log('GENERATED PRIMITIVE SCHEMA:', JSON.stringify(schema, null, 2));
+    this.logDebug(
+      'GENERATED PRIMITIVE SCHEMA:',
+      'debug',
+      'generateSchema'
+    );
+    this.logDebug(
+      JSON.stringify(schema, null, 2),
+      'debug',
+      'generateSchema'
+    );
     return schema;
   }
 
@@ -1065,19 +1119,51 @@ ${examplesSection}
       );
 
       // TEMPORARY DEBUG: Log more detailed field info
-      console.error(`[DEBUG] SCHEMA GENERATION - Field: "${field.name}"`);
-      console.error(`[DEBUG] Field type: ${field.type}`);
-      console.error(`[DEBUG] Instructions length: ${field.instructions?.length || 0}`);
-      console.error(`[DEBUG] Instructions preview: "${field.instructions?.substring(0, 150)}${field.instructions?.length > 150 ? '...' : ''}"`);
-      console.error(`[DEBUG] Field properties: ${Object.keys(field).join(', ')}`);
+      this.logDebug(
+        `SCHEMA GENERATION - Field: "${field.name}"`,
+        'debug',
+        'generateOpenAISchema'
+      );
+      this.logDebug(
+        `Field type: ${field.type}`,
+        'debug',
+        'generateOpenAISchema'
+      );
+      this.logDebug(
+        `Instructions length: ${field.instructions?.length || 0}`,
+        'debug',
+        'generateOpenAISchema'
+      );
+      this.logDebug(
+        `Instructions preview: "${field.instructions?.substring(0, 150)}${field.instructions?.length > 150 ? '...' : ''}"`,
+        'debug',
+        'generateOpenAISchema'
+      );
+      this.logDebug(
+        `Field properties: ${Object.keys(field).join(', ')}`,
+        'debug',
+        'generateOpenAISchema'
+      );
 
       // Check for reference content (from IExtendedField)
       const extendedField = field as IExtendedField;
       if (extendedField.referenceContent) {
-        console.error(`[DEBUG] Has reference content: YES, length=${extendedField.referenceContent.length}`);
-        console.error(`[DEBUG] Is direct attribute: ${extendedField.returnDirectAttribute === true ? 'YES' : 'NO'}`);
+        this.logDebug(
+          `Has reference content: YES, length=${extendedField.referenceContent.length}`,
+          'debug',
+          'generateOpenAISchema'
+        );
+        this.logDebug(
+          `Is direct attribute: ${extendedField.returnDirectAttribute === true ? 'YES' : 'NO'}`,
+          'debug',
+          'generateOpenAISchema'
+        );
       } else {
-        console.error(`[DEBUG] Has reference content: NO`);
+        this.logDebug(
+          `Has reference content: NO`,
+          'debug',
+          'generateOpenAISchema'
+        );
       }
     });
 

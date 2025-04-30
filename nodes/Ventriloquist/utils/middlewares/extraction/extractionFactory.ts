@@ -377,7 +377,16 @@ export class BasicExtraction implements IExtraction {
           const extractAttributes = this.config.extractAttributes === true;
           const attributeName = this.config.attributeName || 'href';
 
-          logger.info(`${logPrefix} Table extraction starting: selector=${this.config.selector}, rowSelector=${rowSelector}, cellSelector=${cellSelector}, includeHeaders=${includeHeaders}, outputFormat=${tableOutputFormat}, extractAttributes=${extractAttributes}`);
+          logWithDebug(
+            logger,
+            this.config.debugMode || false,
+            this.context.nodeName,
+            'Extraction',
+            'extractionFactory',
+            'execute',
+            `Table extraction starting: selector=${this.config.selector}, rowSelector=${rowSelector}, cellSelector=${cellSelector}, includeHeaders=${includeHeaders}, outputFormat=${tableOutputFormat}, extractAttributes=${extractAttributes}`,
+            'info'
+          );
 
           try {
             if (tableOutputFormat === 'html') {
@@ -389,7 +398,16 @@ export class BasicExtraction implements IExtraction {
               logger.info(`${logPrefix} Table HTML extracted successfully, length: ${data.length}`);
             } else {
               // Extract as array of rows and cells
-              logger.info(`${logPrefix} Extracting table as structured data`);
+              logWithDebug(
+                logger,
+                this.config.debugMode || false,
+                this.context.nodeName,
+                'Extraction',
+                'extractionFactory',
+                'execute',
+                `Extracting table as structured data`,
+                'info'
+              );
 
               // First check if the selector exists
               const tableExists = await this.page.$(this.config.selector);
@@ -425,7 +443,16 @@ export class BasicExtraction implements IExtraction {
                 nodeId || 'unknown'
               );
 
-              logger.info(`${logPrefix} Table data extracted: ${Array.isArray(data) ? data.length : 'object'} rows found`);
+              logWithDebug(
+                logger,
+                this.config.debugMode || false,
+                this.context.nodeName,
+                'Extraction',
+                'extractionFactory',
+                'execute',
+                `Table data extracted: ${Array.isArray(data) ? data.length : 'object'} rows found`,
+                'info'
+              );
             }
           } catch (err) {
             logger.error(`${logPrefix} Table extraction failed: ${(err as Error).message}`);
@@ -545,7 +572,16 @@ export class BasicExtraction implements IExtraction {
       // Apply AI formatting if enabled and API key is provided
       if (this.config.smartOptions?.aiAssistance === true && this.config.openaiApiKey) {
         // Log the presence of the API key for debugging
-        logger.info(`${logPrefix} Using OpenAI API key for AI processing. Key length: ${this.config.openaiApiKey.length}`);
+        logWithDebug(
+          logger,
+          this.config.debugMode || false,
+          this.context.nodeName,
+          'Extraction',
+          'extractionFactory',
+          'execute',
+          `Using OpenAI API key for AI processing. Key length: ${this.config.openaiApiKey.length}`,
+          'info'
+        );
 
         // Log debug mode state for maximum visibility
         const isDebugMode = this.config.smartOptions.debugMode === true;
@@ -591,8 +627,26 @@ export class BasicExtraction implements IExtraction {
           debugMode: isDebugMode  // Pass debug mode flag explicitly
         };
 
-        logger.info(`${logPrefix} Applying AI formatting with ${aiFormattingOptions.strategy} strategy, format: ${aiFormattingOptions.extractionFormat}`);
-        logger.info(`${logPrefix} AI options: includeSchema=${aiFormattingOptions.includeSchema}, includeRawData=${aiFormattingOptions.includeRawData}, debugMode=${aiFormattingOptions.debugMode}`);
+        logWithDebug(
+          logger,
+          this.config.debugMode || false,
+          this.context.nodeName,
+          'Extraction',
+          'extractionFactory',
+          'execute',
+          `Applying AI formatting with ${aiFormattingOptions.strategy} strategy, format: ${aiFormattingOptions.extractionFormat}`,
+          'info'
+        );
+        logWithDebug(
+          logger,
+          this.config.debugMode || false,
+          this.context.nodeName,
+          'Extraction',
+          'extractionFactory',
+          'execute',
+          `AI options: includeSchema=${aiFormattingOptions.includeSchema}, includeRawData=${aiFormattingOptions.includeRawData}, debugMode=${aiFormattingOptions.debugMode}`,
+          'info'
+        );
 
         // Direct console log if debug mode is enabled
         if (isDebugMode) {
@@ -646,11 +700,29 @@ export class BasicExtraction implements IExtraction {
 
           // Check if AI processing was successful
           if (aiResult.success) {
-            logger.info(`${logPrefix} AI formatting successful`);
+            logWithDebug(
+              logger,
+              this.config.debugMode || false,
+              this.context.nodeName,
+              'Extraction',
+              'extractionFactory',
+              'execute',
+              `AI formatting successful`,
+              'info'
+            );
 
             // Make sure we return the schema even if there's no data
             if (aiResult.schema) {
-              logger.info(`${logPrefix} Schema provided by AI processing, including in result`);
+              logWithDebug(
+                logger,
+                this.config.debugMode || false,
+                this.context.nodeName,
+                'Extraction',
+                'extractionFactory',
+                'execute',
+                `Schema provided by AI processing, including in result`,
+                'info'
+              );
             }
 
             return {
@@ -661,7 +733,16 @@ export class BasicExtraction implements IExtraction {
             };
           } else {
             // Log AI processing error but return original content
-            logger.warn(`${logPrefix} AI formatting failed: ${aiResult.error}. Returning original extracted content.`);
+            logWithDebug(
+              logger,
+              this.config.debugMode || false,
+              this.context.nodeName,
+              'Extraction',
+              'extractionFactory',
+              'execute',
+              `AI formatting failed: ${aiResult.error}. Returning original extracted content.`,
+              'warning'
+            );
             return {
               success: true,
               data,
@@ -670,7 +751,16 @@ export class BasicExtraction implements IExtraction {
           }
         } catch (error) {
           // If AI processing fails, log the error but continue with the original data
-          logger.error(`${logPrefix} AI processing error: ${(error as Error).message}`);
+          logWithDebug(
+            logger,
+            this.config.debugMode || false,
+            this.context.nodeName,
+            'Extraction',
+            'extractionFactory',
+            'execute',
+            `AI processing error: ${(error as Error).message}`,
+            'error'
+          );
           return {
             success: true,
             data,
@@ -683,7 +773,16 @@ export class BasicExtraction implements IExtraction {
         }
       } else if (this.config.smartOptions?.aiAssistance === true) {
         // Log that we're missing the API key
-        logger.warn(`${logPrefix} AI processing was requested but no OpenAI API key was provided`);
+        logWithDebug(
+          logger,
+          this.config.debugMode || false,
+          this.context.nodeName,
+          'Extraction',
+          'extractionFactory',
+          'execute',
+          `AI processing was requested but no OpenAI API key was provided`,
+          'warning'
+        );
       }
 
       return {

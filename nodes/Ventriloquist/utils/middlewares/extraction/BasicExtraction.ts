@@ -8,6 +8,7 @@ import { formatOperationLog } from '../../resultUtils';
 import { extractTextContent, extractHtmlContent, extractAttributeValue, extractTableData, extractMultipleElements, extractInputValue } from '../../extractionUtils';
 import { processWithAI } from '../../smartExtractionUtils';
 import { enhanceFieldsWithRelativeSelectorContent } from '../../processOpenAISchema';
+import { logWithDebug } from '../../../loggingUtils';
 
 /**
  * Implements basic extraction functionality for common operations
@@ -116,13 +117,40 @@ export class BasicExtraction implements IExtraction {
           // Log if debug mode is enabled
           if (smartOptions.debugMode) {
             logger.info(`${logPrefix} AI extraction starting with debug mode enabled`);
-            console.error(`[EXTRACTION FACTORY DEBUG] AI processing requested with debug mode ON in ${nodeName}/${nodeId}`);
+            logWithDebug(
+              this.context.logger,
+              this.config.debugMode || false,
+              nodeName,
+              'Extraction',
+              'BasicExtraction',
+              'processWithAI',
+              `AI processing requested with debug mode ON in ${nodeName}/${nodeId}`,
+              'error'
+            );
 
             // Log if OpenAI API key is available
             if (this.config.openaiApiKey) {
-              console.error(`[EXTRACTION FACTORY DEBUG] OpenAI API key available (length: ${this.config.openaiApiKey.length})`);
+              logWithDebug(
+                this.context.logger,
+                this.config.debugMode || false,
+                nodeName,
+                'Extraction',
+                'BasicExtraction',
+                'processWithAI',
+                `OpenAI API key available (length: ${this.config.openaiApiKey.length})`,
+                'info'
+              );
             } else {
-              console.error(`[EXTRACTION FACTORY DEBUG] No OpenAI API key provided - AI processing will fail`);
+              logWithDebug(
+                this.context.logger,
+                this.config.debugMode || false,
+                nodeName,
+                'Extraction',
+                'BasicExtraction',
+                'processWithAI',
+                'No OpenAI API key provided - AI processing will fail',
+                'error'
+              );
             }
           }
 
@@ -155,7 +183,16 @@ export class BasicExtraction implements IExtraction {
             }
 
             // Log when we're calling the AI service
-            console.error(`[EXTRACTION FACTORY DEBUG] Calling processWithAI with model ${smartOptions.aiModel}`);
+            logWithDebug(
+              this.context.logger,
+              this.config.debugMode || false,
+              nodeName,
+              'Extraction',
+              'BasicExtraction',
+              'processWithAI',
+              `Calling processWithAI with model ${smartOptions.aiModel}`,
+              'info'
+            );
 
             const smartResult = await processWithAI(
               content,
@@ -292,9 +329,27 @@ export class BasicExtraction implements IExtraction {
 
                   // If in debug mode, log more details
                   if (this.config.smartOptions.debugMode) {
-                    console.error(`[EXTRACTION FACTORY DEBUG] Found ${fieldsWithPotentialSelectors.length} fields that might need relative selector enhancement`);
+                    logWithDebug(
+                      this.context.logger,
+                      this.config.debugMode || false,
+                      nodeName,
+                      'Extraction',
+                      'BasicExtraction',
+                      'processWithAI',
+                      `Found ${fieldsWithPotentialSelectors.length} fields that might need relative selector enhancement`,
+                      'info'
+                    );
                     fieldsWithPotentialSelectors.forEach(field => {
-                      console.error(`[EXTRACTION FACTORY DEBUG] Field "${field.name}" might need enhancement based on instructions: "${field.instructions.substring(0, 50)}..."`);
+                      logWithDebug(
+                        this.context.logger,
+                        this.config.debugMode || false,
+                        nodeName,
+                        'Extraction',
+                        'BasicExtraction',
+                        'processWithAI',
+                        `Field "${field.name}" might need enhancement based on instructions: "${field.instructions.substring(0, 50)}..."`,
+                        'info'
+                      );
                     });
                   }
 
@@ -326,7 +381,16 @@ export class BasicExtraction implements IExtraction {
                       }
 
                       if (this.config.smartOptions.debugMode && (field.relativeSelectorOptional || field.attributeName)) {
-                        console.error(`[EXTRACTION FACTORY DEBUG] Extracted selector "${field.relativeSelectorOptional}" and attribute "${field.attributeName}" for field "${field.name}"`);
+                        logWithDebug(
+                          this.context.logger,
+                          this.config.debugMode || false,
+                          nodeName,
+                          'Extraction',
+                          'BasicExtraction',
+                          'processWithAI',
+                          `Extracted selector "${field.relativeSelectorOptional}" and attribute "${field.attributeName}" for field "${field.name}"`,
+                          'info'
+                        );
                       }
                     }
 
@@ -355,7 +419,16 @@ export class BasicExtraction implements IExtraction {
                   } catch (enhanceError) {
                     // Log error but continue with the extraction - don't interrupt the flow
                     logger.warn(`${logPrefix} Error enhancing fields with relative selector content: ${(enhanceError as Error).message}`);
-                    console.error(`[EXTRACTION FACTORY DEBUG] Error enhancing fields: ${(enhanceError as Error).message}`);
+                    logWithDebug(
+                      this.context.logger,
+                      this.config.debugMode || false,
+                      nodeName,
+                      'Extraction',
+                      'BasicExtraction',
+                      'processWithAI',
+                      `Error enhancing fields: ${(enhanceError as Error).message}`,
+                      'error'
+                    );
                   }
                 }
               }
@@ -482,8 +555,26 @@ export class BasicExtraction implements IExtraction {
 
         // Log debug mode state for maximum visibility
         if (this.config.smartOptions.debugMode) {
-          console.error(`[EXTRACTION FACTORY DEBUG] AI processing requested with debug mode ON in ${nodeName}/${nodeId}`);
-          console.error(`[EXTRACTION FACTORY DEBUG] OpenAI API key available (length: ${this.config.openaiApiKey.length})`);
+          logWithDebug(
+            this.context.logger,
+            this.config.debugMode || false,
+            nodeName,
+            'Extraction',
+            'BasicExtraction',
+            'processWithAI',
+            `AI processing requested with debug mode ON in ${nodeName}/${nodeId}`,
+            'error'
+          );
+          logWithDebug(
+            this.context.logger,
+            this.config.debugMode || false,
+            nodeName,
+            'Extraction',
+            'BasicExtraction',
+            'processWithAI',
+            `OpenAI API key available (length: ${this.config.openaiApiKey.length})`,
+            'info'
+          );
         }
 
         try {
@@ -497,7 +588,16 @@ export class BasicExtraction implements IExtraction {
           }
 
           // Log debug info when calling the processWithAI function
-          console.error(`[EXTRACTION FACTORY DEBUG] Calling processWithAI with model ${this.config.smartOptions.aiModel}`);
+          logWithDebug(
+            this.context.logger,
+            this.config.debugMode || false,
+            nodeName,
+            'Extraction',
+            'BasicExtraction',
+            'processWithAI',
+            `Calling processWithAI with model ${this.config.smartOptions.aiModel}`,
+            'info'
+          );
 
           const result = await processWithAI(
             // Pass the raw data for formatting
