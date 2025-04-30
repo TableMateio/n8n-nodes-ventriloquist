@@ -16,6 +16,7 @@ import { createErrorResponse } from "../utils/errorUtils";
 import { processExtractionItems, type IExtractItem } from "../utils/extractNodeUtils";
 import { logPageDebugInfo } from "../utils/debugUtils";
 import { v4 as uuidv4 } from 'uuid';
+import { logWithDebug } from '../utils/loggingUtils';
 
 /**
  * Extract operation description
@@ -862,43 +863,73 @@ export async function execute(
 
 	// Log debug information about OpenAI API usage
 	if (debugMode) {
-		this.logger.error(
-			formatOperationLog(
-				"Extract",
-				nodeName,
-				nodeId,
-				index,
-				`!!! DEBUG MODE ENABLED !!! OPENAI API REQUEST LOGGING WILL BE ACTIVE !!!`
-			),
+		logWithDebug(
+			this.logger,
+			true,
+			nodeName,
+			'Extract',
+			'extract.operation',
+			'execute',
+			`DEBUG MODE ENABLED - OPENAI API REQUEST LOGGING WILL BE ACTIVE`,
+			'error'
 		);
 
-		// Explicitly mark the beginning of a debug session
-		console.error(`[EXTRACT NODE DEBUG] Debug mode ON for ${nodeName}/${nodeId} - OpenAI requests will be logged`);
-		console.error(`>>> OpenAI API KEY available: ${!!openAiApiKey} (length: ${openAiApiKey?.length || 0})`);
-		console.error(`>>> Debug flags: debugMode=${debugMode}`);
+		// Explicitly mark the beginning of a debug session with proper format
+		logWithDebug(
+			this.logger,
+			true,
+			nodeName,
+			'Extract',
+			'extract.operation',
+			'execute',
+			`Debug mode ON - OpenAI API key available: ${!!openAiApiKey} (length: ${openAiApiKey?.length || 0})`,
+			'error'
+		);
+
+		logWithDebug(
+			this.logger,
+			true,
+			nodeName,
+			'Extract',
+			'extract.operation',
+			'execute',
+			`Debug flags: debugMode=${debugMode}`,
+			'error'
+		);
 
 		// Make it clear we're using OpenAI Assistants API
-		console.error(`[EXTRACT NODE DEBUG] IMPORTANT: Using OpenAI Assistants API with the AIService implementation`);
+		logWithDebug(
+			this.logger,
+			true,
+			nodeName,
+			'Extract',
+			'extract.operation',
+			'execute',
+			`IMPORTANT: Using OpenAI Assistants API with the AIService implementation`,
+			'error'
+		);
 
 		if (openAiApiKey) {
-			this.logger.error(
-				formatOperationLog(
-					"Extract",
-					nodeName,
-					nodeId,
-					index,
-					`Using OpenAI Assistants API with valid API key (${openAiApiKey.length} chars)`
-				),
+			logWithDebug(
+				this.logger,
+				true,
+				nodeName,
+				'Extract',
+				'extract.operation',
+				'execute',
+				`Using OpenAI Assistants API with valid API key (${openAiApiKey.length} chars)`,
+				'error'
 			);
 		} else {
-			this.logger.error(
-				formatOperationLog(
-					"Extract",
-					nodeName,
-					nodeId,
-					index,
-					`No OpenAI API key provided - AI processing will be skipped`
-				),
+			logWithDebug(
+				this.logger,
+				true,
+				nodeName,
+				'Extract',
+				'extract.operation',
+				'execute',
+				`No OpenAI API key provided - AI processing will be skipped`,
+				'error'
 			);
 		}
 	}

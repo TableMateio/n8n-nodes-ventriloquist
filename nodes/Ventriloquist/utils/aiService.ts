@@ -1,6 +1,7 @@
 import type { Logger as ILogger } from 'n8n-workflow';
 import { formatOperationLog } from './resultUtils';
 import { processFieldsWithReferenceContent } from './processOpenAISchema';
+import { logWithDebug } from './loggingUtils';
 
 /**
  * Extended field interface to handle fields with direct attribute references
@@ -1257,7 +1258,6 @@ ${examplesSection}
 
   /**
    * Debug log utility function for AIService
-   * @param context Context with logger and instance info
    * @param message Message to log
    * @param level Log level (info, debug, warn, error)
    * @param functionName Optional function name
@@ -1271,24 +1271,16 @@ ${examplesSection}
     const component = "aiService";
     const fn = functionName || "unknown";
 
-    // Standard log via logger
-    if (this.logger) {
-      this.logger[level](
-        formatOperationLog(
-          'AIService',
-          nodeName,
-          nodeId,
-          index,
-          message,
-          component,
-          fn
-        )
-      );
-    }
-
-    // Direct console log for critical debug info (maximum visibility)
-    if (this.debugMode) {
-      console.error(`[${nodeName}][AIService][${component}][${fn}] ${message}`);
-    }
+    // Use our standardized logging helper
+    logWithDebug(
+      this.logger,
+      this.debugMode,
+      nodeName,
+      'AIService',
+      component,
+      fn,
+      message,
+      level
+    );
   }
 }

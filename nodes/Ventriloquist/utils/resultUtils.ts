@@ -2,6 +2,7 @@ import type { IDataObject } from 'n8n-workflow';
 import type { Page } from 'puppeteer-core';
 import type { ILogger } from './formOperations';
 import { safeTakeScreenshot, safeGetPageInfo } from './errorUtils';
+import { formatStandardLog } from './loggingUtils';
 
 /**
  * Options for creating a standardized success response
@@ -104,6 +105,7 @@ export async function getPageDetails(
 
 /**
  * Format operation log message with consistent structure
+ * @deprecated Use loggingUtils.formatStandardLog instead
  */
 export function formatOperationLog(
   operation: string,
@@ -114,11 +116,8 @@ export function formatOperationLog(
   component?: string,
   functionName?: string
 ): string {
-  const operationStr = operation || 'Unknown';
-  const componentStr = component || 'Core';
-  const functionStr = functionName ? `${functionName}` : '';
-
-  return `[${nodeName}][${operationStr}][${componentStr}]${functionStr ? `[${functionStr}]` : ''} ${message}`;
+  // Call the new standard format function for consistency
+  return formatStandardLog(nodeName, operation, component || 'Core', functionName, message);
 }
 
 /**
@@ -135,14 +134,12 @@ export function createTimingLog(
   functionName?: string
 ): void {
   const duration = Date.now() - startTime;
-  logger.info(formatOperationLog(
-    operation,
+  logger.info(formatStandardLog(
     nodeName,
-    nodeId,
-    index,
-    `Operation completed in ${duration}ms`,
-    component,
-    functionName
+    operation,
+    component || 'Core',
+    functionName,
+    `Operation completed in ${duration}ms`
   ));
 }
 
