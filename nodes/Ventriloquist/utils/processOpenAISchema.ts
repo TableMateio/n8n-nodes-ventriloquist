@@ -361,6 +361,13 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
 
                 const attrValue = element.getAttribute(attrName) || '';
                 console.log(`[Browser] Found attribute ${attrName} value: ${attrValue}`);
+
+                // Add additional debugging for attribute values
+                console.log(`[Browser] ATTRIBUTE DEBUG - Element: ${element.tagName}`);
+                console.log(`[Browser] ATTRIBUTE DEBUG - Attribute Name: ${attrName}`);
+                console.log(`[Browser] ATTRIBUTE DEBUG - Attribute Value: ${attrValue}`);
+                console.log(`[Browser] ATTRIBUTE DEBUG - Element HTML: ${element.outerHTML.substring(0, 150)}`);
+
                 return attrValue;
               } else if (extractType === 'html') {
                 const htmlContent = element.innerHTML || '';

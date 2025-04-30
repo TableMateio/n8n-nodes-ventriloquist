@@ -311,20 +311,22 @@ export async function extractSmartContent(
           );
         }
 
+        // Create the field with all necessary properties
         return {
           name: field.name,
           type: field.type || 'string',
           instructions: field.instructions || '', // Instructions must be non-optional
           format: 'default', // Add required format property
-          // Pass critical field options
-          useLogicAnalysis: aiProcessingMode === 'logical', // Use logic analysis assistant
-          useSeparateThread: threadManagement === 'separate', // Use separate thread
-          // Preserve extraction properties for aiService's reference
-          extractionType,
-          attributeName,
-          // Preserve any reference content and attribute flags
-          referenceContent,
-          returnDirectAttribute
+          // Add correct extraction type and attribute name
+          extractionType: extractionType,
+          attributeName: attributeName,
+          // Add thread management and processing mode flags
+          useLogicAnalysis: aiProcessingMode === 'logical',
+          useSeparateThread: threadManagement === 'separate',
+          // Preserve the reference content if it exists
+          referenceContent: referenceContent,
+          // Preserve the direct attribute flag if it exists
+          returnDirectAttribute: returnDirectAttribute
         };
       });
       aiOptions.fields = convertedFields;
@@ -493,20 +495,22 @@ export async function processWithAI(
           );
         }
 
+        // Create the field with all necessary properties
         return {
           name: field.name,
           type: field.type || 'string',
           instructions: field.instructions || '', // Instructions must be non-optional
           format: 'default', // Add required format property
-          // Pass critical field options
-          useLogicAnalysis: aiProcessingMode === 'logical', // Use logic analysis assistant
-          useSeparateThread: threadManagement === 'separate', // Use separate thread
-          // Preserve extraction properties for aiService's reference
-          extractionType,
-          attributeName,
-          // Preserve any reference content and attribute flags
-          referenceContent,
-          returnDirectAttribute
+          // Add correct extraction type and attribute name
+          extractionType: extractionType,
+          attributeName: attributeName,
+          // Add thread management and processing mode flags
+          useLogicAnalysis: aiProcessingMode === 'logical',
+          useSeparateThread: threadManagement === 'separate',
+          // Preserve the reference content if it exists
+          referenceContent: referenceContent,
+          // Preserve the direct attribute flag if it exists
+          returnDirectAttribute: returnDirectAttribute
         };
       });
       aiOptions.fields = convertedFields;
