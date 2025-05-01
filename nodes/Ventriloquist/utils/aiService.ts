@@ -873,7 +873,12 @@ ${fields.map((field, index) => {
    Output Format: ${formatInstructions}`;
 }).join('\n\n')}
 
-
+IMPORTANT GUIDELINES:
+1. Return a properly formatted array of objects, with each object representing a row.
+2. For each field, if the input contains an array, preserve that array structure in your output.
+3. For link/URL fields, if multiple links are present in an array, maintain that array in your output.
+4. Maintain the exact structure of the input data, only mapping values to the requested field names.
+5. Ensure your response is proper JSON that can be directly parsed.
 `;
 
       // Add this message to the thread
@@ -914,7 +919,26 @@ ${fields.map((field, index) => {
           // Try to parse the result as JSON
           let extractedData;
           try {
+            // Parse the result from OpenAI as JSON
             extractedData = JSON.parse(result.data);
+
+            // Log the extracted data structure for debugging
+            this.logDebug(
+              `Successfully parsed result as JSON. Structure: ${Array.isArray(extractedData) ? 'Array with ' + extractedData.length + ' items' : typeof extractedData}`,
+              'info',
+              'processTableContent'
+            );
+
+            // Make sure we have an array of objects
+            if (!Array.isArray(extractedData)) {
+              this.logDebug(
+                `Expected array but got ${typeof extractedData}. Converting to array.`,
+                'warn',
+                'processTableContent'
+              );
+              // If not an array, wrap it in an array
+              extractedData = [extractedData];
+            }
           } catch (e) {
             // Handle the case where OpenAI might return a string or non-JSON format
             this.logger.warn(

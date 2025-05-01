@@ -448,6 +448,7 @@ export class BasicExtraction implements IExtraction {
                 nodeId || 'unknown'
               );
 
+              // Log extraction information including whether attributes are extracted
               logWithDebug(
                 logger,
                 this.config.debugMode || false,
@@ -455,9 +456,24 @@ export class BasicExtraction implements IExtraction {
                 'Extraction',
                 'extractionFactory',
                 'execute',
-                `Table data extracted: ${Array.isArray(data) ? data.length : 'object'} rows found`,
+                `Table data extracted: ${Array.isArray(data) ? data.length : 'object'} rows found, extracting attributes: ${extractAttributes ? attributeName : 'none'}`,
                 'info'
               );
+
+              // Check if smartOptions are enabled and we're using AI processing
+              if (this.config.smartOptions && this.config.smartOptions.aiAssistance && data) {
+                // If we have array data, make sure we preserve it for AI processing
+                logWithDebug(
+                  logger,
+                  this.config.debugMode || false,
+                  this.context.nodeName,
+                  'Extraction',
+                  'extractionFactory',
+                  'execute',
+                  `Array data will be preserved for AI processing`,
+                  'info'
+                );
+              }
             }
           } catch (err) {
             logger.error(`${logPrefix} Table extraction failed: ${(err as Error).message}`);

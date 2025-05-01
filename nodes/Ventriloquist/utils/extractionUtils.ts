@@ -228,7 +228,7 @@ export async function extractTableData(
 	logger: ILogger,
 	nodeName: string,
 	nodeId: string,
-): Promise<string | IDataObject[] | Array<Array<string>>> {
+): Promise<string | IDataObject[] | Array<Array<string | string[]>>> {
 	try {
 		// Handle different output formats
 		if (options.outputFormat === 'html') {
@@ -253,6 +253,14 @@ export async function extractTableData(
 					return cells.map((cell) => {
 						// If extracting attributes, get the specified attribute value
 						if (extractAttributes && attributeName) {
+							// If this cell contains multiple elements that might have the attribute
+							// (like multiple links in a cell), extract all of them as an array
+							if (cell.querySelectorAll(`a, [${attributeName}]`).length > 1) {
+								return Array.from(cell.querySelectorAll(`a, [${attributeName}]`))
+									.map(el => el.getAttribute(attributeName) || '')
+									.filter(value => value !== ''); // Filter out empty values
+							}
+							// Otherwise just return the single attribute value
 							return cell.getAttribute(attributeName) || '';
 						}
 						// Otherwise get the text content
@@ -273,12 +281,13 @@ export async function extractTableData(
 
 		if (options.outputFormat === 'json' && options.includeHeaders && tableData.length > 1) {
 			// Convert to array of objects using first row as keys
-			const headers = tableData[0];
-			const jsonData = tableData.slice(1).map((row) => {
+			const headers = tableData[0] as string[];
+			const jsonData: IDataObject[] = tableData.slice(1).map((row) => {
 				const obj: IDataObject = {};
 				headers.forEach((header, i) => {
 					if (header && i < row.length) {
-						obj[header] = row[i];
+						// Preserve arrays when they exist (like multiple href values)
+						obj[header as string] = row[i];
 					}
 				});
 				return obj;
@@ -293,7 +302,7 @@ export async function extractTableData(
 		}
 
 		// Return as array of arrays
-		return options.includeHeaders ? tableData : tableData.slice(1);
+		return options.includeHeaders ? tableData : tableData.slice(1) as Array<Array<string | string[]>>;
 	} catch (error) {
 		logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to extract table data: ${(error as Error).message}`);
 		throw error;
