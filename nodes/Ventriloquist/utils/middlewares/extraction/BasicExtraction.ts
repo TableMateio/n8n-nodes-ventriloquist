@@ -428,16 +428,17 @@ export class BasicExtraction implements IExtraction {
 
                     // Call the enhancement function with the full HTML content
                     const enhancedFields = await enhanceFieldsWithRelativeSelectorContent(
-                      convertedFields,
                       this.page,
+                      convertedFields,
                       this.config.selector,
-                      logger,
+                      this.context.logger,
                       {
-                        nodeName: nodeName || 'Ventriloquist',
-                        nodeId: nodeId || 'unknown',
-                        index: 0
-                      },
-                      fullHtmlContent // Pass the full HTML content to avoid selector search
+                        nodeName: this.context.nodeName,
+                        nodeId: this.context.nodeId,
+                        index: this.context.index,
+                        component: 'BasicExtraction',
+                        functionName: 'extractWithManualStrategy'
+                      }
                     );
 
                     // Copy enhanced instructions back to the original fields

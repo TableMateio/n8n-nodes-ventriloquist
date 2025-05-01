@@ -56,7 +56,9 @@ export interface IField {
  */
 export interface IAIExtractionOptions {
   strategy: 'auto' | 'manual' | 'template';
-  model: string;
+  model?: string;
+  aiModel?: string;
+  extractionFormat?: string;
   generalInstructions: string;
   fields?: IField[];
   includeSchema: boolean;
@@ -205,6 +207,11 @@ export class AIService {
         )
       );
 
+      // Explicitly set the strategy to 'auto' for generateSchema method
+      if (this.options) {
+        this.options.strategy = 'auto';
+      }
+
       // Log that we're using Assistants API with the provided constants
       if (isDebugMode) {
         this.logger.error(
@@ -312,19 +319,6 @@ export class AIService {
         assistant_id: ASSISTANTS.auto,
       });
 
-      // Log run creation in debug mode
-      if (isDebugMode) {
-        this.logger.info(
-          formatOperationLog(
-            "SmartExtraction",
-            nodeName,
-            nodeId,
-            index,
-            `[OpenAI API] Created run: ${run.id} for thread: ${thread.id} with assistant: ${ASSISTANTS.auto}`
-          )
-        );
-      }
-
       // Poll for completion
       const result = await this.pollRunCompletion(thread.id, run.id);
 
@@ -332,10 +326,16 @@ export class AIService {
       if (result.success && result.data) {
         const data = JSON.parse(result.data);
 
-        // Generate schema if requested
+        // Create a simple schema for auto mode
         let schema = null;
         if (options.includeSchema) {
-          schema = this.generateSchema(data);
+          // In auto mode, we create a simple marker schema instead of analyzing the data
+          schema = {
+            type: "auto",
+            description: "Schema automatically determined by AI assistant",
+            mode: "auto",
+            assistantId: ASSISTANTS.auto
+          };
 
           // Log schema in debug mode
           if (isDebugMode) {
@@ -345,7 +345,7 @@ export class AIService {
                 nodeName,
                 nodeId,
                 index,
-                `Auto strategy generated schema: ${JSON.stringify(schema, null, 2)}`
+                `Auto strategy schema: ${JSON.stringify(schema, null, 2)}`
               )
             );
           }
@@ -354,7 +354,7 @@ export class AIService {
         return {
           success: true,
           data,
-          schema: schema,
+          schema,
           rawData: options.includeRawData ? content : undefined,
         };
       } else {
@@ -378,7 +378,7 @@ export class AIService {
   }
 
   /**
-   * Process content using the manual strategy (field-by-field)
+   * Process content using the manual strategy (fields defined in UI)
    */
   private async processManualStrategy(
     content: string,
@@ -388,15 +388,30 @@ export class AIService {
     const isDebugMode = options.debugMode === true;
 
     try {
+      const fields = options.fields || [];
+
+      // Validate fields
+      if (!fields.length) {
+        const error = 'Manual strategy requires fields to be defined';
+        this.logDebug(error, 'error', 'processManualStrategy');
+        return { success: false, error };
+      }
+
+      // Log field definitions
       this.logger.info(
         formatOperationLog(
           "SmartExtraction",
           nodeName,
           nodeId,
           index,
-          "Using Manual strategy - extracting specific fields"
+          `Using Manual strategy with ${fields.length} defined fields: ${fields.map(f => f.name).join(', ')}`
         )
       );
+
+      // Generate schema for OpenAI function calling
+      // NOTE: We directly use generateOpenAISchema here which uses the UI-defined fields
+      // and don't use the generateSchema method that builds a schema from data
+      const functionSchema = this.generateOpenAISchema(fields);
 
       // Log that we're using Assistants API with field-by-field extraction
       if (isDebugMode) {
@@ -417,7 +432,7 @@ export class AIService {
       }
 
       // Clone fields array to avoid modifying the original
-      const fields = options.fields ? [...options.fields] : [];
+      const fieldsToProcess = options.fields ? [...options.fields] : [];
 
       // Log reference context details
       if (options.includeReferenceContext) {
@@ -445,7 +460,7 @@ export class AIService {
       }
 
       // Log original fields before processing
-      fields.forEach(field => {
+      fieldsToProcess.forEach(field => {
         this.logger.info(
           formatOperationLog(
             "SmartExtraction",
@@ -460,45 +475,79 @@ export class AIService {
       // Process fields with reference content if provided
       // This adds the reference content to the instructions for URL-related fields
       const processedFields = options.includeReferenceContext && options.referenceContent
-        ? processFieldsWithReferenceContent(fields, options.referenceContent, true, this.logger, this.context)
-        : fields;
+        ? processFieldsWithReferenceContent(fieldsToProcess, options.referenceContent, true, this.logger, this.context)
+        : fieldsToProcess;
 
-      // Log the field instructions after processing to verify reference content is included
-      this.logger.info(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `Field instructions after processing with reference content:`
-        )
-      );
+      // Check for nested field structures - if this is needed for nested field extraction
+      // Group fields by their prefix (e.g., "AI Test Link.Field1" and "AI Test Link.Field2" belong to "AI Test Link")
+      const fieldGroups: Record<string, IField[]> = {};
+      const topLevelFields: IField[] = [];
 
-      processedFields.forEach(field => {
-        this.logger.info(
-          formatOperationLog(
-            "SmartExtraction",
-            nodeName,
-            nodeId,
-            index,
-            `PROCESSED Field "${field.name}" instructions (${field.instructions?.length || 0} chars): ${field.instructions?.substring(0, 100)}${field.instructions?.length > 100 ? '...' : ''}`
-          )
-        );
+      // Separate fields into groups for nested processing if they contain dot notation
+      for (const field of processedFields) {
+        if (field.name.includes('.')) {
+          const [parent, child] = field.name.split('.', 2);
+          if (!fieldGroups[parent]) {
+            fieldGroups[parent] = [];
+          }
+          // Create a new field with the child name but keep all other properties
+          const childField = { ...field, name: child };
+          fieldGroups[parent].push(childField);
+        } else {
+          topLevelFields.push(field);
+        }
+      }
 
-        // Log extended field properties
-        const extendedField = field as IExtendedField;
-        if (extendedField.returnDirectAttribute) {
+      // Check if the content is an array of objects (table data)
+      // If it is, we should process it differently to maintain the array structure
+      let isTableContent = false;
+      let tableContent: any[] = [];
+
+      try {
+        // First try to parse content as JSON
+        let parsedContent;
+        try {
+          parsedContent = JSON.parse(content);
+        } catch (e) {
+          // If it fails, it's likely not JSON, so we'll use it as-is
+          parsedContent = content;
+        }
+
+        // Check if the parsed content is an array of objects
+        if (Array.isArray(parsedContent) && parsedContent.length > 0 && typeof parsedContent[0] === 'object') {
+          isTableContent = true;
+          tableContent = parsedContent;
+
+          // Log we detected table content
           this.logger.info(
             formatOperationLog(
               "SmartExtraction",
               nodeName,
               nodeId,
               index,
-              `Field "${field.name}" has returnDirectAttribute = true, reference content: ${extendedField.referenceContent?.substring(0, 50) || 'none'}`
+              `Detected table content with ${tableContent.length} rows. Using schema-aware table processing.`
             )
           );
         }
-      });
+      } catch (e) {
+        // Not a JSON array, continue with normal processing
+        isTableContent = false;
+      }
+
+      // If we have table content (array of objects), use our improved table processing method
+      if (isTableContent && tableContent.length > 0) {
+        this.logger.info(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `Using schema-based table extraction with ${processedFields.length} fields`
+          )
+        );
+
+        return await this.processTableContent(tableContent, processedFields);
+      }
 
       // Create a result object to store field-by-field responses
       const result: Record<string, any> = {};
@@ -515,11 +564,41 @@ export class AIService {
         )
       );
 
-      // Process fields - logical analysis fields and fields that request a separate thread
-      // will get their own threads, while others will share the thread
-      for (const field of processedFields) {
+      // Process top-level fields first
+      for (const field of topLevelFields) {
         // Cast to extended field type to handle attribute properties
         const extendedField = field as IExtendedField;
+
+        // If this field has direct attribute content, use it directly
+        if (extendedField.returnDirectAttribute === true && extendedField.referenceContent) {
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Using direct attribute value for field "${field.name}": ${extendedField.referenceContent}`
+            )
+          );
+          result[field.name] = extendedField.referenceContent;
+          continue; // Skip AI processing for this field
+        }
+
+        // Check if this field has nested fields to process
+        if (fieldGroups[field.name]) {
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Field "${field.name}" has ${fieldGroups[field.name].length} nested fields to process`
+            )
+          );
+
+          // Skip standard processing - we'll handle nested fields separately
+          continue;
+        }
 
         // Determine if this field needs a separate thread
         const needsSeparateThread = field.useLogicAnalysis === true || field.useSeparateThread === true;
@@ -534,10 +613,6 @@ export class AIService {
             `Processing field "${field.name}" (type: ${field.type}, separate thread: ${needsSeparateThread})`
           )
         );
-
-        // NOTE: We always process fields with AI when AI is enabled
-        // Any attribute values from relative selectors are already included in the instructions
-        // by the enhanceFieldsWithRelativeSelectorContent function
 
         // Process the field with the appropriate thread
         const fieldResult = await this.processFieldWithAI(threadToUse, content, field);
@@ -595,6 +670,102 @@ export class AIService {
         }
       }
 
+      // Now process any nested field groups
+      for (const [parentName, childFields] of Object.entries(fieldGroups)) {
+        if (childFields.length > 0) {
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Processing nested field group "${parentName}" with ${childFields.length} child fields`
+            )
+          );
+
+          // Create an object to store child field results
+          const nestedResult: Record<string, any> = {};
+
+          // Process each child field
+          for (const childField of childFields) {
+            const needsSeparateThread = childField.useLogicAnalysis === true || childField.useSeparateThread === true;
+            const threadToUse = needsSeparateThread ? null : sharedThread.id;
+
+            this.logger.debug(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Processing nested field "${parentName}.${childField.name}" (type: ${childField.type})`
+              )
+            );
+
+            const fieldResult = await this.processFieldWithAI(threadToUse, content, childField);
+
+            if (fieldResult.success && fieldResult.data) {
+              try {
+                let parsedValue;
+                try {
+                  parsedValue = JSON.parse(fieldResult.data);
+                } catch (parseError) {
+                  parsedValue = fieldResult.data;
+                }
+
+                nestedResult[childField.name] = parsedValue;
+
+                this.logger.debug(
+                  formatOperationLog(
+                    "SmartExtraction",
+                    nodeName,
+                    nodeId,
+                    index,
+                    `Successfully extracted nested field "${parentName}.${childField.name}": ${
+                      typeof parsedValue === 'string' ? parsedValue : JSON.stringify(parsedValue)
+                    }`
+                  )
+                );
+              } catch (error) {
+                this.logger.warn(
+                  formatOperationLog(
+                    "SmartExtraction",
+                    nodeName,
+                    nodeId,
+                    index,
+                    `Error parsing result for nested field "${parentName}.${childField.name}": ${(error as Error).message}`
+                  )
+                );
+                nestedResult[childField.name] = fieldResult.data;
+              }
+            } else {
+              this.logger.warn(
+                formatOperationLog(
+                  "SmartExtraction",
+                  nodeName,
+                  nodeId,
+                  index,
+                  `Failed to extract nested field "${parentName}.${childField.name}": ${fieldResult.error || 'Unknown error'}`
+                )
+              );
+              nestedResult[childField.name] = null;
+            }
+          }
+
+          // Store the nested results in the parent field
+          result[parentName] = nestedResult;
+
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Completed nested field group "${parentName}" with result: ${JSON.stringify(nestedResult)}`
+            )
+          );
+        }
+      }
+
       // Generate schema if requested
       let schema = null;
       if (options.includeSchema) {
@@ -627,12 +798,169 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          `Manual strategy processing error: ${(error as Error).message}`
+          `Manual strategy error: ${(error as Error).message}`
         )
       );
       return {
         success: false,
-        error: (error as Error).message,
+        error: `Manual strategy error: ${(error as Error).message}`,
+      };
+    }
+  }
+
+  /**
+   * Process table content (array of objects) with proper array structure preservation
+   */
+  private async processTableContent(
+    tableContent: any[],
+    fields: IField[]
+  ): Promise<IAIExtractionResult> {
+    const { nodeName, nodeId, index } = this.context;
+    const isDebugMode = this.options?.debugMode === true;
+
+    this.logger.info(
+      formatOperationLog(
+        "SmartExtraction",
+        nodeName,
+        nodeId,
+        index,
+        `Processing table content with ${tableContent.length} rows using field-based extraction with ${fields.length} fields`
+      )
+    );
+
+    try {
+      // Create a shared thread for AI processing
+      const sharedThread = await this.openai.beta.threads.create();
+
+      // Generate the OpenAI schema from the fields for proper structured extraction
+      const schema = this.generateOpenAISchema(fields);
+
+      // Log the schema being used
+      if (isDebugMode) {
+        this.logger.error(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `[Schema for Table] Using schema:\n${JSON.stringify(schema, null, 2)}`
+          )
+        );
+      }
+
+      // Build a more detailed prompt that passes our schema
+      const arrayPrompt = `
+TASK: Extract specific fields from each row in the table according to the field specifications below.
+
+INPUT DATA:
+\`\`\`json
+${JSON.stringify(tableContent, null, 2)}
+\`\`\`
+
+FIELD SPECIFICATIONS:
+${fields.map((field, index) => {
+  let formatInstructions = '';
+  switch (field.format) {
+    case 'iso': formatInstructions = 'Format date values using ISO 8601 standard (YYYY-MM-DDTHH:mm:ss.sssZ)'; break;
+    case 'friendly': formatInstructions = 'Format values in a human-friendly way'; break;
+    case 'custom': formatInstructions = `Format using custom specification: ${field.formatString || ''}`; break;
+    default: formatInstructions = 'Use default formatting appropriate for the data type';
+  }
+
+  return `${index + 1}. Name: ${field.name}
+   Type: ${field.type}
+   Description: ${field.instructions}
+   Output Format: ${formatInstructions}`;
+}).join('\n\n')}
+
+
+`;
+
+      // Add this message to the thread
+      await this.openai.beta.threads.messages.create(
+        sharedThread.id,
+        {
+          role: "user",
+          content: arrayPrompt,
+        }
+      );
+
+      // Create a run with the manual assistant, including the schema for function calling
+      const run = await this.openai.beta.threads.runs.create(
+        sharedThread.id,
+        {
+          assistant_id: ASSISTANTS.manual,
+          tools: [{
+            type: "function",
+            function: schema
+          }]
+        }
+      );
+
+      // Poll for completion - use longer timeouts for larger tables
+      const customMaxAttempts = tableContent.length > 10 ? 90 : 60; // More rows = more time
+      const customDelayMs = tableContent.length > 20 ? 3000 : 2000; // Even more rows = even more time
+
+      this.logDebug(
+        `Using custom timeout settings for table with ${tableContent.length} rows: maxAttempts=${customMaxAttempts}, delayMs=${customDelayMs}`,
+        'info',
+        'processTableContent'
+      );
+
+      const result = await this.pollRunCompletion(sharedThread.id, run.id, customMaxAttempts, customDelayMs);
+
+      if (result.success && result.data) {
+        try {
+          // Try to parse the result as JSON
+          let extractedData;
+          try {
+            extractedData = JSON.parse(result.data);
+          } catch (e) {
+            // Handle the case where OpenAI might return a string or non-JSON format
+            this.logger.warn(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Failed to parse table result as JSON: ${e}`
+              )
+            );
+            extractedData = result.data;
+          }
+
+          // Generate schema if needed
+          let schema = null;
+          if (this.options?.includeSchema) {
+            // Use the UI-defined field schema for tables as well, instead of generating from data
+            schema = fields.length > 0 ? this.generateOpenAISchema(fields) : null;
+          }
+
+          return {
+            success: true,
+            data: extractedData,
+            schema,
+            rawData: this.options?.includeRawData ? JSON.stringify(tableContent) : undefined,
+          };
+        } catch (error) {
+          throw new Error(`Error processing table result: ${(error as Error).message}`);
+        }
+      } else {
+        throw new Error(`Failed to process table content: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      this.logger.error(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Table processing error: ${(error as Error).message}`
+        )
+      );
+      return {
+        success: false,
+        error: `Table processing error: ${(error as Error).message}`,
       };
     }
   }
@@ -643,8 +971,8 @@ export class AIService {
   private async pollRunCompletion(
     threadId: string,
     runId: string,
-    maxAttempts = 30,
-    delayMs = 1000
+    maxAttempts = 60,
+    delayMs = 2000
   ): Promise<{ success: boolean; data?: string; error?: string }> {
     const { nodeName, nodeId, index } = this.context;
     const isDebugMode = this.options?.debugMode === true;
@@ -762,30 +1090,47 @@ export class AIService {
    * Build prompt for auto strategy
    */
   private buildAutoPrompt(content: string, generalInstructions: string): string {
-    // Create a base prompt
-    let prompt = "You are an expert data extraction assistant.\n\n";
+    // Create a structured prompt
+    let prompt = "TASK: Extract and structure relevant information from the provided content.\n\n";
 
     // Add reference context if available
     if (this.options?.includeReferenceContext && this.options?.referenceContent) {
-      prompt += `\nREFERENCE CONTEXT (${this.options.referenceName || 'referenceContext'}):\n${this.options.referenceContent}\n\n`;
+      prompt += `REFERENCE CONTEXT (${this.options.referenceName || 'referenceContext'}):\n${this.options.referenceContent}\n\n`;
     }
 
-    // Add the main content and instructions
-    prompt += "CONTENT TO EXTRACT:\n";
+    // Add the main content
+    prompt += "INPUT DATA:\n";
     prompt += content;
-    prompt += "\n\nTASK:";
-    prompt += "\nExtract and structure the relevant data from the above content.";
 
     // Add general instructions if provided
     if (generalInstructions && generalInstructions.trim() !== '') {
       prompt += `\n\nADDITIONAL INSTRUCTIONS:\n${generalInstructions}`;
     }
 
-    // Add format instructions
-    prompt += "\n\nRESPONSE FORMAT:";
-    prompt += "\nProvide the extracted data as a valid JSON object.";
-    prompt += "\nEnsure the structure is consistent and logically organized.";
-    prompt += "\nOnly include the final JSON result without any explanation or preamble.";
+    // Add processing instructions
+    prompt += "\n\nPROCESSING INSTRUCTIONS:";
+    prompt += "\n1. Analyze the input data and identify the key information";
+    prompt += "\n2. Determine a logical structure for organizing this information";
+    prompt += "\n3. Extract and clean up the relevant content";
+    prompt += "\n4. Structure the data in a meaningful and organized way";
+    prompt += "\n5. Infer appropriate data types for each field";
+    prompt += "\n6. Return a JSON object with the structured data";
+
+    // Add output requirements
+    prompt += "\n\nOUTPUT REQUIREMENTS:";
+    prompt += "\n- Return ONLY a valid JSON object with no explanatory text";
+    prompt += "\n- Ensure the JSON structure is logical and well-organized";
+    prompt += "\n- Use appropriate data types (string, number, boolean, arrays, objects)";
+    prompt += "\n- Use descriptive field names that reflect the content";
+    prompt += "\n- Omit any fields that don't contain useful information";
+    prompt += "\n- For empty or missing data, use null or appropriate empty structures";
+
+    // Log the generated prompt for debugging
+    this.logDebug(
+      `Generated auto strategy prompt (${prompt.length} chars)`,
+      'debug',
+      'buildAutoPrompt'
+    );
 
     return prompt;
   }
@@ -794,71 +1139,80 @@ export class AIService {
    * Build prompt for manual strategy
    */
   private buildManualPrompt(content: string, options: IAIExtractionOptions): string {
-    // Create a base prompt with clearer instructions
-    let prompt = "You are an expert data extraction assistant.\n\n";
+    // Create a base prompt with detailed instructions
+    let prompt = "TASK: Extract structured information from the provided content according to the field specifications below.\n\n";
 
     // Add reference context if available
     if (options.includeReferenceContext && options.referenceContent) {
+      prompt += `REFERENCE CONTEXT (${options.referenceName || 'referenceContext'}):\n${options.referenceContent}\n\n`;
+
       this.logDebug(
-        `Adding reference context to prompt`,
-        'debug',
-        'buildManualPrompt'
-      );
-      this.logDebug(
-        `Reference name: ${options.referenceName || 'referenceContext'}`,
-        'debug',
-        'buildManualPrompt'
-      );
-      this.logDebug(
-        `Reference content: ${options.referenceContent.substring(0, 100)}${options.referenceContent.length > 100 ? '...' : ''}`,
-        'debug',
-        'buildManualPrompt'
-      );
-    } else if (options.includeReferenceContext) {
-      this.logDebug(
-        `Reference context enabled but content is empty`,
+        `Added reference context to prompt (${options.referenceContent.length} chars)`,
         'debug',
         'buildManualPrompt'
       );
     }
 
     // Add the main content
-    prompt += "CONTENT TO EXTRACT:\n";
+    prompt += "INPUT DATA:\n";
     prompt += content;
 
-    // Add general instructions if provided
-    if (options.generalInstructions && options.generalInstructions.trim() !== '') {
-      prompt += `\n\nGENERAL INSTRUCTIONS:\n${options.generalInstructions}`;
-    }
-
-    // Add field definitions with more prominence
+    // Add field specifications in a more structured format
     if (options.fields && options.fields.length > 0) {
-      prompt += "\n\nFIELDS TO EXTRACT (Important - follow these instructions carefully):\n";
+      prompt += "\n\nFIELD SPECIFICATIONS:";
       options.fields.forEach((field, index) => {
-        prompt += `\n${index + 1}. ${field.name} (${field.type})`;
-        if (field.instructions && field.instructions.trim()) {
-          prompt += `:\n   INSTRUCTIONS: ${field.instructions}\n`;
-
-          // Note: The reference content is now included directly in the field instructions
-          // by the enhanceFieldsWithRelativeSelectorContent function, so we don't need
-          // special handling for URL fields anymore
-        } else {
-          prompt += '\n';
+        // Determine format instructions based on field format
+        let formatInstructions = '';
+        switch (field.format) {
+          case 'iso':
+            formatInstructions = 'Format date values using ISO 8601 standard (YYYY-MM-DDTHH:mm:ss.sssZ)';
+            break;
+          case 'friendly':
+            formatInstructions = 'Format values in a human-friendly way';
+            break;
+          case 'custom':
+            formatInstructions = `Format using custom specification: ${field.formatString || ''}`;
+            break;
+          default:
+            formatInstructions = 'Use default formatting appropriate for the data type';
         }
+
+        prompt += `\n\n${index + 1}. Name: ${field.name}`;
+        prompt += `\n   Type: ${field.type}`;
+        prompt += `\n   Description: ${field.instructions || `Extract the ${field.name}`}`;
+        prompt += `\n   Output Format: ${formatInstructions}`;
       });
     }
 
-    // Add emphasis on data types and formatting
-    prompt += "\n\nDATA TYPE REQUIREMENTS:";
-    prompt += "\n- Ensure you return proper data types (string, number, boolean, etc.) as specified for each field";
-    prompt += "\n- For boolean fields, return actual boolean values (true/false), not strings";
-    prompt += "\n- For empty fields, return empty strings \"\" or appropriate default values";
+    // Add general instructions if provided
+    if (options.generalInstructions && options.generalInstructions.trim() !== '') {
+      prompt += `\n\nADDITIONAL INSTRUCTIONS:\n${options.generalInstructions}`;
+    }
 
-    // Add response format instructions
-    prompt += "\n\nRESPONSE FORMAT:";
-    prompt += "\n- Provide the extracted data as a valid JSON object using the field names specified above.";
-    prompt += "\n- Only include the final JSON result without any explanation or preamble.";
-    prompt += "\n- Ensure your response is properly formatted with the correct data types.";
+    // // Add processing instructions
+    // prompt += "\n\nPROCESSING INSTRUCTIONS:";
+    // prompt += "\n1. Carefully analyze the input data";
+    // prompt += "\n2. Extract only the information relevant to each field specification";
+    // prompt += "\n3. Clean up any unnecessary formatting, tags, or irrelevant content";
+    // prompt += "\n4. Convert the data to the specified types";
+    // prompt += "\n5. Apply any specified formatting requirements";
+    // prompt += "\n6. Return a JSON object with the extracted fields";
+
+    // // Add output requirements
+    // prompt += "\n\nOUTPUT REQUIREMENTS:";
+    // prompt += "\n- Return ONLY the transformed data as a valid JSON object";
+    // prompt += "\n- The JSON object should ONLY contain the fields specified above";
+    // prompt += "\n- Ensure the output is properly structured and can be parsed directly";
+    // prompt += "\n- Match the exact types specified (e.g., numbers should be numeric not strings, booleans should be true/false)";
+    // prompt += "\n- If data cannot be found or processed for a field, use null or an appropriate empty structure";
+    // prompt += "\n- Do not include any explanatory text, only the JSON object";
+
+    // Log the generated prompt for debugging
+    this.logDebug(
+      `Generated manual strategy prompt (${prompt.length} chars)`,
+      'debug',
+      'buildManualPrompt'
+    );
 
     return prompt;
   }
@@ -974,8 +1328,20 @@ ${examplesSection}
 
   /**
    * Generate a JSON schema from data
+   * NOTE: This method is only used for auto mode, not for manual field-by-field extraction
    */
   private generateSchema(data: any): any {
+    // Only process if we're in auto mode or if data needs to be analyzed
+    // Skip schema generation entirely for manual mode
+    if (this.options?.strategy === 'manual') {
+      this.logDebug(
+        'Skipping automatic schema generation for manual strategy - using UI-defined schema instead',
+        'info',
+        'generateSchema'
+      );
+      return null;
+    }
+
     if (data === null || data === undefined) {
       return { type: 'null' };
     }
@@ -1093,18 +1459,14 @@ ${examplesSection}
   }
 
   /**
-   * Generate OpenAI function schema from field definitions
+   * Generate schema for OpenAI function calling based on field definitions from UI
    */
   private generateOpenAISchema(fields: IField[]): any {
     // Log incoming field definitions with more detail
-    this.logger.info(
-      formatOperationLog(
-        "SmartExtraction",
-        this.context.nodeName,
-        this.context.nodeId,
-        this.context.index,
-        `FIELDS RECEIVED BY generateOpenAISchema:`
-      )
+    this.logDebug(
+      `Generating OpenAI schema from ${fields.length} UI-defined fields`,
+      'info',
+      'generateOpenAISchema'
     );
 
     fields.forEach(field => {
@@ -1300,6 +1662,33 @@ ${examplesSection}
         )
       );
 
+      // Create a function schema specifically for this field
+      const fieldSchema = {
+        name: `extract_${field.name.replace(/[^a-zA-Z0-9_]/g, '_')}`,
+        description: `Extract the ${field.name} data based on the provided instructions`,
+        parameters: {
+          type: "object",
+          properties: {
+            [field.name]: {
+              type: this.mapFieldTypeToSchemaType(field.type),
+              description: field.instructions || `The ${field.name} value`
+            }
+          },
+          required: [field.name]
+        }
+      };
+
+      // Log the schema that will be used
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Using schema for field "${field.name}":\n${JSON.stringify(fieldSchema, null, 2)}`
+        )
+      );
+
       // Add a message to the thread with the content and instructions
       await this.openai.beta.threads.messages.create(actualThreadId, {
         role: "user",
@@ -1319,8 +1708,13 @@ ${examplesSection}
         )
       );
 
+      // Create a run with the function schema defined
       const run = await this.openai.beta.threads.runs.create(actualThreadId, {
         assistant_id: assistantId,
+        tools: [{
+          type: "function",
+          function: fieldSchema
+        }]
       });
 
       // Poll for completion
@@ -1339,6 +1733,25 @@ ${examplesSection}
         success: false,
         error: (error as Error).message,
       };
+    }
+  }
+
+  /**
+   * Map field types to JSON Schema types
+   */
+  private mapFieldTypeToSchemaType(fieldType: string): string {
+    switch (fieldType.toLowerCase()) {
+      case 'number':
+      case 'integer':
+        return fieldType.toLowerCase();
+      case 'boolean':
+        return 'boolean';
+      case 'object':
+        return 'object';
+      case 'array':
+        return 'array';
+      default:
+        return 'string';
     }
   }
 

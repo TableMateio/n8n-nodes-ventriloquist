@@ -67,6 +67,7 @@ export interface IExtractItem {
   openAiApiKey?: string;
   hasOpenAiApiKey?: boolean;
   continueIfNotFound?: boolean;
+  preserveFieldStructure?: boolean;
   textOptions?: {
     cleanText?: boolean;
   };
@@ -251,27 +252,16 @@ export async function processExtractionItems(
       'extraction',
       'extractNodeUtils',
       'processExtractionItems',
-      `Processing ${extractionItems.length} extraction items with debug mode ON`,
-      'error'
-    );
-  }
-
-  logger.info(
-    formatOperationLog(
-      'extraction',
-      nodeName,
-      nodeId,
-      0,
       `Processing ${extractionItems.length} extraction items with options: ${JSON.stringify({
         waitForSelector: extractionNodeOptions.waitForSelector,
         timeout: extractionNodeOptions.timeout,
+        useHumanDelays: extractionNodeOptions.useHumanDelays,
         continueOnFail: extractionNodeOptions.continueOnFail,
-        debugMode: extractionNodeOptions.debugMode,
+        debugMode: extractionNodeOptions.debugMode
       })}`,
-      'extractNodeUtils',
-      'processExtractionItems'
-    )
-  );
+      'info'
+    );
+  }
 
   for (let i = 0; i < extractionItems.length; i++) {
     const extractionItem = extractionItems[i];
@@ -286,6 +276,71 @@ export async function processExtractionItems(
         'processExtractionItems'
       )
     );
+
+    // Check if we should preserve field structure for this extraction item
+    // This happens when:
+    // 1. The extraction uses manual schema with multiple fields
+    // 2. There are fields with nested structure (containing dots in field names)
+    // 3. The fields don't use direct attribute extraction exclusively
+    if (extractionItem.aiFormatting?.strategy === 'manual' &&
+        Array.isArray(extractionItem.aiFields) &&
+        extractionItem.aiFields.length > 0) {
+
+      // Check for multiple fields or nested fields (containing dots)
+      const hasMultipleFields = extractionItem.aiFields.length > 1;
+      const hasNestedFields = extractionItem.aiFields.some(field => field.name.includes('.'));
+
+      // Also check if this is a table extraction, which should always preserve structure when fields are defined
+      const isTableExtraction = extractionItem.extractionType === 'table';
+
+      // Always set preserveFieldStructure flag for manual extraction with multiple or nested fields
+      // or when it's a table extraction with defined fields
+      if (hasMultipleFields || hasNestedFields || isTableExtraction) {
+        logger.info(
+          formatOperationLog(
+            'extraction',
+            nodeName,
+            nodeId,
+            i,
+            `Setting preserveFieldStructure=true for item "${extractionItem.name}" - ` +
+            `hasMultipleFields=${hasMultipleFields}, hasNestedFields=${hasNestedFields}, isTableExtraction=${isTableExtraction}`,
+            'extractNodeUtils',
+            'processExtractionItems'
+          )
+        );
+        extractionItem.preserveFieldStructure = true;
+      }
+
+      // Additional debug logging for complex field structures
+      if (hasNestedFields) {
+        // Group fields by parent name for better logging
+        const fieldGroups: Record<string, string[]> = {};
+        for (const field of extractionItem.aiFields) {
+          if (field.name.includes('.')) {
+            const [parent] = field.name.split('.');
+            if (!fieldGroups[parent]) {
+              fieldGroups[parent] = [];
+            }
+            fieldGroups[parent].push(field.name);
+          }
+        }
+
+        // Log the nested field structure
+        for (const [parent, fields] of Object.entries(fieldGroups)) {
+          logger.info(
+            formatOperationLog(
+              'extraction',
+              nodeName,
+              nodeId,
+              i,
+              `Detected nested field group "${parent}" with fields: ${fields.join(', ')}`,
+              'extractNodeUtils',
+              'processExtractionItems'
+            )
+          );
+        }
+      }
+    }
 
     // Log if this item has AI formatting enabled and API key
     if (extractionItem.aiFormatting?.enabled) {
@@ -721,543 +776,166 @@ export async function processExtractionItems(
         // If we have aiFields and relativeSelectorOptional values, enhance them with extracted content
         if (extractionItem.aiFields && extractionItem.aiFields.length > 0 && extractionItem.puppeteerPage && extractionItem.selector) {
           try {
-            // Add additional logging to see if fields have relativeSelectorOptional property
-            const fieldsWithRelativeSelectors = extractionItem.aiFields.filter(f =>
-              (f.relativeSelectorOptional && typeof f.relativeSelectorOptional === 'string' && f.relativeSelectorOptional.trim() !== '') ||
-              (f.relativeSelector && typeof f.relativeSelector === 'string' && f.relativeSelector.trim() !== ''));
+            // Flag to track if we've already enhanced fields for this item
+            let fieldsAlreadyEnhanced = extractionItem.aiFields.some(field => {
+              const extField = field as any;
+              return extField.referenceContent !== undefined || extField.returnDirectAttribute === true;
+            });
 
-            logger.info(
-              formatOperationLog(
-                'aiFormatting',
-                nodeName,
-                nodeId,
-                i,
-                `Found ${fieldsWithRelativeSelectors.length} fields with relative selectors: ${fieldsWithRelativeSelectors.map(f =>
-                  `${f.name}:${f.relativeSelectorOptional || f.relativeSelector}`).join(', ')}`,
-                'extractNodeUtils',
-                'processExtractionItems'
-              )
-            );
-
-            // Transform the fields to ensure they match the IOpenAIField interface
-            const transformedFields = extractionItem.aiFields.map(field => {
-              // Get extraction type and attribute name from field options
-              const fieldOptions = field.fieldOptions || {};
-              const extractionType = fieldOptions.extractionType || 'text';
-              const attributeName = fieldOptions.attributeName || '';
-              // Check if this is an AI-assisted field by looking at relativeSelectorOptional instead of aiAssisted
-              const aiAssisted = !!field.relativeSelectorOptional;
-
-              // Log detailed information about the field
-              logger.debug(
+            if (fieldsAlreadyEnhanced) {
+              logger.info(
                 formatOperationLog(
                   'aiFormatting',
                   nodeName,
                   nodeId,
                   i,
-                  `Field "${field.name}": ` +
-                  `selector="${field.relativeSelectorOptional || field.relativeSelector || ''}", ` +
-                  `type="${field.type || 'string'}", ` +
-                  `attribute="${(field.fieldOptions && field.fieldOptions.attributeName) || 'none'}", ` +
-                  `aiAssisted=${!!field.relativeSelectorOptional}`,
+                  `Fields for item ${extractionItem.name} already enhanced, skipping enhancement`,
                   'extractNodeUtils',
                   'processExtractionItems'
                 )
               );
-
-              return {
+            } else {
+              // Only enhance if not already enhanced
+              // Force cast aiFields to ensure it matches the expected type
+              const fieldsWithInstructions = extractionItem.aiFields.map(field => ({
                 ...field,
-                instructions: field.instructions || field.description || '',
-                // Explicitly pass both selector types to preserve field mode (AI vs non-AI)
-                relativeSelectorOptional: field.relativeSelectorOptional || '',
-                relativeSelector: field.relativeSelector || '',
-                // Store the aiAssisted flag to help with processing
-                aiAssisted: aiAssisted,
-                format: fieldOptions.format || 'string',
-                type: field.type || 'string',
-                // Always pass the extraction type and attribute name from field options
-                extractionType: extractionType,
-                attributeName: attributeName,
-              };
-            });
+                instructions: field.instructions || ''
+              }));
 
-            logger.debug(
-              formatOperationLog(
-                'aiFormatting',
-                nodeName,
-                nodeId,
-                i,
-                `Enhancing fields with relative selector content using selector: ${extractionItem.selector}`,
-                'extractNodeUtils',
-                'processExtractionItems'
-              )
-            );
-
-            // Add more detailed logging for field options
-            transformedFields.forEach(field => {
-              if (field.relativeSelectorOptional) {
-                logger.debug(
-                  formatOperationLog(
-                    'aiFormatting',
-                    nodeName,
-                    nodeId,
-                    i,
-                    `Field "${field.name}" config: ` +
-                    `selector="${field.relativeSelectorOptional}", ` +
-                    `type="${field.extractionType || 'text'}", ` +
-                    `attribute="${field.attributeName || 'none'}", ` +
-                    `AIMode=${!!field.relativeSelectorOptional}`,
-                    'extractNodeUtils',
-                    'processExtractionItems'
-                  )
-                );
-
-                // TEMPORARY DEBUG: Log detailed field properties
-                logWithDebug(
-                  logger,
-                  true,
+              const enhancedFields = await enhanceFieldsWithRelativeSelectorContent(
+                extractionItem.puppeteerPage,
+                fieldsWithInstructions as any[], // Use type assertion to bypass strict checking
+                extractionItem.selector,
+                logger,
+                {
                   nodeName,
-                  'extraction',
-                  'extractNodeUtils',
-                  'processExtractionItems',
-                  `Field "${field.name}" config for attribute extraction:`,
-                  'error'
-                );
-                logWithDebug(
-                  logger,
-                  true,
-                  nodeName,
-                  'extraction',
-                  'extractNodeUtils',
-                  'processExtractionItems',
-                  `selector="${field.relativeSelectorOptional}", type="${field.extractionType}", attribute="${field.attributeName}"`,
-                  'error'
-                );
-                logWithDebug(
-                  logger,
-                  true,
-                  nodeName,
-                  'extraction',
-                  'extractNodeUtils',
-                  'processExtractionItems',
-                  `instructions="${field.instructions?.substring(0, 50)}..."`,
-                  'error'
-                );
-                logWithDebug(
-                  logger,
-                  true,
-                  nodeName,
-                  'extraction',
-                  'extractNodeUtils',
-                  'processExtractionItems',
-                  `field object keys: ${Object.keys(field).join(', ')}`,
-                  'error'
-                );
-
-                // CRITICAL DEBUG: Check specifically for attribute extraction type fields
-                if (field.extractionType === 'attribute' && field.attributeName) {
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName,
-                    'extraction',
-                    'extractNodeUtils',
-                    'processExtractionItems',
-                    `CRITICAL: Found attribute extraction field "${field.name}"`,
-                    'error'
-                  );
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName,
-                    'extraction',
-                    'extractNodeUtils',
-                    'processExtractionItems',
-                    `attribute=${field.attributeName}, selector=${field.relativeSelectorOptional}`,
-                    'error'
-                  );
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName,
-                    'extraction',
-                    'extractNodeUtils',
-                    'processExtractionItems',
-                    `Will test if element exists and has this attribute...`,
-                    'error'
-                  );
-
-                  // Add immediate test to see if the selector can find the element and attribute
-                  try {
-                    extractionItem.puppeteerPage.evaluate(
-                      (mainSel: string, relSel: string, attr: string) => {
-                        const parent = document.querySelector(mainSel);
-                        if (!parent) {
-                          logWithDebug(
-                            logger,
-                            true,
-                            nodeName,
-                            'extraction',
-                            'extractNodeUtils',
-                            'processExtractionItems',
-                            `CRITICAL: Parent element not found: ${mainSel}`,
-                            'error'
-                          );
-                          return false;
-                        }
-
-                        const el = parent.querySelector(relSel);
-                        if (!el) {
-                          logWithDebug(
-                            logger,
-                            true,
-                            nodeName,
-                            'extraction',
-                            'extractNodeUtils',
-                            'processExtractionItems',
-                            `CRITICAL: Element not found with selector: ${relSel}`,
-                            'error'
-                          );
-                          return false;
-                        }
-
-                        if (!el.hasAttribute(attr)) {
-                          logWithDebug(
-                            logger,
-                            true,
-                            nodeName,
-                            'extraction',
-                            'extractNodeUtils',
-                            'processExtractionItems',
-                            `CRITICAL: Element found but doesn't have attribute: ${attr}`,
-                            'error'
-                          );
-                          return false;
-                        }
-
-                        const value = el.getAttribute(attr);
-                        logWithDebug(
-                          logger,
-                          true,
-                          nodeName,
-                          'extraction',
-                          'extractNodeUtils',
-                          'processExtractionItems',
-                          `CRITICAL: Found element with ${attr}="${value}"`,
-                          'error'
-                        );
-                        return true;
-                      },
-                      extractionItem.selector,
-                      field.relativeSelectorOptional,
-                      field.attributeName
-                    ).then((result: boolean) => {
-                      logWithDebug(
-                        logger,
-                        true,
-                        nodeName,
-                        'extraction',
-                        'extractNodeUtils',
-                        'processExtractionItems',
-                        `Selector test result: ${result ? 'SUCCESS' : 'FAILURE'}`,
-                        'error'
-                      );
-                    }).catch((err: Error) => {
-                      logWithDebug(
-                        logger,
-                        true,
-                        nodeName,
-                        'extraction',
-                        'extractNodeUtils',
-                        'processExtractionItems',
-                        `Selector test error: ${err.message}`,
-                        'error'
-                      );
-                    });
-                  } catch (e: any) {
-                    logWithDebug(
-                      logger,
-                      true,
-                      nodeName,
-                      'extraction',
-                      'extractNodeUtils',
-                      'processExtractionItems',
-                      `Selector test exception: ${e.message}`,
-                      'error'
-                    );
-                  }
+                  nodeId,
+                  index: i,
+                  component: 'extractNodeUtils',
+                  functionName: 'processExtractionItems'
                 }
-              }
-            });
+              );
 
-            // Extract the HTML content of the main selector to pass to the enhancement function
-            let rawHtml = '';
-            try {
-              // Define the response type
-              interface HtmlEvaluateResult {
-                html: string;
-                success: boolean;
-                message: string;
-              }
+              // Replace the fields with enhanced versions
+              extractionItem.aiFields = enhancedFields;
 
-              // Get the HTML content of the main selector
-              const evalResult = await extractionItem.puppeteerPage.evaluate((selector: string) => {
-                try {
-                  const element = document.querySelector(selector);
-                  if (element) {
-                    // Don't use logWithDebug in browser context
-                    return {
-                      html: element.outerHTML,
-                      success: true,
-                      message: 'Found main selector element, getting HTML content'
-                    };
-                  } else {
-                    // Don't use logWithDebug in browser context
-                    return {
-                      html: '',
-                      success: false,
-                      message: `Main selector element not found: ${selector}`
-                    };
-                  }
-                } catch (error) {
-                  // Don't use logWithDebug in browser context
-                  return {
-                    html: '',
-                    success: false,
-                    message: `Error getting HTML content: ${error}`
-                  };
-                }
-              }, extractionItem.selector) as HtmlEvaluateResult;
-
-              // Process the result from evaluate
-              if (evalResult.success) {
-                logger.debug(
-                  formatOperationLog(
-                    'aiFormatting',
-                    nodeName,
-                    nodeId,
-                    i,
-                    `Successfully extracted HTML content from main selector (${evalResult.html.length} chars)`,
-                    'extractNodeUtils',
-                    'processExtractionItems'
-                  )
-                );
-                logWithDebug(
-                  logger,
-                  true,
-                  nodeName,
-                  'extraction',
-                  'extractNodeUtils',
-                  'processExtractionItems',
-                  `Successfully extracted HTML content from main selector (${evalResult.html.length} chars)`,
-                  'error'
-                );
-                // Assign the HTML content
-                rawHtml = evalResult.html;
-              } else {
-                logger.warn(
-                  formatOperationLog(
-                    'aiFormatting',
-                    nodeName,
-                    nodeId,
-                    i,
-                    `Failed to extract HTML content from main selector: ${evalResult.message}`,
-                    'extractNodeUtils',
-                    'processExtractionItems'
-                  )
-                );
-                logWithDebug(
-                  logger,
-                  true,
-                  nodeName,
-                  'extraction',
-                  'extractNodeUtils',
-                  'processExtractionItems',
-                  `Failed to extract HTML content from main selector: ${evalResult.message}`,
-                  'error'
-                );
-                rawHtml = '';
-              }
-            } catch (error) {
-              logger.error(
+              // Log how many fields were enhanced
+              logger.info(
                 formatOperationLog(
                   'aiFormatting',
                   nodeName,
                   nodeId,
                   i,
-                  `Error extracting HTML content from main selector: ${(error as Error).message}`,
-                  'extractNodeUtils',
-                  'processExtractionItems'
-                )
-              );
-              logWithDebug(
-                logger,
-                true,
-                nodeName,
-                'extraction',
-                'extractNodeUtils',
-                'processExtractionItems',
-                `Error extracting HTML content from main selector: ${(error as Error).message}`,
-                'error'
-              );
-              rawHtml = '';
-            }
-
-            // Enhance fields with content from relative selectors
-            const enhancedFields = await enhanceFieldsWithRelativeSelectorContent(
-              transformedFields,
-              extractionItem.puppeteerPage,
-              extractionItem.selector,
-              logger,
-              { nodeName, nodeId, index: i, debugMode: isDebugMode },
-              rawHtml // Pass the HTML content to the enhancement function
-            );
-
-            // Log the enhanced fields to check if content was properly added
-            logger.info(
-              formatOperationLog(
-                'aiFormatting',
-                nodeName,
-                nodeId,
-                i,
-                `Enhanced fields result: ${enhancedFields.length} fields processed`,
-                'extractNodeUtils',
-                'processExtractionItems'
-              )
-            );
-
-            enhancedFields.forEach(field => {
-              const hasRefContent = !!(field as any).referenceContent;
-              const isDirectAttr = !!(field as any).returnDirectAttribute;
-
-              logger.debug(
-                formatOperationLog(
-                  'aiFormatting',
-                  nodeName,
-                  nodeId,
-                  i,
-                  `Field "${field.name}": hasReferenceContent=${hasRefContent}, directAttribute=${isDirectAttr}, ` +
-                  `instructionsLength=${field.instructions?.length || 0}`,
+                  `Enhanced fields result: ${enhancedFields.length} fields processed`,
                   'extractNodeUtils',
                   'processExtractionItems'
                 )
               );
 
-              // TEMPORARY DEBUG: Log enhanced field details
-              logWithDebug(
-                logger,
-                true,
-                nodeName,
-                'extraction',
-                'extractNodeUtils',
-                'processExtractionItems',
-                `AFTER ENHANCEMENT - Field "${field.name}" enhancement results:`,
-                'error'
-              );
-              logWithDebug(
-                logger,
-                true,
-                nodeName,
-                'extraction',
-                'extractNodeUtils',
-                'processExtractionItems',
-                `hasReferenceContent=${hasRefContent}, directAttribute=${isDirectAttr}`,
-                'error'
-              );
-              logWithDebug(
-                logger,
-                true,
-                nodeName,
-                'extraction',
-                'extractNodeUtils',
-                'processExtractionItems',
-                `instructionsLength=${field.instructions?.length || 0}`,
-                'error'
-              );
-              logWithDebug(
-                logger,
-                true,
-                nodeName,
-                'extraction',
-                'extractNodeUtils',
-                'processExtractionItems',
-                `instructions="${field.instructions?.substring(0, 100)}..."`,
-                'error'
-              );
-              if (hasRefContent) {
-                logWithDebug(
-                  logger,
-                  true,
-                  nodeName,
-                  'extraction',
-                  'extractNodeUtils',
-                  'processExtractionItems',
-                  `referenceContent="${(field as any).referenceContent?.substring(0, 50)}..."`,
-                  'error'
-                );
-              }
-            });
+              // Add detailed logs about each field's enhancement
+              for (const field of enhancedFields) {
+                const extField = field as any;
+                const hasReferenceContent = extField.referenceContent !== undefined;
+                const hasDirectAttribute = extField.returnDirectAttribute === true;
 
-            // Copy the enhanced instructions back to the original aiFields
-            for (let j = 0; j < extractionItem.aiFields.length; j++) {
-              if (j < enhancedFields.length) {
-                // Log when instructions are enhanced
-                if (extractionItem.aiFields[j].instructions !== enhancedFields[j].instructions) {
-                  logger.debug(
-                    formatOperationLog(
-                      'aiFormatting',
-                      nodeName,
-                      nodeId,
-                      i,
-                      `Field "${extractionItem.aiFields[j].name}" instructions were enhanced: ` +
-                      `original length=${extractionItem.aiFields[j].instructions?.length || 0}, ` +
-                      `new length=${enhancedFields[j].instructions?.length || 0}`,
-                      'extractNodeUtils',
-                      'processExtractionItems'
-                    )
-                  );
-                }
-
-                // ALWAYS copy these properties, regardless of whether it's an AI field or not
-                // These properties are critical for both types of fields
-                extractionItem.aiFields[j].instructions = enhancedFields[j].instructions;
-                extractionItem.aiFields[j].referenceContent = enhancedFields[j].referenceContent;
-                extractionItem.aiFields[j].returnDirectAttribute = enhancedFields[j].returnDirectAttribute;
-
-                // Provide detailed log about what's being copied
-                logger.debug(
+                logger.info(
                   formatOperationLog(
-                    'aiFormatting',
+                    'extraction',
                     nodeName,
                     nodeId,
                     i,
-                    `Field "${extractionItem.aiFields[j].name}" properties:`,
+                    `AFTER ENHANCEMENT - Field "${field.name}" enhancement results:`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
+                  )
+                );
+
+                logger.info(
+                  formatOperationLog(
+                    'extraction',
+                    nodeName,
+                    nodeId,
+                    i,
+                    `hasReferenceContent=${hasReferenceContent}, directAttribute=${hasDirectAttribute}`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
+                  )
+                );
+
+                logger.info(
+                  formatOperationLog(
+                    'extraction',
+                    nodeName,
+                    nodeId,
+                    i,
+                    `instructionsLength=${field.instructions?.length || 0}`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
+                  )
+                );
+
+                logger.info(
+                  formatOperationLog(
+                    'extraction',
+                    nodeName,
+                    nodeId,
+                    i,
+                    `instructions="${field.instructions?.substring(0, 20)}..."`,
                     'extractNodeUtils',
                     'processExtractionItems'
                   )
                 );
               }
-            }
 
-            logger.debug(
-              formatOperationLog(
-                'aiFormatting',
-                nodeName,
-                nodeId,
-                i,
-                `Enhanced ${extractionItem.aiFields.length} fields with relative selector content`,
-                'extractNodeUtils',
-                'processExtractionItems'
-              )
-            );
+              // NEW SECTION: Check for presence of at least one field with returnDirectAttribute=false
+              // This ensures we don't rely exclusively on direct attribute extraction when there are
+              // fields that need AI processing
+              const hasNonDirectFields = extractionItem.aiFields.some(field => {
+                const extField = field as any;
+                return extField.returnDirectAttribute !== true;
+              });
+
+              if (hasNonDirectFields) {
+                logger.info(
+                  formatOperationLog(
+                    'extraction',
+                    nodeName,
+                    nodeId,
+                    i,
+                    `Item ${extractionItem.name} has fields requiring AI processing - will maintain field structure`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
+                  )
+                );
+
+                // Set a flag to indicate we should preserve field structure
+                extractionItem.preserveFieldStructure = true;
+              } else if (extractionItem.aiFields.length > 1) {
+                // If all fields are direct attributes but we have multiple, we should still preserve structure
+                logger.info(
+                  formatOperationLog(
+                    'extraction',
+                    nodeName,
+                    nodeId,
+                    i,
+                    `Item ${extractionItem.name} has multiple direct attribute fields - will maintain field structure`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
+                  )
+                );
+
+                // Set a flag to indicate we should preserve field structure
+                extractionItem.preserveFieldStructure = true;
+              }
+            }
           } catch (error) {
-            logger.warn(
+            logger.error(
               formatOperationLog(
                 'aiFormatting',
                 nodeName,
                 nodeId,
                 i,
-                `Error enhancing fields with relative selector content: ${(error as Error).message}`,
+                `Error enhancing fields: ${(error as Error).message}`,
                 'extractNodeUtils',
                 'processExtractionItems'
               )
@@ -1265,58 +943,59 @@ export async function processExtractionItems(
           }
         }
 
-        // Create extraction configuration based on AI formatting options
-        const aiConfig: IExtractionConfig = {
-          extractionType: extractionItem.extractionType, // Use the original extraction type (table, text, etc.)
+        // Set up extraction configuration
+        const extractionConfig: IExtractionConfig = {
+          id: extractionItem.id,
+          extractionType: extractionItem.extractionType,
           selector: extractionItem.selector || '',
-          debugMode: extractionItem.aiFormatting?.smartOptions?.debugMode || false,
-          smartOptions: {
-            aiAssistance: true,
-            extractionFormat: extractionItem.aiFormatting?.extractionFormat || 'json',
-            aiModel: extractionItem.aiFormatting?.aiModel || 'gpt-3.5-turbo',
-            generalInstructions: extractionItem.aiFormatting?.generalInstructions || '',
-            strategy: extractionItem.aiFormatting?.strategy || 'manual',
-            includeSchema: extractionItem.aiFormatting?.includeSchema || false,
-            includeRawData: extractionItem.aiFormatting?.includeRawData || false,
-            includeReferenceContext: extractionItem.aiFormatting?.includeReferenceContext || false,
-            referenceSelector: extractionItem.aiFormatting?.referenceSelector || '',
-            referenceName: extractionItem.aiFormatting?.referenceName || 'referenceContext',
-            referenceFormat: extractionItem.aiFormatting?.referenceFormat || 'text',
-            referenceAttribute: extractionItem.aiFormatting?.referenceAttribute || '',
-            selectorScope: extractionItem.aiFormatting?.selectorScope || 'global',
-            debugMode: extractionItem.aiFormatting?.smartOptions?.debugMode || false
-          },
-          openaiApiKey: extractionItem.openAiApiKey,
-          waitForSelector: false,
-          selectorTimeout: 5000,
-          // Include table options if applicable
-          ...(extractionItem.tableOptions && {
-            includeHeaders: extractionItem.tableOptions.includeHeaders,
-            rowSelector: extractionItem.tableOptions.rowSelector,
-            cellSelector: extractionItem.tableOptions.cellSelector,
-            outputFormat: extractionItem.tableOptions.outputFormat
-          }),
-          // Include HTML options if applicable
-          ...(extractionItem.htmlOptions && {
-            outputFormat: extractionItem.htmlOptions.outputFormat,
-            includeMetadata: extractionItem.htmlOptions.includeMetadata
-          }),
-          // Include text options if applicable
-          ...(extractionItem.textOptions && {
-            cleanText: extractionItem.textOptions.cleanText
-          }),
-          // Include fields for AI processing
-          fields: {
-            items: extractionItem.aiFields?.map(field => ({
-              name: field.name,
-              type: field.type || 'string',
-              instructions: field.instructions || '',
-              format: (field.fieldOptions?.format as string) || 'default'
-            })) || []
-          }
+          attributeName: extractionItem.attribute,
+          waitForSelector: extractionNodeOptions.waitForSelector,
+          selectorTimeout: extractionNodeOptions.timeout,
+          debugMode: isDebugMode,
+          preserveFieldStructure: extractionItem.preserveFieldStructure || false,
         };
 
-        const extraction = createExtraction(extractionItem.puppeteerPage, aiConfig, context);
+        // Add ai formatting options if they exist
+        if (extractionItem.aiFormatting?.enabled) {
+          extractionConfig.smartOptions = {
+            ...extractionItem.aiFormatting,
+            extractionFormat: extractionItem.aiFormatting.extractionFormat || 'json',
+            aiAssistance: true,
+            aiModel: extractionItem.aiFormatting.aiModel || 'gpt-3.5-turbo',
+            generalInstructions: extractionItem.aiFormatting.generalInstructions || '',
+            strategy: extractionItem.aiFormatting.strategy || 'auto',
+            includeSchema: extractionItem.aiFormatting.includeSchema || false,
+            includeRawData: extractionItem.aiFormatting.includeRawData || false,
+            includeReferenceContext: extractionItem.aiFormatting.includeReferenceContext || false,
+            referenceSelector: extractionItem.aiFormatting.referenceSelector || '',
+            referenceName: extractionItem.aiFormatting.referenceName || 'reference',
+            referenceFormat: extractionItem.aiFormatting.referenceFormat || 'text',
+            referenceAttribute: extractionItem.aiFormatting.referenceAttribute || '',
+            selectorScope: extractionItem.aiFormatting.selectorScope || 'global',
+            referenceContent: extractionItem.aiFormatting.referenceContent || '',
+            debugMode: isDebugMode
+          };
+
+          // Add API key if available
+          if (extractionItem.openAiApiKey) {
+            extractionConfig.openaiApiKey = extractionItem.openAiApiKey;
+          }
+
+          // Add fields if using manual strategy
+          if (extractionItem.aiFormatting.strategy === 'manual' && Array.isArray(extractionItem.aiFields)) {
+            extractionConfig.fields = {
+              items: extractionItem.aiFields.map(field => ({
+                name: field.name,
+                type: field.type || 'string',
+                instructions: field.instructions || '',
+                format: field.required ? 'required' : 'optional',
+                // Include additional field properties as needed
+              }))
+            };
+          }
+        }
+
+        const extraction = createExtraction(extractionItem.puppeteerPage, extractionConfig, context);
 
         try {
           // Add direct logging before extraction execution
@@ -1406,6 +1085,23 @@ export async function processExtractionItems(
                   'error'
                 );
               }
+            }
+
+            // Before storing the extracted data, check if it has a proper structure
+            if (result.data !== null && typeof result.data === 'object' && !Array.isArray(result.data)) {
+              // Check if this might be a nested object structure from field-by-field extraction
+              // This is to ensure we maintain hierarchical structures from AI-processed data
+              logger.info(
+                formatOperationLog(
+                  'extraction',
+                  nodeName,
+                  nodeId,
+                  i,
+                  `Processed object data for [${extractionItem.name}] with properties: ${Object.keys(result.data).join(', ')}`,
+                  'extractNodeUtils',
+                  'processExtractionItems'
+                )
+              );
             }
 
             // Store extracted data

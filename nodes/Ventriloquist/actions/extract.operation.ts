@@ -1225,12 +1225,30 @@ export async function execute(
 						const extractionType = fieldOptions.extractionType as string || 'text';
 						const attributeName = fieldOptions.attributeName as string || '';
 
+						// Check if this is a nested field (contains dots in the name) and handle it
+						let fieldName = field.name as string;
+						let isNestedField = false;
+
+						// Log all field information for debugging
+						if (debugMode) {
+							logWithDebug(
+								this.logger,
+								true,
+								nodeName,
+								'extraction',
+								'extract.operation',
+								'execute',
+								`Processing field "${fieldName}" with type ${field.type}, AI assisted: ${aiAssisted}`,
+								'error'
+							);
+						}
+
 						// Add more debug information for better visibility
-						this.logger.debug(`Field ${field.name} AI=${aiAssisted}, using selector=${actualSelector}` +
+						this.logger.debug(`Field ${fieldName} AI=${aiAssisted}, using selector=${actualSelector}` +
 							(fieldOptions && fieldOptions.extractionType === 'attribute' ? `, attribute=${fieldOptions.attributeName || ''}` : ''));
 
 						return {
-							name: field.name as string,
+							name: fieldName,
 							instructions: field.instructions as string || '',
 							type: field.type as string,
 							required: field.format === 'required',
@@ -1320,12 +1338,71 @@ export async function execute(
 			})),
 			// Instead of passing all data as is, create a properly mapped output based on the extraction configuration
 			data: extractionData.reduce((result: IDataObject, item: IExtractItem) => {
+				// Add detailed debug logs
+				if (debugMode) {
+					logWithDebug(
+						this.logger,
+						true,
+						nodeName,
+						'extraction',
+						'extract.operation',
+						'execute',
+						`DEBUG: Processing item [${item.name}], type: ${item.extractionType}, has data: ${item.extractedData !== undefined}`,
+						'error'
+					);
+				}
+
 				// Only include items that have extracted data
 				if (item.extractedData !== undefined) {
-					// Use item.name as the key for the extracted data
-					// This maps each field in the UI to a property in the output
-					if (item.aiFormatting?.enabled) {
-						// When AI formatting is enabled, use the AI-processed data
+					// Check if AI formatting is enabled but also prioritize direct attribute values
+					// Only use direct attribute extraction if preserveFieldStructure flag is not set
+					// AND we only have a single field that's a direct attribute
+					const shouldUseDirect = !item.preserveFieldStructure &&
+						Array.isArray(item.aiFields) &&
+						item.aiFields.length === 1 && // Only apply direct extraction when there's exactly one field
+						item.aiFields.some(field => {
+							const enhancedField = field as {
+								returnDirectAttribute?: boolean;
+								referenceContent?: string;
+							};
+							return enhancedField.returnDirectAttribute === true && enhancedField.referenceContent !== undefined;
+						});
+
+					if (shouldUseDirect) {
+						// Find the field with direct attribute and use its value
+						const directField = (item.aiFields as any[]).find(field =>
+							field.returnDirectAttribute === true && field.referenceContent !== undefined
+						);
+
+						this.logger.info(
+							formatOperationLog(
+								'extraction',
+								nodeName,
+								nodeId,
+								index,
+								`Using direct attribute value for [${item.name}]: ${directField.referenceContent}`
+							)
+						);
+
+						result[item.name] = directField.referenceContent;
+					}
+					// Special handling for array data to maintain object structure
+					else if (Array.isArray(item.extractedData) && item.extractionType === 'table') {
+						this.logger.info(
+							formatOperationLog(
+								'extraction',
+								nodeName,
+								nodeId,
+								index,
+								`Using structured table data for [${item.name}] (${item.extractedData.length} rows)`
+							)
+						);
+
+						// Preserve array structure when it's a table
+						result[item.name] = item.extractedData;
+					}
+					// Handle AI-processed data - preserve nested structure
+					else if (item.aiFormatting?.enabled) {
 						this.logger.info(
 							formatOperationLog(
 								'extraction',
@@ -1335,70 +1412,236 @@ export async function execute(
 								`Using AI-processed data for [${item.name}]`
 							)
 						);
-						result[item.name] = item.extractedData;
-					} else {
-						// Check if this is a field that should return a direct attribute value
-						// This handles fields with returnDirectAttribute flag set by enhanceFieldsWithRelativeSelectorContent
-						const hasDirectAttributeValue = Array.isArray(item.aiFields) &&
-							item.aiFields.some(field => {
-								// Use type assertion to inform TypeScript about additional properties
-								const enhancedField = field as {
-									returnDirectAttribute?: boolean;
-									referenceContent?: string;
-								};
-								return enhancedField.returnDirectAttribute === true &&
-									enhancedField.referenceContent !== undefined;
-							});
 
-						if (hasDirectAttributeValue && Array.isArray(item.aiFields)) {
-							// Use the reference content from the first field with returnDirectAttribute
-							const fieldWithDirectAttr = item.aiFields.find(field => {
-								// Use type assertion to inform TypeScript about additional properties
-								const enhancedField = field as {
-									returnDirectAttribute?: boolean;
-									referenceContent?: string;
-								};
-								return enhancedField.returnDirectAttribute === true &&
-									enhancedField.referenceContent !== undefined;
-							});
+						// Check if the data needs to maintain field structure
+						if (item.preserveFieldStructure) {
+							// If we have the preserved field structure flag, we need to construct a field-based object
+							const fieldBasedResult: Record<string, any> = {};
 
-							// Use type assertion for fieldWithDirectAttr
-							const enhancedField = fieldWithDirectAttr as {
-								returnDirectAttribute?: boolean;
-								referenceContent?: string;
-							} | undefined;
-
-							if (enhancedField && enhancedField.referenceContent) {
+							if (Array.isArray(item.aiFields) && item.aiFields.length > 0) {
+								// Log the field structure we're processing
 								this.logger.info(
 									formatOperationLog(
 										'extraction',
 										nodeName,
 										nodeId,
 										index,
-										`Using direct attribute value for [${item.name}]: ${enhancedField.referenceContent}`
+										`Processing ${item.aiFields.length} fields with structure preservation for [${item.name}]`
 									)
 								);
-								result[item.name] = enhancedField.referenceContent;
+
+								// Check if we have dot notation fields that need to be handled specially
+								const hasNestedFields = item.aiFields.some(field => field.name.includes('.'));
+
+								if (hasNestedFields) {
+									// If we have nested fields, we'll build a hierarchy
+									for (const field of item.aiFields) {
+										// Skip processing if this is a nested field - we'll handle it through its parent
+										if (field.name.includes('.')) {
+											continue;
+										}
+
+										// For each top-level field, check if it has nested fields
+										const fieldName = field.name;
+										const nestedFields: typeof item.aiFields = item.aiFields.filter(f =>
+											f.name.startsWith(fieldName + '.') && f.name !== fieldName
+										);
+
+										if (nestedFields.length > 0) {
+											// This field has nested children - create an object structure
+											const nestedObject: Record<string, any> = {};
+
+											// Process each nested field
+											for (const nestedField of nestedFields) {
+												// Get the child field name (part after the dot)
+												const childName = nestedField.name.split('.')[1];
+
+												// Try to get the value from the extracted data
+												if (typeof item.extractedData === 'object' &&
+													item.extractedData !== null &&
+													item.extractedData[nestedField.name] !== undefined) {
+													// Store the value in the nested object using the child name
+													nestedObject[childName] = item.extractedData[nestedField.name];
+												} else {
+													// If not found, set to null
+													nestedObject[childName] = null;
+												}
+											}
+
+											// Try to get the value for the parent field itself
+											let parentValue = null;
+											if (typeof item.extractedData === 'object' &&
+												item.extractedData !== null &&
+												item.extractedData[fieldName] !== undefined) {
+												parentValue = item.extractedData[fieldName];
+											}
+
+											// If parent value is an object, merge it with nested values
+											if (parentValue !== null && typeof parentValue === 'object') {
+												fieldBasedResult[fieldName] = { ...parentValue, ...nestedObject };
+											} else {
+												// Otherwise, just use the nested structure
+												fieldBasedResult[fieldName] = nestedObject;
+											}
+										} else {
+											// Regular non-nested field
+											const extField = field as any;
+											if (extField.returnDirectAttribute === true && extField.referenceContent !== undefined) {
+												fieldBasedResult[fieldName] = extField.referenceContent;
+											} else if (typeof item.extractedData === 'object' &&
+													   item.extractedData !== null &&
+													   item.extractedData[fieldName] !== undefined) {
+												fieldBasedResult[fieldName] = item.extractedData[fieldName];
+											} else {
+												fieldBasedResult[fieldName] = null;
+											}
+										}
+									}
+								} else {
+									// Regular field processing without nested fields
+									for (const field of item.aiFields) {
+										const fieldName = field.name;
+
+										// If this field has direct attribute extraction
+										const extField = field as any;
+										if (extField.returnDirectAttribute === true && extField.referenceContent !== undefined) {
+											fieldBasedResult[fieldName] = extField.referenceContent;
+
+											this.logger.info(
+												formatOperationLog(
+													'extraction',
+													nodeName,
+													nodeId,
+													index,
+													`Using direct attribute for field [${item.name}.${fieldName}]: ${extField.referenceContent?.substring(0, 30)}...`
+												)
+											);
+										}
+										// Otherwise, try to get the value from AI-processed data if it exists
+										else if (typeof item.extractedData === 'object' && item.extractedData !== null) {
+											// Check if the AI result contains this field
+											if (item.extractedData[fieldName] !== undefined) {
+												fieldBasedResult[fieldName] = item.extractedData[fieldName];
+
+												this.logger.info(
+													formatOperationLog(
+														'extraction',
+														nodeName,
+														nodeId,
+														index,
+														`Using AI-processed value for field [${item.name}.${fieldName}]`
+													)
+												);
+											} else {
+												this.logger.warn(
+													formatOperationLog(
+														'extraction',
+														nodeName,
+														nodeId,
+														index,
+														`Field [${fieldName}] not found in AI-processed data for [${item.name}]`
+													)
+												);
+
+												// Set to null to ensure the field exists in the output
+												fieldBasedResult[fieldName] = null;
+											}
+										} else {
+											// AI data is not an object, set null for this field
+											fieldBasedResult[fieldName] = null;
+
+											this.logger.warn(
+												formatOperationLog(
+													'extraction',
+													nodeName,
+													nodeId,
+													index,
+													`No object data available for field [${fieldName}] in [${item.name}]`
+												)
+											);
+										}
+									}
+								}
+
+								// Use the field-based result instead of the raw AI result
+								result[item.name] = fieldBasedResult;
+
+								this.logger.info(
+									formatOperationLog(
+										'extraction',
+										nodeName,
+										nodeId,
+										index,
+										`Created field-based object for [${item.name}] with ${Object.keys(fieldBasedResult).length} fields`
+									)
+								);
 							} else {
-								// Fallback to extracted data if no reference content
+								// No fields defined, use the AI-processed data as-is
 								result[item.name] = item.extractedData;
 							}
-						} else {
-							// When AI formatting is not enabled, just use the raw extracted data
+						}
+						// Check if the AI-processed data is a complex object or nested structure
+						else if (typeof item.extractedData === 'object' && item.extractedData !== null) {
+							const dataKeys = Object.keys(item.extractedData);
+
 							this.logger.info(
 								formatOperationLog(
 									'extraction',
 									nodeName,
 									nodeId,
 									index,
-									`Using raw extracted data for [${item.name}]`
+									`Data for [${item.name}] is a complex object with properties: ${dataKeys.join(', ')}`
 								)
 							);
+
+							// If this is a manually-processed field-by-field extraction and we have a manual schema
+							if (item.aiFormatting.strategy === 'manual' && Array.isArray(item.aiFields) && item.aiFields.length > 0) {
+								// Extra validation to ensure object structure matches field structure
+								const hasMatchingFields = item.aiFields.some(field => dataKeys.includes(field.name));
+
+								if (hasMatchingFields || dataKeys.length > 0) {
+									// Preserve the structure completely - this is the key fix that maintains nested data
+									result[item.name] = item.extractedData;
+
+									// Additional logging to verify the structure is maintained
+									logWithDebug(
+										this.logger,
+										true,
+										nodeName,
+										'extraction',
+										'extract.operation',
+										'execute',
+										`STRUCTURE CHECK: Field [${item.name}] contains structured data with properties: ${Object.keys(item.extractedData).join(', ')}`,
+										'error'
+									);
+								} else {
+									// Structure doesn't match field definitions, just use as-is
+									result[item.name] = item.extractedData;
+								}
+							} else {
+								// For auto-processed data or data with an unexpected structure
+								result[item.name] = item.extractedData;
+							}
+						} else {
+							// Simple value or null
 							result[item.name] = item.extractedData;
 						}
 					}
+					// Regular extraction without AI
+					else {
+						this.logger.info(
+							formatOperationLog(
+								'extraction',
+								nodeName,
+								nodeId,
+								index,
+								`Using raw extracted data for [${item.name}]`
+							)
+						);
+						result[item.name] = item.extractedData;
+					}
 
-					// Always include schema if it exists, regardless of includeSchema setting
+					// Always include schema if it exists
 					if (item.schema) {
 						this.logger.info(
 							formatOperationLog(
@@ -1412,7 +1655,7 @@ export async function execute(
 						result[`${item.name}_schema`] = item.schema;
 					}
 
-					// Always include raw data if available, regardless of includeRawData setting
+					// Always include raw data if available
 					if (item.rawData !== undefined) {
 						this.logger.info(
 							formatOperationLog(
@@ -1436,7 +1679,7 @@ export async function execute(
 							`No extracted data found for [${item.name}]`
 						)
 					);
-					// Set a placehoder for the data to ensure the property exists
+					// Set a placeholder for missing data
 					result[item.name] = null;
 				}
 				return result;

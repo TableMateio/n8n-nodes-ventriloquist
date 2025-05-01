@@ -7,17 +7,21 @@ import { IExtractItem } from '../../extractNodeUtils';
 import { processWithAI, IAIFormattingOptions } from '../../smartExtractionUtils';
 import { extractTableData } from '../../extractionUtils';
 import { logWithDebug } from '../../loggingUtils';
+import { TableExtraction } from './TableExtraction';
+import { MultipleExtraction } from './TableExtraction';
 
 /**
  * Extraction configuration interface
  */
 export interface IExtractionConfig {
+  id?: string;
   extractionType: string;
   selector: string;
   attributeName?: string;
   waitForSelector?: boolean;
   selectorTimeout?: number;
   debugMode?: boolean;
+  preserveFieldStructure?: boolean;
   // Additional properties needed for table extraction
   includeHeaders?: boolean;
   rowSelector?: string;
@@ -733,7 +737,7 @@ export class BasicExtraction implements IExtraction {
               rawContent
             };
           } else {
-            // Log AI processing error but return original content
+            // Log AI processing error but return error status instead of original content
             logWithDebug(
               logger,
               this.config.debugMode || false,
@@ -741,17 +745,21 @@ export class BasicExtraction implements IExtraction {
               'Extraction',
               'extractionFactory',
               'execute',
-              `AI formatting failed: ${aiResult.error}. Returning original extracted content.`,
+              `AI formatting failed: ${aiResult.error}. Not falling back to original content.`,
               'warn'
             );
             return {
-              success: true,
-              data,
+              success: false,
+              error: {
+                message: `AI formatting failed: ${aiResult.error}`,
+                details: aiResult.error
+              },
+              // Include the raw content for debugging
               rawContent
             };
           }
         } catch (error) {
-          // If AI processing fails, log the error but continue with the original data
+          // If AI processing fails, log the error and return error instead of original data
           logWithDebug(
             logger,
             this.config.debugMode || false,
@@ -763,13 +771,13 @@ export class BasicExtraction implements IExtraction {
             'error'
           );
           return {
-            success: true,
-            data,
-            rawContent,
+            success: false,
             error: {
               message: `AI processing failed: ${(error as Error).message}`,
               details: error
-            }
+            },
+            // Include the raw content for debugging
+            rawContent
           };
         }
       } else if (this.config.smartOptions?.aiAssistance === true) {
@@ -807,27 +815,64 @@ export class BasicExtraction implements IExtraction {
 }
 
 /**
- * Create an extraction instance
+ * Create an extraction instance based on the configuration
  */
-export function createExtraction(
-  page: Page,
-  config: IExtractionConfig,
-  context: {
-    logger: ILogger;
-    nodeName: string;
-    nodeId: string;
-    sessionId: string;
-    index?: number;
-  }
-): IExtraction {
-  // Convert to IMiddlewareContext
-  const middlewareContext: IMiddlewareContext = {
-    logger: context.logger,
-    nodeName: context.nodeName,
-    nodeId: context.nodeId,
-    sessionId: context.sessionId,
-    index: context.index,
-  };
+export function createExtraction(page: Page, config: IExtractionConfig, context: IMiddlewareContext): IExtraction {
+  const { logger, nodeName, nodeId } = context;
+  const { extractionType, smartOptions } = config;
 
-  return new BasicExtraction(page, config, middlewareContext);
+  // Check for AI formatting and OpenAI API key
+  const hasAiFormatting = smartOptions && smartOptions.aiAssistance && config.openaiApiKey;
+
+  // Check for manual fields definition
+  const hasManualFields = config.fields && config.fields.items && config.fields.items.length > 0;
+
+  // Check if field structure needs to be preserved
+  const preserveFieldStructure = config.preserveFieldStructure === true;
+
+  // Log the extraction type and any special handling
+  logger.debug(`[ExtractFactory][${nodeName}] Creating extraction with type: ${extractionType}, AI: ${hasAiFormatting ? 'enabled' : 'disabled'}, Manual fields: ${hasManualFields ? 'yes' : 'no'}, Preserve structure: ${preserveFieldStructure ? 'yes' : 'no'}`);
+
+  // Prioritize field-by-field extraction in several cases:
+  // 1. When manual fields are defined with AI formatting
+  // 2. When preserveFieldStructure flag is explicitly set (e.g. for nested fields)
+  // 3. When using manual strategy and fields are defined
+  // 4. When it's a table extraction with manual fields defined (to ensure proper field structure)
+  if ((hasAiFormatting && smartOptions?.strategy === 'manual' && hasManualFields) ||
+      preserveFieldStructure ||
+      (extractionType === 'table' && hasManualFields)) {
+    // When manual fields are defined with AI formatting, prioritize field-by-field extraction
+    // over special extraction types like table
+    logger.info(
+      formatOperationLog(
+        'ExtractFactory',
+        nodeName,
+        nodeId,
+        context.index !== undefined ? context.index : 0,
+        `Using field-by-field extraction for ${preserveFieldStructure ? 'field structure preservation' :
+         extractionType === 'table' ? 'table with manual fields' : 'manual schema'} (overriding ${extractionType} extraction type)`
+      )
+    );
+
+    return new BasicExtraction(page, config, context);
+  }
+
+  // Otherwise, use extraction type-specific implementations
+  switch (extractionType) {
+    case 'text':
+      return new BasicExtraction(page, config, context);
+    case 'attribute':
+      return new BasicExtraction(page, config, context);
+    case 'value':
+      return new BasicExtraction(page, config, context);
+    case 'html':
+      return new BasicExtraction(page, config, context);
+    case 'multiple':
+      return new MultipleExtraction(page, config, context);
+    case 'table':
+      return new TableExtraction(page, config, context);
+    default:
+      logger.warn(`[ExtractFactory][${nodeName}] Unknown extraction type: ${extractionType}, falling back to BasicExtraction`);
+      return new BasicExtraction(page, config, context);
+  }
 }

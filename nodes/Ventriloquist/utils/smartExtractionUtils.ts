@@ -3,6 +3,8 @@ import { formatOperationLog } from './resultUtils';
 import { IMiddlewareContext } from './middlewares/middleware';
 import { AIService, IAIExtractionOptions } from './aiService';
 import { logWithDebug } from './loggingUtils';
+import type * as puppeteer from 'puppeteer';
+import { enhanceFieldsWithRelativeSelectorContent } from './processOpenAISchema';
 
 /**
  * Interface for smart extraction options
@@ -64,6 +66,28 @@ export interface IAIFormattingResult {
   data?: any;
   schema?: any;
   error?: string;
+}
+
+/**
+ * Interface for smart extraction result
+ */
+export interface ISmartExtractionResult {
+  success: boolean;
+  data?: any;
+  schema?: any;
+  rawData?: any;
+  error?: string;
+}
+
+/**
+ * Define a more flexible Page type to accommodate both puppeteer and puppeteer-core
+ */
+interface Page {
+  evaluate: Function;
+  $$eval: Function;
+  $eval: Function;
+  url: Function;
+  screenshot: Function;
 }
 
 /**
@@ -137,14 +161,20 @@ export function detectContentType(content: any): string {
  * @returns The extracted content
  */
 export async function extractSmartContent(
-  page: any,
+  page: Page,
   selector: string,
   options: ISmartExtractionOptions,
-  fields?: any[],
+  fields: IAIField[] = [],
   openaiApiKey?: string,
-  context?: IMiddlewareContext
-): Promise<any> {
-  const logger = context?.logger as Logger;
+  context?: {
+    logger?: Logger;
+    nodeName?: string;
+    nodeId?: string;
+    index?: number;
+  }
+): Promise<ISmartExtractionResult> {
+  // Set up default logger if not provided
+  const logger = context?.logger || console;
   const nodeName = context?.nodeName || 'Ventriloquist';
   const nodeId = context?.nodeId || 'unknown';
   const itemIndex = context?.index !== undefined ? context.index : 0;
@@ -154,142 +184,208 @@ export async function extractSmartContent(
 
   try {
     // Log the start of extraction
-    logWithDebug(
-      logger,
-      isDebugMode,
-      nodeName,
-      'SmartExtraction',
-      component,
-      functionName,
-      `Starting smart extraction with selector: ${selector}`
+    logger.info(
+      formatOperationLog(
+        'smartExtraction',
+        nodeName,
+        nodeId,
+        itemIndex,
+        `Starting smart extraction using selector: ${selector}`,
+        component,
+        functionName
+      )
     );
 
     // Log that we're using the Assistants API path
     if (isDebugMode) {
-      logWithDebug(
-        logger,
-        true,
-        nodeName,
-        'SmartExtraction',
-        component,
-        functionName,
-        `Using AIService with OpenAI Assistants API path (not Chat Completions)`,
-        'info'
+      logger.error(
+        formatOperationLog(
+          'smartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `!!! IMPORTANT !!! Using AIService with OpenAI Assistants API path (not Chat Completions)`,
+          component,
+          functionName
+        )
       );
+      console.error(`!!! EXTRACTION DEBUG !!! [${nodeName}/${nodeId}] Using AIService with Assistants API path`);
     }
 
     // Extract raw content from the page
     let content = '';
     try {
-      content = await page.evaluate((sel: string) => {
-        const element = document.querySelector(sel);
-        return element ? element.textContent : '';
-      }, selector);
+      const extractedContent = await page.$$eval(selector, (elements: Element[]) => {
+        if (elements.length === 0) return '';
+
+        // Use only the first element found
+        const element = elements[0];
+
+        // Return the outer HTML including the element itself
+        return element.outerHTML;
+      });
+
+      content = extractedContent;
+
+      logger.info(
+        formatOperationLog(
+          'smartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `Extracted content (${content.length} chars): "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`,
+          component,
+          functionName
+        )
+      );
     } catch (error) {
-      logWithDebug(
-        logger,
-        isDebugMode,
-        nodeName,
-        'SmartExtraction',
-        component,
-        functionName,
-        `Error extracting content: ${error}`,
-        'error'
+      logger.error(
+        formatOperationLog(
+          'smartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `Failed to extract content using selector ${selector}: ${(error as Error).message}`,
+          component,
+          functionName
+        )
       );
-      throw new Error(`Failed to extract content from selector '${selector}': ${error}`);
+      return {
+        success: false,
+        error: `Failed to extract content: ${(error as Error).message}`
+      };
     }
 
-    // If no content was found, log an error and return empty result
-    if (!content || content.trim() === '') {
-      logWithDebug(
-        logger,
-        isDebugMode,
+    // Detect content type
+    const contentType = detectContentType(content);
+    logger.info(
+      formatOperationLog(
+        'smartExtraction',
         nodeName,
-        'SmartExtraction',
+        nodeId,
+        itemIndex,
+        `Detected content type: ${contentType}`,
         component,
-        functionName,
-        `No content found for selector: ${selector}`,
-        'error'
-      );
-      return { data: null, error: 'No content found' };
+        functionName
+      )
+    );
+
+    // Enhance fields with relative selector content if using manual strategy
+    if (options.strategy === 'manual' && fields.length > 0) {
+      try {
+        // Enhance fields with relative selector content
+        logger.info(
+          formatOperationLog(
+            'smartExtraction',
+            nodeName,
+            nodeId,
+            itemIndex,
+            `Enhancing ${fields.length} fields with relative selector content`,
+            component,
+            functionName
+          )
+        );
+
+        // Ensure fields match the expected IOpenAIField[] type by providing instructions property
+        const fieldsWithInstructions = fields.map(field => ({
+          ...field,
+          instructions: field.instructions || ''
+        }));
+
+        // Copy the fields array to avoid modifying the original
+        const enhancedFields = await enhanceFieldsWithRelativeSelectorContent(
+          page,
+          fieldsWithInstructions as any, // Type assertion to bypass strict checking
+          selector,
+          logger,
+          {
+            nodeName,
+            nodeId,
+            index: itemIndex,
+            component,
+            functionName
+          }
+        );
+
+        // Copy back the enhanced fields (now with reference content)
+        fields = enhancedFields;
+      } catch (error) {
+        logger.error(
+          formatOperationLog(
+            'smartExtraction',
+            nodeName,
+            nodeId,
+            itemIndex,
+            `Error enhancing fields: ${(error as Error).message}`,
+            component,
+            functionName
+          )
+        );
+      }
     }
 
-    // Detect content type if set to auto
-    let extractionFormat = options.extractionFormat;
-    if (extractionFormat === 'auto') {
-      extractionFormat = detectContentType(content);
-      logWithDebug(
-        logger,
-        isDebugMode,
-        nodeName,
-        'SmartExtraction',
-        component,
-        functionName,
-        `Detected content type: ${extractionFormat}`,
-        'debug'
-      );
-    }
-
-    // Initialize AI service
+    // Create AIService instance
     const aiService = new AIService(
       openaiApiKey || '',
-      logger || console,
+      logger,
       { nodeName, nodeId, index: itemIndex },
       options.debugMode === true
     );
 
     // Log the AIService initialization
     if (isDebugMode) {
-      logWithDebug(
-        logger,
-        isDebugMode,
-        nodeName,
-        'SmartExtraction',
-        component,
-        functionName,
-        `Created AIService instance with API key (length: ${openaiApiKey?.length || 0}), model: ${options.aiModel}`,
-        'info'
+      logger.info(
+        formatOperationLog(
+          'smartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `Created AIService instance with API key (length: ${openaiApiKey?.length || 0}), model: ${options.aiModel}`,
+          component,
+          functionName
+        )
       );
     }
 
     // Process content based on strategy
     const aiOptions: IAIExtractionOptions = {
       strategy: options.strategy === 'auto' ? 'auto' : 'manual',
-      model: options.aiModel,
-      generalInstructions: options.generalInstructions,
-      includeSchema: options.includeSchema,
-      includeRawData: options.includeRawData,
-      includeReferenceContext: options.includeReferenceContext,
-      referenceName: options.referenceName,
-      referenceContent: options.referenceContent,
+      extractionFormat: options.extractionFormat || 'json',
+      aiModel: options.aiModel || 'gpt-4',
+      generalInstructions: options.generalInstructions || '',
+      includeSchema: options.includeSchema === true,
+      includeRawData: options.includeRawData === true,
+      referenceContent: options.referenceContent || '',
       debugMode: options.debugMode
     };
 
     // Log field count if in manual strategy
     if (options.strategy === 'manual' && fields) {
-      logWithDebug(
-        logger,
-        isDebugMode,
-        nodeName,
-        'SmartExtraction',
-        component,
-        functionName,
-        `Manual strategy with ${fields.length} fields: ${fields.map(f => f.name).join(', ')}`,
-        'debug'
+      logger.debug(
+        formatOperationLog(
+          'smartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `Manual strategy with ${fields.length} fields: ${fields.map(f => f.name).join(', ')}`,
+          component,
+          functionName
+        )
       );
     }
 
     // Log reference context if available
     if (options.includeReferenceContext && options.referenceContent) {
-      logWithDebug(
-        logger,
-        isDebugMode,
-        nodeName,
-        'SmartExtraction',
-        component,
-        functionName,
-        `Including reference context: ${options.referenceName || 'referenceContext'} (${options.referenceContent.length} chars)`,
-        'debug'
+      logger.debug(
+        formatOperationLog(
+          'smartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `Using reference context (${options.referenceContent.length} chars): "${options.referenceContent.substring(0, 50)}${options.referenceContent.length > 50 ? '...' : ''}"`,
+          component,
+          functionName
+        )
       );
     }
 
@@ -312,19 +408,14 @@ export async function extractSmartContent(
 
         // Log field options in debug mode
         if (isDebugMode) {
-          logWithDebug(
-            logger,
-            true,
-            nodeName,
-            'SmartExtraction',
-            component,
-            functionName,
-            `Field "${field.name}" options: extractionType=${extractionType}, attributeName=${attributeName}, aiMode=${aiProcessingMode}, threadMode=${threadManagement}, hasRefContent=${!!referenceContent}`,
-            'error'
+          console.error(
+            `!!! OPENAI API DEBUG !!! [${nodeName}/${nodeId}] ` +
+            `Field "${field.name}" options: extractionType=${extractionType}, ` +
+            `attributeName=${attributeName}, aiMode=${aiProcessingMode}, ` +
+            `threadMode=${threadManagement}, hasRefContent=${!!referenceContent}`
           );
         }
 
-        // Create the field with all necessary properties
         return {
           name: field.name,
           type: field.type || 'string',
@@ -346,51 +437,40 @@ export async function extractSmartContent(
     }
 
     // Process content with AI
-    logWithDebug(
-      logger,
-      isDebugMode,
-      nodeName,
-      'SmartExtraction',
-      component,
-      functionName,
-      `Calling AIService.processContent with ${content.length} chars, strategy: ${aiOptions.strategy}`,
-      'info'
-    );
-
-    const result = await aiService.processContent(content, aiOptions);
-
-    // Log result
-    if (isDebugMode) {
-      logWithDebug(
-        logger,
-        isDebugMode,
-        nodeName,
-        'SmartExtraction',
-        component,
-        functionName,
-        `AIService.processContent result: success=${result.success}, dataSize=${result.data ? JSON.stringify(result.data).length : 0}, hasSchema=${!!result.schema}`,
-        'info'
-      );
+    let stringContent = content;
+    if (typeof stringContent !== 'string') {
+      stringContent = JSON.stringify(stringContent);
     }
 
-    return result;
-  } catch (error) {
-    // Log error
-    logWithDebug(
-      logger,
-      isDebugMode,
-      nodeName,
-      'SmartExtraction',
-      component,
-      functionName,
-      `Smart extraction failed: ${error}`,
-      'error'
+    // Log the string content to be sent to AI
+    logger.debug(
+      formatOperationLog(
+        'smartExtraction',
+        nodeName,
+        nodeId,
+        itemIndex,
+        `Sending ${stringContent.length} chars to AI service`,
+        component,
+        functionName
+      )
     );
 
-    // Return error result
+    // Process with AI service
+    const result = await aiService.processContent(stringContent, aiOptions);
+
     return {
-      data: null,
-      error: `Smart extraction failed: ${error}`,
+      success: result.success,
+      data: result.data,
+      schema: result.schema,
+      error: result.error
+    };
+  } catch (error) {
+    const errorMessage = `AI processing failed: ${(error as Error).message}`;
+    logger.error(formatOperationLog('aiProcessing', nodeName, nodeId, itemIndex, errorMessage));
+
+    return {
+      success: false,
+      error: errorMessage
     };
   }
 }

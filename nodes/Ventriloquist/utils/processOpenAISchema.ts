@@ -1,4 +1,13 @@
 /**
+ * Define a more flexible Page type to accommodate both puppeteer and puppeteer-core
+ */
+interface Page {
+  evaluate: Function;
+  $$eval: Function;
+  $eval: Function;
+}
+
+/**
  * Utility function to process OpenAI field definitions and append reference content
  * to URL or link-related fields to enhance extraction accuracy.
  *
@@ -8,6 +17,7 @@
 import type { Logger } from 'n8n-workflow';
 import { formatOperationLog } from './resultUtils';
 import { logWithDebug } from './loggingUtils';
+// import type * as puppeteer from 'puppeteer';
 
 export interface IOpenAIField {
   name: string;
@@ -185,126 +195,74 @@ export function processFieldsWithReferenceContent<T extends IOpenAIField>(
  * @returns Promise with the modified array of field definitions
  */
 export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAIField>(
+  page: Page,
   fields: T[],
-  page: any,
   mainSelector: string,
-  logger?: Logger | undefined,
-  context?: { nodeName: string; nodeId: string; index: number; debugMode?: boolean },
-  rawHtml?: string
-): Promise<T[]> {
-  const nodeName = context?.nodeName || 'Ventriloquist';
-  const nodeId = context?.nodeId || 'unknown';
-  const index = context?.index !== undefined ? context.index : 0;
-  const component = 'processOpenAISchema';
-  const functionName = 'enhanceFieldsWithRelativeSelectorContent';
-
-  if (!page || !mainSelector || !fields || fields.length === 0) {
-    if (logger) {
-      logger.warn(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `Cannot enhance fields: missing page, selector, or fields`,
-          component,
-          functionName
-        )
-      );
-    }
-    return fields;
+  logger?: Logger,
+  logOptions?: {
+    nodeName?: string;
+    nodeId?: string;
+    index?: number;
+    component?: string;
+    functionName?: string;
   }
-
-  // Find fields with relative selectors
+): Promise<T[]> {
+  // Create a copy of the fields array to avoid modifying the original
   const enhancedFields = [...fields];
 
-  try {
-    if (logger) {
-      logWithDebug(
-        logger,
-        !!context?.debugMode,
-        nodeName,
-        'SmartExtraction',
-        component,
-        functionName,
-        `Enhancing ${fields.length} fields with relative selector content (main selector: ${mainSelector})`,
-        'debug'
-      );
+  // Set defaults for logs
+  const nodeName = logOptions?.nodeName || 'Unknown';
+  const nodeId = logOptions?.nodeId || 'unknown';
+  const index = logOptions?.index !== undefined ? logOptions?.index : 0;
+  const component = logOptions?.component || 'processOpenAISchema';
+  const functionName = logOptions?.functionName || 'enhanceFieldsWithRelativeSelectorContent';
 
-      // Log each field that has a relative selector
-      fields.forEach(field => {
-        if (field.relativeSelectorOptional || field.relativeSelector) {
-          logger.debug(
-            formatOperationLog(
-              "SmartExtraction",
-              nodeName,
-              nodeId,
-              index,
-              `Field ${field.name} has relative selector: ${field.relativeSelectorOptional || field.relativeSelector}`,
-              component,
-              functionName
-            )
-          );
-        }
-      });
-    }
+  // For each field with an AI-provided optional relative selector
+  for (const field of enhancedFields) {
+    try {
+      // Check if it has a relativeSelector (could be AI-provided or explicitly defined)
+      const relativeSelectorOptional = field.relativeSelectorOptional;
+      const relativeSelector = field.relativeSelector;
 
-    // Determine if we have valid HTML content to work with
-    let mainElementHtml = '';
-    let mainElementExists = false;
+      // Skip fields without a relative selector
+      if (!relativeSelectorOptional && !relativeSelector) {
+        continue;
+      }
 
-    // If raw HTML was provided, use it directly
-    if (rawHtml && rawHtml.length > 0) {
-      mainElementHtml = rawHtml;
-      mainElementExists = true;
+      // Determine which selector to use
+      const actualSelector = relativeSelectorOptional || relativeSelector || '';
+
+      // Get extraction type and attribute name if they exist
+      const fieldOptions = (field as any).fieldOptions || {};
+      const extractionType = fieldOptions.extractionType || 'text';
+      const attributeName = fieldOptions.attributeName || '';
 
       if (logger) {
-        logger.debug(
+        logger.info(
           formatOperationLog(
             "SmartExtraction",
             nodeName,
             nodeId,
             index,
-            `Using provided HTML content (${mainElementHtml.length} chars) instead of querying for selector`,
+            `Processing field "${field.name}" with ${actualSelector ? 'selector: ' + actualSelector : 'no selector'}`,
             component,
             functionName
           )
         );
       }
-    }
-    // Otherwise, try to get the HTML from the page
-    else {
-      try {
-        // Check if selector exists and get its HTML content
-        const selectorInfo = await page.evaluate((selector: string) => {
-          const el = document.querySelector(selector);
-          if (!el) return { exists: false, message: `Selector not found: ${selector}` };
 
-          return {
-            exists: true,
-            html: el.outerHTML,
-            message: `Found element with tag ${el.tagName}`
-          };
+      try {
+        // First, get the main element's HTML to work with
+        const mainElementHtml = await page.evaluate((selector: string) => {
+          const element = document.querySelector(selector);
+          if (!element) {
+            console.error(`[Browser] Main element not found with selector: ${selector}`);
+            return null;
+          }
+          return element.outerHTML;
         }, mainSelector);
 
-        if (selectorInfo.exists) {
-          mainElementExists = true;
-          mainElementHtml = selectorInfo.html;
-
-          if (logger) {
-            logger.debug(
-              formatOperationLog(
-                "SmartExtraction",
-                nodeName,
-                nodeId,
-                index,
-                `Found main selector: ${mainSelector}, HTML length: ${mainElementHtml.length}`,
-                component,
-                functionName
-              )
-            );
-          }
-        } else {
+        if (!mainElementHtml) {
           if (logger) {
             logger.warn(
               formatOperationLog(
@@ -312,444 +270,160 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
                 nodeName,
                 nodeId,
                 index,
-                `Main selector not found: ${mainSelector}`,
+                `Main element not found for selector: ${mainSelector}`,
                 component,
                 functionName
               )
             );
+          }
+          continue;
+        }
 
-            // Even if main selector isn't found, try to find it with a less strict approach
+        // Clean the selector for safe use in JavaScript
+        const cleanSelector = actualSelector.replace(/"/g, '\\"');
+
+        // Now extract the content using the relative selector within the main element
+        const content = await page.evaluate(
+          (mainSelector: string, cleanSelector: string, attributeName: string, extractionType: string, mainElementHtml: string) => {
+            try {
+              console.log(`[Browser] Searching for child element using selector: ${cleanSelector} within main element ${mainSelector}`);
+
+              // Create a temporary container with the main element's HTML
+              const tempContainer = document.createElement('div');
+              tempContainer.innerHTML = mainElementHtml;
+
+              // Find the relative element within the temporary container
+              // This is more reliable than trying to query within the live DOM
+              const element = tempContainer.querySelector(cleanSelector);
+
+              if (!element) {
+                console.error(`[Browser] Element not found with selector: ${cleanSelector} within the container`);
+                return '';
+              }
+
+              console.log(`[Browser] Element found with selector: ${cleanSelector}`);
+
+              // Extract based on extraction type
+              if (extractionType === 'attribute' && attributeName) {
+                const attrValue = element.getAttribute(attributeName) || '';
+                console.log(`[Browser] Found attribute ${attributeName} value: ${attrValue}`);
+
+                // Add additional debugging for attribute values
+                console.log(`[Browser] ATTRIBUTE DEBUG - Element: ${element.tagName}`);
+                console.log(`[Browser] ATTRIBUTE DEBUG - Attribute Name: ${attributeName}`);
+                console.log(`[Browser] ATTRIBUTE DEBUG - Attribute Value: ${attrValue}`);
+                console.log(`[Browser] ATTRIBUTE DEBUG - Element HTML: ${element.outerHTML.substring(0, 150)}`);
+
+                return attrValue;
+              } else if (extractionType === 'html') {
+                const htmlContent = element.innerHTML || '';
+                console.log(`[Browser] Found HTML content (truncated): ${htmlContent.substring(0, 100)}...`);
+                return htmlContent;
+              } else {
+                const textContent = element.textContent || '';
+                console.log(`[Browser] Found text content (truncated): ${textContent.substring(0, 100)}...`);
+                return textContent;
+              }
+            } catch (err) {
+              console.error(`[Browser] Error in relative selector extraction: ${err.message}`);
+              return '';
+            }
+          },
+          mainSelector,
+          cleanSelector,
+          attributeName,
+          extractionType,
+          mainElementHtml // Pass the HTML content to the browser context
+        );
+
+        if (content && content.trim() !== '') {
+          // Store the extracted content in the field for later reference
+          field.referenceContent = content.trim();
+
+          // For attribute extraction, mark to return the direct value
+          if (extractionType === 'attribute' && attributeName) {
+            field.returnDirectAttribute = true;
+
+            if (logger) {
+              logger.info(
+                formatOperationLog(
+                  "SmartExtraction",
+                  nodeName,
+                  nodeId,
+                  index,
+                  `Field "${field.name}" will return direct attribute value: "${content.trim()}"`,
+                  component,
+                  functionName
+                )
+              );
+            }
+
+            // For attribute fields, use a more descriptive reference format
+            const instructionText = field.instructions || field.description || '';
+            field.instructions = `${instructionText}\n\nThe value of the ${attributeName} attribute is: ${content.trim()}`;
+          } else {
+            // For non-attribute fields, use standard reference format
+            const instructionText = field.instructions || field.description || '';
+            field.instructions = `${instructionText}\n\nUse this as reference: "${content.trim()}"`;
+          }
+
+          if (logger) {
             logger.info(
               formatOperationLog(
                 "SmartExtraction",
                 nodeName,
                 nodeId,
                 index,
-                `Trying alternative approach to find selector elements`,
+                `Enhanced field "${field.name}" with extracted content (${content.length} chars): "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`,
                 component,
                 functionName
               )
             );
           }
-        }
-      } catch (error) {
-        if (logger) {
+        } else if (logger) {
           logger.warn(
             formatOperationLog(
               "SmartExtraction",
               nodeName,
               nodeId,
               index,
-              `Error evaluating main selector: ${(error as Error).message}`,
+              `No content extracted for field "${field.name}" using selector: ${actualSelector}`,
               component,
               functionName
             )
           );
         }
-      }
-    }
-
-    // If we don't have HTML content to work with, return the original fields
-    if (!mainElementExists || !mainElementHtml) {
-      if (logger) {
-        logger.warn(
-          formatOperationLog(
-            "SmartExtraction",
-            nodeName,
-            nodeId,
-            index,
-            `Cannot enhance fields without HTML content to work with`,
-            component,
-            functionName
-          )
-        );
-      }
-      return enhancedFields;
-    }
-
-    // Process each field for relative selector content
-    for (let i = 0; i < enhancedFields.length; i++) {
-      const field = enhancedFields[i];
-
-      // Get the actual selector to use - prioritize relativeSelectorOptional (AI mode) but fallback to relativeSelector (non-AI mode)
-      const actualSelector = field.relativeSelectorOptional || field.relativeSelector;
-
-      // Check if the field has any relative selector property
-      if (actualSelector && typeof actualSelector === 'string' && actualSelector.trim() !== '') {
+      } catch (error) {
         if (logger) {
-          logger.debug(
+          logger.error(
             formatOperationLog(
               "SmartExtraction",
               nodeName,
               nodeId,
               index,
-              `Processing field "${field.name}" with relative selector: ${actualSelector}`,
+              `Error enhancing field ${field.name} with relative selector content: ${(error as Error).message}`,
               component,
               functionName
             )
           );
         }
-
-        try {
-          // Determine how to extract data - from the field's extractionType and attributeName
-          // or from the selector itself if it contains attribute syntax
-          let extractionType = field.extractionType || 'text';
-          let attributeName = field.attributeName || '';
-          let cleanSelector = actualSelector;
-
-          // Check if the selector contains attribute extraction syntax (e.g., [href])
-          const attributeMatch = actualSelector.match(/\[([^\]]+)\]$/);
-          if (attributeMatch && attributeMatch[1]) {
-            attributeName = attributeMatch[1];
-            cleanSelector = actualSelector.replace(/\[([^\]]+)\]$/, '');
-            extractionType = 'attribute';
-
-            if (logger) {
-              logger.info(
-                formatOperationLog(
-                  "SmartExtraction",
-                  nodeName,
-                  nodeId,
-                  index,
-                  `Detected attribute extraction from selector: ${attributeName} using selector: ${cleanSelector}`,
-                  component,
-                  functionName
-                )
-              );
-            }
-          }
-
-          // Override with explicit extraction type if set in the field
-          if (field.extractionType === 'attribute' && field.attributeName) {
-            extractionType = 'attribute';
-            attributeName = field.attributeName;
-
-            if (logger) {
-              logger.info(
-                formatOperationLog(
-                  "SmartExtraction",
-                  nodeName,
-                  nodeId,
-                  index,
-                  `Using explicit attribute extraction: ${attributeName}`,
-                  component,
-                  functionName
-                )
-              );
-            }
-          }
-
-          if (logger) {
-            logger.info(
-              formatOperationLog(
-                "SmartExtraction",
-                nodeName,
-                nodeId,
-                index,
-                `About to extract content for field "${field.name}" using ${rawHtml ? 'provided HTML' : 'main selector: ' + mainSelector} and relative selector: ${cleanSelector}, type: ${extractionType}, attribute: ${attributeName || 'none'}, AI mode: ${!!field.relativeSelectorOptional}`,
-                component,
-                functionName
-              )
-            );
-          }
-
-          // Extract content using the relative selector - now we pass the raw HTML to the browser context
-          // so it can create a temporary element and query within it
-          const content = await page.evaluate(
-            (mainSel: string, relSel: string, attrName: string, extractType: string, html: string) => {
-              try {
-                let parentElement;
-
-                // If we have HTML content, create a temporary element to query within
-                if (html) {
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName || 'Ventriloquist',
-                    'SmartExtraction',
-                    component,
-                    functionName,
-                    `Using provided HTML content (${html.length} chars)`,
-                    'info'
-                  );
-                  const tempContainer = document.createElement('div');
-                  tempContainer.innerHTML = html;
-                  parentElement = tempContainer;
-                } else {
-                  // Otherwise, query the document directly (fallback)
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName || 'Ventriloquist',
-                    'SmartExtraction',
-                    component,
-                    functionName,
-                    `Finding parent element with selector: ${mainSel}`,
-                    'info'
-                  );
-                  parentElement = document.querySelector(mainSel);
-                }
-
-                if (!parentElement) {
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName || 'Ventriloquist',
-                    'SmartExtraction',
-                    component,
-                    functionName,
-                    `Parent element not found or HTML content not valid`,
-                    'warn'
-                  );
-                  return '';
-                }
-
-                logWithDebug(
-                  logger,
-                  true,
-                  nodeName || 'Ventriloquist',
-                  'SmartExtraction',
-                  component,
-                  functionName,
-                  `Finding element with selector: ${relSel} within parent`,
-                  'info'
-                );
-                const element = parentElement.querySelector(relSel);
-                if (!element) {
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName || 'Ventriloquist',
-                    'SmartExtraction',
-                    component,
-                    functionName,
-                    `Relative element not found: ${relSel}`,
-                    'warn'
-                  );
-                  return '';
-                }
-
-                logWithDebug(
-                  logger,
-                  true,
-                  nodeName || 'Ventriloquist',
-                  'SmartExtraction',
-                  component,
-                  functionName,
-                  `Element found: ${element.tagName}, extraction type: ${extractType}`,
-                  'info'
-                );
-
-                // Get the content based on extraction type
-                if (extractType === 'attribute' && attrName) {
-                  // Check if element has the attribute
-                  if (!element.hasAttribute(attrName)) {
-                    logWithDebug(
-                      logger,
-                      true,
-                      nodeName || 'Ventriloquist',
-                      'SmartExtraction',
-                      component,
-                      functionName,
-                      `Element does not have attribute: ${attrName}`,
-                      'warn'
-                    );
-                    return '';
-                  }
-
-                  const attrValue = element.getAttribute(attrName) || '';
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName || 'Ventriloquist',
-                    'SmartExtraction',
-                    component,
-                    functionName,
-                    `Found attribute ${attrName} value: ${attrValue}`,
-                    'info'
-                  );
-
-                  // Add additional debugging for attribute values
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName || 'Ventriloquist',
-                    'SmartExtraction',
-                    component,
-                    functionName,
-                    `ATTRIBUTE DEBUG - Element: ${element.tagName}`,
-                    'debug'
-                  );
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName || 'Ventriloquist',
-                    'SmartExtraction',
-                    component,
-                    functionName,
-                    `ATTRIBUTE DEBUG - Attribute Name: ${attrName}`,
-                    'debug'
-                  );
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName || 'Ventriloquist',
-                    'SmartExtraction',
-                    component,
-                    functionName,
-                    `ATTRIBUTE DEBUG - Attribute Value: ${attrValue}`,
-                    'debug'
-                  );
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName || 'Ventriloquist',
-                    'SmartExtraction',
-                    component,
-                    functionName,
-                    `ATTRIBUTE DEBUG - Element HTML: ${element.outerHTML.substring(0, 150)}`,
-                    'debug'
-                  );
-
-                  return attrValue;
-                } else if (extractType === 'html') {
-                  const htmlContent = element.innerHTML || '';
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName || 'Ventriloquist',
-                    'SmartExtraction',
-                    component,
-                    functionName,
-                    `Found HTML content (truncated): ${htmlContent.substring(0, 100)}...`,
-                    'info'
-                  );
-                  return htmlContent;
-                } else {
-                  const textContent = element.textContent || '';
-                  logWithDebug(
-                    logger,
-                    true,
-                    nodeName || 'Ventriloquist',
-                    'SmartExtraction',
-                    component,
-                    functionName,
-                    `Found text content (truncated): ${textContent.substring(0, 100)}...`,
-                    'info'
-                  );
-                  return textContent;
-                }
-              } catch (err: any) {
-                logWithDebug(
-                  logger,
-                  true,
-                  nodeName || 'Ventriloquist',
-                  'SmartExtraction',
-                  component,
-                  functionName,
-                  `Error in relative selector extraction: ${err.message}`,
-                  'error'
-                );
-                return '';
-              }
-            },
-            mainSelector,
-            cleanSelector,
-            attributeName,
-            extractionType,
-            mainElementHtml // Pass the HTML content to the browser context
-          );
-
-          if (content && content.trim() !== '') {
-            // Store the extracted content in the field for later reference
-            field.referenceContent = content.trim();
-
-            // For attribute extraction, mark to return the direct value
-            if (extractionType === 'attribute' && attributeName) {
-              field.returnDirectAttribute = true;
-
-              if (logger) {
-                logger.info(
-                  formatOperationLog(
-                    "SmartExtraction",
-                    nodeName,
-                    nodeId,
-                    index,
-                    `Field "${field.name}" will return direct attribute value: "${content.trim()}"`,
-                    component,
-                    functionName
-                  )
-                );
-              }
-
-              // For attribute fields, use a more descriptive reference format
-              const instructionText = field.instructions || field.description || '';
-              field.instructions = `${instructionText}\n\nThe value of the ${attributeName} attribute is: ${content.trim()}`;
-            } else {
-              // For non-attribute fields, use standard reference format
-              const instructionText = field.instructions || field.description || '';
-              field.instructions = `${instructionText}\n\nUse this as reference: "${content.trim()}"`;
-            }
-
-            if (logger) {
-              logger.info(
-                formatOperationLog(
-                  "SmartExtraction",
-                  nodeName,
-                  nodeId,
-                  index,
-                  `Enhanced field "${field.name}" with extracted content (${content.length} chars): "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`,
-                  component,
-                  functionName
-                )
-              );
-            }
-          } else if (logger) {
-            logger.warn(
-              formatOperationLog(
-                "SmartExtraction",
-                nodeName,
-                nodeId,
-                index,
-                `No content extracted for field "${field.name}" using selector: ${actualSelector}`,
-                component,
-                functionName
-              )
-            );
-          }
-        } catch (error) {
-          if (logger) {
-            logger.error(
-              formatOperationLog(
-                "SmartExtraction",
-                nodeName,
-                nodeId,
-                index,
-                `Error enhancing field ${field.name} with relative selector content: ${(error as Error).message}`,
-                component,
-                functionName
-              )
-            );
-          }
-        }
+      }
+    } catch (error) {
+      if (logger) {
+        logger.error(
+          formatOperationLog(
+            "OpenAISchema",
+            nodeName,
+            nodeId,
+            index,
+            `Error processing field: ${(error as Error).message}`,
+            component,
+            functionName
+          )
+        );
       }
     }
-
-    return enhancedFields;
-  } catch (error) {
-    if (logger) {
-      logger.error(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `Error enhancing fields: ${(error as Error).message}`,
-          component,
-          functionName
-        )
-      );
-    }
-    return fields;
   }
+
+  return enhancedFields;
 }

@@ -77,6 +77,11 @@ export function logError(
   logger.error(formatStandardLog(nodeName, operation, component, functionName, message));
 }
 
+// Add a message tracking system to prevent duplicate logs
+const recentLogMessages = new Set<string>();
+const MAX_RECENT_MESSAGES = 100; // Max number of messages to track
+const LOG_EXPIRY_MS = 100; // Time in ms after which a message can be logged again
+
 /**
  * Handle debug logging with consistent format for normal and debug mode
  *
@@ -105,6 +110,33 @@ export function logWithDebug(
 ): void {
   // Format the message with our standard format
   const formattedMessage = formatStandardLog(nodeName, operation, component, functionName, message);
+
+  // Create a unique signature for this log message
+  const logSignature = `${level}:${formattedMessage}`;
+
+  // Check if this exact message was logged recently
+  if (recentLogMessages.has(logSignature)) {
+    // Skip logging this duplicate message
+    return;
+  }
+
+  // Add this message to the recent logs set
+  recentLogMessages.add(logSignature);
+
+  // Keep the set size manageable
+  if (recentLogMessages.size > MAX_RECENT_MESSAGES) {
+    // Remove the oldest message (first added)
+    const iterator = recentLogMessages.values();
+    const firstValue = iterator.next().value;
+    if (firstValue) {
+      recentLogMessages.delete(firstValue);
+    }
+  }
+
+  // Clear this message from the set after a small delay
+  setTimeout(() => {
+    recentLogMessages.delete(logSignature);
+  }, LOG_EXPIRY_MS);
 
   // Always log through the normal logger interface if logger is available
   if (logger) {
