@@ -18,7 +18,7 @@ import {
     type IEntityMatcherActionOutput,
     type IEntityMatchResult
 } from '../types/entityMatcherTypes';
-import { generateUniqueSelector } from '../../selectorUtils';
+import { generateUniqueSelector, generateCssFriendlySelector } from '../../selectorUtils';
 
 /**
  * Interface for the entity matcher configuration
@@ -362,6 +362,7 @@ export class EntityMatcherFactory {
                         try {
                             const uniqueSelector = await generateUniqueSelector(page, comparisonResult.selectedMatch.element, logger);
                             comparisonResult.selectedMatch.uniqueSelector = uniqueSelector;
+                            comparisonResult.selectedMatch.formattedSelector = generateCssFriendlySelector(uniqueSelector);
                             logger.debug(`[EntityMatcherFactory] Generated unique selector for selected match: ${uniqueSelector}`);
                         } catch (error) {
                             logger.warn(`[EntityMatcherFactory] Could not generate unique selector for selected match: ${(error as Error).message}`);
@@ -374,6 +375,7 @@ export class EntityMatcherFactory {
                             try {
                                 const uniqueSelector = await generateUniqueSelector(page, match.element, logger);
                                 match.uniqueSelector = uniqueSelector;
+                                match.formattedSelector = generateCssFriendlySelector(uniqueSelector);
                                 logger.debug(`[EntityMatcherFactory] Generated unique selector for match #${match.index}: ${uniqueSelector}`);
                             } catch (error) {
                                 logger.warn(`[EntityMatcherFactory] Could not generate unique selector for match #${match.index}: ${(error as Error).message}`);

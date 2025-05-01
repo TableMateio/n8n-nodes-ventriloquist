@@ -341,12 +341,24 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
         break;
 
       case 'firstAboveThreshold':
-        // First match above threshold is selected
-        if (matchesAboveThresholdArray.length > 0) {
-          matchesAboveThresholdArray[0].selected = true;
-          logger.debug(
-            `${logPrefix} Selected first match #${matchesAboveThresholdArray[0].index} with score: ${matchesAboveThresholdArray[0].overallSimilarity.toFixed(4)}, richness: ${(matchesAboveThresholdArray[0].informationRichness || 0).toFixed(4)}`
-          );
+        // We need to use the original order (by index) for this mode, not the sorted order
+        // Sort by original index to preserve page order
+        const originalOrderMatches = [...limitedMatches].sort((a, b) => a.index - b.index);
+
+        // Find the first match above threshold in the original order
+        const firstMatch = originalOrderMatches.find(m => m.overallSimilarity >= threshold);
+
+        if (firstMatch) {
+          // Mark the match as selected in the original array
+          for (const match of limitedMatches) {
+            if (match.index === firstMatch.index) {
+              match.selected = true;
+              logger.debug(
+                `${logPrefix} Selected first match #${match.index} with score: ${match.overallSimilarity.toFixed(4)}, richness: ${(match.informationRichness || 0).toFixed(4)}`
+              );
+              break;
+            }
+          }
         }
         break;
 

@@ -5,6 +5,15 @@ import type { Page, ElementHandle } from 'puppeteer-core';
 import type { Logger as ILogger } from 'n8n-workflow';
 
 /**
+ * Converts a standard CSS selector to a CSS-friendly attribute selector format
+ * This replaces id selectors like div#12345 with attribute selectors like div[id="12345"]
+ */
+export function generateCssFriendlySelector(selector: string): string {
+    // Regex to match ID selectors (#id) and replace them with attribute selectors [id="value"]
+    return selector.replace(/(^|[>\s])([a-zA-Z0-9\-_]+)#([a-zA-Z0-9\-_]+)/g, '$1$2[id="$3"]');
+}
+
+/**
  * Generates a unique CSS selector for a specific element
  * This creates a selector that should match only this specific element
  */

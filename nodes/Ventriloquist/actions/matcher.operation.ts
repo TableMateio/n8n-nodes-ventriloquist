@@ -45,6 +45,7 @@ import {
 	createEntityMatcher,
 	type IEntityMatcherConfig
 } from "../utils/middlewares/matching/entityMatcherFactory";
+import { generateCssFriendlySelector } from '../utils/selectorUtils';
 
 // Add this interface near the top of the file with the other interfaces
 interface IContainerInfo {
@@ -1006,11 +1007,11 @@ export async function execute(
 		// Create output item with clearer structure
 		let matches = matchResult.matches || matchResult.comparisons || [];
 
-		// When using "best" match mode, filter matches to only include the selected match
-		if (matchMode === 'best' && matchResult.selectedMatch) {
+		// When using "best" or "firstAboveThreshold" match mode, filter matches to only include the selected match
+		if ((matchMode === 'best' || matchMode === 'firstAboveThreshold') && matchResult.selectedMatch) {
 			// Keep only the selected match in the matches array
 			matches = matches.filter((m: IEntityMatchResult) => m.selected === true);
-			this.logger.info(`[Matcher] Filtered matches to only include the best match in "best" match mode`);
+			this.logger.info(`[Matcher] Filtered matches to only include the selected match in "${matchMode}" match mode`);
 		}
 
 		const item = {
@@ -1033,6 +1034,15 @@ export async function execute(
 					matches: matches.filter((m: IEntityMatchResult) => m.uniqueSelector).map((m: IEntityMatchResult) => ({
 						index: m.index,
 						selector: m.uniqueSelector,
+						similarity: m.overallSimilarity
+					})) || []
+				},
+				// Include formatted selectors (using attribute selectors instead of ID selectors)
+				formattedSelectors: {
+					selected: matchResult.selectedMatch?.formattedSelector || null,
+					matches: matches.filter((m: IEntityMatchResult) => m.formattedSelector).map((m: IEntityMatchResult) => ({
+						index: m.index,
+						selector: m.formattedSelector,
 						similarity: m.overallSimilarity
 					})) || []
 				},

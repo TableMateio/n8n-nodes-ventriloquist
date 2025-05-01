@@ -77,6 +77,7 @@ export interface IEntityMatchResult {
   requiredFieldsPresent?: boolean;
   isMatch?: boolean;
   uniqueSelector?: string;
+  formattedSelector?: string;
 }
 
 /**
@@ -102,6 +103,7 @@ export interface IExtractedItem {
   sourceNodeName?: string;
   sourceNodeId?: string;
   uniqueSelector?: string;
+  formattedSelector?: string;
 }
 
 /**
