@@ -375,6 +375,8 @@ For JSON format: Look for the field "${fieldNameReference}"
 For CSV format: Look for the column "${field.name} ${attributeName.toUpperCase()}"
 For HTML format: The ${attributeName} value will be embedded in the HTML data structure
 For text format: Look for text lines containing "${field.name} ${attributeName}: [value]"
+
+NOTE: If the attribute is not present or contains "javascript:void(0);", the field will be omitted from the data.
 In all cases, use the extracted ${attributeName} attribute value directly. DO NOT try to extract the attribute from HTML content.
 `;
             // Ensure we're not appending to potentially undefined instructions

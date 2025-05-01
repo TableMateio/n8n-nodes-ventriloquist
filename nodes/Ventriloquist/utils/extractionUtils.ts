@@ -342,7 +342,23 @@ export async function extractTableData(
 										fieldName = `${attrName}_value`; // For other attributes
 									}
 
-									obj[fieldName] = attrValue as string | string[];
+									// Filter out javascript:void(0) and empty values
+									if (attrValue &&
+										typeof attrValue === 'string' &&
+										attrValue.trim() !== '' &&
+										attrValue !== 'javascript:void(0);') {
+										obj[fieldName] = attrValue as string | string[];
+									} else if (Array.isArray(attrValue)) {
+										// For arrays, filter out javascript:void(0) values
+										const filteredValues = (attrValue as string[]).filter(
+											val => val && val.trim() !== '' && val !== 'javascript:void(0);'
+										);
+
+										// Only add the field if there are valid values after filtering
+										if (filteredValues.length > 0) {
+											obj[fieldName] = filteredValues.length === 1 ? filteredValues[0] : filteredValues;
+										}
+									}
 								});
 							}
 						} else {
@@ -368,7 +384,23 @@ export async function extractTableData(
 							fieldName = `${attrName}_value`; // For other attributes
 						}
 
-						obj[fieldName] = attrValue as string | string[];
+						// Filter out javascript:void(0) and empty values
+						if (attrValue &&
+							typeof attrValue === 'string' &&
+							attrValue.trim() !== '' &&
+							attrValue !== 'javascript:void(0);') {
+							obj[fieldName] = attrValue as string | string[];
+						} else if (Array.isArray(attrValue)) {
+							// For arrays, filter out javascript:void(0) values
+							const filteredValues = (attrValue as string[]).filter(
+								val => val && val.trim() !== '' && val !== 'javascript:void(0);'
+							);
+
+							// Only add the field if there are valid values after filtering
+							if (filteredValues.length > 0) {
+								obj[fieldName] = filteredValues.length === 1 ? filteredValues[0] : filteredValues;
+							}
+						}
 					});
 				}
 
