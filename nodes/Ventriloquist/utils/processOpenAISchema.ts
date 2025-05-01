@@ -358,13 +358,36 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
               );
             }
 
-            // For attribute fields, use a more descriptive reference format
-            const instructionText = field.instructions || field.description || '';
-            field.instructions = `${instructionText}\n\nThe value of the ${attributeName} attribute is: ${content.trim()}`;
+            // Don't include the actual extracted content in the instructions
+            // Instead, explain how to access the standardized field
+            let fieldNameReference = '';
+            if (attributeName === 'href') {
+              fieldNameReference = 'href_url';
+            } else if (attributeName === 'src') {
+              fieldNameReference = 'src_url';
+            } else {
+              fieldNameReference = `${attributeName}_value`;
+            }
+
+            const attributeInstructions = `
+IMPORTANT: This is an attribute extraction field.
+For JSON format: Look for the field "${fieldNameReference}"
+For CSV format: Look for the column "${field.name} ${attributeName.toUpperCase()}"
+For HTML format: The ${attributeName} value will be embedded in the HTML data structure
+For text format: Look for text lines containing "${field.name} ${attributeName}: [value]"
+In all cases, use the extracted ${attributeName} attribute value directly. DO NOT try to extract the attribute from HTML content.
+`;
+            // Ensure we're not appending to potentially undefined instructions
+            field.instructions = field.instructions ?
+              `${field.instructions}\n${attributeInstructions}` :
+              attributeInstructions;
           } else {
-            // For non-attribute fields, use standard reference format
-            const instructionText = field.instructions || field.description || '';
-            field.instructions = `${instructionText}\n\nUse this as reference: "${content.trim()}"`;
+            // For non-attribute extraction, include content in the instructions
+            if (field.instructions) {
+              field.instructions += `\nReference content: ${content.trim()}`;
+            } else {
+              field.instructions = `Reference content: ${content.trim()}`;
+            }
           }
 
           if (logger) {

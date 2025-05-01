@@ -1074,6 +1074,84 @@ IMPORTANT GUIDELINES:
           }
 
           return { success: false, error: 'No valid response content found' };
+        } else if (run.status === 'requires_action' && run.required_action?.type === 'submit_tool_outputs') {
+          // Handle the requires_action status for function calling
+          const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
+
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `[OpenAI API] Run requires action - handling ${toolCalls.length} tool call(s)`
+            )
+          );
+
+          // Create an array to store our tool outputs
+          const toolOutputs = toolCalls.map((toolCall: any) => {
+            try {
+              // Extract the function arguments
+              const args = JSON.parse(toolCall.function.arguments);
+
+              // Log the function being called
+              if (isDebugMode) {
+                this.logger.info(
+                  formatOperationLog(
+                    "SmartExtraction",
+                    nodeName,
+                    nodeId,
+                    index,
+                    `[OpenAI API] Function called: ${toolCall.function.name} with arguments: ${JSON.stringify(args, null, 2).substring(0, 200)}...`
+                  )
+                );
+              }
+
+              // Return a simple success response - this allows the AI to continue processing
+              return {
+                tool_call_id: toolCall.id,
+                output: JSON.stringify({ success: true, data: args })
+              };
+            } catch (error) {
+              this.logger.error(
+                formatOperationLog(
+                  "SmartExtraction",
+                  nodeName,
+                  nodeId,
+                  index,
+                  `[OpenAI API] Error processing function call: ${(error as Error).message}`
+                )
+              );
+
+              // Return an error response
+              return {
+                tool_call_id: toolCall.id,
+                output: JSON.stringify({ success: false, error: (error as Error).message })
+              };
+            }
+          });
+
+          // Submit the tool outputs back to OpenAI
+          await this.openai.beta.threads.runs.submitToolOutputs(
+            threadId,
+            runId,
+            { tool_outputs: toolOutputs }
+          );
+
+          // Add logging to confirm submission
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `[OpenAI API] Submitted ${toolOutputs.length} tool outputs for run ${runId}`
+            )
+          );
+
+          // Wait before checking again
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          continue; // Skip to the next iteration
         } else if (run.status === 'failed') {
           return { success: false, error: `Run failed: ${run.last_error?.message || 'Unknown error'}` };
         } else if (run.status === 'expired') {

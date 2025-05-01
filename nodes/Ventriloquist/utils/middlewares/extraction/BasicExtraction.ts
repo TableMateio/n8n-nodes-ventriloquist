@@ -85,7 +85,9 @@ export class BasicExtraction implements IExtraction {
               rawContent = data.html as string;
             }
 
-            if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+            // Only truncate for logging, not for processing
+            const loggedHtmlContent = rawContent.length > 200 ? rawContent.substring(0, 200) + '... [truncated]' : rawContent;
+            logger.debug(`${logPrefix} Extracted HTML content: ${loggedHtmlContent}`);
           } catch (err) {
             logger.error(`${logPrefix} HTML extraction failed: ${(err as Error).message}`);
             throw err;
@@ -157,12 +159,15 @@ export class BasicExtraction implements IExtraction {
           try {
             // First extract the text or HTML content
             const content = await this.page.$eval(this.config.selector, (el) => {
-              return el.textContent?.trim() || el.innerHTML;
+              return el.outerHTML; // Change from textContent to outerHTML to get full HTML
             });
 
-            // Store raw content
+            // Store raw content - don't truncate for processing
             rawContent = content;
-            if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+
+            // Only truncate for logging
+            const loggedSmartContent = content.length > 200 ? content.substring(0, 200) + '... [truncated]' : content;
+            logger.debug(`${logPrefix} Extracted content for smart processing: ${loggedSmartContent}`);
 
             // Prepare the extraction context for AI processing
             const extractContext = {
@@ -230,26 +235,85 @@ export class BasicExtraction implements IExtraction {
 
         case 'table':
           // Handle table extraction
-          const includeHeaders = this.config.includeHeaders !== false;
-          const rowSelector = this.config.rowSelector || 'tr';
-          const cellSelector = this.config.cellSelector || 'td, th';
-          const tableOutputFormat = this.config.outputFormat || 'json';
-          const extractAttributes = this.config.extractAttributes === true;
-          const attributeName = this.config.attributeName || 'href';
+          const {
+            selector,
+            includeHeaders = true,
+            rowSelector = 'tr',
+            cellSelector = 'td, th',
+            outputFormat = 'json',
+            preserveFieldStructure = false,
+            extractAttributes = false,
+            attributeName = 'href',
+          } = this.config;
 
-          logger.info(`${logPrefix} Table extraction starting: selector=${this.config.selector}, rowSelector=${rowSelector}, cellSelector=${cellSelector}, includeHeaders=${includeHeaders}, outputFormat=${tableOutputFormat}, extractAttributes=${extractAttributes}`);
+          // Create a local variable for table output format to use in the extraction
+          const tableOutputFormat = outputFormat;
+
+          // Check for attribute extraction fields and automatically enable if needed
+          let useAttributeExtraction = extractAttributes;
+          let useAttributeName = attributeName;
+
+          // Look for fields with attribute extraction
+          if (this.config.fields && this.config.fields.items) {
+            const attributeFields = this.config.fields.items.filter(field => {
+              const fieldOptions = (field as any).fieldOptions || {};
+              return fieldOptions.extractionType === 'attribute' && fieldOptions.attributeName;
+            });
+
+            if (attributeFields.length > 0) {
+              // We found fields with attribute extraction, enable it automatically
+              useAttributeExtraction = true;
+
+              // Use the first attribute name we find, prioritize href
+              const attributeNames = attributeFields.map(field => {
+                const fieldOptions = (field as any).fieldOptions || {};
+                return fieldOptions.attributeName;
+              });
+
+              if (attributeNames.includes('href')) {
+                useAttributeName = 'href';
+              } else {
+                useAttributeName = attributeNames[0];
+              }
+
+              logger.info(
+                formatOperationLog(
+                  'TableExtraction',
+                  this.context.nodeName,
+                  this.context.nodeId,
+                  this.context.index !== undefined ? this.context.index : 0,
+                  `Found ${attributeFields.length} attribute extraction fields, enabling attribute extraction for ${useAttributeName}`
+                )
+              );
+            }
+          }
+
+          logger.info(
+            formatOperationLog(
+              'TableExtraction',
+              this.context.nodeName,
+              this.context.nodeId,
+              this.context.index !== undefined ? this.context.index : 0,
+              `Extracting table as structured data${preserveFieldStructure ? ' (preserving field structure)' : ''}${useAttributeExtraction ? ' with attribute extraction' : ''}`
+            )
+          );
 
           try {
             if (tableOutputFormat === 'html') {
               // Just return the HTML if that's what was requested
               logger.info(`${logPrefix} Extracting table as HTML`);
-              rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
-              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
-              data = rawContent;
-              logger.info(`${logPrefix} Table HTML extracted successfully, length: ${data.length}`);
+              const fullTableHtml = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+              rawContent = fullTableHtml; // Store full HTML for processing
+
+              // Only truncate for logging
+              const loggedTableContent = fullTableHtml.length > 200 ? fullTableHtml.substring(0, 200) + '... [truncated]' : fullTableHtml;
+              logger.debug(`${logPrefix} Table HTML extracted: ${loggedTableContent}`);
+
+              data = fullTableHtml;
+              logger.info(`${logPrefix} Table HTML extracted successfully, length: ${fullTableHtml.length}`);
             } else {
               // Extract as array of rows and cells
-              logger.info(`${logPrefix} Extracting table as structured data`);
+              logger.info(`${logPrefix} Extracting table as structured data${useAttributeExtraction ? ' with attribute extraction' : ''}`);
 
               // First check if the selector exists more thoroughly with content logging
               const selectorInfo = await this.page.evaluate((selector) => {
@@ -300,8 +364,8 @@ export class BasicExtraction implements IExtraction {
                 throw new Error(`Could not extract HTML content from table`);
               }
 
-              // Use the extractTableData utility function from extractionUtils.ts
-              data = await extractTableData(
+              // Use utility to extract table data
+              const result = await extractTableData(
                 this.page,
                 this.config.selector,
                 {
@@ -309,15 +373,18 @@ export class BasicExtraction implements IExtraction {
                   rowSelector,
                   cellSelector,
                   outputFormat: tableOutputFormat,
-                  extractAttributes,
-                  attributeName: extractAttributes ? attributeName : undefined,
+                  extractAttributes: useAttributeExtraction,
+                  attributeName: useAttributeName,
                 },
                 logger,
-                nodeName || 'Ventriloquist',
-                nodeId || 'unknown'
+                this.context.nodeName,
+                this.context.nodeId
               );
 
-              logger.info(`${logPrefix} Table data extracted: ${Array.isArray(data) ? data.length : 'object'} rows found`);
+              // Assign the result to data for further processing
+              data = result;
+
+              logger.info(`${logPrefix} Table data extracted: ${Array.isArray(result) ? result.length : 'object'} rows found${useAttributeExtraction ? ' with attributes' : ''}`);
 
               // NEW CODE: If there are aiFields with relative selectors in the config
               // and we've successfully extracted the table, use the full HTML content
@@ -517,7 +584,10 @@ export class BasicExtraction implements IExtraction {
             const elements = document.querySelectorAll(selector);
             return Array.from(elements).map(el => el.outerHTML).join('\n');
           }, this.config.selector);
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+
+          // Only truncate for logging
+          const loggedMultipleContent = rawContent.length > 200 ? rawContent.substring(0, 200) + '... [truncated]' : rawContent;
+          logger.debug(`${logPrefix} Raw multiple elements content: ${loggedMultipleContent}`);
 
           // Limit the number of elements if requested
           const limitedElements = limit > 0 ? elements.slice(0, limit) : elements;

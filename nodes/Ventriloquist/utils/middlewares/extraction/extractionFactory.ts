@@ -158,7 +158,9 @@ export class BasicExtraction implements IExtraction {
 
           // Store all raw content joined together for compatibility
           rawContent = textElements.join('\n');
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+          // Only truncate raw content for logging, not for processing
+          const loggedTextContent = rawContent.length > 200 ? rawContent.substring(0, 200) + '... [truncated]' : rawContent;
+          logger.debug(`${logPrefix} Extracted text content: ${loggedTextContent}`);
 
           // If only one result was found, keep backwards compatibility by returning a string
           // Otherwise, return an array of results
@@ -233,7 +235,9 @@ export class BasicExtraction implements IExtraction {
 
               // Store all raw content joined together for compatibility
               rawContent = hrefValues.join('\n');
-              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+              // Only truncate for logging
+              const loggedHrefContent = rawContent.length > 200 ? rawContent.substring(0, 200) + '... [truncated]' : rawContent;
+              logger.debug(`${logPrefix} Extracted href values: ${loggedHrefContent}`);
 
               // If only one result was found, keep backwards compatibility by returning a string
               // Otherwise, return an array of results
@@ -249,7 +253,9 @@ export class BasicExtraction implements IExtraction {
 
               // Store all raw content joined together for compatibility
               rawContent = attributeValues.join('\n');
-              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+              // Only truncate for logging
+              const loggedAttrContent = rawContent.length > 200 ? rawContent.substring(0, 200) + '... [truncated]' : rawContent;
+              logger.debug(`${logPrefix} Extracted attribute values: ${loggedAttrContent}`);
 
               // If only one result was found, keep backwards compatibility by returning a string
               // Otherwise, return an array of results
@@ -277,7 +283,9 @@ export class BasicExtraction implements IExtraction {
 
           // Store all raw content joined together for compatibility
           rawContent = htmlContents.join('\n');
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+          // Only truncate for logging
+          const loggedHtmlContent = rawContent.length > 200 ? rawContent.substring(0, 200) + '... [truncated]' : rawContent;
+          logger.debug(`${logPrefix} Extracted HTML content: ${loggedHtmlContent}`);
 
           // If only one result was found, keep backwards compatibility by returning a string
           // Otherwise, return an array of results
@@ -292,7 +300,9 @@ export class BasicExtraction implements IExtraction {
 
           // Store all raw content joined together for compatibility
           rawContent = outerHtmlContents.join('\n');
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+          // Only truncate for logging
+          const loggedOuterContent = rawContent.length > 200 ? rawContent.substring(0, 200) + '... [truncated]' : rawContent;
+          logger.debug(`${logPrefix} Extracted outer HTML content: ${loggedOuterContent}`);
 
           // If only one result was found, keep backwards compatibility by returning a string
           // Otherwise, return an array of results
@@ -314,8 +324,12 @@ export class BasicExtraction implements IExtraction {
 
           try {
             // Get raw content from the element
-            rawContent = await this.page.$eval(this.config.selector, (el) => el.textContent?.trim() || '');
-            if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+            const fullContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+            rawContent = fullContent; // Store the full content for processing
+
+            // Only truncate for logging
+            const loggedSmartContent = fullContent.length > 200 ? fullContent.substring(0, 200) + '... [truncated]' : fullContent;
+            logger.debug(`${logPrefix} Extracted content for smart processing: ${loggedSmartContent}`);
 
             // Create properly typed smart options
             const smartOptions: ISmartExtractionOptions = {
@@ -397,10 +411,15 @@ export class BasicExtraction implements IExtraction {
             if (tableOutputFormat === 'html') {
               // Just return the HTML if that's what was requested
               logger.info(`${logPrefix} Extracting table as HTML`);
-              rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
-              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
-              data = rawContent;
-              logger.info(`${logPrefix} Table HTML extracted successfully, length: ${data.length}`);
+              const fullTableHtml = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+              rawContent = fullTableHtml; // Store full HTML for processing
+
+              // Only truncate for logging
+              const loggedTableContent = fullTableHtml.length > 200 ? fullTableHtml.substring(0, 200) + '... [truncated]' : fullTableHtml;
+              logger.debug(`${logPrefix} Table HTML extracted: ${loggedTableContent}`);
+
+              data = fullTableHtml;
+              logger.info(`${logPrefix} Table HTML extracted successfully, length: ${fullTableHtml.length}`);
             } else {
               // Extract as array of rows and cells
               logWithDebug(
@@ -429,7 +448,9 @@ export class BasicExtraction implements IExtraction {
 
               // Get the raw HTML for raw content
               rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
-              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+              // Only truncate for logging, not for processing
+              const loggedStructuredTableContent = rawContent.length > 200 ? rawContent.substring(0, 200) + '... [truncated]' : rawContent;
+              logger.debug(`${logPrefix} Raw table HTML: ${loggedStructuredTableContent}`);
 
               // Use the extractTableData utility function from extractionUtils.ts
               data = await extractTableData(
@@ -441,7 +462,7 @@ export class BasicExtraction implements IExtraction {
                   cellSelector,
                   outputFormat: tableOutputFormat,
                   extractAttributes,
-                  attributeName: extractAttributes ? attributeName : undefined,
+                  attributeName,
                 },
                 logger,
                 nodeName || 'Ventriloquist',
@@ -526,7 +547,10 @@ export class BasicExtraction implements IExtraction {
             const elements = document.querySelectorAll(selector);
             return Array.from(elements).map(el => el.outerHTML).join('\n');
           }, this.config.selector);
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+
+          // Only truncate for logging
+          const loggedMultipleContent = rawContent.length > 200 ? rawContent.substring(0, 200) + '... [truncated]' : rawContent;
+          logger.debug(`${logPrefix} Raw multiple elements content: ${loggedMultipleContent}`);
 
           // Limit the number of elements if requested
           const limitedElements = limit > 0 ? elements.slice(0, limit) : elements;

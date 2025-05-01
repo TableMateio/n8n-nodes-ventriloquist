@@ -250,22 +250,50 @@ export async function extractTableData(
 				// Extract all rows
 				return Array.from(rows).map((row) => {
 					const cells = Array.from(row.querySelectorAll(cellSelector));
-					return cells.map((cell) => {
-						// If extracting attributes, get the specified attribute value
+
+					// For each row, we'll create an array of cell data objects
+					return cells.map((cell, cellIndex) => {
+						// Create a cell data object that will hold both text and attributes
+						const cellData: any = {
+							text: cell.textContent?.trim() || '',
+							attributes: {} as Record<string, string | string[]>
+						};
+
+						// If extracting attributes is enabled
 						if (extractAttributes && attributeName) {
-							// Handle the case where a cell might contain multiple elements with attributes
-							// This is a general approach that works for any attribute type, not just links
+							// Find all elements with the specified attribute
 							const elements = cell.querySelectorAll(`[${attributeName}]`);
-							if (elements.length > 1) {
-								return Array.from(elements)
+
+							if (elements.length > 0) {
+								// Extract attribute values
+								const attributeValues = Array.from(elements)
 									.map(el => el.getAttribute(attributeName) || '')
 									.filter(value => value !== ''); // Filter out empty values
+
+								// Store attribute values
+								cellData.attributes[attributeName] =
+									attributeValues.length === 1 ? attributeValues[0] : attributeValues;
 							}
-							// Otherwise just return the single attribute value
-							return cell.getAttribute(attributeName) || '';
+
+							// For links, we want to specifically handle href attributes in a user-friendly way
+							if (attributeName === 'href') {
+								const links = cell.querySelectorAll('a[href]');
+								if (links.length > 0) {
+									const hrefValues = Array.from(links)
+										.map(el => el.getAttribute('href') || '')
+										.filter(value => value !== '');
+
+									if (hrefValues.length > 0) {
+										cellData.attributes['href'] =
+											hrefValues.length === 1 ? hrefValues[0] : hrefValues;
+									}
+								}
+							}
 						}
-						// Otherwise get the text content
-						return cell.textContent?.trim() || '';
+
+						// For simplicity of downstream processing, if no attributes were extracted,
+						// just return the text value directly
+						return Object.keys(cellData.attributes).length > 0 ? cellData : cellData.text;
 					});
 				});
 			},
@@ -282,28 +310,88 @@ export async function extractTableData(
 
 		if (options.outputFormat === 'json' && options.includeHeaders && tableData.length > 1) {
 			// Convert to array of objects using first row as keys
-			const headers = tableData[0] as string[];
+			const headers = tableData[0].map((cell: any) =>
+				typeof cell === 'object' && cell.text ? cell.text : String(cell)
+			);
+
 			const jsonData: IDataObject[] = tableData.slice(1).map((row) => {
 				const obj: IDataObject = {};
+
 				headers.forEach((header, i) => {
 					if (header && i < row.length) {
-						// Preserve any data structure (arrays, objects, primitives) in the output
-						obj[header as string] = row[i];
+						const cell = row[i];
+
+						// If the cell is a complex object with text and attributes
+						if (typeof cell === 'object' && cell !== null && cell.text !== undefined) {
+							// Add the text content with the header name
+							obj[header as string] = cell.text;
+
+							// Add attributes with appropriate naming
+							if (cell.attributes) {
+								Object.entries(cell.attributes).forEach(([attrName, attrValue]) => {
+									// Create consistent, standardized field names
+									// Format: attribute_[type] where type is url for href, src for image sources, etc.
+									let fieldName = '';
+
+									// Handle different attribute types with standardized names
+									if (attrName === 'href') {
+										fieldName = 'href_url'; // Always use href_url for all href attributes
+									} else if (attrName === 'src') {
+										fieldName = 'src_url'; // Always use src_url for image sources
+									} else {
+										fieldName = `${attrName}_value`; // For other attributes
+									}
+
+									obj[fieldName] = attrValue as string | string[];
+								});
+							}
+						} else {
+							// If it's just a simple value, add it directly
+							obj[header as string] = cell;
+						}
 					}
 				});
+
+				// Special case for row-level attributes
+				const rowElement = row as any;
+				if (rowElement._row_attributes) {
+					Object.entries(rowElement._row_attributes).forEach(([attrName, attrValue]) => {
+						// Use consistent field naming for row attributes too
+						let fieldName = '';
+
+						// Handle different attribute types with standardized names
+						if (attrName === 'href') {
+							fieldName = 'href_url'; // Always use href_url for href attributes
+						} else if (attrName === 'src') {
+							fieldName = 'src_url'; // Always use src_url for image sources
+						} else {
+							fieldName = `${attrName}_value`; // For other attributes
+						}
+
+						obj[fieldName] = attrValue as string | string[];
+					});
+				}
+
 				return obj;
 			});
+
 			return jsonData;
 		}
 
 		if (options.outputFormat === 'csv') {
-			// Convert to CSV string
-			const csvRows = tableData.map(row => row.join(','));
+			// Convert to CSV string, extracting just the text content for simplicity
+			const csvRows = tableData.map(row =>
+				row.map(cell => typeof cell === 'object' && cell.text ? cell.text : String(cell)).join(',')
+			);
 			return csvRows.join('\n');
 		}
 
-		// Return as array of arrays
-		return options.includeHeaders ? tableData : tableData.slice(1) as Array<Array<string | string[]>>;
+		// Return as array of arrays, but simplify by returning just the text for complex cells
+		const simplifiedData = tableData.map(row =>
+			row.map(cell => typeof cell === 'object' && cell.text ? cell.text : cell)
+		);
+
+		return options.includeHeaders ? simplifiedData : simplifiedData.slice(1) as Array<Array<string | string[]>>;
 	} catch (error) {
 		logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to extract table data: ${(error as Error).message}`);
 		throw error;

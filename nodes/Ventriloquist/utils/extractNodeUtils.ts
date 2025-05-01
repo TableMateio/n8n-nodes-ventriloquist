@@ -68,6 +68,8 @@ export interface IExtractItem {
   hasOpenAiApiKey?: boolean;
   continueIfNotFound?: boolean;
   preserveFieldStructure?: boolean;
+  extractAttributes?: boolean;
+  attributeName?: string;
   textOptions?: {
     cleanText?: boolean;
   };
@@ -895,6 +897,59 @@ export async function processExtractionItems(
                 return extField.returnDirectAttribute !== true;
               });
 
+              // NEW SECTION: Check if any fields need attribute extraction
+              const hasAttributeFields = extractionItem.aiFields.some(field => {
+                const fieldOptions = (field as any).fieldOptions || {};
+                return fieldOptions.extractionType === 'attribute' && fieldOptions.attributeName;
+              });
+
+              // If we have attribute fields, make sure the extraction config will include them
+              if (hasAttributeFields) {
+                logger.info(
+                  formatOperationLog(
+                    'extraction',
+                    nodeName,
+                    nodeId,
+                    i,
+                    `Item ${extractionItem.name} has attribute extraction fields - automatically enabling attribute extraction`,
+                    'extractNodeUtils',
+                    'processExtractionItems'
+                  )
+                );
+
+                // Ensure extractAttributes will be set to true
+                extractionItem.extractAttributes = true;
+
+                // Find which attribute names are needed
+                const attributeNames = extractionItem.aiFields
+                  .filter(field => {
+                    const fieldOptions = (field as any).fieldOptions || {};
+                    return fieldOptions.extractionType === 'attribute' && fieldOptions.attributeName;
+                  })
+                  .map(field => {
+                    const fieldOptions = (field as any).fieldOptions || {};
+                    return fieldOptions.attributeName;
+                  });
+
+                // If we have at least one attribute name, set it as the primary
+                if (attributeNames.length > 0) {
+                  // Prioritize href if it exists, otherwise use the first attribute name
+                  extractionItem.attributeName = attributeNames.includes('href') ? 'href' : attributeNames[0];
+
+                  logger.info(
+                    formatOperationLog(
+                      'extraction',
+                      nodeName,
+                      nodeId,
+                      i,
+                      `Setting primary attribute name to "${extractionItem.attributeName}" for extraction`,
+                      'extractNodeUtils',
+                      'processExtractionItems'
+                    )
+                  );
+                }
+              }
+
               if (hasNonDirectFields) {
                 logger.info(
                   formatOperationLog(
@@ -948,11 +1003,12 @@ export async function processExtractionItems(
           id: extractionItem.id,
           extractionType: extractionItem.extractionType,
           selector: extractionItem.selector || '',
-          attributeName: extractionItem.attribute,
+          attributeName: extractionItem.attribute || extractionItem.attributeName || 'href',
           waitForSelector: extractionNodeOptions.waitForSelector,
           selectorTimeout: extractionNodeOptions.timeout,
           debugMode: isDebugMode,
           preserveFieldStructure: extractionItem.preserveFieldStructure || false,
+          extractAttributes: extractionItem.extractAttributes || false,
         };
 
         // Add ai formatting options if they exist

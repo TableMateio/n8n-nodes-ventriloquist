@@ -17,6 +17,7 @@ import { processExtractionItems, type IExtractItem } from "../utils/extractNodeU
 import { logPageDebugInfo } from "../utils/debugUtils";
 import { v4 as uuidv4 } from 'uuid';
 import { logWithDebug } from '../utils/loggingUtils';
+import { processTableData } from '../utils/smartExtractionUtils';
 
 /**
  * Extract operation description

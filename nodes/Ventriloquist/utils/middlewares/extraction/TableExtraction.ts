@@ -36,16 +36,57 @@ export class TableExtraction implements IExtraction {
       outputFormat = 'json',
       smartOptions,
       preserveFieldStructure = false,
+      extractAttributes = false,
+      attributeName = 'href',
     } = config;
 
     try {
+      // Check if we have fields with attribute extraction
+      let useAttributeExtraction = extractAttributes;
+      let useAttributeName = attributeName;
+
+      if (smartOptions && smartOptions.strategy === 'manual' && config.fields && config.fields.items) {
+        // Look for attribute extraction fields
+        const attributeFields = config.fields.items.filter(field => {
+          const fieldOptions = (field as any).fieldOptions || {};
+          return fieldOptions.extractionType === 'attribute' && fieldOptions.attributeName;
+        });
+
+        if (attributeFields.length > 0) {
+          // We found fields with attribute extraction, enable it automatically
+          useAttributeExtraction = true;
+
+          // Use the first attribute name we find, prioritize href
+          const attributeNames = attributeFields.map(field => {
+            const fieldOptions = (field as any).fieldOptions || {};
+            return fieldOptions.attributeName;
+          });
+
+          if (attributeNames.includes('href')) {
+            useAttributeName = 'href';
+          } else {
+            useAttributeName = attributeNames[0];
+          }
+
+          logger.info(
+            formatOperationLog(
+              'TableExtraction',
+              context.nodeName,
+              context.nodeId,
+              context.index !== undefined ? context.index : 0,
+              `Found ${attributeFields.length} attribute extraction fields, enabling attribute extraction for ${useAttributeName}`
+            )
+          );
+        }
+      }
+
       logger.info(
         formatOperationLog(
           'TableExtraction',
           context.nodeName,
           context.nodeId,
           context.index !== undefined ? context.index : 0,
-          `Extracting table as structured data${preserveFieldStructure ? ' (preserving field structure)' : ''}`
+          `Extracting table as structured data${preserveFieldStructure ? ' (preserving field structure)' : ''}${useAttributeExtraction ? ' with attribute extraction' : ''}`
         )
       );
 
@@ -58,6 +99,8 @@ export class TableExtraction implements IExtraction {
           rowSelector,
           cellSelector,
           outputFormat,
+          extractAttributes: useAttributeExtraction,
+          attributeName: useAttributeName,
         },
         logger,
         context.nodeName,
@@ -77,7 +120,7 @@ export class TableExtraction implements IExtraction {
           context.nodeName,
           context.nodeId,
           context.index !== undefined ? context.index : 0,
-          `Table data extracted: ${rowCount} rows found`
+          `Table data extracted: ${rowCount} rows found${useAttributeExtraction ? ' with attributes' : ''}`
         )
       );
 
