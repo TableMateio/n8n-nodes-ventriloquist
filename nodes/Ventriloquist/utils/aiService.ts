@@ -875,9 +875,9 @@ ${fields.map((field, index) => {
 
 IMPORTANT GUIDELINES:
 1. Return a properly formatted array of objects, with each object representing a row.
-2. For each field, if the input contains an array, preserve that array structure in your output.
-3. For link/URL fields, if multiple links are present in an array, maintain that array in your output.
-4. Maintain the exact structure of the input data, only mapping values to the requested field names.
+2. Preserve the original data structure for all values - if the input contains arrays, they must remain arrays in the output.
+3. Maintain the exact data types of all values - strings, numbers, booleans, arrays, objects should all be preserved.
+4. Do not flatten or convert arrays to strings in the output.
 5. Ensure your response is proper JSON that can be directly parsed.
 `;
 
@@ -924,12 +924,12 @@ IMPORTANT GUIDELINES:
 
             // Log the extracted data structure for debugging
             this.logDebug(
-              `Successfully parsed result as JSON. Structure: ${Array.isArray(extractedData) ? 'Array with ' + extractedData.length + ' items' : typeof extractedData}`,
+              `Successfully parsed result as JSON. Structure: ${this.describeDataStructure(extractedData)}`,
               'info',
               'processTableContent'
             );
 
-            // Make sure we have an array of objects
+            // Make sure we have an array of objects for table data
             if (!Array.isArray(extractedData)) {
               this.logDebug(
                 `Expected array but got ${typeof extractedData}. Converting to array.`,
@@ -1212,24 +1212,6 @@ IMPORTANT GUIDELINES:
     if (options.generalInstructions && options.generalInstructions.trim() !== '') {
       prompt += `\n\nADDITIONAL INSTRUCTIONS:\n${options.generalInstructions}`;
     }
-
-    // // Add processing instructions
-    // prompt += "\n\nPROCESSING INSTRUCTIONS:";
-    // prompt += "\n1. Carefully analyze the input data";
-    // prompt += "\n2. Extract only the information relevant to each field specification";
-    // prompt += "\n3. Clean up any unnecessary formatting, tags, or irrelevant content";
-    // prompt += "\n4. Convert the data to the specified types";
-    // prompt += "\n5. Apply any specified formatting requirements";
-    // prompt += "\n6. Return a JSON object with the extracted fields";
-
-    // // Add output requirements
-    // prompt += "\n\nOUTPUT REQUIREMENTS:";
-    // prompt += "\n- Return ONLY the transformed data as a valid JSON object";
-    // prompt += "\n- The JSON object should ONLY contain the fields specified above";
-    // prompt += "\n- Ensure the output is properly structured and can be parsed directly";
-    // prompt += "\n- Match the exact types specified (e.g., numbers should be numeric not strings, booleans should be true/false)";
-    // prompt += "\n- If data cannot be found or processed for a field, use null or an appropriate empty structure";
-    // prompt += "\n- Do not include any explanatory text, only the JSON object";
 
     // Log the generated prompt for debugging
     this.logDebug(
@@ -1805,5 +1787,27 @@ ${examplesSection}
       message,
       level
     );
+  }
+
+  /**
+   * Helper to describe data structure for debugging
+   */
+  private describeDataStructure(data: any): string {
+    if (data === null) return 'null';
+    if (data === undefined) return 'undefined';
+
+    if (Array.isArray(data)) {
+      const itemTypes = data.length > 0
+        ? data.slice(0, 3).map(item => this.describeDataStructure(item)).join(', ')
+        : 'empty';
+      return `Array with ${data.length} items${data.length > 0 ? ' of types: [' + itemTypes + (data.length > 3 ? ', ...' : '') + ']' : ''}`;
+    }
+
+    if (typeof data === 'object') {
+      const keys = Object.keys(data);
+      return `Object with ${keys.length} keys${keys.length > 0 ? ': ' + keys.slice(0, 3).join(', ') + (keys.length > 3 ? ', ...' : '') : ''}`;
+    }
+
+    return typeof data;
   }
 }

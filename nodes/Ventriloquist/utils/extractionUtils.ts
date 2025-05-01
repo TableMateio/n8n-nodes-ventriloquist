@@ -253,10 +253,11 @@ export async function extractTableData(
 					return cells.map((cell) => {
 						// If extracting attributes, get the specified attribute value
 						if (extractAttributes && attributeName) {
-							// If this cell contains multiple elements that might have the attribute
-							// (like multiple links in a cell), extract all of them as an array
-							if (cell.querySelectorAll(`a, [${attributeName}]`).length > 1) {
-								return Array.from(cell.querySelectorAll(`a, [${attributeName}]`))
+							// Handle the case where a cell might contain multiple elements with attributes
+							// This is a general approach that works for any attribute type, not just links
+							const elements = cell.querySelectorAll(`[${attributeName}]`);
+							if (elements.length > 1) {
+								return Array.from(elements)
 									.map(el => el.getAttribute(attributeName) || '')
 									.filter(value => value !== ''); // Filter out empty values
 							}
@@ -286,7 +287,7 @@ export async function extractTableData(
 				const obj: IDataObject = {};
 				headers.forEach((header, i) => {
 					if (header && i < row.length) {
-						// Preserve arrays when they exist (like multiple href values)
+						// Preserve any data structure (arrays, objects, primitives) in the output
 						obj[header as string] = row[i];
 					}
 				});

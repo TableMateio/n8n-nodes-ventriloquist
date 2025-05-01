@@ -462,7 +462,7 @@ export class BasicExtraction implements IExtraction {
 
               // Check if smartOptions are enabled and we're using AI processing
               if (this.config.smartOptions && this.config.smartOptions.aiAssistance && data) {
-                // If we have array data, make sure we preserve it for AI processing
+                // Log that we're preserving data structures for AI processing
                 logWithDebug(
                   logger,
                   this.config.debugMode || false,
@@ -470,7 +470,7 @@ export class BasicExtraction implements IExtraction {
                   'Extraction',
                   'extractionFactory',
                   'execute',
-                  `Array data will be preserved for AI processing`,
+                  `Preserving original data structures for AI processing to maintain integrity of arrays, objects, and primitive values`,
                   'info'
                 );
               }
