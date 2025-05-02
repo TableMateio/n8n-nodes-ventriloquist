@@ -494,65 +494,82 @@ export class Ventriloquist implements INodeType {
 				type: 'options',
 				noDataExpression: true,
 				options: [
+					// BROWSER CONTROL
+					{
+						name: 'Browser Control:',
+						value: 'header',
+					},
 					{
 						name: 'Open Browser',
 						value: 'open',
-						description: 'Open a browser instance',
+						description: 'Navigate to a URL',
 						action: 'Open a browser instance',
 					},
 					{
-						name: 'Click',
+						name: 'Close Session',
+						value: 'close',
+						description: 'End a browser session',
+						action: 'Close a browser session',
+					},
+
+					// NAVIGATION AND INTERACTION
+					{
+						name: 'Navigation & Interaction:',
+						value: 'header',
+					},
+					{
+						name: 'Click Element',
 						value: 'click',
-						description: 'Click on a specific element on the page',
+						description: 'Click on a page element',
 						action: 'Click an element on the page',
 					},
 					{
-						name: 'Close',
-						value: 'close',
-						description: 'Close a browser session',
-						action: 'Close a browser session',
-					},
-					{
-						name: 'Decision',
-						value: 'decision',
-						description: 'Make conditional decisions based on page state and take action',
-						action: 'Make a decision and take action',
-					},
-					{
-						name: 'Detect',
-						value: 'detect',
-						description: 'Detect elements, text, URL paths, or page state',
-						action: 'Detect page state',
-					},
-					{
-						name: 'Extract',
-						value: 'extract',
-						description: 'Extract data from a webpage',
-						action: 'Extract data from a webpage',
-					},
-					{
-						name: 'Form',
+						name: 'Fill Form',
 						value: 'form',
-						description: 'Fill out a form',
+						description: 'Complete form fields',
 						action: 'Fill out a form',
 					},
 					{
 						name: 'Authenticate',
 						value: 'authenticate',
-						description: 'Handle authentication (TOTP, etc.)',
+						description: 'Handle logins and verification',
 						action: 'Authenticate with credentials',
 					},
 					{
-						name: 'Entity Matcher',
+						name: 'Make Decision',
+						value: 'decision',
+						description: 'Create conditional workflows',
+						action: 'Make a decision and take action',
+					},
+
+					// DATA OPERATIONS
+					{
+						name: 'Data Operations:',
+						value: 'header',
+					},
+					{
+						name: 'Extract Data',
+						value: 'extract',
+						description: 'Get structured data from a page',
+						action: 'Extract data from a webpage',
+					},
+					{
+						name: 'Collect Data',
+						value: 'collector',
+						description: 'Gather items from listings',
+						action: 'Collect data from a webpage',
+					},
+					{
+						name: 'Match Entities',
 						value: 'matcher',
-						description: 'Match entities across data sources',
+						description: 'Compare and match data',
 						action: 'Match entities across data sources',
 					},
 					{
-						name: 'Collector',
-						value: 'collector',
-						description: 'Collect data from a webpage',
-						action: 'Collect data from a webpage',
+						name: 'Detect State',
+						value: 'detect',
+						description: 'Check page elements or conditions',
+						action: 'Detect page state',
 					},
 				],
 				default: 'open',
