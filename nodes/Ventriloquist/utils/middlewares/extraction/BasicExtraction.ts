@@ -52,12 +52,13 @@ export class BasicExtraction implements IExtraction {
           if (cleanText) {
             logger.info(`${logPrefix} Cleaning text content - original length: ${data.length}`);
             // First replace all whitespace (including non-breaking spaces, tabs, etc.) with regular spaces
-            data = data.replace(/[\s\n\r\t\f\v]+/g, ' ');
+            // but preserve newlines
+            data = data.replace(/[^\S\n\r]+/g, ' ');
             // Then replace multiple consecutive spaces with a single space
             data = data.replace(/ {2,}/g, ' ');
-            // Replace newlines around spaces/whitespace
-            data = data.replace(/\s*\n\s*/g, '\n');
-            // Finally replace multiple consecutive newlines
+            // Replace spaces around newlines
+            data = data.replace(/[ \t]*\n[ \t]*/g, '\n');
+            // Finally replace multiple consecutive newlines with a single newline
             data = data.replace(/\n{2,}/g, '\n');
             logger.info(`${logPrefix} Text cleaned - new length: ${data.length}`);
           }

@@ -707,6 +707,11 @@ export const description: INodeProperties[] = [
 				value: "detectCycling",
 				description: "Stop when the same pages are being visited repeatedly (prevents infinite loops)",
 			},
+			{
+				name: "Detect Disabled Button State",
+				value: "disabledState",
+				description: "Stop when the next button has disabled attributes or classes",
+			},
 		],
 		default: "buttonMissing",
 		description: "Method to detect when there are no more pages",
@@ -806,6 +811,53 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["collector"],
+			},
+		},
+	},
+	{
+		displayName: "Disabled Button Detection",
+		name: "disabledButtonConfig",
+		type: "fixedCollection",
+		default: {},
+		placeholder: "Add Disabled Button Detection Configuration",
+		typeOptions: {
+			multipleValues: false,
+		},
+		options: [
+			{
+				name: "values",
+				displayName: "Disabled Button Configuration",
+				values: [
+					{
+						displayName: "Disabled Classes",
+						name: "disabledClasses",
+						type: "string",
+						default: "disabled,disable,inactive",
+						description: "Comma-separated list of class names that indicate a disabled button",
+					},
+					{
+						displayName: "Disabled Attributes",
+						name: "disabledAttributes",
+						type: "string",
+						default: "disabled,aria-disabled",
+						description: "Comma-separated list of attributes that indicate a disabled button",
+					},
+					{
+						displayName: "Check Button Text",
+						name: "checkButtonText",
+						type: "boolean",
+						default: false,
+						description: "Check if the button text changes (e.g., 'Next' to 'Last Page')",
+					},
+				],
+			},
+		],
+		description: "Configure how to detect when a pagination button is disabled",
+		displayOptions: {
+			show: {
+				operation: ["collector"],
+				enablePagination: [true],
+				lastPageDetection: ["disabledState"],
 			},
 		},
 	},
@@ -938,6 +990,7 @@ export async function execute(
 		let lastPageSelector = '';
 		let waitAfterPagination = false;
 		let waitTimeAfterPagination = 2000;
+		let disabledButtonConfig: IDataObject = {};
 
 		if (enablePagination) {
 			paginationStrategy = this.getNodeParameter('paginationStrategy', index, 'clickNext') as string;
@@ -959,8 +1012,13 @@ export async function execute(
 
 			if (lastPageDetection === 'selectorPresent') {
 				lastPageSelector = this.getNodeParameter('lastPageSelector', index, '') as string;
+			} else if (lastPageDetection === 'disabledState') {
+				disabledButtonConfig = this.getNodeParameter('disabledButtonConfig.values', index, {}) as IDataObject;
 			}
 		}
+
+		// Store information about the next button for comparison between pages
+		let previousButtonState: { classes: string, attributes: Record<string, string>, text: string } | null = null;
 
 		// Initialize pagination state
 		paginationState = {
@@ -1100,6 +1158,150 @@ export async function execute(
 				if (lastPageDetection === 'buttonMissing' && paginationStrategy === 'clickNext') {
 					const nextButtonExists = await elementExists(page, nextPageSelector);
 					if (!nextButtonExists) {
+						this.logger.info(
+							formatOperationLog(
+								'Collector',
+								nodeName,
+								nodeId,
+								index,
+								`Next button not found (${nextPageSelector}), reached last page`
+							)
+						);
+						paginationState.lastPageDetected = true;
+						break;
+					}
+				} else if (lastPageDetection === 'disabledState' && paginationStrategy === 'clickNext') {
+					// Enhanced detection of disabled button states
+					const disabledClasses = ((disabledButtonConfig.disabledClasses as string) || 'disabled,disable,inactive').split(',').map(c => c.trim());
+					const disabledAttributes = ((disabledButtonConfig.disabledAttributes as string) || 'disabled,aria-disabled').split(',').map(a => a.trim());
+					const checkButtonText = disabledButtonConfig.checkButtonText as boolean || false;
+
+					// Get current button state
+					const currentButtonState = await page.evaluate(
+						(params: {
+							selector: string;
+							disabledClasses: string[];
+							disabledAttributes: string[];
+							checkButtonText: boolean;
+						}) => {
+							const button = document.querySelector(params.selector);
+							if (!button) return null;
+
+							// Check for disabled classes
+							const classList = Array.from(button.classList);
+							const hasDisabledClass = classList.some(cls =>
+								params.disabledClasses.some(disabledCls =>
+									cls.toLowerCase().includes(disabledCls.toLowerCase())
+								)
+							);
+
+							// Check for disabled attributes
+							const attributes: Record<string, string> = {};
+							let hasDisabledAttribute = false;
+
+							for (const attr of Array.from(button.attributes)) {
+								attributes[attr.name] = attr.value;
+
+								// Check if this is a disabled attribute
+								if (params.disabledAttributes.some(a => attr.name.toLowerCase() === a.toLowerCase())) {
+									if (attr.value === '' || attr.value === 'true') {
+										hasDisabledAttribute = true;
+									}
+								}
+
+								// Check if any attribute contains "disabled" in its value
+								if (attr.value.toLowerCase().includes('disabled') ||
+									attr.value.toLowerCase().includes('disable')) {
+									hasDisabledAttribute = true;
+								}
+							}
+
+							// Get button text if needed
+							const buttonText = params.checkButtonText ? button.textContent || '' : '';
+
+							return {
+								classes: classList.join(' '),
+								attributes,
+								text: buttonText,
+								hasDisabledClass,
+								hasDisabledAttribute,
+								isDisabled: hasDisabledClass || hasDisabledAttribute,
+							};
+						},
+						{
+							selector: nextPageSelector,
+							disabledClasses,
+							disabledAttributes,
+							checkButtonText
+						}
+					);
+
+					if (currentButtonState) {
+						if (currentButtonState.isDisabled) {
+							this.logger.info(
+								formatOperationLog(
+									'Collector',
+									nodeName,
+									nodeId,
+									index,
+									`Next button (${nextPageSelector}) is disabled, reached last page`
+								)
+							);
+							paginationState.lastPageDetected = true;
+							break;
+						}
+
+						// Compare with previous button state if we have one
+						if (previousButtonState && checkButtonText) {
+							// Check if the button text has changed significantly
+							if (previousButtonState.text !== currentButtonState.text &&
+								previousButtonState.text.trim() !== '' &&
+								currentButtonState.text.trim() !== '') {
+								this.logger.info(
+									formatOperationLog(
+										'Collector',
+										nodeName,
+										nodeId,
+										index,
+										`Next button text changed from "${previousButtonState.text}" to "${currentButtonState.text}", might indicate last page`
+									)
+								);
+							}
+
+							// Advanced detection: check if ng-class or similar directives have added disabled classes
+							// This specifically targets the example you provided with ng-class="{disable: nextPageDisabled()}"
+							const previousClassList = previousButtonState.classes.split(' ');
+							const currentClassList = currentButtonState.classes.split(' ');
+
+							// Check if a disabled class was added
+							const newClasses = currentClassList.filter(cls => !previousClassList.includes(cls));
+							const disabledClassAdded = newClasses.some(cls =>
+								disabledClasses.some(disabledCls => cls.toLowerCase().includes(disabledCls.toLowerCase()))
+							);
+
+							if (disabledClassAdded) {
+								this.logger.info(
+									formatOperationLog(
+										'Collector',
+										nodeName,
+										nodeId,
+										index,
+										`Next button has new disabled class added: ${newClasses.join(', ')}, reached last page`
+									)
+								);
+								paginationState.lastPageDetected = true;
+								break;
+							}
+						}
+
+						// Store current state for next comparison
+						previousButtonState = {
+							classes: currentButtonState.classes,
+							attributes: currentButtonState.attributes,
+							text: currentButtonState.text
+						};
+					} else {
+						// Button not found
 						this.logger.info(
 							formatOperationLog(
 								'Collector',

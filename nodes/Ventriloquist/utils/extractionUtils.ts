@@ -103,9 +103,56 @@ export async function extractTextContent(
 	nodeId: string,
 ): Promise<string> {
 	try {
-		const textContent = await page.$eval(selector, (el) => el.textContent?.trim() || '');
+		// Modified approach to better handle BR tags and limit consecutive newlines
+		const textContent = await page.$eval(selector, (el) => {
+			// Get the original HTML
+			const originalHtml = el.innerHTML;
+
+			// Create a document fragment to work with
+			const template = document.createElement('template');
+			template.innerHTML = originalHtml;
+			const fragment = template.content;
+
+			// Replace all BR tags with newline placeholder
+			// Using a special placeholder that won't appear in normal text
+			const BR_PLACEHOLDER = '[[BR_NEWLINE_PLACEHOLDER]]';
+			const brElements = fragment.querySelectorAll('br');
+			Array.from(brElements).forEach(br => {
+				br.outerHTML = BR_PLACEHOLDER;
+			});
+
+			// Get text content from the modified fragment
+			const tempDiv = document.createElement('div');
+			tempDiv.appendChild(fragment.cloneNode(true));
+			let content = tempDiv.textContent || '';
+
+			// Replace the BR placeholders with actual newlines
+			content = content.replace(new RegExp(BR_PLACEHOLDER, 'g'), '\n');
+
+			// Normalize whitespace: replace multiple spaces with single space
+			content = content.replace(/ {2,}/g, ' ');
+
+			// Limit consecutive newlines to a maximum of 2
+			content = content.replace(/\n{3,}/g, '\n\n');
+
+			// Trim leading and trailing whitespace
+			content = content.trim();
+
+			// Debug info to see what's happening
+			console.log(`Original HTML length: ${originalHtml.length}`);
+			console.log(`BR tags found: ${brElements.length}`);
+			console.log(`Final text length: ${content.length}`);
+
+			return content;
+		});
+
 		const truncatedData = formatExtractedDataForLog(textContent, 'text');
 		logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted text content: ${truncatedData}`);
+
+		// Log additional debug info
+		const brCount = (textContent.match(/\n/g) || []).length;
+		logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Text has ${brCount} newlines`);
+
 		return textContent;
 	} catch (error) {
 		logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to extract text: ${(error as Error).message}`);

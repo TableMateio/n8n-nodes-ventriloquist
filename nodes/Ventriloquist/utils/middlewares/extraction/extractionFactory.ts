@@ -151,52 +151,72 @@ export class BasicExtraction implements IExtraction {
 
       switch (this.config.extractionType) {
         case 'text':
-          // Changed from $eval to $$eval to get all matching elements
-          const textElements = await this.page.$$eval(this.config.selector, (els) =>
-            els.map(el => el.textContent?.trim() || '')
-          );
+          // Modified to handle BR tags and excessive newlines
+          const textContent = await this.page.$eval(this.config.selector, (el) => {
+            // Get the original HTML
+            const originalHtml = el.innerHTML;
 
-          // Store all raw content joined together for compatibility
-          rawContent = textElements.join('\n');
+            // First, directly replace all <br> tags with newlines in the HTML
+            // This is a more direct approach than using the document fragment
+            let modifiedHtml = originalHtml.replace(/<br\s*\/?>/gi, '\n');
+
+            // Create a temporary div to extract text
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = modifiedHtml;
+
+            // Get text content
+            let content = tempDiv.textContent || '';
+
+            // Remove excessive whitespace at the beginning (common in HTML)
+            content = content.replace(/^\s+/, '');
+
+            // Normalize whitespace: replace multiple spaces with single space
+            content = content.replace(/ {2,}/g, ' ');
+
+            // Limit consecutive newlines to a maximum of 2
+            content = content.replace(/\n{3,}/g, '\n\n');
+
+            // Trim leading and trailing whitespace
+            content = content.trim();
+
+            return content;
+          });
+
+          // Store raw content
+          rawContent = textContent;
           if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
 
-          // If only one result was found, keep backwards compatibility by returning a string
-          // Otherwise, return an array of results
-          data = textElements.length === 1 ? textElements[0] : textElements;
+          // Set data to the extracted text
+          data = textContent;
 
-          // Clean text if the option is enabled
+          // Apply additional text cleaning if the option is enabled
           if (this.config.cleanText) {
-            logger.info(`${logPrefix} Cleaning text content`);
+            logger.info(`${logPrefix} Applying additional text cleaning`);
 
             if (Array.isArray(data)) {
               // Clean each element in the array
               data = data.map(item => {
-                // First replace all whitespace with regular spaces
-                let cleaned = item.replace(/[\s\n\r\t\f\v]+/g, ' ');
-                // Then replace multiple consecutive spaces with a single space
-                cleaned = cleaned.replace(/ {2,}/g, ' ');
-                // Replace newlines around spaces/whitespace
-                cleaned = cleaned.replace(/\s*\n\s*/g, '\n');
-                // Finally replace multiple consecutive newlines
-                cleaned = cleaned.replace(/\n{2,}/g, '\n');
-                return cleaned;
+                // Replace any remaining excessive whitespace
+                let cleaned = item.replace(/ {2,}/g, ' ');
+                // Ensure single newlines are preserved
+                cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+                return cleaned.trim();
               });
+            } else if (typeof data === 'string') {
+              // Replace any remaining excessive whitespace
+              data = data.replace(/ {2,}/g, ' ');
+              // Ensure single newlines are preserved
+              data = data.replace(/\n{3,}/g, '\n\n');
+              data = data.trim();
+            }
 
-              // Update rawContent to reflect cleaned data
+            // Update rawContent to reflect cleaned data
+            if (Array.isArray(data)) {
               rawContent = data.join('\n');
             } else {
-              // First replace all whitespace with regular spaces
-              data = data.replace(/[\s\n\r\t\f\v]+/g, ' ');
-              // Then replace multiple consecutive spaces with a single space
-              data = data.replace(/ {2,}/g, ' ');
-              // Replace newlines around spaces/whitespace
-              data = data.replace(/\s*\n\s*/g, '\n');
-              // Finally replace multiple consecutive newlines
-              data = data.replace(/\n{2,}/g, '\n');
-
-              // Update rawContent
               rawContent = data;
             }
+            if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
 
             logger.info(`${logPrefix} Text cleaned successfully`);
           }
