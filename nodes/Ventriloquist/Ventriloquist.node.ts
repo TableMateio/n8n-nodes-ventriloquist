@@ -494,82 +494,85 @@ export class Ventriloquist implements INodeType {
 				type: 'options',
 				noDataExpression: true,
 				options: [
-					// BROWSER CONTROL
 					{
-						name: 'Browser Control:',
-						value: 'header',
-					},
-					{
-						name: 'Open Browser',
+						name: 'Open',
 						value: 'open',
 						description: 'Navigate to a URL',
 						action: 'Open a browser instance',
+						// @ts-ignore
+						group: 'Browser Control',
 					},
 					{
-						name: 'Close Session',
+						name: 'Close',
 						value: 'close',
 						description: 'End a browser session',
 						action: 'Close a browser session',
-					},
-
-					// NAVIGATION AND INTERACTION
-					{
-						name: 'Navigation & Interaction:',
-						value: 'header',
+						// @ts-ignore
+						group: 'Browser Control',
 					},
 					{
-						name: 'Click Element',
+						name: 'Click',
 						value: 'click',
 						description: 'Click on a page element',
 						action: 'Click an element on the page',
+						// @ts-ignore
+						group: 'Navigation & Interaction',
 					},
 					{
 						name: 'Fill Form',
 						value: 'form',
 						description: 'Complete form fields',
 						action: 'Fill out a form',
+						// @ts-ignore
+						group: 'Navigation & Interaction',
 					},
 					{
 						name: 'Authenticate',
 						value: 'authenticate',
-						description: 'Handle logins and verification',
+						description: 'Handle logins',
 						action: 'Authenticate with credentials',
+						// @ts-ignore
+						group: 'Navigation & Interaction',
 					},
 					{
-						name: 'Make Decision',
+						name: 'Decision',
 						value: 'decision',
 						description: 'Create conditional workflows',
 						action: 'Make a decision and take action',
-					},
-
-					// DATA OPERATIONS
-					{
-						name: 'Data Operations:',
-						value: 'header',
+						// @ts-ignore
+						group: 'Navigation & Interaction',
 					},
 					{
-						name: 'Extract Data',
+						name: 'Extract',
 						value: 'extract',
 						description: 'Get structured data from a page',
 						action: 'Extract data from a webpage',
+						// @ts-ignore
+						group: 'Data Operations',
 					},
 					{
-						name: 'Collect Data',
+						name: 'Collect',
 						value: 'collector',
 						description: 'Gather items from listings',
 						action: 'Collect data from a webpage',
+						// @ts-ignore
+						group: 'Data Operations',
 					},
 					{
-						name: 'Match Entities',
+						name: 'Match',
 						value: 'matcher',
 						description: 'Compare and match data',
 						action: 'Match entities across data sources',
+						// @ts-ignore
+						group: 'Data Operations',
 					},
 					{
-						name: 'Detect State',
+						name: 'Detect',
 						value: 'detect',
 						description: 'Check page elements or conditions',
 						action: 'Detect page state',
+						// @ts-ignore
+						group: 'Data Operations',
 					},
 				],
 				default: 'open',
