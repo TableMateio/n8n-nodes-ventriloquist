@@ -413,6 +413,14 @@ export const description: INodeProperties[] = [
 						description: "CSS selector for the element to check within each item",
 					},
 					{
+						displayName: "Field Name",
+						name: "fieldName",
+						type: "string",
+						default: "",
+						placeholder: "Location, Price, Title",
+						description: "Name of the field to filter on (must match the name of an extracted field)",
+					},
+					{
 						displayName: "Extraction Type",
 						name: "extractionType",
 						type: "options",
@@ -460,6 +468,11 @@ export const description: INodeProperties[] = [
 								description: "Check if the value contains the specified text",
 							},
 							{
+								name: "Not Contains",
+								value: "notContains",
+								description: "Check if the value does not contain the specified text",
+							},
+							{
 								name: "Equals",
 								value: "equals",
 								description: "Check if the value equals the specified text",
@@ -503,7 +516,7 @@ export const description: INodeProperties[] = [
 						name: "value",
 						type: "string",
 						default: "",
-						description: "Value to compare against",
+						description: "Value to compare against. For 'Contains' and 'Not Contains' conditions, you can use comma-separated values (e.g., 'REMOVED,SOLD,EXPIRED').",
 						displayOptions: {
 							hide: {
 								condition: ["exists", "notExists"],
@@ -1014,10 +1027,8 @@ export async function execute(
 					linkConfig: (this.getNodeParameter('linkConfiguration.values', index, {}) as IDataObject) || {},
 					additionalFields: (this.getNodeParameter('additionalFields.fields', index, []) as IDataObject[]) || [],
 					filterItems: this.getNodeParameter('filterItems', index, false) as boolean,
-					filterCriteria: this.getNodeParameter('filterItems', index, false) as boolean ?
-						(this.getNodeParameter('filterCriteria.criteria', index, []) as IDataObject[]) || [] : [],
-					filterLogic: this.getNodeParameter('filterItems', index, false) as boolean ?
-						this.getNodeParameter('filterLogic', index, 'and') as string : 'and',
+					filterCriteria: this.getNodeParameter('filterCriteria.criteria', index, []) as IDataObject[],
+					filterLogic: this.getNodeParameter('filterLogic', index, 'and') as string,
 					useHumanDelays,
 					debugMode
 				},
@@ -1403,6 +1414,29 @@ async function collectItemsFromPage(
 	const urlTransformation = linkConfig.urlTransformation as boolean || false;
 	const transformationType = linkConfig.transformationType as string || 'absolute';
 
+	// Debug log the configuration
+	if (debugMode) {
+		this.logger.info(
+			formatOperationLog(
+				'Collector',
+				nodeName,
+				nodeId,
+				index,
+				`Link config: selector=${linkSelector}, attribute=${linkAttribute}, transform=${urlTransformation}, type=${transformationType}`
+			)
+		);
+
+		this.logger.info(
+			formatOperationLog(
+				'Collector',
+				nodeName,
+				nodeId,
+				index,
+				`Additional fields: ${JSON.stringify(additionalFields)}`
+			)
+		);
+	}
+
 	// Count the number of items
 	const itemCount = await page.evaluate((selector: string) => {
 		return document.querySelectorAll(selector).length;
@@ -1418,6 +1452,38 @@ async function collectItemsFromPage(
 		)
 	);
 
+	// If in debug mode, examine the first few items to help debugging
+	if (debugMode) {
+		const itemSamples = await page.evaluate((selector: string) => {
+			const samples = [];
+			const elements = document.querySelectorAll(selector);
+			const maxSamples = Math.min(3, elements.length);
+
+			for (let i = 0; i < maxSamples; i++) {
+				const element = elements[i];
+				samples.push({
+					outerHTML: element.outerHTML.substring(0, 500) + (element.outerHTML.length > 500 ? '...' : ''),
+					tagName: element.tagName,
+					childElementCount: element.childElementCount,
+					hasLinks: element.querySelectorAll('a').length > 0,
+					linkHrefs: Array.from(element.querySelectorAll('a')).map(a => a.getAttribute('href')),
+				});
+			}
+
+			return samples;
+		}, actualItemSelector);
+
+		this.logger.info(
+			formatOperationLog(
+				'Collector',
+				nodeName,
+				nodeId,
+				index,
+				`Item samples for debugging: ${JSON.stringify(itemSamples)}`
+			)
+		);
+	}
+
 	// Extract items based on selector
 	const items = await page.evaluate(
 		(params: {
@@ -1429,6 +1495,7 @@ async function collectItemsFromPage(
 			urlTransformation: boolean;
 			transformationType: string;
 			pageNumber: number;
+			debug: boolean;
 		}) => {
 			const {
 				selector,
@@ -1438,7 +1505,8 @@ async function collectItemsFromPage(
 				additionalFields,
 				urlTransformation,
 				transformationType,
-				pageNumber
+				pageNumber,
+				debug
 			} = params;
 
 			// Helper function to get absolute URL
@@ -1452,6 +1520,8 @@ async function collectItemsFromPage(
 
 			// Helper function to transform URL
 			const transformUrl = (url: string): string => {
+				if (!url) return '';
+
 				if (!urlTransformation) return url;
 
 				if (transformationType === 'absolute') {
@@ -1473,57 +1543,115 @@ async function collectItemsFromPage(
 			const elements = Array.from(document.querySelectorAll(selector));
 			const limitedElements = elements.slice(0, maxItems);
 
-			return limitedElements.map((element, index) => {
+			// Debug function
+			const debugLog = (message: string) => {
+				if (debug) {
+					console.log(`[Collector Debug] ${message}`);
+				}
+			};
+
+			return limitedElements.map((element, idx) => {
 				// Extract link
 				let url = '';
-				const linkElement = element.querySelector(linkSelector);
-				if (linkElement) {
-					url = linkElement.getAttribute(linkAttribute) || '';
-					url = transformUrl(url);
+
+				try {
+					// First try the specified linkSelector
+					const linkElements = element.querySelectorAll(linkSelector);
+					debugLog(`Item #${idx}: Found ${linkElements.length} potential link elements matching "${linkSelector}"`);
+
+					if (linkElements.length > 0) {
+						// Get the first matching link element
+						const linkElement = linkElements[0];
+						url = linkElement.getAttribute(linkAttribute) || '';
+						debugLog(`Item #${idx}: Raw URL from ${linkAttribute}: "${url}"`);
+					} else {
+						// If no links found with the specific selector, try any anchor tags
+						const anyLinks = element.querySelectorAll('a');
+						if (anyLinks.length > 0) {
+							url = anyLinks[0].getAttribute('href') || '';
+							debugLog(`Item #${idx}: Fallback - found ${anyLinks.length} generic links, using first href: "${url}"`);
+						}
+					}
+
+					// Transform URL if needed
+					if (url) {
+						url = transformUrl(url);
+						debugLog(`Item #${idx}: Transformed URL: "${url}"`);
+					}
+				} catch (error) {
+					debugLog(`Item #${idx}: Error extracting URL: ${error}`);
 				}
 
 				// Extract additional fields
 				const result: any = {
 					url,
-					itemIndex: index,
+					itemIndex: idx,
 					pageNumber,
 				};
 
 				// Process additional fields
-				for (const field of additionalFields) {
-					const fieldName = field.name as string;
-					const fieldSelector = field.selector as string;
-					const extractionType = field.extractionType as string;
-					const attributeName = field.attributeName as string;
+				if (additionalFields && additionalFields.length > 0) {
+					debugLog(`Item #${idx}: Processing ${additionalFields.length} additional fields`);
 
-					// Find the element
-					let fieldElement = null;
-					try {
-						fieldElement = element.querySelector(fieldSelector);
-					} catch (error) {
-						// Invalid selector, skip this field
-						console.error(`Invalid selector for field ${fieldName}: ${fieldSelector}`);
-						result[fieldName] = null;
-						continue;
-					}
+					for (const field of additionalFields) {
+						const fieldName = field.name as string;
+						const fieldSelector = field.selector as string;
+						const extractionType = field.extractionType as string || 'text';
+						const attributeName = field.attributeName as string;
 
-					if (!fieldElement) {
-						result[fieldName] = null;
-						continue;
-					}
-
-					// Extract value based on extraction type
-					if (extractionType === 'text') {
-						result[fieldName] = fieldElement.textContent?.trim() || '';
-					} else if (extractionType === 'attribute' && attributeName) {
-						result[fieldName] = fieldElement.getAttribute(attributeName) || '';
-
-						// Transform URL if it's a URL attribute
-						if (attributeName === 'href' || attributeName === 'src') {
-							result[fieldName] = transformUrl(result[fieldName]);
+						if (!fieldName || !fieldSelector) {
+							debugLog(`Item #${idx}: Skipping field with missing name or selector`);
+							continue;
 						}
-					} else if (extractionType === 'html') {
-						result[fieldName] = fieldElement.innerHTML || '';
+
+						debugLog(`Item #${idx}: Processing field "${fieldName}" with selector "${fieldSelector}"`);
+
+						// Find the element
+						let fieldElement = null;
+						try {
+							// First try to find it within this item
+							const matchingElements = element.querySelectorAll(fieldSelector);
+							if (matchingElements.length > 0) {
+								fieldElement = matchingElements[0];
+								debugLog(`Item #${idx}: Found element for field "${fieldName}" (${matchingElements.length} matches)`);
+							} else {
+								debugLog(`Item #${idx}: No elements found for field "${fieldName}" using selector "${fieldSelector}"`);
+							}
+						} catch (error) {
+							// Invalid selector, skip this field
+							debugLog(`Item #${idx}: Invalid selector for field "${fieldName}": ${fieldSelector}`);
+							result[fieldName] = '';
+							continue;
+						}
+
+						if (!fieldElement) {
+							debugLog(`Item #${idx}: No element found for field "${fieldName}"`);
+							result[fieldName] = '';
+							continue;
+						}
+
+						// Extract value based on extraction type
+						try {
+							if (extractionType === 'text') {
+								result[fieldName] = fieldElement.textContent?.trim() || '';
+								debugLog(`Item #${idx}: Extracted text for "${fieldName}": "${result[fieldName]}"`);
+							} else if (extractionType === 'attribute' && attributeName) {
+								result[fieldName] = fieldElement.getAttribute(attributeName) || '';
+								debugLog(`Item #${idx}: Extracted attribute "${attributeName}" for "${fieldName}": "${result[fieldName]}"`);
+
+								// Transform URL if it's a URL attribute
+								if ((attributeName === 'href' || attributeName === 'src') && result[fieldName]) {
+									result[fieldName] = transformUrl(result[fieldName]);
+									debugLog(`Item #${idx}: Transformed URL for "${fieldName}": "${result[fieldName]}"`);
+								}
+							} else if (extractionType === 'html') {
+								result[fieldName] = fieldElement.innerHTML || '';
+								debugLog(`Item #${idx}: Extracted HTML for "${fieldName}" (${result[fieldName].length} chars)`);
+							}
+						} catch (error) {
+							debugLog(`Item #${idx}: Error extracting field "${fieldName}": ${error}`);
+							result[fieldName] = '';
+						}
 					}
 				}
 
@@ -1538,9 +1666,23 @@ async function collectItemsFromPage(
 			additionalFields,
 			urlTransformation,
 			transformationType,
-			pageNumber
+			pageNumber,
+			debug: debugMode
 		}
 	);
+
+	// Log the extracted items for debugging
+	if (debugMode) {
+		this.logger.info(
+			formatOperationLog(
+				'Collector',
+				nodeName,
+				nodeId,
+				index,
+				`Extracted ${items.length} items. First item sample: ${JSON.stringify(items[0])}`
+			)
+		);
+	}
 
 	// Apply filters if needed
 	let filteredItems = items;
@@ -1555,102 +1697,109 @@ async function collectItemsFromPage(
 			)
 		);
 
-		// Filter items that meet the criteria
-		filteredItems = await page.evaluate(
-			(params: {
-				items: IDataObject[];
-				filterCriteria: IDataObject[];
-				filterLogic: string;
-			}) => {
-				const {
-					items,
-					filterCriteria,
-					filterLogic
-				} = params;
+		// Log filter criteria for debugging
+		if (debugMode) {
+			this.logger.info(
+				formatOperationLog(
+					'Collector',
+					nodeName,
+					nodeId,
+					index,
+					`Filter criteria: ${JSON.stringify(filterCriteria)}`
+				)
+			);
+		}
 
-				return items.filter((item: IDataObject) => {
-					// Check each criterion
-					const results = filterCriteria.map((criterion: IDataObject) => {
-						const selector = criterion.selector as string;
-						const extractionType = criterion.extractionType as string;
-						const attributeName = criterion.attributeName as string;
-						const condition = criterion.condition as string;
-						const value = criterion.value as string;
-						const caseSensitive = criterion.caseSensitive as boolean;
+		// Filter items directly based on the extracted data
+		filteredItems = items.filter((item: IDataObject) => {
+			// Process each filter criterion
+			const results = filterCriteria.map((criterion: IDataObject) => {
+				const fieldName = criterion.fieldName as string || criterion.name as string || (criterion.selector as string); // Use explicit field name, then name, then selector
+				const condition = criterion.condition as string;
+				const value = criterion.value as string;
+				const caseSensitive = criterion.caseSensitive as boolean;
 
-						// Create a temporary DOM element to use querySelector
-						const tempDiv = document.createElement('div');
-						tempDiv.innerHTML = (item.html as string) || '';
+				// Get the field value from the item
+				let itemValue = '';
 
-						// Handle 'exists' extraction type specially
-						if (extractionType === 'exists') {
-							const elementExists = !!tempDiv.querySelector(selector);
-							return condition === 'exists' ? elementExists : !elementExists;
+				// First try exact match on the field name
+				if (item[fieldName] !== undefined) {
+					itemValue = String(item[fieldName] || '');
+				} else {
+					// Try case-insensitive match on any property
+					const lowerFieldName = fieldName.toLowerCase();
+					for (const key of Object.keys(item)) {
+						if (key.toLowerCase() === lowerFieldName) {
+							itemValue = String(item[key] || '');
+							break;
 						}
-
-						// Find the element
-						const element = tempDiv.querySelector(selector);
-						if (!element) {
-							return condition === 'notExists';
-						}
-
-						// Extract the value
-						let extractedValue = '';
-						if (extractionType === 'text') {
-							extractedValue = element.textContent?.trim() || '';
-						} else if (extractionType === 'attribute') {
-							extractedValue = element.getAttribute(attributeName) || '';
-						}
-
-						// Apply case sensitivity
-						let compareValue = value;
-						let compareExtracted = extractedValue;
-						if (!caseSensitive) {
-							compareValue = value.toLowerCase();
-							compareExtracted = extractedValue.toLowerCase();
-						}
-
-						// Apply the condition
-						switch (condition) {
-							case 'contains':
-								return compareExtracted.includes(compareValue);
-							case 'equals':
-								return compareExtracted === compareValue;
-							case 'startsWith':
-								return compareExtracted.startsWith(compareValue);
-							case 'endsWith':
-								return compareExtracted.endsWith(compareValue);
-							case 'regex':
-								try {
-									const regex = new RegExp(value);
-									return regex.test(extractedValue);
-								} catch (error) {
-									console.error(`Invalid regex: ${value}`);
-									return false;
-								}
-							case 'exists':
-								return true;
-							case 'notExists':
-								return false;
-							default:
-								return false;
-						}
-					});
-
-					// Apply the logic (AND or OR)
-					if (filterLogic === 'and') {
-						return results.every((result: boolean) => result);
-					} else {
-						return results.some((result: boolean) => result);
 					}
-				});
-			},
-			{
-				items,
-				filterCriteria,
-				filterLogic
+				}
+
+				if (debugMode) {
+					console.log(`[Filter Debug] Item: ${JSON.stringify(item)}, Field: ${fieldName}, Value: ${itemValue}, Condition: ${condition}, Filter value: ${value}`);
+				}
+
+				// Handle empty values
+				if (itemValue === undefined || itemValue === null) {
+					itemValue = '';
+				}
+
+				// Normalize case if needed
+				let compareValue = value;
+				let compareItemValue = itemValue;
+
+				if (!caseSensitive) {
+					compareValue = value.toLowerCase();
+					compareItemValue = itemValue.toLowerCase();
+				}
+
+				// Apply the condition
+				switch (condition) {
+					case 'contains':
+						if (compareValue.includes(',')) {
+							// Split by comma and check if any value is included
+							const valuesToCheck = compareValue.split(',').map(v => v.trim());
+							return valuesToCheck.some(val => compareItemValue.includes(val));
+						}
+						return compareItemValue.includes(compareValue);
+					case 'notContains':
+						if (compareValue.includes(',')) {
+							// Split by comma and check that none of the values are included
+							const valuesToCheck = compareValue.split(',').map(v => v.trim());
+							return valuesToCheck.every(val => !compareItemValue.includes(val));
+						}
+						return !compareItemValue.includes(compareValue);
+					case 'equals':
+						return compareItemValue === compareValue;
+					case 'startsWith':
+						return compareItemValue.startsWith(compareValue);
+					case 'endsWith':
+						return compareItemValue.endsWith(compareValue);
+					case 'regex':
+						try {
+							const regex = new RegExp(value, caseSensitive ? '' : 'i');
+							return regex.test(itemValue);
+						} catch (error) {
+							console.error(`Invalid regex: ${value}`);
+							return false;
+						}
+					case 'exists':
+						return itemValue !== '';
+					case 'notExists':
+						return itemValue === '';
+					default:
+						return false;
+				}
+			});
+
+			// Apply the filter logic
+			if (filterLogic === 'and') {
+				return results.every(Boolean);
+			} else {
+				return results.some(Boolean);
 			}
-		);
+		});
 
 		this.logger.info(
 			formatOperationLog(
@@ -1658,9 +1807,34 @@ async function collectItemsFromPage(
 				nodeName,
 				nodeId,
 				index,
-				`Filter applied: ${filteredItems.length} items passed the filter`
+				`Filter applied: ${filteredItems.length} items passed the filter out of ${items.length} total`
 			)
 		);
+
+		// Debug log the filtered items
+		if (debugMode) {
+			if (filteredItems.length > 0) {
+				this.logger.info(
+					formatOperationLog(
+						'Collector',
+						nodeName,
+						nodeId,
+						index,
+						`First filtered item sample: ${JSON.stringify(filteredItems[0])}`
+					)
+				);
+			} else {
+				this.logger.info(
+					formatOperationLog(
+						'Collector',
+						nodeName,
+						nodeId,
+						index,
+						`No items passed the filter`
+					)
+				);
+			}
+		}
 	}
 
 	return filteredItems;
