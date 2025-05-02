@@ -1140,6 +1140,21 @@ export async function execute(
 						`Reached maximum total items (${maxTotalItems}), stopping pagination`
 					)
 				);
+
+				// Trim the collection to the exact maxTotalItems
+				if (collectedItems.length > maxTotalItems) {
+					collectedItems.length = maxTotalItems;
+					this.logger.info(
+						formatOperationLog(
+							'Collector',
+							nodeName,
+							nodeId,
+							index,
+							`Trimmed collection to exactly ${maxTotalItems} items`
+						)
+					);
+				}
+
 				break;
 			}
 
@@ -1826,7 +1841,6 @@ async function collectItemsFromPage(
 	const items = await page.evaluate(
 		(params: {
 			selector: string;
-			maxItems: number;
 			linkSelector: string;
 			linkAttribute: string;
 			additionalFields: IDataObject[];
@@ -1837,7 +1851,6 @@ async function collectItemsFromPage(
 		}) => {
 			const {
 				selector,
-				maxItems,
 				linkSelector,
 				linkAttribute,
 				additionalFields,
@@ -1877,9 +1890,8 @@ async function collectItemsFromPage(
 				return url;
 			};
 
-			// Get all items
+			// Get all items - don't limit here
 			const elements = Array.from(document.querySelectorAll(selector));
-			const limitedElements = elements.slice(0, maxItems);
 
 			// Debug function
 			const debugLog = (message: string) => {
@@ -1888,7 +1900,7 @@ async function collectItemsFromPage(
 				}
 			};
 
-			return limitedElements.map((element, idx) => {
+			return elements.map((element, idx) => {
 				// Extract link
 				let url = '';
 
@@ -1998,7 +2010,6 @@ async function collectItemsFromPage(
 		},
 		{
 			selector: actualItemSelector,
-			maxItems,
 			linkSelector,
 			linkAttribute,
 			additionalFields,
@@ -2173,6 +2184,20 @@ async function collectItemsFromPage(
 				);
 			}
 		}
+	}
+
+	// Now apply the maxItems limit AFTER filtering
+	if (filteredItems.length > maxItems) {
+		this.logger.info(
+			formatOperationLog(
+				'Collector',
+				nodeName,
+				nodeId,
+				index,
+				`Limiting filtered items from ${filteredItems.length} to max ${maxItems} per page`
+			)
+		);
+		filteredItems = filteredItems.slice(0, maxItems);
 	}
 
 	return filteredItems;
