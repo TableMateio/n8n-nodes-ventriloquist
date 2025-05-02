@@ -1893,7 +1893,71 @@ ${examplesSection}
       });
 
       // Poll for completion
-      return await this.pollRunCompletion(actualThreadId, run.id);
+      const result = await this.pollRunCompletion(actualThreadId, run.id);
+
+      if (result.success && result.data) {
+        // Clean up the result in case it's wrapped in Markdown code blocks
+        try {
+          let cleanedData = result.data;
+
+          // Log the raw response for debugging
+          this.logger.debug(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Raw response from OpenAI for field "${field.name}": ${cleanedData}`
+            )
+          );
+
+          // Remove markdown code block markers if present
+          if (cleanedData.includes("```")) {
+            // Extract content between markdown code blocks
+            const codeBlockMatch = cleanedData.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+            if (codeBlockMatch && codeBlockMatch[1]) {
+              cleanedData = codeBlockMatch[1];
+              this.logger.debug(
+                formatOperationLog(
+                  "SmartExtraction",
+                  nodeName,
+                  nodeId,
+                  index,
+                  `Extracted content from code block for field "${field.name}": ${cleanedData}`
+                )
+              );
+            } else {
+              // If we can't extract from the code block, strip all code block markers
+              cleanedData = cleanedData.replace(/```(?:json)?|```/g, "").trim();
+              this.logger.debug(
+                formatOperationLog(
+                  "SmartExtraction",
+                  nodeName,
+                  nodeId,
+                  index,
+                  `Removed code block markers for field "${field.name}": ${cleanedData}`
+                )
+              );
+            }
+          }
+
+          return { success: true, data: cleanedData };
+        } catch (error) {
+          // If there's an error cleaning the data, return the original result
+          this.logger.warn(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Error cleaning response for field "${field.name}": ${(error as Error).message}. Using original response.`
+            )
+          );
+          return { success: true, data: result.data };
+        }
+      }
+
+      return result;
     } catch (error) {
       this.logger.error(
         formatOperationLog(
@@ -2073,10 +2137,64 @@ ${examplesSection}
           // Parse the JSON result
           let parsedData;
           try {
-            // Parse the result from OpenAI as JSON
-            parsedData = JSON.parse(result.data);
+            // Clean up the result in case it's wrapped in Markdown code blocks
+            let cleanedData = result.data;
+
+            // First log the raw response for debugging
+            this.logger.debug(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Raw response from OpenAI: ${cleanedData}`
+              )
+            );
+
+            // Remove markdown code block markers if present
+            if (cleanedData.includes("```")) {
+              // Extract content between markdown code blocks
+              const codeBlockMatch = cleanedData.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+              if (codeBlockMatch && codeBlockMatch[1]) {
+                cleanedData = codeBlockMatch[1];
+                this.logger.debug(
+                  formatOperationLog(
+                    "SmartExtraction",
+                    nodeName,
+                    nodeId,
+                    index,
+                    `Extracted content from code block: ${cleanedData}`
+                  )
+                );
+              } else {
+                // If we can't extract from the code block, strip all code block markers
+                cleanedData = cleanedData.replace(/```(?:json)?|```/g, "").trim();
+                this.logger.debug(
+                  formatOperationLog(
+                    "SmartExtraction",
+                    nodeName,
+                    nodeId,
+                    index,
+                    `Removed code block markers: ${cleanedData}`
+                  )
+                );
+              }
+            }
+
+            // Parse the cleaned result as JSON
+            parsedData = JSON.parse(cleanedData);
+
+            this.logger.debug(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Successfully parsed JSON result: ${JSON.stringify(parsedData)}`
+              )
+            );
           } catch (error) {
-            throw new Error(`Failed to parse batch result as JSON: ${(error as Error).message}`);
+            throw new Error(`Failed to parse batch result as JSON: ${(error as Error).message}\nRaw data: ${result.data}`);
           }
 
           // Extract the field values from the parsed result
