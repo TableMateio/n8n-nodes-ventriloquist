@@ -25,6 +25,7 @@ import * as authenticateOperation from './actions/authenticate.operation';
 import * as clickOperation from './actions/click.operation';
 import * as closeOperation from './actions/close.operation';
 import * as matcherOperation from './actions/matcher.operation';
+import * as collectorOperation from './actions/collector.operation';
 
 /**
  * Configure outputs for decision operation based on routing parameters
@@ -547,6 +548,12 @@ export class Ventriloquist implements INodeType {
 						description: 'Match entities across data sources',
 						action: 'Match entities across data sources',
 					},
+					{
+						name: 'Collector',
+						value: 'collector',
+						description: 'Collect data from a webpage',
+						action: 'Collect data from a webpage',
+					},
 				],
 				default: 'open',
 			},
@@ -706,6 +713,9 @@ export class Ventriloquist implements INodeType {
 
 			// Properties for 'close' operation
 			...closeOperation.description,
+
+			// Properties for 'collector' operation
+			...collectorOperation.description,
 		],
 	};
 
@@ -1012,6 +1022,24 @@ export class Ventriloquist implements INodeType {
 					}
 
 					returnData[0].push(result);
+				} else if (operation === 'collector') {
+					// Execute collector operation
+					const results = await collectorOperation.execute.call(
+						this,
+						i,
+						workflowId,
+						websocketEndpoint,
+					);
+
+					// Add execution duration to the results if not already added
+					for (const result of results) {
+						if (result.json && !result.json.executionDuration) {
+							result.json.executionDuration = Date.now() - startTime;
+						}
+					}
+
+					// Add all items to the return data
+					returnData[0].push(...results);
 				} else {
 					throw new Error(`The operation "${operation}" is not supported!`);
 				}
