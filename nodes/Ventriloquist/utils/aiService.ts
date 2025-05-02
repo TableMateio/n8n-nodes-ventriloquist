@@ -1086,7 +1086,7 @@ IMPORTANT GUIDELINES:
   }
 
   /**
-   * Poll for run completion
+   * Poll for completion of an OpenAI Assistant run and handle any required actions
    */
   private async pollRunCompletion(
     threadId: string,
@@ -1170,6 +1170,79 @@ IMPORTANT GUIDELINES:
           }
 
           return { success: false, error: 'No valid response content found' };
+        } else if (run.status === 'requires_action') {
+          // The assistant is waiting for us to execute the required tool calls
+          if (isDebugMode) {
+            this.logger.info(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `[OpenAI API] Run requires action: ${JSON.stringify(run.required_action, null, 2)}`
+              )
+            );
+          }
+
+          // Make sure we have required actions of type 'submit_tool_outputs'
+          if (run.required_action && run.required_action.type === 'submit_tool_outputs') {
+            const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
+
+            if (toolCalls && toolCalls.length > 0) {
+              const toolOutputs = [];
+
+              // Process each tool call
+              for (const toolCall of toolCalls) {
+                if (toolCall.type === 'function') {
+                  const functionName = toolCall.function.name;
+                  const functionArgs = JSON.parse(toolCall.function.arguments);
+
+                  this.logger.info(
+                    formatOperationLog(
+                      "SmartExtraction",
+                      nodeName,
+                      nodeId,
+                      index,
+                      `[OpenAI API] Processing function call: ${functionName} with args: ${JSON.stringify(functionArgs, null, 2)}`
+                    )
+                  );
+
+                  // Here we would normally actually execute the function
+                  // But for extraction functions, we're just going to return the parsed args directly
+                  // This effectively tells the assistant "yes, I extracted this data"
+                  toolOutputs.push({
+                    tool_call_id: toolCall.id,
+                    output: JSON.stringify(functionArgs)
+                  });
+                }
+              }
+
+              // Submit the tool outputs back to the API
+              if (toolOutputs.length > 0) {
+                this.logger.info(
+                  formatOperationLog(
+                    "SmartExtraction",
+                    nodeName,
+                    nodeId,
+                    index,
+                    `[OpenAI API] Submitting ${toolOutputs.length} tool outputs`
+                  )
+                );
+
+                await this.openai.beta.threads.runs.submitToolOutputs(
+                  threadId,
+                  runId,
+                  { tool_outputs: toolOutputs }
+                );
+
+                // Continue polling for completion after submitting tool outputs
+                continue;
+              }
+            }
+          }
+
+          // If we get here, there was an issue with the required actions
+          return { success: false, error: 'Invalid required actions format' };
         } else if (run.status === 'failed') {
           return { success: false, error: `Run failed: ${run.last_error?.message || 'Unknown error'}` };
         } else if (run.status === 'expired') {
