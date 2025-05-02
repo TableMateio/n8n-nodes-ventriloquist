@@ -224,6 +224,22 @@ export const description: INodeProperties[] = [
 						description: "Schema extraction method to use",
 					},
 					{
+						displayName: "Field Processing Mode",
+						name: "fieldProcessingMode",
+						type: "options",
+						options: [
+							{ name: "Process fields simultaneously", value: "batch", description: "Process all fields in one request (faster + cheaper)" },
+							{ name: "Process fields one after the next", value: "individual", description: "Process each field separately (more diligent but expensive)" },
+						],
+						default: "batch",
+						description: "How to process extraction fields",
+						displayOptions: {
+							show: {
+								schema: ["manual"],
+							},
+						},
+					},
+					{
 						displayName: "General Instructions",
 						name: "generalInstructions",
 						type: "string",
@@ -1020,6 +1036,7 @@ export async function execute(
 				referenceFormat: string;
 				referenceAttribute: string;
 				selectorScope: string;
+				fieldProcessingMode: string;
 			} | undefined = undefined;
 
 			if (schema === "manual" || schema === "auto") {
@@ -1154,6 +1171,23 @@ export async function execute(
 					}
 				}
 
+				// Get the field processing mode if using manual strategy
+				let fieldProcessingMode = 'batch'; // Default to batch mode
+				if (schema === 'manual') {
+					try {
+						fieldProcessingMode = this.getNodeParameter(
+							`extractionItems.items[${extractionItems.indexOf(item)}].fieldProcessingMode`,
+							index,
+							'batch'
+						) as string;
+
+						this.logger.debug(`Using field processing mode: ${fieldProcessingMode} for item ${item.name}`);
+					} catch (error) {
+						// If parameter doesn't exist yet, use default
+						this.logger.debug(`Field processing mode not found, using default: batch for item ${item.name}`);
+					}
+				}
+
 				aiFormatting = {
 					enabled: true,
 					extractionFormat,
@@ -1166,7 +1200,8 @@ export async function execute(
 					referenceName,
 					referenceFormat,
 					referenceAttribute,
-					selectorScope
+					selectorScope,
+					fieldProcessingMode, // Add the field processing mode
 				};
 
 				// Log AI formatting settings

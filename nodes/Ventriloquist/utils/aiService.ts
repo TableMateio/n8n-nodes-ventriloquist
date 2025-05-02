@@ -69,6 +69,7 @@ export interface IAIExtractionOptions {
   referenceAttribute?: string;
   selectorScope?: string;
   referenceContent?: string;
+  fieldProcessingMode?: 'batch' | 'individual';
   debugMode?: boolean; // Whether debug mode is enabled
 }
 
@@ -386,6 +387,7 @@ export class AIService {
   ): Promise<IAIExtractionResult> {
     const { nodeName, nodeId, index } = this.context;
     const isDebugMode = options.debugMode === true;
+    const fieldProcessingMode = options.fieldProcessingMode || 'batch'; // Default to batch mode
 
     try {
       const fields = options.fields || [];
@@ -408,6 +410,17 @@ export class AIService {
         )
       );
 
+      // Log the processing mode
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Using ${fieldProcessingMode} processing mode`
+        )
+      );
+
       // Generate schema for OpenAI function calling
       // NOTE: We directly use generateOpenAISchema here which uses the UI-defined fields
       // and don't use the generateSchema method that builds a schema from data
@@ -421,7 +434,7 @@ export class AIService {
             nodeName,
             nodeId,
             index,
-            `Using OpenAI Assistants API for field-by-field extraction with IDs: manual=${ASSISTANTS.manual}, logic=${ASSISTANTS.logic}`
+            `Using OpenAI Assistants API for ${fieldProcessingMode} extraction with IDs: manual=${ASSISTANTS.manual}, logic=${ASSISTANTS.logic}`
           )
         );
         this.logDebug(
@@ -552,70 +565,161 @@ export class AIService {
       // Create a result object to store field-by-field responses
       const result: Record<string, any> = {};
 
-      // Create a shared thread for fields that don't need separate threads
-      const sharedThread = await this.openai.beta.threads.create();
-      this.logger.debug(
+      // First, let's identify fields that need special processing (separate threads or logic assistant)
+      const standardFields: IField[] = [];
+      const specialFields: IField[] = [];
+
+      topLevelFields.forEach(field => {
+        const extendedField = field as IExtendedField;
+
+        // Skip fields with direct attribute content
+        if (extendedField.returnDirectAttribute === true && extendedField.referenceContent) {
+          result[field.name] = extendedField.referenceContent;
+          return; // Skip AI processing for this field
+        }
+
+        // Skip fields with nested fields
+        if (fieldGroups[field.name]) {
+          return; // Skip processing - we'll handle nested fields separately
+        }
+
+        // Check if the field needs special processing
+        if (field.useLogicAnalysis === true || field.useSeparateThread === true) {
+          specialFields.push(field);
+        } else {
+          standardFields.push(field);
+        }
+      });
+
+      // Log the field distribution for debugging
+      this.logger.info(
         formatOperationLog(
           "SmartExtraction",
           nodeName,
           nodeId,
           index,
-          `Created shared thread for standard fields: ${sharedThread.id}`
+          `Field distribution: ${standardFields.length} standard fields, ${specialFields.length} special fields`
         )
       );
 
-      // Process top-level fields first
-      for (const field of topLevelFields) {
-        // Cast to extended field type to handle attribute properties
-        const extendedField = field as IExtendedField;
-
-        // If this field has direct attribute content, use it directly
-        if (extendedField.returnDirectAttribute === true && extendedField.referenceContent) {
+      // Process standard fields based on the field processing mode
+      if (standardFields.length > 0) {
+        if (fieldProcessingMode === 'batch') {
+          // Process all standard fields in a single batch
           this.logger.info(
             formatOperationLog(
               "SmartExtraction",
               nodeName,
               nodeId,
               index,
-              `Using direct attribute value for field "${field.name}": ${extendedField.referenceContent}`
+              `Processing ${standardFields.length} standard fields in batch mode`
             )
           );
-          result[field.name] = extendedField.referenceContent;
-          continue; // Skip AI processing for this field
-        }
 
-        // Check if this field has nested fields to process
-        if (fieldGroups[field.name]) {
+          const batchResult = await this.batchProcessFields(content, standardFields);
+
+          if (batchResult.success && batchResult.data) {
+            // Merge batch results into the main result object
+            Object.assign(result, batchResult.data);
+          } else {
+            this.logger.error(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Batch processing failed: ${batchResult.error || 'Unknown error'}`
+              )
+            );
+          }
+        } else {
+          // Process standard fields individually (original behavior)
           this.logger.info(
             formatOperationLog(
               "SmartExtraction",
               nodeName,
               nodeId,
               index,
-              `Field "${field.name}" has ${fieldGroups[field.name].length} nested fields to process`
+              `Processing ${standardFields.length} standard fields individually`
             )
           );
 
-          // Skip standard processing - we'll handle nested fields separately
-          continue;
+          // Create a shared thread for standard fields
+          const sharedThread = await this.openai.beta.threads.create();
+          this.logger.debug(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Created shared thread for standard fields: ${sharedThread.id}`
+            )
+          );
+
+          // Process each standard field individually
+          for (const field of standardFields) {
+            const fieldResult = await this.processFieldWithAI(sharedThread.id, content, field);
+
+            if (fieldResult.success && fieldResult.data) {
+              try {
+                // Parse the result or use as is
+                let parsedValue;
+                try {
+                  parsedValue = JSON.parse(fieldResult.data);
+                } catch (parseError) {
+                  // If not JSON, use as is
+                  parsedValue = fieldResult.data;
+                }
+
+                // Extract just the field value from the parsedValue object
+                if (typeof parsedValue === 'object' && parsedValue !== null && field.name in parsedValue) {
+                  result[field.name] = parsedValue[field.name];
+                } else {
+                  // If we can't extract the field value, use the parsed value as is
+                  result[field.name] = parsedValue;
+                }
+              } catch (e) {
+                this.logger.error(
+                  formatOperationLog(
+                    "SmartExtraction",
+                    nodeName,
+                    nodeId,
+                    index,
+                    `Error parsing field "${field.name}" result: ${(e as Error).message}`
+                  )
+                );
+                result[field.name] = null;
+              }
+            } else {
+              this.logger.error(
+                formatOperationLog(
+                  "SmartExtraction",
+                  nodeName,
+                  nodeId,
+                  index,
+                  `Failed to extract field "${field.name}": ${fieldResult.error || 'Unknown error'}`
+                )
+              );
+              result[field.name] = null;
+            }
+          }
         }
+      }
 
-        // Determine if this field needs a separate thread
-        const needsSeparateThread = field.useLogicAnalysis === true || field.useSeparateThread === true;
-        const threadToUse = needsSeparateThread ? null : sharedThread.id; // null means create a new thread
-
-        this.logger.debug(
+      // Process special fields (always individually)
+      for (const field of specialFields) {
+        this.logger.info(
           formatOperationLog(
             "SmartExtraction",
             nodeName,
             nodeId,
             index,
-            `Processing field "${field.name}" (type: ${field.type}, separate thread: ${needsSeparateThread})`
+            `Processing special field "${field.name}" with separate thread (logic: ${field.useLogicAnalysis === true})`
           )
         );
 
-        // Process the field with the appropriate thread
-        const fieldResult = await this.processFieldWithAI(threadToUse, content, field);
+        // These fields always need a new thread
+        const fieldResult = await this.processFieldWithAI(null, content, field);
 
         if (fieldResult.success && fieldResult.data) {
           try {
@@ -628,168 +732,160 @@ export class AIService {
               parsedValue = fieldResult.data;
             }
 
-            // Store the value
-            result[field.name] = parsedValue;
-
-            this.logger.debug(
+            // Extract just the field value from the parsedValue object
+            if (typeof parsedValue === 'object' && parsedValue !== null && field.name in parsedValue) {
+              result[field.name] = parsedValue[field.name];
+            } else {
+              // If we can't extract the field value, use the parsed value as is
+              result[field.name] = parsedValue;
+            }
+          } catch (e) {
+            this.logger.error(
               formatOperationLog(
                 "SmartExtraction",
                 nodeName,
                 nodeId,
                 index,
-                `Successfully extracted field "${field.name}": ${
-                  typeof parsedValue === 'string'
-                    ? parsedValue
-                    : JSON.stringify(parsedValue)
-                }`
+                `Error parsing special field "${field.name}" result: ${(e as Error).message}`
               )
             );
-          } catch (error) {
-            this.logger.warn(
-              formatOperationLog(
-                "SmartExtraction",
-                nodeName,
-                nodeId,
-                index,
-                `Error parsing result for field "${field.name}": ${(error as Error).message}`
-              )
-            );
-            result[field.name] = fieldResult.data;
+            result[field.name] = null;
           }
         } else {
-          this.logger.warn(
+          this.logger.error(
             formatOperationLog(
               "SmartExtraction",
               nodeName,
               nodeId,
               index,
-              `Failed to extract field "${field.name}": ${fieldResult.error || 'Unknown error'}`
+              `Failed to extract special field "${field.name}": ${fieldResult.error || 'Unknown error'}`
             )
           );
           result[field.name] = null;
         }
       }
 
-      // Now process any nested field groups
-      for (const [parentName, childFields] of Object.entries(fieldGroups)) {
-        if (childFields.length > 0) {
-          this.logger.info(
+      // Process nested fields (fields with dot notation)
+      for (const parentName in fieldGroups) {
+        const nestedFields = fieldGroups[parentName];
+        const nestedObject: Record<string, any> = {};
+
+        this.logger.info(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `Processing ${nestedFields.length} nested fields for parent "${parentName}"`
+          )
+        );
+
+        // Create a shared thread for this nested field group
+        let nestedThread = null;
+        if (fieldProcessingMode === 'individual') {
+          const thread = await this.openai.beta.threads.create();
+          nestedThread = thread.id;
+          this.logger.debug(
             formatOperationLog(
               "SmartExtraction",
               nodeName,
               nodeId,
               index,
-              `Processing nested field group "${parentName}" with ${childFields.length} child fields`
+              `Created shared thread for nested fields of "${parentName}": ${nestedThread}`
             )
           );
+        }
 
-          // Create an object to store child field results
-          const nestedResult: Record<string, any> = {};
+        // For batch mode with nested fields
+        if (fieldProcessingMode === 'batch') {
+          // Process all nested fields in a single batch
+          const batchResult = await this.batchProcessFields(content, nestedFields);
 
-          // Process each child field
-          for (const childField of childFields) {
-            const needsSeparateThread = childField.useLogicAnalysis === true || childField.useSeparateThread === true;
-            const threadToUse = needsSeparateThread ? null : sharedThread.id;
-
-            this.logger.debug(
+          if (batchResult.success && batchResult.data) {
+            // Assign all nested fields to the nested object
+            Object.assign(nestedObject, batchResult.data);
+          } else {
+            this.logger.error(
               formatOperationLog(
                 "SmartExtraction",
                 nodeName,
                 nodeId,
                 index,
-                `Processing nested field "${parentName}.${childField.name}" (type: ${childField.type})`
+                `Batch processing failed for nested fields of "${parentName}": ${batchResult.error || 'Unknown error'}`
               )
             );
+          }
+        } else {
+          // Process each nested field individually (original behavior)
+          for (const childField of nestedFields) {
+            const childResult = await this.processFieldWithAI(nestedThread, content, childField);
 
-            const fieldResult = await this.processFieldWithAI(threadToUse, content, childField);
-
-            if (fieldResult.success && fieldResult.data) {
+            if (childResult.success && childResult.data) {
               try {
+                // Parse the result or use as is
                 let parsedValue;
                 try {
-                  parsedValue = JSON.parse(fieldResult.data);
+                  parsedValue = JSON.parse(childResult.data);
                 } catch (parseError) {
-                  parsedValue = fieldResult.data;
+                  // If not JSON, use as is
+                  parsedValue = childResult.data;
                 }
 
-                nestedResult[childField.name] = parsedValue;
-
-                this.logger.debug(
+                // Extract just the field value from the parsedValue object
+                if (typeof parsedValue === 'object' && parsedValue !== null && childField.name in parsedValue) {
+                  nestedObject[childField.name] = parsedValue[childField.name];
+                } else {
+                  // If we can't extract the field value, use the parsed value as is
+                  nestedObject[childField.name] = parsedValue;
+                }
+              } catch (e) {
+                this.logger.error(
                   formatOperationLog(
                     "SmartExtraction",
                     nodeName,
                     nodeId,
                     index,
-                    `Successfully extracted nested field "${parentName}.${childField.name}": ${
-                      typeof parsedValue === 'string' ? parsedValue : JSON.stringify(parsedValue)
-                    }`
+                    `Error parsing nested field "${parentName}.${childField.name}" result: ${(e as Error).message}`
                   )
                 );
-              } catch (error) {
-                this.logger.warn(
-                  formatOperationLog(
-                    "SmartExtraction",
-                    nodeName,
-                    nodeId,
-                    index,
-                    `Error parsing result for nested field "${parentName}.${childField.name}": ${(error as Error).message}`
-                  )
-                );
-                nestedResult[childField.name] = fieldResult.data;
+                nestedObject[childField.name] = null;
               }
             } else {
-              this.logger.warn(
+              this.logger.error(
                 formatOperationLog(
                   "SmartExtraction",
                   nodeName,
                   nodeId,
                   index,
-                  `Failed to extract nested field "${parentName}.${childField.name}": ${fieldResult.error || 'Unknown error'}`
+                  `Failed to extract nested field "${parentName}.${childField.name}": ${childResult.error || 'Unknown error'}`
                 )
               );
-              nestedResult[childField.name] = null;
+              nestedObject[childField.name] = null;
             }
           }
-
-          // Store the nested results in the parent field
-          result[parentName] = nestedResult;
-
-          this.logger.info(
-            formatOperationLog(
-              "SmartExtraction",
-              nodeName,
-              nodeId,
-              index,
-              `Completed nested field group "${parentName}" with result: ${JSON.stringify(nestedResult)}`
-            )
-          );
         }
+
+        // Assign the nested object to the parent field in the result
+        result[parentName] = nestedObject;
       }
 
-      // Generate schema if requested
-      let schema = null;
-      if (options.includeSchema) {
-        schema = this.generateOpenAISchema(processedFields);
+      // Log the complete result structure
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Extraction complete with ${Object.keys(result).length} top-level fields`
+        )
+      );
 
-        // Log the generated schema in debug mode (already logged in generateOpenAISchema, but adding here for clarity)
-        if (isDebugMode) {
-          this.logger.info(
-            formatOperationLog(
-              "SmartExtraction",
-              nodeName,
-              nodeId,
-              index,
-              `Manual strategy final schema (post-processing): ${JSON.stringify(schema, null, 2)}`
-            )
-          );
-        }
-      }
-
+      // Return the extraction result
       return {
         success: true,
         data: result,
-        schema,
-        rawData: options.includeRawData ? content : undefined,
+        schema: options.includeSchema ? functionSchema : undefined,
+        rawData: options.includeRawData ? content : undefined
       };
     } catch (error) {
       this.logger.error(
@@ -798,12 +894,12 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          `Manual strategy error: ${(error as Error).message}`
+          `Error in manual strategy: ${(error as Error).message}`
         )
       );
       return {
         success: false,
-        error: `Manual strategy error: ${(error as Error).message}`,
+        error: (error as Error).message
       };
     }
   }
@@ -1809,5 +1905,192 @@ ${examplesSection}
     }
 
     return typeof data;
+  }
+
+  /**
+   * Process all fields at once in a single batch
+   * This is more efficient than processing fields individually
+   */
+  private async batchProcessFields(
+    content: string,
+    fields: IField[]
+  ): Promise<{ success: boolean; data?: Record<string, any>; error?: string }> {
+    const { nodeName, nodeId, index } = this.context;
+
+    try {
+      // Log that we're using batch processing
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Batch processing ${fields.length} fields at once`
+        )
+      );
+
+      // Create a combined schema for all fields
+      const schema = this.generateOpenAISchema(fields);
+
+      // Create a thread for the batch processing
+      const thread = await this.openai.beta.threads.create();
+      const threadId = thread.id;
+
+      this.logger.debug(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Created thread for batch processing: ${threadId}`
+        )
+      );
+
+      // Build a combined prompt for all fields
+      const combinedPrompt = this.buildManualPrompt(content, {
+        strategy: 'manual',
+        generalInstructions: 'Extract all fields from the provided content.',
+        fields: fields,
+        includeSchema: false,
+        includeRawData: false,
+      });
+
+      // Log the complete prompt being sent to the AI for debugging
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `FULL AI PROMPT for batch processing ${fields.length} fields:\n${'-'.repeat(80)}\n${combinedPrompt.substring(0, 500)}...\n${'-'.repeat(80)}`
+        )
+      );
+
+      // Log the schema being used
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Using combined schema for ${fields.length} fields:\n${JSON.stringify(schema, null, 2)}`
+        )
+      );
+
+      // Add a message to the thread with the content and instructions
+      await this.openai.beta.threads.messages.create(threadId, {
+        role: "user",
+        content: combinedPrompt,
+      });
+
+      // Run the assistant on the thread
+      const run = await this.openai.beta.threads.runs.create(threadId, {
+        assistant_id: ASSISTANTS.manual, // Always use the manual assistant for batch processing
+        tools: [{
+          type: "function",
+          function: schema
+        }]
+      });
+
+      // Poll for completion
+      const result = await this.pollRunCompletion(threadId, run.id);
+
+      if (result.success && result.data) {
+        try {
+          // Parse the JSON result
+          let parsedData;
+          try {
+            // Parse the result from OpenAI as JSON
+            parsedData = JSON.parse(result.data);
+          } catch (error) {
+            throw new Error(`Failed to parse batch result as JSON: ${(error as Error).message}`);
+          }
+
+          // Extract the field values from the parsed result
+          const extractedData: Record<string, any> = {};
+
+          // Check if we got an object with our fields
+          if (typeof parsedData === 'object' && parsedData !== null) {
+            // Add each field to the extracted data
+            fields.forEach(field => {
+              if (field.name in parsedData) {
+                extractedData[field.name] = parsedData[field.name];
+              } else {
+                this.logger.warn(
+                  formatOperationLog(
+                    "SmartExtraction",
+                    nodeName,
+                    nodeId,
+                    index,
+                    `Field "${field.name}" not found in batch result`
+                  )
+                );
+                extractedData[field.name] = null;
+              }
+            });
+          } else {
+            throw new Error('Batch result is not a valid object');
+          }
+
+          // Log the extracted data for debugging
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Batch processing extracted ${Object.keys(extractedData).length} fields`
+            )
+          );
+
+          return {
+            success: true,
+            data: extractedData
+          };
+        } catch (error) {
+          this.logger.error(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Error processing batch result: ${(error as Error).message}`
+            )
+          );
+          return {
+            success: false,
+            error: `Error processing batch result: ${(error as Error).message}`
+          };
+        }
+      } else {
+        this.logger.error(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `Batch processing failed: ${result.error || 'Unknown error'}`
+          )
+        );
+        return {
+          success: false,
+          error: result.error || 'Unknown error in batch processing'
+        };
+      }
+    } catch (error) {
+      this.logger.error(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Error in batch processing: ${(error as Error).message}`
+        )
+      );
+      return {
+        success: false,
+        error: `Error in batch processing: ${(error as Error).message}`
+      };
+    }
   }
 }

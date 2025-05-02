@@ -107,6 +107,7 @@ export interface IExtractItem {
     referenceAttribute?: string;
     selectorScope?: string;
     referenceContent?: string; // Will store the extracted reference content
+    fieldProcessingMode?: string; // 'batch' or 'individual'
     smartOptions?: {
       extractionFormat?: string;
       aiAssistance?: boolean;
