@@ -88,6 +88,14 @@ interface IPaginationState {
 	hasNextPage: boolean;
 	nextPageUrl?: string;
 	lastPageDetected: boolean;
+	// Track previously seen URLs to detect cycling
+	visitedUrls: Set<string>;
+	// Track consecutive pages with no new items
+	consecutiveEmptyPages: number;
+	// Count repeated URLs to detect cycling
+	urlRepeatCount: Map<string, number>;
+	// Maximum allowed URL repeats before detecting cycling
+	maxUrlRepeats: number;
 }
 
 /**
@@ -694,6 +702,11 @@ export const description: INodeProperties[] = [
 				value: "noResults",
 				description: "Stop when no more results are found on the page",
 			},
+			{
+				name: "Detect Page Cycling",
+				value: "detectCycling",
+				description: "Stop when the same pages are being visited repeatedly (prevents infinite loops)",
+			},
 		],
 		default: "buttonMissing",
 		description: "Method to detect when there are no more pages",
@@ -820,7 +833,11 @@ export async function execute(
 	let paginationState: IPaginationState = {
 		currentPage: 1,
 		hasNextPage: false,
-		lastPageDetected: false
+		lastPageDetected: false,
+		visitedUrls: new Set<string>(),
+		consecutiveEmptyPages: 0,
+		urlRepeatCount: new Map<string, number>(),
+		maxUrlRepeats: 2 // Allow each URL to be seen maximum 2 times before flagging as cycling
 	};
 
 	// Visual marker to clearly indicate a new node is starting
@@ -950,7 +967,11 @@ export async function execute(
 			currentPage: startPage,
 			totalPages: maxPages,
 			hasNextPage: enablePagination,
-			lastPageDetected: false
+			lastPageDetected: false,
+			visitedUrls: new Set<string>(),
+			consecutiveEmptyPages: 0,
+			urlRepeatCount: new Map<string, number>(),
+			maxUrlRepeats: 2 // Allow each URL to be seen maximum 2 times before flagging as cycling
 		};
 
 		// Process pages until we reach the maximum or detect the last page
@@ -1066,6 +1087,15 @@ export async function execute(
 
 			// Check if we've reached the last page
 			if (enablePagination && paginationState.currentPage < maxPages) {
+				// Get current URL for all detection methods
+				const currentUrl = await page.url();
+
+				// Track the current URL visit for all detection methods
+				const repeatCount = paginationState.urlRepeatCount.get(currentUrl) || 0;
+				const newRepeatCount = repeatCount + 1;
+				paginationState.urlRepeatCount.set(currentUrl, newRepeatCount);
+				paginationState.visitedUrls.add(currentUrl);
+
 				// Check for last page indicators
 				if (lastPageDetection === 'buttonMissing' && paginationStrategy === 'clickNext') {
 					const nextButtonExists = await elementExists(page, nextPageSelector);
@@ -1098,13 +1128,119 @@ export async function execute(
 						break;
 					}
 				} else if (lastPageDetection === 'noResults' && pageItems.length === 0) {
+					// Increment consecutive empty pages counter
+					paginationState.consecutiveEmptyPages += 1;
+
+					// If we've seen 2 consecutive empty pages, stop pagination
+					if (paginationState.consecutiveEmptyPages >= 2) {
+						this.logger.info(
+							formatOperationLog(
+								'Collector',
+								nodeName,
+								nodeId,
+								index,
+								`No items found on ${paginationState.consecutiveEmptyPages} consecutive pages, reached last page`
+							)
+						);
+						paginationState.lastPageDetected = true;
+						break;
+					}
+
 					this.logger.info(
 						formatOperationLog(
 							'Collector',
 							nodeName,
 							nodeId,
 							index,
-							`No items found on current page, reached last page`
+							`No items found on current page, but continuing to check more pages`
+						)
+					);
+				} else if (lastPageDetection === 'detectCycling') {
+					// Using the repeatCount we already calculated above
+
+					// If we've seen this URL too many times, stop pagination
+					if (newRepeatCount > paginationState.maxUrlRepeats) {
+						this.logger.info(
+							formatOperationLog(
+								'Collector',
+								nodeName,
+								nodeId,
+								index,
+								`Detected page cycling - URL "${currentUrl}" has been visited ${newRepeatCount} times, stopping pagination`
+							)
+						);
+						paginationState.lastPageDetected = true;
+						break;
+					}
+
+					// If we've seen a high number of pages with the same items (regardless of URL),
+					// we might be in a cycling situation
+					if (pageItems.length > 0 &&
+						paginationState.visitedUrls.size > 5 &&
+						paginationState.currentPage > 10 &&
+						paginationState.urlRepeatCount.size < paginationState.currentPage / 2) {
+						this.logger.info(
+							formatOperationLog(
+								'Collector',
+								nodeName,
+								nodeId,
+								index,
+								`Possible pagination cycling detected - visited ${paginationState.visitedUrls.size} unique URLs in ${paginationState.currentPage} pages`
+							)
+						);
+						paginationState.lastPageDetected = true;
+						break;
+					}
+				}
+
+				// Reset consecutive empty pages counter if we found items
+				if (pageItems.length > 0) {
+					paginationState.consecutiveEmptyPages = 0;
+				}
+
+				// Safety mechanism: If we see the same URL too many times, stop pagination
+				// This runs regardless of the selected last page detection method
+				const maxSafeRepeats = 3; // Maximum safe repeats of the same URL
+				if (newRepeatCount > maxSafeRepeats) {
+					this.logger.warn(
+						formatOperationLog(
+							'Collector',
+							nodeName,
+							nodeId,
+							index,
+							`Safety: URL "${currentUrl}" has been visited ${newRepeatCount} times, stopping pagination to prevent infinite loops`
+						)
+					);
+					paginationState.lastPageDetected = true;
+					break;
+				}
+
+				// Safety mechanism: If we've visited too many pages compared to unique URLs
+				// This helps catch cycling where the URLs include changing parameters
+				if (paginationState.currentPage > 20 && paginationState.visitedUrls.size < paginationState.currentPage / 4) {
+					this.logger.warn(
+						formatOperationLog(
+							'Collector',
+							nodeName,
+							nodeId,
+							index,
+							`Safety: Only ${paginationState.visitedUrls.size} unique URLs seen in ${paginationState.currentPage} pages, likely in a pagination loop`
+						)
+					);
+					paginationState.lastPageDetected = true;
+					break;
+				}
+
+				// Absolute safety: Never exceed 50 pages unless explicitly allowed
+				const absoluteMaxPages = 50;
+				if (paginationState.currentPage >= absoluteMaxPages && maxPages > absoluteMaxPages) {
+					this.logger.warn(
+						formatOperationLog(
+							'Collector',
+							nodeName,
+							nodeId,
+							index,
+							`Safety: Reached ${absoluteMaxPages} pages which is unusually high, stopping pagination`
 						)
 					);
 					paginationState.lastPageDetected = true;
