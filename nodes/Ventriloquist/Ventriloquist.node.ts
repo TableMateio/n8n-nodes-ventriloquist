@@ -417,7 +417,7 @@ export class Ventriloquist implements INodeType {
 		icon: 'file:ventriloquist.svg',
 		group: ['browser'],
 		version: 1,
-		subtitle: '={{ $parameter["operation"] }}',
+		subtitle: '={{ $parameter.action }}',
 		description: 'Automate browser interactions using Bright Data, Browserless, or local Chrome',
 		defaults: {
 			name: 'Ventriloquist',
@@ -528,13 +528,13 @@ export class Ventriloquist implements INodeType {
 						name: 'Open',
 						value: 'open',
 						description: 'Open a browser instance',
-						action: 'Open a browser instance',
+						action: 'Open',
 					},
 					{
 						name: 'Close',
 						value: 'close',
 						description: 'Close a browser session',
-						action: 'Close a browser session',
+						action: 'Close',
 					},
 				],
 				default: 'open',
@@ -554,19 +554,19 @@ export class Ventriloquist implements INodeType {
 						name: 'Authenticate',
 						value: 'authenticate',
 						description: 'Handle authentication (TOTP, etc.)',
-						action: 'Authenticate with credentials',
+						action: 'Authenticate',
 					},
 					{
 						name: 'Click',
 						value: 'click',
 						description: 'Click on a specific element on the page',
-						action: 'Click an element on the page',
+						action: 'Click',
 					},
 					{
 						name: 'Form',
 						value: 'form',
 						description: 'Fill out a form',
-						action: 'Fill out a form',
+						action: 'Form',
 					},
 				],
 				default: 'click',
@@ -586,31 +586,31 @@ export class Ventriloquist implements INodeType {
 						name: 'Collector',
 						value: 'collector',
 						description: 'Collect data from a webpage',
-						action: 'Collect data from a webpage',
+						action: 'Collect',
 					},
 					{
 						name: 'Decision',
 						value: 'decision',
 						description: 'Make conditional decisions based on page state and take action',
-						action: 'Make a decision and take action',
+						action: 'Decide',
 					},
 					{
 						name: 'Detect',
 						value: 'detect',
 						description: 'Detect elements, text, URL paths, or page state',
-						action: 'Detect page state',
+						action: 'Detect',
 					},
 					{
 						name: 'Extract',
 						value: 'extract',
 						description: 'Extract data from a webpage',
-						action: 'Extract data from a webpage',
+						action: 'Extract',
 					},
 					{
 						name: 'Matcher',
 						value: 'matcher',
 						description: 'Match entities across data sources',
-						action: 'Match entities across data sources',
+						action: 'Match',
 					},
 				],
 				default: 'extract',
@@ -867,6 +867,16 @@ export class Ventriloquist implements INodeType {
 					},
 				},
 			})),
+
+			// Add additionalOptions to hide custom operations
+			{
+				displayName: 'Additional Options',
+				name: 'additionalOptions',
+				type: 'hidden',
+				default: {
+					showCustomApi: false
+				},
+			}
 		],
 	};
 
