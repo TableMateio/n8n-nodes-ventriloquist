@@ -464,31 +464,6 @@ export class Ventriloquist implements INodeType {
 		],
 		properties: [
 			{
-				displayName: 'Resource',
-				name: 'resource',
-				type: 'options',
-				noDataExpression: true,
-				options: [
-					{
-						name: 'Browser Control',
-						value: 'browserControl',
-						description: 'Operations for controlling the browser instance',
-					},
-					{
-						name: 'Navigation & Interaction',
-						value: 'navigation',
-						description: 'Operations for navigating and interacting with web pages',
-					},
-					{
-						name: 'Data Operations',
-						value: 'dataOperations',
-						description: 'Operations for extracting and processing data from web pages',
-					},
-				],
-				default: 'browserControl',
-				description: 'Resource to use',
-			},
-			{
 				displayName: 'Browser Service',
 				name: 'browserService',
 				type: 'options',
@@ -512,6 +487,31 @@ export class Ventriloquist implements INodeType {
 				default: 'brightData',
 				description: 'The browser service to use for automation',
 				required: true,
+			},
+			{
+				displayName: 'Resource',
+				name: 'resource',
+				type: 'options',
+				noDataExpression: true,
+				options: [
+					{
+						name: 'Browser Control',
+						value: 'browserControl',
+						description: 'Operations for controlling the browser instance',
+					},
+					{
+						name: 'Navigation & Interaction',
+						value: 'navigation',
+						description: 'Operations for navigating and interacting with web pages',
+					},
+					{
+						name: 'Data Operations',
+						value: 'dataOperations',
+						description: 'Operations for extracting and processing data from web pages',
+					},
+				],
+				default: 'browserControl',
+				description: 'Resource to use',
 			},
 			{
 				displayName: 'Operation',
