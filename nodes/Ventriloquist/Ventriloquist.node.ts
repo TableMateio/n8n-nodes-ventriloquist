@@ -563,7 +563,7 @@ export class Ventriloquist implements INodeType {
 						action: 'Click an element on the page',
 					},
 					{
-						name: 'Fill Form',
+						name: 'Form',
 						value: 'form',
 						description: 'Fill out a form',
 						action: 'Fill out a form',
@@ -583,7 +583,7 @@ export class Ventriloquist implements INodeType {
 				},
 				options: [
 					{
-						name: 'Collect',
+						name: 'Collector',
 						value: 'collector',
 						description: 'Collect data from a webpage',
 						action: 'Collect data from a webpage',
@@ -607,7 +607,7 @@ export class Ventriloquist implements INodeType {
 						action: 'Extract data from a webpage',
 					},
 					{
-						name: 'Match',
+						name: 'Matcher',
 						value: 'matcher',
 						description: 'Match entities across data sources',
 						action: 'Match entities across data sources',
