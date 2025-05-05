@@ -464,6 +464,31 @@ export class Ventriloquist implements INodeType {
 		],
 		properties: [
 			{
+				displayName: 'Resource',
+				name: 'resource',
+				type: 'options',
+				noDataExpression: true,
+				options: [
+					{
+						name: 'Browser Control',
+						value: 'browserControl',
+						description: 'Operations for controlling the browser instance',
+					},
+					{
+						name: 'Navigation & Interaction',
+						value: 'navigation',
+						description: 'Operations for navigating and interacting with web pages',
+					},
+					{
+						name: 'Data Operations',
+						value: 'dataOperations',
+						description: 'Operations for extracting and processing data from web pages',
+					},
+				],
+				default: 'browserControl',
+				description: 'Resource to use',
+			},
+			{
 				displayName: 'Browser Service',
 				name: 'browserService',
 				type: 'options',
@@ -493,12 +518,43 @@ export class Ventriloquist implements INodeType {
 				name: 'operation',
 				type: 'options',
 				noDataExpression: true,
+				displayOptions: {
+					show: {
+						resource: ['browserControl'],
+					},
+				},
 				options: [
 					{
-						name: 'Open Browser',
+						name: 'Open',
 						value: 'open',
 						description: 'Open a browser instance',
 						action: 'Open a browser instance',
+					},
+					{
+						name: 'Close',
+						value: 'close',
+						description: 'Close a browser session',
+						action: 'Close a browser session',
+					},
+				],
+				default: 'open',
+			},
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: {
+					show: {
+						resource: ['navigation'],
+					},
+				},
+				options: [
+					{
+						name: 'Authenticate',
+						value: 'authenticate',
+						description: 'Handle authentication (TOTP, etc.)',
+						action: 'Authenticate with credentials',
 					},
 					{
 						name: 'Click',
@@ -507,10 +563,30 @@ export class Ventriloquist implements INodeType {
 						action: 'Click an element on the page',
 					},
 					{
-						name: 'Close',
-						value: 'close',
-						description: 'Close a browser session',
-						action: 'Close a browser session',
+						name: 'Fill Form',
+						value: 'form',
+						description: 'Fill out a form',
+						action: 'Fill out a form',
+					},
+				],
+				default: 'click',
+			},
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: {
+					show: {
+						resource: ['dataOperations'],
+					},
+				},
+				options: [
+					{
+						name: 'Collect',
+						value: 'collector',
+						description: 'Collect data from a webpage',
+						action: 'Collect data from a webpage',
 					},
 					{
 						name: 'Decision',
@@ -531,31 +607,13 @@ export class Ventriloquist implements INodeType {
 						action: 'Extract data from a webpage',
 					},
 					{
-						name: 'Form',
-						value: 'form',
-						description: 'Fill out a form',
-						action: 'Fill out a form',
-					},
-					{
-						name: 'Authenticate',
-						value: 'authenticate',
-						description: 'Handle authentication (TOTP, etc.)',
-						action: 'Authenticate with credentials',
-					},
-					{
-						name: 'Entity Matcher',
+						name: 'Match',
 						value: 'matcher',
 						description: 'Match entities across data sources',
 						action: 'Match entities across data sources',
 					},
-					{
-						name: 'Collector',
-						value: 'collector',
-						description: 'Collect data from a webpage',
-						action: 'Collect data from a webpage',
-					},
 				],
-				default: 'open',
+				default: 'extract',
 			},
 
 			// Properties for 'open' operation
@@ -568,6 +626,7 @@ export class Ventriloquist implements INodeType {
 				description: 'The URL to navigate to',
 				displayOptions: {
 					show: {
+						resource: ['browserControl'],
 						operation: ['open'],
 					},
 				},
@@ -580,6 +639,7 @@ export class Ventriloquist implements INodeType {
 				description: 'Whether to use incognito mode',
 				displayOptions: {
 					show: {
+						resource: ['browserControl'],
 						operation: ['open'],
 					},
 				},
@@ -593,6 +653,11 @@ export class Ventriloquist implements INodeType {
 				displayOptions: {
 					show: {
 						operation: ['open', 'form', 'detect', 'extract'],
+						resource: [
+							'browserControl',
+							'navigation',
+							'dataOperations',
+						],
 					},
 				},
 			},
@@ -627,6 +692,7 @@ export class Ventriloquist implements INodeType {
 				description: 'When to consider navigation completed',
 				displayOptions: {
 					show: {
+						resource: ['browserControl'],
 						operation: ['open'],
 					},
 				},
@@ -639,6 +705,7 @@ export class Ventriloquist implements INodeType {
 				description: 'Maximum navigation time in milliseconds',
 				displayOptions: {
 					show: {
+						resource: ['browserControl'],
 						operation: ['open'],
 					},
 				},
@@ -651,6 +718,7 @@ export class Ventriloquist implements INodeType {
 				description: 'Enable a debuggable session visible in Bright Data console',
 				displayOptions: {
 					show: {
+						resource: ['browserControl'],
 						operation: ['open'],
 					},
 				},
@@ -664,6 +732,7 @@ export class Ventriloquist implements INodeType {
 				hint: 'The session will close automatically after this period of inactivity to prevent orphaned sessions',
 				displayOptions: {
 					show: {
+						resource: ['browserControl'],
 						operation: ['open'],
 					},
 				},
@@ -676,6 +745,7 @@ export class Ventriloquist implements INodeType {
 				description: 'Whether to continue execution even when browser operations fail (cannot connect or navigate)',
 				displayOptions: {
 					show: {
+						resource: ['browserControl'],
 						operation: ['open'],
 					},
 				},
@@ -688,34 +758,115 @@ export class Ventriloquist implements INodeType {
 					...(property.displayOptions || {}),
 					show: {
 						...(property.displayOptions?.show || {}),
+						resource: ['navigation'],
 						operation: ['click'],
 					},
 				},
 			})),
 
 			// Properties for 'form' operation
-			...formOperation.description,
+			...formOperation.description.map(property => ({
+				...property,
+				displayOptions: {
+					...(property.displayOptions || {}),
+					show: {
+						...(property.displayOptions?.show || {}),
+						resource: ['navigation'],
+						operation: ['form'],
+					},
+				},
+			})),
 
 			// Properties for 'detect' operation
-			...detectOperation.description,
+			...detectOperation.description.map(property => ({
+				...property,
+				displayOptions: {
+					...(property.displayOptions || {}),
+					show: {
+						...(property.displayOptions?.show || {}),
+						resource: ['dataOperations'],
+						operation: ['detect'],
+					},
+				},
+			})),
 
 			// Properties for 'decision' operation
-			...decisionOperation.description,
+			...decisionOperation.description.map(property => ({
+				...property,
+				displayOptions: {
+					...(property.displayOptions || {}),
+					show: {
+						...(property.displayOptions?.show || {}),
+						resource: ['dataOperations'],
+						operation: ['decision'],
+					},
+				},
+			})),
 
 			// Properties for 'extract' operation
-			...extractOperation.description,
+			...extractOperation.description.map(property => ({
+				...property,
+				displayOptions: {
+					...(property.displayOptions || {}),
+					show: {
+						...(property.displayOptions?.show || {}),
+						resource: ['dataOperations'],
+						operation: ['extract'],
+					},
+				},
+			})),
 
 			// Properties for 'authenticate' operation
-			...authenticateOperation.description,
+			...authenticateOperation.description.map(property => ({
+				...property,
+				displayOptions: {
+					...(property.displayOptions || {}),
+					show: {
+						...(property.displayOptions?.show || {}),
+						resource: ['navigation'],
+						operation: ['authenticate'],
+					},
+				},
+			})),
 
 			// Properties for 'matcher' operation
-			...matcherOperation.description,
+			...matcherOperation.description.map(property => ({
+				...property,
+				displayOptions: {
+					...(property.displayOptions || {}),
+					show: {
+						...(property.displayOptions?.show || {}),
+						resource: ['dataOperations'],
+						operation: ['matcher'],
+					},
+				},
+			})),
 
 			// Properties for 'close' operation
-			...closeOperation.description,
+			...closeOperation.description.map(property => ({
+				...property,
+				displayOptions: {
+					...(property.displayOptions || {}),
+					show: {
+						...(property.displayOptions?.show || {}),
+						resource: ['browserControl'],
+						operation: ['close'],
+					},
+				},
+			})),
 
 			// Properties for 'collector' operation
-			...collectorOperation.description,
+			...collectorOperation.description.map(property => ({
+				...property,
+				displayOptions: {
+					...(property.displayOptions || {}),
+					show: {
+						...(property.displayOptions?.show || {}),
+						resource: ['dataOperations'],
+						operation: ['collector'],
+					},
+				},
+			})),
 		],
 	};
 
