@@ -495,17 +495,17 @@ export class Ventriloquist implements INodeType {
 				noDataExpression: true,
 				options: [
 					{
-						name: 'Browser Control',
+						name: 'Browser',
 						value: 'browserControl',
 						description: 'Operations for controlling the browser instance',
 					},
 					{
-						name: 'Navigation & Interaction',
+						name: 'Navigation',
 						value: 'navigation',
 						description: 'Operations for navigating and interacting with web pages',
 					},
 					{
-						name: 'Data Operations',
+						name: 'Data',
 						value: 'dataOperations',
 						description: 'Operations for extracting and processing data from web pages',
 					},
