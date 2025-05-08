@@ -417,7 +417,7 @@ export class Ventriloquist implements INodeType {
 		icon: 'file:ventriloquist.svg',
 		group: ['browser'],
 		version: 1,
-		subtitle: '={{ $parameter.action }}',
+		subtitle: '={{ $parameter.operation }}',
 		description: 'Automate browser interactions using Bright Data, Browserless, or local Chrome',
 		defaults: {
 			name: 'Ventriloquist',
