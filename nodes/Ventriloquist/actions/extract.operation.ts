@@ -224,6 +224,22 @@ export const description: INodeProperties[] = [
 						description: "Schema extraction method to use",
 					},
 					{
+						displayName: "Output Structure",
+						name: "outputStructure",
+						type: "options",
+						options: [
+							{ name: "Single Object", value: "object", description: "Extract as a single object" },
+							{ name: "Array of Objects", value: "array", description: "Extract as an array of objects" },
+						],
+						default: "object",
+						description: "Structure of the extracted data",
+						displayOptions: {
+							show: {
+								schema: ["manual"],
+							},
+						},
+					},
+					{
 						displayName: "Field Processing Mode",
 						name: "fieldProcessingMode",
 						type: "options",
@@ -1016,44 +1032,33 @@ export async function execute(
 			// Log debug information about the item
 			this.logger.debug(`Processing extraction item with name: ${item.name}, type: ${item.extractionType}, schema: ${item.schema}`);
 
-			// Add AI formatting options from parameters
-			const schema = this.getNodeParameter(`extractionItems.items[${extractionItems.indexOf(item)}].schema`, index, "none") as string;
+			// Check if AI formatting is enabled based on Schema selection
+			let schema = this.getNodeParameter(
+				`extractionItems.items[${extractionItems.indexOf(item)}].schema`,
+				index,
+				"none",
+			) as string;
 
-			// Log schema and AI settings
-			this.logger.debug(`Item ${item.name} - schema setting: "${schema}", AI enabled: ${schema !== "none"}`);
-
+			let aiFormatting: any = undefined;
 			let aiFields: IDataObject[] = [];
-			let aiFormatting: {
-				enabled: boolean;
-				extractionFormat: string;
-				generalInstructions: string;
-				strategy: string;
-				includeSchema: boolean;
-				includeRawData: boolean;
-				includeReferenceContext: boolean;
-				referenceSelector: string;
-				referenceName: string;
-				referenceFormat: string;
-				referenceAttribute: string;
-				selectorScope: string;
-				fieldProcessingMode: string;
-			} | undefined = undefined;
+			let fieldProcessingMode = "batch";
 
-			if (schema === "manual" || schema === "auto") {
-				// Get AI specific parameters only if schema is manual or auto
-				const extractionFormat = this.getNodeParameter(
-					`extractionItems.items[${extractionItems.indexOf(item)}].extractionFormat`,
-					index,
-					'json'
-				) as string;
+			// Additional parameters for AI formatting
+			if (schema === "auto" || schema === "manual") {
+				// Get common AI formatting parameters
+				const extractionFormat =
+					(this.getNodeParameter(
+						`extractionItems.items[${extractionItems.indexOf(item)}].extractionFormat`,
+						index,
+						"json"
+					) as string) || "json";
 
 				const generalInstructions = this.getNodeParameter(
 					`extractionItems.items[${extractionItems.indexOf(item)}].generalInstructions`,
 					index,
-					''
+					""
 				) as string;
 
-				// Get includeSchema and includeRawData parameters
 				const includeSchema = this.getNodeParameter(
 					`extractionItems.items[${extractionItems.indexOf(item)}].includeSchema`,
 					index,
@@ -1066,54 +1071,59 @@ export async function execute(
 					false
 				) as boolean;
 
-				// Handle reference context parameters
+				// Check if we need reference context
 				const includeReferenceContext = this.getNodeParameter(
 					`extractionItems.items[${extractionItems.indexOf(item)}].includeReferenceContext`,
 					index,
 					false
 				) as boolean;
 
-				let referenceSelector = '';
-				let referenceName = 'referenceContext';
-				let referenceFormat = 'text';
-				let referenceAttribute = '';
-				let selectorScope = 'global';
+				// Get reference context parameters if enabled
+				let referenceSelector = "";
+				let referenceName = "reference";
+				let referenceFormat = "text";
+				let referenceAttribute = "";
+				let selectorScope = "global";
 
 				if (includeReferenceContext) {
+					// Get reference selector
 					referenceSelector = this.getNodeParameter(
 						`extractionItems.items[${extractionItems.indexOf(item)}].referenceSelector`,
 						index,
-						''
+						""
 					) as string;
 
+					// Get reference name
 					referenceName = this.getNodeParameter(
 						`extractionItems.items[${extractionItems.indexOf(item)}].referenceName`,
 						index,
-						'referenceContext'
+						"reference"
 					) as string;
 
-					// Get the reference format
+					// Get reference format
 					referenceFormat = this.getNodeParameter(
 						`extractionItems.items[${extractionItems.indexOf(item)}].referenceFormat`,
 						index,
-						'text'
+						"text"
 					) as string;
 
-					// Get the selector scope
+					// Get attribute name if using attribute format
+					if (referenceFormat === "attribute") {
+						referenceAttribute = this.getNodeParameter(
+							`extractionItems.items[${extractionItems.indexOf(
+								item,
+							)}].referenceAttribute`,
+							index,
+							""
+						) as string;
+					}
+
+					// Get selector scope
 					selectorScope = this.getNodeParameter(
 						`extractionItems.items[${extractionItems.indexOf(item)}].selectorScope`,
 						index,
-						'global'
+						"global"
 					) as string;
-
-					// Get the attribute name if format is 'attribute'
-					if (referenceFormat === 'attribute') {
-						referenceAttribute = this.getNodeParameter(
-							`extractionItems.items[${extractionItems.indexOf(item)}].referenceAttribute`,
-							index,
-							'href'
-						) as string;
-					}
 				}
 
 				// Get AI fields if manual strategy is selected
@@ -1172,7 +1182,12 @@ export async function execute(
 				}
 
 				// Get the field processing mode if using manual strategy
-				let fieldProcessingMode = 'batch'; // Default to batch mode
+				let fieldProcessingMode = 'batch';
+
+				// Get output structure for manual mode
+				let outputStructure = 'object';
+
+				// Default to batch mode
 				if (schema === 'manual') {
 					try {
 						fieldProcessingMode = this.getNodeParameter(
@@ -1181,10 +1196,32 @@ export async function execute(
 							'batch'
 						) as string;
 
+						outputStructure = this.getNodeParameter(
+							`extractionItems.items[${extractionItems.indexOf(item)}].outputStructure`,
+							index,
+							'object'
+						) as string;
+
+						// Add high-visibility logging when in debug mode
+						if (debugMode) {
+							logWithDebug(
+								this.logger,
+								true,
+								nodeName,
+								'Extract',
+								'extract.operation',
+								'execute',
+								`OUTPUT STRUCTURE SPECIFIED: "${outputStructure}" for item "${item.name}"`,
+								'error'
+							);
+						}
+
 						this.logger.debug(`Using field processing mode: ${fieldProcessingMode} for item ${item.name}`);
+						this.logger.debug(`Using output structure: ${outputStructure} for item ${item.name}`);
 					} catch (error) {
 						// If parameter doesn't exist yet, use default
 						this.logger.debug(`Field processing mode not found, using default: batch for item ${item.name}`);
+						this.logger.debug(`Output structure not found, using default: object for item ${item.name}`);
 					}
 				}
 
@@ -1202,10 +1239,25 @@ export async function execute(
 					referenceAttribute,
 					selectorScope,
 					fieldProcessingMode, // Add the field processing mode
+					outputStructure, // Add the output structure
 				};
 
+				// Add more detailed logging for aiFormatting when in debug mode
+				if (debugMode) {
+					logWithDebug(
+						this.logger,
+						true,
+						nodeName,
+						'Extract',
+						'extract.operation',
+						'execute',
+						`AI FORMATTING OBJECT: outputStructure=${outputStructure}, strategy=${schema}, fieldProcessingMode=${fieldProcessingMode}`,
+						'error'
+					);
+				}
+
 				// Log AI formatting settings
-				this.logger.debug(`AI formatting enabled for ${item.name} - strategy: ${schema}, format: ${extractionFormat}`);
+				this.logger.debug(`AI formatting enabled for ${item.name} - strategy: ${schema}, format: ${extractionFormat}, structure: ${outputStructure}`);
 			} else {
 				this.logger.debug(`AI formatting not enabled for ${item.name} - schema: ${schema}`);
 			}
@@ -1450,8 +1502,22 @@ export async function execute(
 							)
 						);
 
-						// Check if the data needs to maintain field structure
-						if (item.preserveFieldStructure) {
+						// If AI formatting is enabled, outputStructure is 'array', and extractedData is actually an array,
+						// use the extractedData directly.
+						if (item.aiFormatting.outputStructure === 'array' && Array.isArray(item.extractedData)) {
+							this.logger.info(
+								formatOperationLog(
+									'extraction',
+									nodeName,
+									nodeId,
+									index,
+									`Output structure for [${item.name}] is 'array' and AI returned an array. Using AI data directly.`
+								)
+							);
+							result[item.name] = item.extractedData;
+						}
+						// Check if the data needs to maintain field structure (and not handled by the array case above)
+						else if (item.preserveFieldStructure) {
 							// If we have the preserved field structure flag, we need to construct a field-based object
 							const fieldBasedResult: Record<string, any> = {};
 

@@ -1,7 +1,8 @@
 import type { Logger as ILogger } from 'n8n-workflow';
+import type { IDataObject } from 'n8n-workflow';
 import { formatOperationLog } from './resultUtils';
-import { processFieldsWithReferenceContent } from './processOpenAISchema';
 import { logWithDebug } from './loggingUtils';
+import { processFieldsWithReferenceContent } from './processOpenAISchema';
 
 /**
  * Extended field interface to handle fields with direct attribute references
@@ -35,13 +36,25 @@ const ASSISTANTS = {
 };
 
 /**
- * Type for defining a field in manual strategy
+ * Interface for OpenAI field definition
+ */
+export interface IOpenAIField {
+  name: string;
+  instructions: string;
+  type: string;
+  required?: boolean;
+  format?: string; // 'required' or 'optional'
+}
+
+/**
+ * Interface for AI field definition
  */
 export interface IField {
   name: string;
-  type: string;
-  instructions: string;  // This becomes the "description" in the OpenAI schema
-  format: string;
+  instructions?: string;
+  type?: string;
+  required?: boolean;
+  format?: string; // 'required' or 'optional'
   formatString?: string;
   examples?: Array<{
     input: string;
@@ -70,6 +83,7 @@ export interface IAIExtractionOptions {
   selectorScope?: string;
   referenceContent?: string;
   fieldProcessingMode?: 'batch' | 'individual';
+  outputStructure?: 'object' | 'array';
   debugMode?: boolean; // Whether debug mode is enabled
 }
 
@@ -146,8 +160,46 @@ export class AIService {
     // Save options for internal use
     this.options = options;
 
+    // Log the output structure immediately when options are processed
+    const { nodeName, nodeId, index } = this.context;
+    const isDebugMode = options.debugMode === true || this.debugMode;
+
+    if (isDebugMode) {
+      this.logger.error(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `CRITICAL: Initial options.outputStructure=${options.outputStructure}, this.options.outputStructure=${this.options.outputStructure}`
+        )
+      );
+    }
+
     // Log processing start
     this.logDebug(`Starting AI processing with debug mode ${this.debugMode ? 'enabled' : 'disabled'}`, 'info', 'processContent');
+
+    // Make sure output structure is set properly
+    const outputStructure = options.outputStructure || 'object';
+
+    // Ensure outputStructure is properly set in our stored options
+    if (this.options) {
+      this.options.outputStructure = outputStructure;
+    }
+
+    // Log the output structure being used
+    if (isDebugMode) {
+      this.logger.error(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Using output structure: ${outputStructure}`
+        )
+      );
+      this.logDebug(`OUTPUT STRUCTURE TRACKING: options.outputStructure=${options.outputStructure}, using ${outputStructure} for schema generation`, 'error', 'processContent');
+    }
 
     // Validate required options
     if (!options.strategy) {
@@ -379,7 +431,7 @@ export class AIService {
   }
 
   /**
-   * Process content using the manual strategy (fields defined in UI)
+   * Process content using the manual strategy (field-by-field)
    */
   private async processManualStrategy(
     content: string,
@@ -387,13 +439,72 @@ export class AIService {
   ): Promise<IAIExtractionResult> {
     const { nodeName, nodeId, index } = this.context;
     const isDebugMode = options.debugMode === true;
-    const fieldProcessingMode = options.fieldProcessingMode || 'batch'; // Default to batch mode
 
     try {
-      const fields = options.fields || [];
+      // Save options for the class and ensure outputStructure is properly preserved
+      if (options) {
+        // Log the original outputStructure directly from incoming options
+        if (isDebugMode) {
+          this.logger.error(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `CRITICAL: Starting processManualStrategy with incoming options.outputStructure=${options.outputStructure}`
+            )
+          );
+        }
+
+        // Store the options
+        this.options = options;
+      }
+
+      // If output structure mode is not explicitly set, default to 'object'
+      const outputStructure = options.outputStructure || 'object';
+
+      // Add critical debug logging for output structure
+      if (isDebugMode) {
+        this.logger.error(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `OUTPUT STRUCTURE TRACKING: options.outputStructure=${options.outputStructure}, using ${outputStructure} for schema generation`
+          )
+        );
+      }
+
+      // Validate required fields
+      if (!options.fields || options.fields.length === 0) {
+        this.logger.error(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            "No fields provided for manual strategy"
+          )
+        );
+        return { success: false, error: "No fields provided for manual strategy" };
+      }
+
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Using Manual strategy with ${options.fields.length} fields and output structure: ${outputStructure}`
+        )
+      );
+
+      // Get fields from options or create default
+      let fieldsToProcess: IField[] = options.fields || [];
 
       // Validate fields
-      if (!fields.length) {
+      if (!fieldsToProcess.length) {
         const error = 'Manual strategy requires fields to be defined';
         this.logDebug(error, 'error', 'processManualStrategy');
         return { success: false, error };
@@ -406,7 +517,7 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          `Using Manual strategy with ${fields.length} defined fields: ${fields.map(f => f.name).join(', ')}`
+          `Using Manual strategy with ${fieldsToProcess.length} defined fields: ${fieldsToProcess.map(f => f.name).join(', ')}`
         )
       );
 
@@ -417,14 +528,9 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          `Using ${fieldProcessingMode} processing mode`
+          `Using ${options.fieldProcessingMode || 'batch'} processing mode`
         )
       );
-
-      // Generate schema for OpenAI function calling
-      // NOTE: We directly use generateOpenAISchema here which uses the UI-defined fields
-      // and don't use the generateSchema method that builds a schema from data
-      const functionSchema = this.generateOpenAISchema(fields);
 
       // Log that we're using Assistants API with field-by-field extraction
       if (isDebugMode) {
@@ -434,7 +540,7 @@ export class AIService {
             nodeName,
             nodeId,
             index,
-            `Using OpenAI Assistants API for ${fieldProcessingMode} extraction with IDs: manual=${ASSISTANTS.manual}, logic=${ASSISTANTS.logic}`
+            `Using OpenAI Assistants API for ${options.fieldProcessingMode || 'batch'} extraction with IDs: manual=${ASSISTANTS.manual}, logic=${ASSISTANTS.logic}`
           )
         );
         this.logDebug(
@@ -443,9 +549,6 @@ export class AIService {
           'processManualStrategy'
         );
       }
-
-      // Clone fields array to avoid modifying the original
-      const fieldsToProcess = options.fields ? [...options.fields] : [];
 
       // Log reference context details
       if (options.includeReferenceContext) {
@@ -480,15 +583,26 @@ export class AIService {
             nodeName,
             nodeId,
             index,
-            `ORIGINAL Field "${field.name}" instructions (${field.instructions?.length || 0} chars): ${field.instructions?.substring(0, 100)}${field.instructions?.length > 100 ? '...' : ''}`
+            `ORIGINAL Field "${field.name}" instructions (${field.instructions ? field.instructions.length : 0} chars): ${field.instructions ? field.instructions.substring(0, 100) + (field.instructions.length > 100 ? '...' : '') : 'No instructions'}`
           )
         );
       });
 
-      // Process fields with reference content if provided
-      // This adds the reference content to the instructions for URL-related fields
-      const processedFields = options.includeReferenceContext && options.referenceContent
-        ? processFieldsWithReferenceContent(fieldsToProcess, options.referenceContent, true, this.logger, this.context)
+      // Process fields with reference content if available
+      fieldsToProcess = options.referenceContent
+        ? processFieldsWithReferenceContent(
+            fieldsToProcess.map(field => ({
+              name: field.name,
+              instructions: field.instructions || `Extract the ${field.name}`,
+              type: field.type || 'string',
+              required: field.required,
+              format: field.format
+            })),
+            options.referenceContent,
+            true,
+            this.logger,
+            this.context
+          )
         : fieldsToProcess;
 
       // Check for nested field structures - if this is needed for nested field extraction
@@ -497,7 +611,7 @@ export class AIService {
       const topLevelFields: IField[] = [];
 
       // Separate fields into groups for nested processing if they contain dot notation
-      for (const field of processedFields) {
+      for (const field of fieldsToProcess) {
         if (field.name.includes('.')) {
           const [parent, child] = field.name.split('.', 2);
           if (!fieldGroups[parent]) {
@@ -555,15 +669,15 @@ export class AIService {
             nodeName,
             nodeId,
             index,
-            `Using schema-based table extraction with ${processedFields.length} fields`
+            `Using schema-based table extraction with ${fieldsToProcess.length} fields`
           )
         );
 
-        return await this.processTableContent(tableContent, processedFields);
+        return await this.processTableContent(tableContent, fieldsToProcess);
       }
 
       // Create a result object to store field-by-field responses
-      const result: Record<string, any> = {};
+      let result: Record<string, any> = {};
 
       // First, let's identify fields that need special processing (separate threads or logic assistant)
       const standardFields: IField[] = [];
@@ -574,6 +688,10 @@ export class AIService {
 
         // Skip fields with direct attribute content
         if (extendedField.returnDirectAttribute === true && extendedField.referenceContent) {
+          // Ensure result is an object before assigning properties
+          if (Array.isArray(result)) {
+            result = {};
+          }
           result[field.name] = extendedField.referenceContent;
           return; // Skip AI processing for this field
         }
@@ -604,7 +722,7 @@ export class AIService {
 
       // Process standard fields based on the field processing mode
       if (standardFields.length > 0) {
-        if (fieldProcessingMode === 'batch') {
+        if (options.fieldProcessingMode === 'batch') {
           // Process all standard fields in a single batch
           this.logger.info(
             formatOperationLog(
@@ -619,8 +737,26 @@ export class AIService {
           const batchResult = await this.batchProcessFields(content, standardFields);
 
           if (batchResult.success && batchResult.data) {
+            // Process the result based on the output structure
+            const processedData = this.handleFunctionResult(batchResult.data, outputStructure);
+
             // Merge batch results into the main result object
-            Object.assign(result, batchResult.data);
+            if (outputStructure === 'array') {
+              // For array structure, initialize result as an array
+              if (!Array.isArray(result)) {
+                result = processedData;
+              } else {
+                // Merge arrays
+                Object.assign(result, processedData);
+              }
+            } else {
+              // Ensure result is an object before merging
+              if (typeof result !== 'object' || Array.isArray(result)) {
+                result = {};
+              }
+              // For object structure, merge objects
+              Object.assign(result, processedData);
+            }
           } else {
             this.logger.error(
               formatOperationLog(
@@ -671,6 +807,11 @@ export class AIService {
                   parsedValue = fieldResult.data;
                 }
 
+                // Ensure result is an object before assigning properties
+                if (Array.isArray(result)) {
+                  result = {};
+                }
+
                 // Extract just the field value from the parsedValue object
                 if (typeof parsedValue === 'object' && parsedValue !== null && field.name in parsedValue) {
                   result[field.name] = parsedValue[field.name];
@@ -688,6 +829,11 @@ export class AIService {
                     `Error parsing field "${field.name}" result: ${(e as Error).message}`
                   )
                 );
+
+                // Ensure result is an object before assigning properties
+                if (Array.isArray(result)) {
+                  result = {};
+                }
                 result[field.name] = null;
               }
             } else {
@@ -700,6 +846,11 @@ export class AIService {
                   `Failed to extract field "${field.name}": ${fieldResult.error || 'Unknown error'}`
                 )
               );
+
+              // Ensure result is an object before assigning properties
+              if (Array.isArray(result)) {
+                result = {};
+              }
               result[field.name] = null;
             }
           }
@@ -732,6 +883,11 @@ export class AIService {
               parsedValue = fieldResult.data;
             }
 
+            // Ensure result is an object before assigning properties
+            if (Array.isArray(result)) {
+              result = {};
+            }
+
             // Extract just the field value from the parsedValue object
             if (typeof parsedValue === 'object' && parsedValue !== null && field.name in parsedValue) {
               result[field.name] = parsedValue[field.name];
@@ -749,6 +905,11 @@ export class AIService {
                 `Error parsing special field "${field.name}" result: ${(e as Error).message}`
               )
             );
+
+            // Ensure result is an object before assigning properties
+            if (Array.isArray(result)) {
+              result = {};
+            }
             result[field.name] = null;
           }
         } else {
@@ -761,6 +922,11 @@ export class AIService {
               `Failed to extract special field "${field.name}": ${fieldResult.error || 'Unknown error'}`
             )
           );
+
+          // Ensure result is an object before assigning properties
+          if (Array.isArray(result)) {
+            result = {};
+          }
           result[field.name] = null;
         }
       }
@@ -782,7 +948,7 @@ export class AIService {
 
         // Create a shared thread for this nested field group
         let nestedThread = null;
-        if (fieldProcessingMode === 'individual') {
+        if (options.fieldProcessingMode === 'individual') {
           const thread = await this.openai.beta.threads.create();
           nestedThread = thread.id;
           this.logger.debug(
@@ -797,7 +963,7 @@ export class AIService {
         }
 
         // For batch mode with nested fields
-        if (fieldProcessingMode === 'batch') {
+        if (options.fieldProcessingMode === 'batch') {
           // Process all nested fields in a single batch
           const batchResult = await this.batchProcessFields(content, nestedFields);
 
@@ -865,6 +1031,11 @@ export class AIService {
           }
         }
 
+        // Ensure result is an object before assigning the nested object
+        if (Array.isArray(result)) {
+          result = {};
+        }
+
         // Assign the nested object to the parent field in the result
         result[parentName] = nestedObject;
       }
@@ -876,17 +1047,57 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          `Extraction complete with ${Object.keys(result).length} top-level fields`
+          `Extraction complete with ${Object.keys(typeof result === 'object' && !Array.isArray(result) ? result : {}).length} top-level fields`
         )
       );
 
-      // Return the extraction result
+      // Generate schema if needed
+      let schema = null;
+      if (options.includeSchema) {
+        schema = this.generateOpenAISchema(options.fields);
+      }
+
+      // Handle the result according to outputStructure
+      // If we're supposed to return an array and result is not an array, wrap it
+      if (outputStructure === 'array' && !Array.isArray(result)) {
+        // If result is an object with properties, put it in an array
+        if (result && typeof result === 'object') {
+          result = [result];
+
+          // Log the conversion
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Converted object result to array for 'array' output structure`
+            )
+          );
+        }
+      }
+
+      // Log the final result structure
+      if (isDebugMode) {
+        this.logger.error(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `FINAL RESULT: Using outputStructure=${outputStructure}, returning ${typeof result} type${Array.isArray(result) ? ' (array)' : ''}`
+          )
+        );
+      }
+
+      // Return the result
       return {
         success: true,
         data: result,
-        schema: options.includeSchema ? functionSchema : undefined,
-        rawData: options.includeRawData ? content : undefined
+        schema,
+        rawData: options.includeRawData ? content : undefined,
       };
+
     } catch (error) {
       this.logger.error(
         formatOperationLog(
@@ -894,12 +1105,12 @@ export class AIService {
           nodeName,
           nodeId,
           index,
-          `Error in manual strategy: ${(error as Error).message}`
+          `Manual strategy processing error: ${(error as Error).message}`
         )
       );
       return {
         success: false,
-        error: (error as Error).message
+        error: (error as Error).message,
       };
     }
   }
@@ -928,8 +1139,29 @@ export class AIService {
       // Create a shared thread for AI processing
       const sharedThread = await this.openai.beta.threads.create();
 
+      // Log the schema structure
+      const outputStructure = this.options?.outputStructure || 'object';
+      this.logDebug(
+        `Using output structure: ${outputStructure}`,
+        'info',
+        'processTableContent'
+      );
+
       // Generate the OpenAI schema from the fields for proper structured extraction
+      // Make sure to save the current outputStructure option
+      const originalOutputStructure = this.options?.outputStructure;
+
+      // Temporarily set outputStructure to 'array' for table data
+      if (this.options) {
+        this.options.outputStructure = 'array';
+      }
+
       const schema = this.generateOpenAISchema(fields);
+
+      // Restore the original outputStructure
+      if (this.options) {
+        this.options.outputStructure = originalOutputStructure;
+      }
 
       // Log the schema being used
       if (isDebugMode) {
@@ -986,16 +1218,31 @@ IMPORTANT GUIDELINES:
         }
       );
 
-      // Create a run with the manual assistant, including the schema for function calling
+      // Create a run with the function definition for OpenAI function calling
       const run = await this.openai.beta.threads.runs.create(
         sharedThread.id,
         {
           assistant_id: ASSISTANTS.manual,
           tools: [{
             type: "function",
-            function: schema
+            function: {
+              name: "extract_data",
+              description: "Extract structured information from the provided text content according to the specified fields",
+              parameters: schema
+            }
           }]
         }
+      );
+
+      // Additional debugging log
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Created function run with schema for ${this.options?.outputStructure || 'object'} structure`
+        )
       );
 
       // Poll for completion - use longer timeouts for larger tables
@@ -1016,7 +1263,7 @@ IMPORTANT GUIDELINES:
           let extractedData;
           try {
             // Parse the result from OpenAI as JSON
-            extractedData = JSON.parse(result.data);
+            extractedData = this.handleFunctionResult(JSON.parse(result.data), this.options?.outputStructure || 'object');
 
             // Log the extracted data structure for debugging
             this.logDebug(
@@ -1164,7 +1411,20 @@ IMPORTANT GUIDELINES:
                   );
                 }
 
-                return { success: true, data: textContent };
+                // Clean the text content - remove potential markdown fences
+                let cleanedTextContent = textContent.trim();
+                if (cleanedTextContent.startsWith('```json')) {
+                  cleanedTextContent = cleanedTextContent.substring(7); // Remove ```json
+                }
+                if (cleanedTextContent.startsWith('```')) {
+                  cleanedTextContent = cleanedTextContent.substring(3);
+                }
+                if (cleanedTextContent.endsWith('```')) {
+                  cleanedTextContent = cleanedTextContent.substring(0, cleanedTextContent.length - 3);
+                }
+                cleanedTextContent = cleanedTextContent.trim(); // Trim again after removing fences
+
+                return { success: true, data: cleanedTextContent }; // Return cleaned content
               }
             }
           }
@@ -1277,6 +1537,146 @@ IMPORTANT GUIDELINES:
     }
 
     return { success: false, error: `Timed out after ${maxAttempts} attempts` };
+  }
+
+  /**
+   * Handle function result processing, especially for array-based results
+   */
+  private handleFunctionResult(
+    result: any,
+    outputStructure: 'object' | 'array' = 'object'
+  ): any {
+    const { nodeName, nodeId, index } = this.context;
+    const isDebugMode = this.options?.debugMode === true;
+
+    try {
+      // If result is already a parsed object, use it directly; otherwise try to parse it
+      let data: any;
+      if (typeof result === 'string') {
+        try {
+          data = JSON.parse(result);
+        } catch (parseError) {
+          // If parsing fails, use result as-is (might be a non-JSON string)
+          data = result;
+        }
+      } else {
+        data = result;
+      }
+
+      // Enhanced debug logging for function result processing
+      if (isDebugMode) {
+        this.logger.error(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `[handleFunctionResult] Processing result with outputStructure=${outputStructure}, data type=${typeof data}, isArray=${Array.isArray(data)}`
+          )
+        );
+      }
+
+      // Log the parsed data structure
+      if (isDebugMode) {
+        this.logger.info(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `[Function Result] Parsed result structure: ${this.describeDataStructure(data)}`
+          )
+        );
+      }
+
+      // Handle array output structure
+      if (outputStructure === 'array') {
+        this.logger.info(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `Processing result for array output structure: ${this.describeDataStructure(data)}`
+          )
+        );
+        if (isDebugMode) {
+           this.logger.error(`[ARRAY HANDLING] Raw data: ${JSON.stringify(data).substring(0, 100)}...`);
+        }
+
+        // If data is an object with an 'items' array (matching the schema)
+        if (typeof data === 'object' && data !== null && Array.isArray(data.items)) {
+            this.logger.info(
+                formatOperationLog(
+                    "SmartExtraction", nodeName, nodeId, index,
+                    `Found 'items' array with ${data.items.length} elements, returning directly.`
+                )
+            );
+            return data.items; // Return the items array
+        }
+        // If data is already an array
+        else if (Array.isArray(data)) {
+            this.logger.info(
+                formatOperationLog(
+                    "SmartExtraction", nodeName, nodeId, index,
+                    `Data is already an array with ${data.length} elements, returning directly`
+                )
+            );
+          return data; // Return the data array directly
+        } else {
+          // If data is not an array and doesn't have items, log error and return empty array
+          this.logger.warn(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Expected array structure but received ${typeof data}. Returning empty array.`
+            )
+          );
+          return []; // Return empty array instead of wrapping string
+        }
+      } else { // outputStructure is 'object'
+        // For object structure, just return the parsed data (or raw if parse failed)
+        this.logger.info(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `Processing result for object output structure: ${this.describeDataStructure(data)}`
+          )
+        );
+
+        // Log the parsed data structure
+        if (isDebugMode) {
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `[Function Result] Parsed result structure: ${this.describeDataStructure(data)}`
+            )
+          );
+        }
+
+        return data;
+      }
+    }
+    catch (error) {
+      this.logger.error(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Error processing function result: ${(error as Error).message}`
+        )
+      );
+      // Return original result in case of error
+      return result;
+    }
   }
 
   /**
@@ -1405,7 +1805,7 @@ IMPORTANT GUIDELINES:
         nodeName,
         nodeId,
         index,
-        `Building prompt for field "${field.name}" with instructions: ${field.instructions?.substring(0, 100)}${field.instructions?.length > 100 ? '...' : ''}`
+        `Building prompt for field "${field.name}" with instructions: ${field.instructions ? field.instructions.substring(0, 100) + (field.instructions.length > 100 ? '...' : '') : 'No instructions'}`
       )
     );
 
@@ -1502,188 +1902,50 @@ ${examplesSection}
   }
 
   /**
-   * Generate a JSON schema from data
-   * NOTE: This method is only used for auto mode, not for manual field-by-field extraction
-   */
-  private generateSchema(data: any): any {
-    // Only process if we're in auto mode or if data needs to be analyzed
-    // Skip schema generation entirely for manual mode
-    if (this.options?.strategy === 'manual') {
-      this.logDebug(
-        'Skipping automatic schema generation for manual strategy - using UI-defined schema instead',
-        'info',
-        'generateSchema'
-      );
-      return null;
-    }
-
-    if (data === null || data === undefined) {
-      return { type: 'null' };
-    }
-
-    // Debug the input data
-    this.logDebug(
-      'GENERATING SCHEMA FOR DATA:',
-      'debug',
-      'generateSchema'
-    );
-    this.logDebug(
-      JSON.stringify(data, null, 2),
-      'debug',
-      'generateSchema'
-    );
-
-    if (Array.isArray(data)) {
-      let schema: any = { type: 'array' };
-
-      if (data.length > 0) {
-        // Create schema for items based on the first item
-        schema.items = this.generateSchema(data[0]);
-      }
-
-      return schema;
-    }
-
-    if (typeof data === 'object') {
-      // Get the field descriptions from the configuration if available
-      const fieldDescriptions: Record<string, string> = {};
-      if (this.options?.fields) {
-        this.options.fields.forEach(field => {
-          fieldDescriptions[field.name] = field.instructions || `Extract the ${field.name}`;
-        });
-      }
-
-      const schema: any = {
-        type: 'object',
-        properties: {},
-        required: []
-      };
-
-      for (const [key, value] of Object.entries(data)) {
-        schema.properties[key] = this.generateSchema(value);
-
-        // Include the description if available
-        if (fieldDescriptions[key]) {
-          schema.properties[key].description = fieldDescriptions[key];
-        } else {
-          // Add a default description if none was provided
-          schema.properties[key].description = `The ${key} field`;
-        }
-
-        if (value !== null && value !== undefined) {
-          schema.required.push(key);
-        }
-      }
-
-      // Debug the generated object schema
-      this.logDebug(
-        'GENERATED OBJECT SCHEMA:',
-        'debug',
-        'generateSchema'
-      );
-      this.logDebug(
-        JSON.stringify(schema, null, 2),
-        'debug',
-        'generateSchema'
-      );
-      return schema;
-    }
-
-    // Handle primitive types with more detail
-    const type = typeof data;
-    const schema: any = { type };
-
-    // Add format for specific types
-    if (type === 'string' && this.looksLikeDate(data)) {
-      schema.format = 'date-time';
-    }
-
-    // Include an example value
-    schema.example = data;
-
-    // Add a description for primitive types too
-    schema.description = `A ${type} value`;
-
-    // Debug the generated primitive schema
-    this.logDebug(
-      'GENERATED PRIMITIVE SCHEMA:',
-      'debug',
-      'generateSchema'
-    );
-    this.logDebug(
-      JSON.stringify(schema, null, 2),
-      'debug',
-      'generateSchema'
-    );
-    return schema;
-  }
-
-  /**
-   * Check if a string looks like a date
-   */
-  private looksLikeDate(value: string): boolean {
-    if (typeof value !== 'string') return false;
-
-    // Check for ISO date format
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) return true;
-
-    // Check for other common date formats
-    if (/^\d{4}-\d{2}-\d{2}/.test(value)) return true;
-
-    return false;
-  }
-
-  /**
-   * Generate schema for OpenAI function calling based on field definitions from UI
+   * Generate schema for OpenAI function calls
    */
   private generateOpenAISchema(fields: IField[]): any {
     // Log incoming field definitions with more detail
     this.logDebug(
-      `Generating OpenAI schema from ${fields.length} UI-defined fields`,
+      `Generating OpenAI schema for ${fields.length} fields`,
       'info',
       'generateOpenAISchema'
     );
 
-    fields.forEach(field => {
-      this.logger.info(
+    // Get the output structure directly from options
+    const outputStructure = this.options?.outputStructure || 'object';
+
+    // Add critical logging for the output structure being used
+    const { nodeName, nodeId, index } = this.context;
+    const isDebugMode = this.options?.debugMode || this.debugMode;
+
+    if (isDebugMode) {
+      this.logger.error(
         formatOperationLog(
           "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `SCHEMA GENERATION: Using outputStructure=${outputStructure} for schema generation`
+        )
+      );
+    }
+
+    // Log all field details in debug mode for better visibility
+    fields.forEach(field => {
+      const extendedField = field as any;
+
+      this.logger.info(
+        formatOperationLog(
+          'AIFormatting',
           this.context.nodeName,
           this.context.nodeId,
           this.context.index,
-          `Field: "${field.name}", Type: "${field.type}", Instructions: "${field.instructions?.substring(0, 100)}${field.instructions?.length > 100 ? '...' : ''}"`
+          `Field "${field.name}" (${field.type || 'string'}): ${field.instructions ? field.instructions.substring(0, 50) + (field.instructions.length > 50 ? '...' : '') : 'No instructions'}`
         )
       );
 
-      // TEMPORARY DEBUG: Log more detailed field info
-      this.logDebug(
-        `SCHEMA GENERATION - Field: "${field.name}"`,
-        'debug',
-        'generateOpenAISchema'
-      );
-      this.logDebug(
-        `Field type: ${field.type}`,
-        'debug',
-        'generateOpenAISchema'
-      );
-      this.logDebug(
-        `Instructions length: ${field.instructions?.length || 0}`,
-        'debug',
-        'generateOpenAISchema'
-      );
-      this.logDebug(
-        `Instructions preview: "${field.instructions?.substring(0, 150)}${field.instructions?.length > 150 ? '...' : ''}"`,
-        'debug',
-        'generateOpenAISchema'
-      );
-      this.logDebug(
-        `Field properties: ${Object.keys(field).join(', ')}`,
-        'debug',
-        'generateOpenAISchema'
-      );
-
-      // Check for reference content (from IExtendedField)
-      const extendedField = field as IExtendedField;
+      // Check if the field has reference content
       if (extendedField.referenceContent) {
         this.logDebug(
           `Has reference content: YES, length=${extendedField.referenceContent.length}`,
@@ -1715,10 +1977,13 @@ ${examplesSection}
       let schemaFormat = undefined;
       let additionalProps: Record<string, any> = {};
 
-      switch (field.type.toLowerCase()) {
+      // Default to string if type is undefined
+      const fieldType = field.type || 'string';
+
+      switch (fieldType.toLowerCase()) {
         case 'number':
         case 'integer':
-          schemaType = field.type.toLowerCase();
+          schemaType = fieldType.toLowerCase();
           break;
         case 'boolean':
           schemaType = 'boolean';
@@ -1747,47 +2012,113 @@ ${examplesSection}
       // Preserve the complete instructions including any reference content
       const property: Record<string, any> = {
         type: schemaType,
-        description: field.instructions
+        description: field.instructions || `Extract the ${field.name}`
       };
 
-      // Add format if applicable
+      // Add format if specified
       if (schemaFormat) {
         property.format = schemaFormat;
       }
 
-      // Add additional properties
+      // Add any additional properties
       Object.assign(property, additionalProps);
 
-      // Add to properties object
+      // Add to properties map
       properties[field.name] = property;
 
-      // Add to required list (all fields are considered required unless explicitly marked optional)
-      required.push(field.name);
+      // Add to required array if marked as required
+      if (field.format === 'required' || field.required === true) {
+        required.push(field.name);
+      }
     });
 
-    // Create a function definition for OpenAI function calling
-    const schema = {
-      name: "extract_data",
-      description: "Extract structured information from the provided text content according to the specified fields",
-      parameters: {
-        type: "object",
-        properties: properties,
-        required: required
-      }
-    };
-
-    // Log the complete schema being sent to OpenAI
-    this.logger.info(
-      formatOperationLog(
-        "SmartExtraction",
-        this.context.nodeName,
-        this.context.nodeId,
-        this.context.index,
-        `COMPLETE SCHEMA for OpenAI:\n${JSON.stringify(schema, null, 2)}`
-      )
+    // Log the output structure
+    this.logDebug(
+      `Using output structure: ${outputStructure}`,
+      'info',
+      'generateOpenAISchema'
     );
 
+    // Create our schema object
+    let schema: Record<string, any>;
+
+    if (outputStructure === 'array') {
+      // Create array schema for array output structure
+      schema = {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            description: 'Array of extracted items',
+            items: {
+              type: 'object',
+              properties,
+              ...(required.length > 0 ? { required } : {})
+            }
+          }
+        },
+        required: ['items']
+      };
+
+      // Log the schema structure for debugging
+      this.logDebug(
+        `Generated ARRAY schema structure with ${Object.keys(properties).length} properties`,
+        'info',
+        'generateOpenAISchema'
+      );
+    } else {
+      // Create object schema for object output structure (default)
+      schema = {
+        type: 'object',
+        properties,
+        ...(required.length > 0 ? { required } : {})
+      };
+
+      // Log the schema structure for debugging
+      this.logDebug(
+        `Generated OBJECT schema structure with ${Object.keys(properties).length} properties`,
+        'info',
+        'generateOpenAISchema'
+      );
+    }
+
+    // Log the schema structure for debugging
+    this.logDebug(
+      `Generated ${outputStructure.toUpperCase()} schema structure with ${Object.keys(properties).length} properties`,
+      'info',
+      'generateOpenAISchema'
+    );
+
+    // Add more detailed schema logging
+    if (this.options?.debugMode || this.debugMode) {
+      const { nodeName, nodeId, index } = this.context;
+      this.logger.error(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `FINAL SCHEMA: ${JSON.stringify(schema).substring(0, 300)}...`
+        )
+      );
+    }
+
     return schema;
+  }
+
+  /**
+   * Check if a string looks like a date
+   */
+  private looksLikeDate(value: string): boolean {
+    if (typeof value !== 'string') return false;
+
+    // Check for ISO date format
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) return true;
+
+    // Check for other common date formats
+    if (/^\d{4}-\d{2}-\d{2}/.test(value)) return true;
+
+    return false;
   }
 
   /**
@@ -1968,29 +2299,59 @@ ${examplesSection}
           `Error processing field "${field.name}": ${(error as Error).message}`
         )
       );
-      return {
-        success: false,
-        error: (error as Error).message,
-      };
+      return { success: false, error: (error as Error).message };
     }
   }
 
   /**
-   * Map field types to JSON Schema types
+   * Map field type to schema type
    */
-  private mapFieldTypeToSchemaType(fieldType: string): string {
-    switch (fieldType.toLowerCase()) {
+  private mapFieldTypeToSchemaType(type?: string): string {
+    if (!type) return 'string';
+
+    switch (type.toLowerCase()) {
       case 'number':
       case 'integer':
-        return fieldType.toLowerCase();
+        return 'number';
       case 'boolean':
         return 'boolean';
-      case 'object':
-        return 'object';
+      case 'date':
+        return 'string';
+      case 'datetime':
+        return 'string';
       case 'array':
         return 'array';
+      case 'object':
+        return 'object';
       default:
         return 'string';
+    }
+  }
+
+  /**
+   * Describe data structure
+   */
+  private describeDataStructure(data: any): string {
+    if (typeof data === 'object' && data !== null) {
+      if (Array.isArray(data)) {
+        return `Array of ${data.length} items`;
+      } else {
+        return `Object with ${Object.keys(data).length} properties`;
+      }
+    } else if (typeof data === 'string') {
+      return `String (${data.length} characters)`;
+    } else if (typeof data === 'number') {
+      return 'Number';
+    } else if (typeof data === 'boolean') {
+      return 'Boolean';
+    } else if (typeof data === 'undefined') {
+      return 'Undefined';
+    } else if (typeof data === 'function') {
+      return 'Function';
+    } else if (typeof data === 'symbol') {
+      return 'Symbol';
+    } else {
+      return 'Unknown';
     }
   }
 
@@ -2001,13 +2362,18 @@ ${examplesSection}
    * @param functionName Optional function name
    */
   private logDebug(
-    message: string,
+    message: string | Error,
     level: 'info' | 'debug' | 'warn' | 'error' = 'debug',
     functionName?: string
   ) {
     const { nodeName, nodeId, index } = this.context;
     const component = "aiService";
     const fn = functionName || "unknown";
+
+    // Format error objects
+    const formattedMessage = message instanceof Error
+      ? `${message.message}\n${message.stack || ''}`
+      : message;
 
     // Use our standardized logging helper
     logWithDebug(
@@ -2017,31 +2383,9 @@ ${examplesSection}
       'AIService',
       component,
       fn,
-      message,
+      formattedMessage,
       level
     );
-  }
-
-  /**
-   * Helper to describe data structure for debugging
-   */
-  private describeDataStructure(data: any): string {
-    if (data === null) return 'null';
-    if (data === undefined) return 'undefined';
-
-    if (Array.isArray(data)) {
-      const itemTypes = data.length > 0
-        ? data.slice(0, 3).map(item => this.describeDataStructure(item)).join(', ')
-        : 'empty';
-      return `Array with ${data.length} items${data.length > 0 ? ' of types: [' + itemTypes + (data.length > 3 ? ', ...' : '') + ']' : ''}`;
-    }
-
-    if (typeof data === 'object') {
-      const keys = Object.keys(data);
-      return `Object with ${keys.length} keys${keys.length > 0 ? ': ' + keys.slice(0, 3).join(', ') + (keys.length > 3 ? ', ...' : '') : ''}`;
-    }
-
-    return typeof data;
   }
 
   /**
@@ -2053,235 +2397,193 @@ ${examplesSection}
     fields: IField[]
   ): Promise<{ success: boolean; data?: Record<string, any>; error?: string }> {
     const { nodeName, nodeId, index } = this.context;
+    const outputStructure = this.options?.outputStructure || 'object';
+    const isDebugMode = this.options?.debugMode === true;
 
     try {
-      // Log that we're using batch processing
+      // Log which fields we're processing in batch mode
       this.logger.info(
         formatOperationLog(
           "SmartExtraction",
           nodeName,
           nodeId,
           index,
-          `Batch processing ${fields.length} fields at once`
+          `Processing ${fields.length} fields in batch mode with output structure: ${outputStructure}`
         )
       );
 
-      // Create a combined schema for all fields
+      // Create a new thread for batch processing
+      const thread = await this.openai.beta.threads.create();
+
+      // Generate schema that respects the output structure
       const schema = this.generateOpenAISchema(fields);
 
-      // Create a thread for the batch processing
-      const thread = await this.openai.beta.threads.create();
-      const threadId = thread.id;
+      // Build a comprehensive prompt that includes all fields
+      let fieldDescriptions = fields.map((field, index) => {
+        return `${index + 1}. ${field.name}: ${field.instructions || `Extract the ${field.name}`}`;
+      }).join("\n");
 
-      this.logger.debug(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `Created thread for batch processing: ${threadId}`
-        )
+      const batchPrompt = `
+TASK: Extract all the specified fields from the provided content.
+
+INPUT DATA:
+${content}
+
+FIELDS TO EXTRACT:
+${fieldDescriptions}
+
+INSTRUCTIONS:
+1. Analyze the content carefully
+2. Extract each field according to its specifications
+3. Return the data in a ${outputStructure === 'array' ? 'properly formatted array of objects' : 'properly formatted object'}
+${outputStructure === 'array' ? '4. The response should be an array containing objects with the field properties, even if there is only one object' : ''}
+5. Use appropriate data types for each field (string, number, boolean, etc.)
+6. If a field is not found, set its value to null
+
+Ensure that your response is valid JSON that can be parsed directly.
+`;
+
+      // Send the prompt to the thread
+      await this.openai.beta.threads.messages.create(
+        thread.id,
+        {
+          role: "user",
+          content: batchPrompt,
+        }
       );
 
-      // Build a combined prompt for all fields
-      const combinedPrompt = this.buildManualPrompt(content, {
-        strategy: 'manual',
-        generalInstructions: 'Extract all fields from the provided content.',
-        fields: fields,
-        includeSchema: false,
-        includeRawData: false,
-      });
-
-      // Log the complete prompt being sent to the AI for debugging
       this.logger.info(
         formatOperationLog(
           "SmartExtraction",
           nodeName,
           nodeId,
           index,
-          `FULL AI PROMPT for batch processing ${fields.length} fields:\n${'-'.repeat(80)}\n${combinedPrompt.substring(0, 500)}...\n${'-'.repeat(80)}`
+          `Sent batch request to OpenAI for ${fields.length} fields with output structure: ${outputStructure}`
         )
       );
 
       // Log the schema being used
-      this.logger.info(
-        formatOperationLog(
-          "SmartExtraction",
-          nodeName,
-          nodeId,
-          index,
-          `Using combined schema for ${fields.length} fields:\n${JSON.stringify(schema, null, 2)}`
-        )
-      );
-
-      // Add a message to the thread with the content and instructions
-      await this.openai.beta.threads.messages.create(threadId, {
-        role: "user",
-        content: combinedPrompt,
-      });
-
-      // Run the assistant on the thread
-      const run = await this.openai.beta.threads.runs.create(threadId, {
-        assistant_id: ASSISTANTS.manual, // Always use the manual assistant for batch processing
-        tools: [{
-          type: "function",
-          function: schema
-        }]
-      });
-
-      // Poll for completion
-      const result = await this.pollRunCompletion(threadId, run.id);
-
-      if (result.success && result.data) {
-        try {
-          // Parse the JSON result
-          let parsedData;
-          try {
-            // Clean up the result in case it's wrapped in Markdown code blocks
-            let cleanedData = result.data;
-
-            // First log the raw response for debugging
-            this.logger.debug(
-              formatOperationLog(
-                "SmartExtraction",
-                nodeName,
-                nodeId,
-                index,
-                `Raw response from OpenAI: ${cleanedData}`
-              )
-            );
-
-            // Remove markdown code block markers if present
-            if (cleanedData.includes("```")) {
-              // Extract content between markdown code blocks
-              const codeBlockMatch = cleanedData.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-              if (codeBlockMatch && codeBlockMatch[1]) {
-                cleanedData = codeBlockMatch[1];
-                this.logger.debug(
-                  formatOperationLog(
-                    "SmartExtraction",
-                    nodeName,
-                    nodeId,
-                    index,
-                    `Extracted content from code block: ${cleanedData}`
-                  )
-                );
-              } else {
-                // If we can't extract from the code block, strip all code block markers
-                cleanedData = cleanedData.replace(/```(?:json)?|```/g, "").trim();
-                this.logger.debug(
-                  formatOperationLog(
-                    "SmartExtraction",
-                    nodeName,
-                    nodeId,
-                    index,
-                    `Removed code block markers: ${cleanedData}`
-                  )
-                );
-              }
-            }
-
-            // Parse the cleaned result as JSON
-            parsedData = JSON.parse(cleanedData);
-
-            this.logger.debug(
-              formatOperationLog(
-                "SmartExtraction",
-                nodeName,
-                nodeId,
-                index,
-                `Successfully parsed JSON result: ${JSON.stringify(parsedData)}`
-              )
-            );
-          } catch (error) {
-            throw new Error(`Failed to parse batch result as JSON: ${(error as Error).message}\nRaw data: ${result.data}`);
-          }
-
-          // Extract the field values from the parsed result
-          const extractedData: Record<string, any> = {};
-
-          // Check if we got an object with our fields
-          if (typeof parsedData === 'object' && parsedData !== null) {
-            // Add each field to the extracted data
-            fields.forEach(field => {
-              if (field.name in parsedData) {
-                extractedData[field.name] = parsedData[field.name];
-              } else {
-                this.logger.warn(
-                  formatOperationLog(
-                    "SmartExtraction",
-                    nodeName,
-                    nodeId,
-                    index,
-                    `Field "${field.name}" not found in batch result`
-                  )
-                );
-                extractedData[field.name] = null;
-              }
-            });
-          } else {
-            throw new Error('Batch result is not a valid object');
-          }
-
-          // Log the extracted data for debugging
-          this.logger.info(
-            formatOperationLog(
-              "SmartExtraction",
-              nodeName,
-              nodeId,
-              index,
-              `Batch processing extracted ${Object.keys(extractedData).length} fields`
-            )
-          );
-
-          return {
-            success: true,
-            data: extractedData
-          };
-        } catch (error) {
-          this.logger.error(
-            formatOperationLog(
-              "SmartExtraction",
-              nodeName,
-              nodeId,
-              index,
-              `Error processing batch result: ${(error as Error).message}`
-            )
-          );
-          return {
-            success: false,
-            error: `Error processing batch result: ${(error as Error).message}`
-          };
-        }
-      } else {
+      if (isDebugMode) {
         this.logger.error(
           formatOperationLog(
             "SmartExtraction",
             nodeName,
             nodeId,
             index,
-            `Batch processing failed: ${result.error || 'Unknown error'}`
+            `[Batch Processing] Using schema for ${fields.length} fields: ${JSON.stringify(schema, null, 2)}`
           )
         );
-        return {
-          success: false,
-          error: result.error || 'Unknown error in batch processing'
-        };
+
+        // Add very explicit logging for outputStructure value
+        this.logger.error(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            `[CRITICAL DEBUG] BEFORE API CALL: outputStructure=${outputStructure}, this.options.outputStructure=${this.options?.outputStructure}, schema type=${schema.type}`
+          )
+        );
+
+        // If schema is for array output, log the array schema details
+        if (outputStructure === 'array' && schema.properties?.items?.type === 'array') {
+          this.logger.error(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `[ARRAY SCHEMA DETAIL] items property exists: ${!!schema.properties.items}, type: ${schema.properties.items.type}`
+            )
+          );
+        }
+      }
+
+      // Create a run with the function definition for OpenAI function calling
+      const run = await this.openai.beta.threads.runs.create(
+        thread.id,
+        {
+          assistant_id: ASSISTANTS.manual,
+          tools: [{
+            type: "function",
+            function: {
+              name: "extract_data",
+              description: "Extract structured information from the provided text content according to the specified fields",
+              parameters: schema
+            }
+          }]
+        }
+      );
+
+      // Additional debugging log
+      this.logger.info(
+        formatOperationLog(
+          "SmartExtraction",
+          nodeName,
+          nodeId,
+          index,
+          `Created function run with schema for ${outputStructure} structure`
+        )
+      );
+
+      // Poll for completion
+      const result = await this.pollRunCompletion(thread.id, run.id);
+
+      if (result.success && result.data) {
+        try {
+          // Process the result based on output structure
+          const processedData = this.handleFunctionResult(result.data, outputStructure);
+
+          // Log the processed data structure
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Batch processing successful - Output structure: ${this.describeDataStructure(processedData)}`
+            )
+          );
+
+          return { success: true, data: processedData };
+        } catch (error) {
+          const errorMsg = `Error processing batch result: ${(error as Error).message}`;
+          this.logger.error(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              errorMsg
+            )
+          );
+          return { success: false, error: errorMsg };
+        }
+      } else {
+        const errorMsg = `Batch processing failed: ${result.error || 'Unknown error'}`;
+        this.logger.error(
+          formatOperationLog(
+            "SmartExtraction",
+            nodeName,
+            nodeId,
+            index,
+            errorMsg
+          )
+        );
+        return { success: false, error: errorMsg };
       }
     } catch (error) {
+      const errorMsg = `Error in batch processing: ${(error as Error).message}`;
       this.logger.error(
         formatOperationLog(
           "SmartExtraction",
           nodeName,
           nodeId,
           index,
-          `Error in batch processing: ${(error as Error).message}`
+          errorMsg
         )
       );
-      return {
-        success: false,
-        error: `Error in batch processing: ${(error as Error).message}`
-      };
+      return { success: false, error: errorMsg };
     }
   }
 }

@@ -4,7 +4,7 @@ import { createExtraction, type IExtractionConfig } from './middlewares/extracti
 import { formatExtractedDataForLog } from './extractionUtils';
 import { formatOperationLog } from './resultUtils';
 import { getHumanDelay } from './extractionUtils';
-import { detectContentType, processWithAI } from './smartExtractionUtils';
+import { detectContentType, processWithAI, type ISmartExtractionOptions } from './smartExtractionUtils';
 import { Logger } from 'n8n-workflow';
 import { v4 as uuidv4 } from 'uuid';
 import { IMiddlewareContext } from './middlewares/middleware';
@@ -108,6 +108,7 @@ export interface IExtractItem {
     selectorScope?: string;
     referenceContent?: string; // Will store the extracted reference content
     fieldProcessingMode?: string; // 'batch' or 'individual'
+    outputStructure?: string; // 'object' or 'array'
     smartOptions?: {
       extractionFormat?: string;
       aiAssistance?: boolean;
@@ -124,6 +125,7 @@ export interface IExtractItem {
       selectorScope?: string;
       referenceContent?: string;
       debugMode?: boolean;
+      outputStructure?: string; // 'object' or 'array'
     };
   };
   aiFields?: Array<{
@@ -944,6 +946,47 @@ export async function processExtractionItems(
           }
         }
 
+        // Create a new object for AI options to avoid direct modification of item.aiFormatting
+        // This ensures that the passed options are clean and well-defined
+        let smartOptsForConfig: ISmartExtractionOptions | undefined = undefined;
+        if (extractionItem.aiFormatting?.enabled && extractionItem.aiFormatting.strategy !== 'none') {
+          // Ensure item.aiFormatting.outputStructure is strictly 'array' or 'object'
+          let determinedOutputStructure: 'array' | 'object' | undefined = undefined;
+          if (extractionItem.aiFormatting.outputStructure === 'array') {
+            determinedOutputStructure = 'array';
+          } else if (extractionItem.aiFormatting.outputStructure === 'object') {
+            determinedOutputStructure = 'object';
+          } // else it remains undefined, will be defaulted downstream by AIService if needed
+
+          // Ensure item.aiFormatting.fieldProcessingMode is strictly 'batch' or 'individual'
+          let determinedFieldProcessingMode: 'batch' | 'individual' | undefined = undefined;
+          if (extractionItem.aiFormatting.fieldProcessingMode === 'batch') {
+            determinedFieldProcessingMode = 'batch';
+          } else if (extractionItem.aiFormatting.fieldProcessingMode === 'individual') {
+            determinedFieldProcessingMode = 'individual';
+          } // else it remains undefined, will be defaulted downstream by AIService if needed
+
+          smartOptsForConfig = {
+            enabled: true,
+            extractionFormat: extractionItem.aiFormatting.extractionFormat || 'json',
+            aiModel: extractionItem.aiFormatting.aiModel || 'gpt-3.5-turbo', // Defaulted if not present
+            generalInstructions: extractionItem.aiFormatting.generalInstructions || '',
+            strategy: extractionItem.aiFormatting.strategy || 'auto', // Defaulted
+            includeSchema: extractionItem.aiFormatting.includeSchema === true,
+            includeRawData: extractionItem.aiFormatting.includeRawData === true,
+            debugMode: extractionNodeOptions.debugMode, // From global node options
+            outputStructure: determinedOutputStructure, // Use explicitly validated value
+            fieldProcessingMode: determinedFieldProcessingMode, // Use explicitly validated value
+            includeReferenceContext: extractionItem.aiFormatting.includeReferenceContext,
+            referenceSelector: extractionItem.aiFormatting.referenceSelector,
+            referenceName: extractionItem.aiFormatting.referenceName,
+            referenceFormat: extractionItem.aiFormatting.referenceFormat,
+            referenceAttribute: extractionItem.aiFormatting.referenceAttribute,
+            selectorScope: extractionItem.aiFormatting.selectorScope,
+            referenceContent: extractionItem.aiFormatting.referenceContent,
+          };
+        }
+
         // Set up extraction configuration
         const extractionConfig: IExtractionConfig = {
           id: extractionItem.id,
@@ -954,46 +997,25 @@ export async function processExtractionItems(
           selectorTimeout: extractionNodeOptions.timeout,
           debugMode: isDebugMode,
           preserveFieldStructure: extractionItem.preserveFieldStructure || false,
+          smartOptions: smartOptsForConfig, // Assign the carefully constructed object
         };
 
-        // Add ai formatting options if they exist
-        if (extractionItem.aiFormatting?.enabled) {
-          extractionConfig.smartOptions = {
-            ...extractionItem.aiFormatting,
-            extractionFormat: extractionItem.aiFormatting.extractionFormat || 'json',
-            aiAssistance: true,
-            aiModel: extractionItem.aiFormatting.aiModel || 'gpt-3.5-turbo',
-            generalInstructions: extractionItem.aiFormatting.generalInstructions || '',
-            strategy: extractionItem.aiFormatting.strategy || 'auto',
-            includeSchema: extractionItem.aiFormatting.includeSchema || false,
-            includeRawData: extractionItem.aiFormatting.includeRawData || false,
-            includeReferenceContext: extractionItem.aiFormatting.includeReferenceContext || false,
-            referenceSelector: extractionItem.aiFormatting.referenceSelector || '',
-            referenceName: extractionItem.aiFormatting.referenceName || 'reference',
-            referenceFormat: extractionItem.aiFormatting.referenceFormat || 'text',
-            referenceAttribute: extractionItem.aiFormatting.referenceAttribute || '',
-            selectorScope: extractionItem.aiFormatting.selectorScope || 'global',
-            referenceContent: extractionItem.aiFormatting.referenceContent || '',
-            debugMode: isDebugMode
+        // Add API key if available
+        if (extractionItem.openAiApiKey) {
+          extractionConfig.openaiApiKey = extractionItem.openAiApiKey;
+        }
+
+        // Add fields if using manual strategy
+        if (extractionItem.aiFormatting && extractionItem.aiFormatting.strategy === 'manual' && Array.isArray(extractionItem.aiFields)) {
+          extractionConfig.fields = {
+            items: extractionItem.aiFields.map(field => ({
+              name: field.name,
+              type: field.type || 'string',
+              instructions: field.instructions || '',
+              format: field.required ? 'required' : 'optional',
+              // Include additional field properties as needed
+            }))
           };
-
-          // Add API key if available
-          if (extractionItem.openAiApiKey) {
-            extractionConfig.openaiApiKey = extractionItem.openAiApiKey;
-          }
-
-          // Add fields if using manual strategy
-          if (extractionItem.aiFormatting.strategy === 'manual' && Array.isArray(extractionItem.aiFields)) {
-            extractionConfig.fields = {
-              items: extractionItem.aiFields.map(field => ({
-                name: field.name,
-                type: field.type || 'string',
-                instructions: field.instructions || '',
-                format: field.required ? 'required' : 'optional',
-                // Include additional field properties as needed
-              }))
-            };
-          }
         }
 
         const extraction = createExtraction(extractionItem.puppeteerPage, extractionConfig, context);

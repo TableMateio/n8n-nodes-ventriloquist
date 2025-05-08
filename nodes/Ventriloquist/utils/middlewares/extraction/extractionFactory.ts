@@ -53,6 +53,7 @@ export interface IExtractionConfig {
     selectorScope?: string;
     referenceContent?: string;
     debugMode?: boolean;
+    outputStructure?: 'object' | 'array';
   };
   // Fields for manual strategy in smart extraction
   fields?: {
@@ -354,6 +355,7 @@ export class BasicExtraction implements IExtraction {
               selectorScope: this.config.smartOptions.selectorScope || '',
               referenceContent: this.config.smartOptions.referenceContent || '',
               debugMode: this.config.smartOptions.debugMode === true,
+              outputStructure: this.config.smartOptions.outputStructure as 'object' | 'array' || 'object',
             };
 
             // Log reference context if available
@@ -610,63 +612,20 @@ export class BasicExtraction implements IExtraction {
 
       logger.debug(`${logPrefix} Extraction successful:`, typeof data === 'string' ? data.substring(0, 50) + '...' : data);
 
-      // Apply AI formatting if enabled and API key is provided
-      if (this.config.smartOptions?.aiAssistance === true && this.config.openaiApiKey) {
-        // Log the presence of the API key for debugging
-        logWithDebug(
-          logger,
-          this.config.debugMode || false,
-          this.context.nodeName,
-          'Extraction',
-          'extractionFactory',
-          'execute',
-          `Using OpenAI API key for AI processing. Key length: ${this.config.openaiApiKey.length}`,
-          'info'
-        );
+      // Check if AI formatting should be applied
+      const aiFormattingOptions = this.config.smartOptions;
 
-        // Log debug mode state for maximum visibility
-        const isDebugMode = this.config.smartOptions?.debugMode === true;
-        if (isDebugMode) {
-          logWithDebug(
-            this.context.logger,
-            this.config.debugMode || false,
-            this.context.nodeName,
-            'extraction',
-            'extractionFactory',
-            'processWithAI',
-            `AI processing requested with debug mode ON`,
-            'error'
-          );
-        }
+      // Corrected Condition: Check for valid strategy and API key, not non-existent aiAssistance
+      if (aiFormattingOptions &&
+          (aiFormattingOptions.strategy === 'manual' || aiFormattingOptions.strategy === 'auto') &&
+          this.config.openaiApiKey) {
+        // AI processing should happen
 
-        // Verify API key is valid (sufficient length)
-        if (this.config.openaiApiKey.length < 20) {
-          logger.warn(`${logPrefix} OpenAI API key appears to be invalid (length: ${this.config.openaiApiKey.length}) - skipping AI processing`);
-          return {
-            success: true,
-            data,
-            rawContent
-          };
-        }
+        // Define isDebugMode safely within this block
+        const isDebugMode = aiFormattingOptions.debugMode === true;
 
-        // Prepare AI formatting options
-        const aiFormattingOptions: IAIFormattingOptions = {
-          enabled: true,
-          extractionFormat: this.config.smartOptions.extractionFormat || 'json',
-          aiModel: this.config.smartOptions.aiModel || 'gpt-4',
-          generalInstructions: this.config.smartOptions.generalInstructions || '',
-          strategy: this.config.smartOptions.strategy || 'auto',
-          includeSchema: this.config.smartOptions.includeSchema === true,
-          includeRawData: this.config.smartOptions.includeRawData === true,
-          includeReferenceContext: this.config.smartOptions.includeReferenceContext === true,
-          referenceSelector: this.config.smartOptions.referenceSelector || '',
-          referenceName: this.config.smartOptions.referenceName || 'referenceContext',
-          referenceFormat: this.config.smartOptions.referenceFormat || 'text',
-          referenceAttribute: this.config.smartOptions.referenceAttribute || '',
-          selectorScope: this.config.smartOptions.selectorScope || 'global',
-          referenceContent: this.config.smartOptions.referenceContent || '',
-          debugMode: isDebugMode  // Pass debug mode flag explicitly
-        };
+        // Cast aiFormattingOptions to ensure type checker recognizes its properties
+        const confirmedSmartOptions = aiFormattingOptions as ISmartExtractionOptions;
 
         logWithDebug(
           logger,
@@ -675,7 +634,7 @@ export class BasicExtraction implements IExtraction {
           'Extraction',
           'extractionFactory',
           'execute',
-          `Applying AI formatting with ${aiFormattingOptions.strategy} strategy, format: ${aiFormattingOptions.extractionFormat}`,
+          `Applying AI formatting with ${confirmedSmartOptions.strategy} strategy, format: ${confirmedSmartOptions.extractionFormat}`,
           'info'
         );
         logWithDebug(
@@ -685,7 +644,8 @@ export class BasicExtraction implements IExtraction {
           'Extraction',
           'extractionFactory',
           'execute',
-          `AI options: includeSchema=${aiFormattingOptions.includeSchema}, includeRawData=${aiFormattingOptions.includeRawData}, debugMode=${aiFormattingOptions.debugMode}`,
+          // Use aiFormattingOptions here, as it's guaranteed to exist
+          `AI options: includeSchema=${confirmedSmartOptions.includeSchema}, includeRawData=${confirmedSmartOptions.includeRawData}, debugMode=${confirmedSmartOptions.debugMode}`,
           'info'
         );
 
@@ -698,7 +658,8 @@ export class BasicExtraction implements IExtraction {
             'extraction',
             'extractionFactory',
             'processWithAI',
-            `Calling processWithAI with model ${aiFormattingOptions.aiModel}`,
+            // Use aiFormattingOptions here, as it's guaranteed to exist
+            `Calling processWithAI with model ${confirmedSmartOptions.aiModel}`,
             'error'
           );
         }
@@ -715,22 +676,40 @@ export class BasicExtraction implements IExtraction {
         }
 
         // Log the field definitions for manual strategy
-        if (aiFormattingOptions.strategy === 'manual' && this.config.fields?.items) {
+        if (confirmedSmartOptions.strategy === 'manual' && this.config.fields?.items) {
           logger.info(`${logPrefix} Using manual strategy with ${this.config.fields.items.length} field definitions`);
         }
 
         try {
           // Process with AI - ensure we're passing the API key correctly
-          const apiKey = this.config.openaiApiKey;
-          if (!apiKey) {
-            logger.error(`${logPrefix} OpenAI API key is missing before AI processing`);
-          }
+          const apiKey = this.config.openaiApiKey; // API key is confirmed present by the outer if
+
+          // Construct the options object for processWithAI, ensuring it matches ISmartExtractionOptions
+          const optionsForProcessWithAI: ISmartExtractionOptions = {
+            enabled: true, // Required property
+            extractionFormat: confirmedSmartOptions.extractionFormat || 'json', // Default if needed
+            aiModel: confirmedSmartOptions.aiModel || 'gpt-3.5-turbo', // Default if needed
+            generalInstructions: confirmedSmartOptions.generalInstructions || '',
+            strategy: confirmedSmartOptions.strategy, // Already checked this is 'manual' or 'auto'
+            includeSchema: confirmedSmartOptions.includeSchema === true,
+            includeRawData: confirmedSmartOptions.includeRawData === true,
+            debugMode: isDebugMode,
+            outputStructure: confirmedSmartOptions.outputStructure, // Pass through (can be undefined)
+            fieldProcessingMode: confirmedSmartOptions.fieldProcessingMode, // Pass through (can be undefined)
+            includeReferenceContext: confirmedSmartOptions.includeReferenceContext,
+            referenceSelector: confirmedSmartOptions.referenceSelector,
+            referenceName: confirmedSmartOptions.referenceName,
+            referenceFormat: confirmedSmartOptions.referenceFormat,
+            referenceAttribute: confirmedSmartOptions.referenceAttribute,
+            selectorScope: confirmedSmartOptions.selectorScope,
+            referenceContent: confirmedSmartOptions.referenceContent,
+          };
 
           const aiResult = await processWithAI(
             contentForAI,
-            aiFormattingOptions,
+            optionsForProcessWithAI, // Pass the well-typed object
             this.config.fields?.items || [],
-            apiKey, // Explicitly use the local variable to ensure it's passed correctly
+            apiKey,
             {
               logger,
               nodeName,
@@ -816,8 +795,8 @@ export class BasicExtraction implements IExtraction {
             rawContent
           };
         }
-      } else if (this.config.smartOptions?.aiAssistance === true) {
-        // Log that we're missing the API key
+      } else if (aiFormattingOptions && (aiFormattingOptions.strategy === 'manual' || aiFormattingOptions.strategy === 'auto')) {
+        // Log that AI processing is skipped (e.g., no API key or strategy is 'none')
         logWithDebug(
           logger,
           this.config.debugMode || false,
@@ -825,7 +804,7 @@ export class BasicExtraction implements IExtraction {
           'Extraction',
           'extractionFactory',
           'execute',
-          `AI processing was requested but no OpenAI API key was provided`,
+          `AI processing was requested (strategy: ${aiFormattingOptions.strategy}) but no OpenAI API key was provided. Skipping AI.`,
           'warn'
         );
       }
