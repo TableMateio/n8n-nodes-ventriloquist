@@ -25,6 +25,8 @@ export interface ISmartExtractionOptions {
   selectorScope?: string;
   referenceContent?: string;
   debugMode?: boolean;
+  outputStructure?: 'object' | 'array';
+  fieldProcessingMode?: 'batch' | 'individual'; // Add field processing mode
 }
 
 /**
@@ -356,8 +358,25 @@ export async function extractSmartContent(
       includeSchema: options.includeSchema === true,
       includeRawData: options.includeRawData === true,
       referenceContent: options.referenceContent || '',
+      outputStructure: (options.outputStructure || 'object') as 'object' | 'array',
+      fieldProcessingMode: options.fieldProcessingMode || 'batch',
       debugMode: options.debugMode
     };
+
+    // Add explicit logging for the outputStructure
+    if (isDebugMode) {
+      logger.error(
+        formatOperationLog(
+          'smartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `[CRITICAL] Using outputStructure=${aiOptions.outputStructure} (from options.outputStructure=${options.outputStructure || 'undefined'})`,
+          component,
+          functionName
+        )
+      );
+    }
 
     // Log field count if in manual strategy
     if (options.strategy === 'manual' && fields) {
@@ -455,7 +474,34 @@ export async function extractSmartContent(
       )
     );
 
-    // Process with AI service
+    // Log that we're using the AIService
+    if (isDebugMode) {
+      logWithDebug(
+        logger,
+        true,
+        nodeName,
+        'SmartExtraction',
+        component,
+        functionName,
+        `Using AIService.processContent with ${fields.length} fields`,
+        'error'
+      );
+
+      // Add explicit logging for outputStructure just before the API call
+      logger.error(
+        formatOperationLog(
+          'SmartExtraction',
+          nodeName,
+          nodeId,
+          itemIndex,
+          `CRITICAL: About to call AIService.processContent with outputStructure=${aiOptions.outputStructure} and fieldProcessingMode=${aiOptions.fieldProcessingMode}`,
+          component,
+          functionName
+        )
+      );
+    }
+
+    // Process content with AIService
     const result = await aiService.processContent(stringContent, aiOptions);
 
     return {
@@ -514,6 +560,21 @@ export async function processWithAI(
           nodeId,
           index,
           `Processing content with AI (strategy: ${options.strategy}, model: ${options.aiModel}, debugMode: ${isDebugMode})`,
+          component,
+          functionName
+        )
+      );
+    }
+
+    // Explicitly log the outputStructure value for debugging
+    if (isDebugMode && logger) {
+      logger.error(
+        formatOperationLog(
+          'SmartExtraction',
+          nodeName,
+          nodeId,
+          index,
+          `OUTPUT STRUCTURE TRACKING: Processing with outputStructure=${options.outputStructure || 'object'} and fieldProcessingMode=${options.fieldProcessingMode || 'batch'}`,
           component,
           functionName
         )
@@ -580,6 +641,8 @@ export async function processWithAI(
       includeReferenceContext: options.includeReferenceContext,
       referenceName: options.referenceName,
       referenceContent: options.referenceContent,
+      outputStructure: (options.outputStructure || 'object') as 'object' | 'array',
+      fieldProcessingMode: options.fieldProcessingMode || 'batch',
       debugMode: options.debugMode
     };
 
