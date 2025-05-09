@@ -441,6 +441,29 @@ export class AIService {
     const { nodeName, nodeId, index } = this.context;
     const isDebugMode = options.debugMode === true;
 
+    // ==== NEW LOGGING START ====
+    this.logDebug(
+      `PROCESSMANUALSTRATEGY_DEBUG: Entered. options.referenceContent='${options.referenceContent}'. Checking initial options.fields...`,
+      'error', // High visibility
+      'processManualStrategy'
+    );
+    if (options.fields && options.fields.length > 0) {
+      options.fields.forEach(field => {
+        this.logDebug(
+          `PROCESSMANUALSTRATEGY_DEBUG: Initial option field: "${field.name}", type: '${field.type}', arrayItemType: '${field.arrayItemType}'`,
+          'error',
+          'processManualStrategy'
+        );
+      });
+    } else {
+      this.logDebug(
+        `PROCESSMANUALSTRATEGY_DEBUG: Initial options.fields is undefined or empty.`,
+        'error',
+        'processManualStrategy'
+      );
+    }
+    // ==== NEW LOGGING END ====
+
     try {
       // Save options for the class and ensure outputStructure is properly preserved
       if (options) {
@@ -597,7 +620,8 @@ export class AIService {
               instructions: field.instructions || `Extract the ${field.name}`,
               type: field.type || 'string',
               required: field.required,
-              format: field.format
+              format: field.format,
+              arrayItemType: field.arrayItemType, // Added this line
             })),
             options.referenceContent,
             true,
@@ -673,6 +697,29 @@ export class AIService {
             `Using schema-based table extraction with ${fieldsToProcess.length} fields`
           )
         );
+
+        // ==== NEW LOGGING START ====
+        this.logDebug(
+          `PROCESSMANUALSTRATEGY_DEBUG: About to call processTableContent. Checking fieldsToProcess...`,
+          'error', // High visibility
+          'processManualStrategy'
+        );
+        if (fieldsToProcess && fieldsToProcess.length > 0) {
+          fieldsToProcess.forEach(field => {
+            this.logDebug(
+              `PROCESSMANUALSTRATEGY_DEBUG: Field for processTableContent: "${field.name}", type: '${field.type}', arrayItemType: '${field.arrayItemType}'`,
+              'error',
+              'processManualStrategy'
+            );
+          });
+        } else {
+          this.logDebug(
+            `PROCESSMANUALSTRATEGY_DEBUG: fieldsToProcess for processTableContent is undefined or empty.`,
+            'error',
+            'processManualStrategy'
+          );
+        }
+        // ==== NEW LOGGING END ====
 
         return await this.processTableContent(tableContent, fieldsToProcess);
       }
@@ -2018,8 +2065,14 @@ ${examplesSection}
           break;
         case 'array':
           schemaType = 'array';
-          // If the field has arrayItemType defined, use it, otherwise default to 'string'
-          additionalProps.items = { type: (field as any).arrayItemType || 'string' };
+          // Log the incoming arrayItemType for this field
+          this.logDebug(
+            `Field "${field.name}" (array): incoming field.arrayItemType='${field.arrayItemType}', typeof=${typeof field.arrayItemType}`,
+            'error', // Using 'error' for high visibility
+            'generateOpenAISchema'
+          );
+          // If the field has arrayItemType defined, use it (lowercase), otherwise default to 'string'
+          additionalProps.items = { type: field.arrayItemType?.trim().toLowerCase() || 'string' };
           break;
         case 'object':
           schemaType = 'object';

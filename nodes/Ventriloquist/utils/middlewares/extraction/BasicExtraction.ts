@@ -126,7 +126,7 @@ export class BasicExtraction implements IExtraction {
               'BasicExtraction',
               'processWithAI',
               `AI processing requested with debug mode ON in ${nodeName}/${nodeId}`,
-              'error'
+              'info'
             );
 
             // Log if OpenAI API key is available
@@ -196,8 +196,8 @@ export class BasicExtraction implements IExtraction {
             );
 
             const smartResult = await processWithAI(
-              content,
-              {
+              content, // Pass the single content string
+              { // These are the ISmartExtractionOptions
                 enabled: true,
                 extractionFormat: smartOptions.extractionFormat || 'json',
                 aiModel: smartOptions.aiModel || 'gpt-3.5-turbo',

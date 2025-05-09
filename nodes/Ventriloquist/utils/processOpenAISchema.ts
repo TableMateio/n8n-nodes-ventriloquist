@@ -17,12 +17,12 @@ interface Page {
 import type { Logger } from 'n8n-workflow';
 import { formatOperationLog } from './resultUtils';
 import { logWithDebug } from './loggingUtils';
+import type { IField } from './aiService';
 // import type * as puppeteer from 'puppeteer';
 
 export interface IOpenAIField {
   name: string;
   type?: string;
-  description?: string;
   instructions: string;
   format?: string;
   formatString?: string;
@@ -31,12 +31,6 @@ export interface IOpenAIField {
     input: string;
     output: string;
   }>;
-  relativeSelectorOptional?: string; // Used when AI is ON
-  relativeSelector?: string;       // Used when AI is OFF
-  extractionType?: string;        // Type of extraction (text, attribute, html)
-  attributeName?: string;         // Name of attribute to extract if extraction type is attribute
-  returnDirectAttribute?: boolean; // Flag to indicate if attribute value should be returned directly
-  referenceContent?: string;      // Stores extracted content for reference
 }
 
 /**
@@ -49,7 +43,7 @@ export interface IOpenAIField {
  * @param context Optional logging context
  * @returns Modified array of field definitions
  */
-export function processFieldsWithReferenceContent<T extends IOpenAIField>(
+export function processFieldsWithReferenceContent<T extends IField>(
   fields: T[],
   referenceContent?: string,
   includeReferenceContext: boolean = false,
@@ -102,8 +96,8 @@ export function processFieldsWithReferenceContent<T extends IOpenAIField>(
     // Create a copy of the field to avoid modifying the original
     const processedField = { ...field };
 
-    // Get the instruction or description text
-    const instructionText = processedField.instructions || processedField.description || '';
+    // Get the instruction text. IField has instructions?, but the map in aiService ensures it's a string.
+    const instructionText = processedField.instructions || ''; // Default to empty string if somehow undefined
 
     if (logger) {
       logger.info(
@@ -117,64 +111,33 @@ export function processFieldsWithReferenceContent<T extends IOpenAIField>(
       );
     }
 
-    // Add reference content to all fields unless they already have referenceContent
-    if (!processedField.referenceContent) {
-      // Add reference content to instructions
-      const referenceNote = `\n\nUse this as reference: "${referenceContent}"`;
+    // Add reference content to instructions
+    // The check for existing processedField.referenceContent is removed as IField doesn't have it,
+    // and this function's purpose is to add the passed referenceContent.
+    const referenceNote = `\n\nUse this as reference: "${referenceContent}"`;
 
-      // Update instructions
-      const originalInstructionsLength = processedField.instructions?.length || 0;
-      processedField.instructions += referenceNote;
+    // Update instructions. It should be a string due to prior mapping in aiService.
+    const originalInstructionsLength = processedField.instructions?.length || 0;
+    processedField.instructions = (processedField.instructions || '') + referenceNote;
 
-      if (logger) {
-        logger.info(
-          formatOperationLog(
-            logTag,
-            nodeName,
-            nodeId,
-            index,
-            `Added reference note to field "${field.name}" instructions, new length: ${processedField.instructions.length} (was ${originalInstructionsLength})`
-          )
-        );
-      }
-
-      // Update description if it exists
-      if (processedField.description) {
-        const originalDescriptionLength = processedField.description?.length || 0;
-        processedField.description += referenceNote;
-
-        if (logger) {
-          logger.info(
-            formatOperationLog(
-              logTag,
-              nodeName,
-              nodeId,
-              index,
-              `Added reference note to field "${field.name}" description, new length: ${processedField.description.length} (was ${originalDescriptionLength})`
-            )
-          );
-        }
-      }
-
-      if (logger) {
-        logger.info(
-          formatOperationLog(
-            logTag,
-            nodeName,
-            nodeId,
-            index,
-            `Enhanced field "${processedField.name}" with reference content. Final instructions (${processedField.instructions.length} chars): ${processedField.instructions.substring(0, 100)}${processedField.instructions.length > 100 ? '...' : ''}`
-          )
-        );
-      }
-    } else if (logger) {
+    if (logger) {
       logger.info(
         formatOperationLog(
           logTag,
           nodeName,
           nodeId,
           index,
-          `Field "${processedField.name}" already has reference content, skipping`
+          `Added reference note to field "${field.name}" instructions, new length: ${processedField.instructions.length} (was ${originalInstructionsLength})`
+        )
+      );
+      // Removed section that updated processedField.description as IField doesn't have it.
+      logger.info(
+        formatOperationLog(
+          logTag,
+          nodeName,
+          nodeId,
+          index,
+          `Enhanced field "${processedField.name}" with reference content. Final instructions (${processedField.instructions.length} chars): ${processedField.instructions.substring(0, 100)}${processedField.instructions.length > 100 ? '...' : ''}`
         )
       );
     }
@@ -221,20 +184,20 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
   for (const field of enhancedFields) {
     try {
       // Check if it has a relativeSelector (could be AI-provided or explicitly defined)
-      const relativeSelectorOptional = field.relativeSelectorOptional;
-      const relativeSelector = field.relativeSelector;
+      // const relativeSelectorOptional = field.relativeSelectorOptional;
+      // const relativeSelector = field.relativeSelector;
+      const extractionType = (field as any).extractionType || 'text'; // Default to text extraction
 
       // Skip fields without a relative selector
-      if (!relativeSelectorOptional && !relativeSelector) {
+      if (extractionType === 'text') {
         continue;
       }
 
       // Determine which selector to use
-      const actualSelector = relativeSelectorOptional || relativeSelector || '';
+      // const actualSelector = relativeSelectorOptional || relativeSelector || '';
 
       // Get extraction type and attribute name if they exist
       const fieldOptions = (field as any).fieldOptions || {};
-      const extractionType = fieldOptions.extractionType || 'text';
       const attributeName = fieldOptions.attributeName || '';
 
       if (logger) {
@@ -244,7 +207,7 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
             nodeName,
             nodeId,
             index,
-            `Processing field "${field.name}" with ${actualSelector ? 'selector: ' + actualSelector : 'no selector'}`,
+            `Processing field "${field.name}" with ${extractionType} extraction`,
             component,
             functionName
           )
@@ -280,13 +243,13 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
         }
 
         // Clean the selector for safe use in JavaScript
-        const cleanSelector = actualSelector.replace(/"/g, '\\"');
+        // const cleanSelector = actualSelector.replace(/"/g, '\\"');
 
         // Now extract the content using the relative selector within the main element
         const content = await page.evaluate(
-          (mainSelector: string, cleanSelector: string, attributeName: string, extractionType: string, mainElementHtml: string) => {
+          (mainSelector: string, extractionType: string, mainElementHtml: string) => {
             try {
-              console.log(`[Browser] Searching for child element using selector: ${cleanSelector} within main element ${mainSelector}`);
+              console.log(`[Browser] Searching for child element using extraction type: ${extractionType} within main element ${mainSelector}`);
 
               // Create a temporary container with the main element's HTML
               const tempContainer = document.createElement('div');
@@ -294,14 +257,14 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
 
               // Find the relative element within the temporary container
               // This is more reliable than trying to query within the live DOM
-              const element = tempContainer.querySelector(cleanSelector);
+              const element = tempContainer.querySelector(extractionType);
 
               if (!element) {
-                console.error(`[Browser] Element not found with selector: ${cleanSelector} within the container`);
+                console.error(`[Browser] Element not found with extraction type: ${extractionType} within the container`);
                 return '';
               }
 
-              console.log(`[Browser] Element found with selector: ${cleanSelector}`);
+              console.log(`[Browser] Element found with extraction type: ${extractionType}`);
 
               // Extract based on extraction type
               if (extractionType === 'attribute' && attributeName) {
@@ -330,19 +293,17 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
             }
           },
           mainSelector,
-          cleanSelector,
-          attributeName,
           extractionType,
           mainElementHtml // Pass the HTML content to the browser context
         );
 
         if (content && content.trim() !== '') {
           // Store the extracted content in the field for later reference
-          field.referenceContent = content.trim();
+          // field.referenceContent = content.trim(); // Commented out: IField does not have referenceContent; content is added to instructions
 
           // For attribute extraction, mark to return the direct value
           if (extractionType === 'attribute' && attributeName) {
-            field.returnDirectAttribute = true;
+            // field.returnDirectAttribute = true;  // Commented out: IField does not have returnDirectAttribute
 
             if (logger) {
               logger.info(
@@ -359,11 +320,11 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
             }
 
             // For attribute fields, use a more descriptive reference format
-            const instructionText = field.instructions || field.description || '';
+            const instructionText = field.instructions || '';
             field.instructions = `${instructionText}\n\nThe value of the ${attributeName} attribute is: ${content.trim()}`;
           } else {
             // For non-attribute fields, use standard reference format
-            const instructionText = field.instructions || field.description || '';
+            const instructionText = field.instructions || '';
             field.instructions = `${instructionText}\n\nUse this as reference: "${content.trim()}"`;
           }
 
@@ -387,7 +348,7 @@ export async function enhanceFieldsWithRelativeSelectorContent<T extends IOpenAI
               nodeName,
               nodeId,
               index,
-              `No content extracted for field "${field.name}" using selector: ${actualSelector}`,
+              `No content extracted for field "${field.name}" using extraction type: ${extractionType}`,
               component,
               functionName
             )
