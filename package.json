@@ -38,12 +38,14 @@
 			"dist/credentials/HttpBinApi.credentials.js",
 			"dist/credentials/BrightDataApi.credentials.js",
 			"dist/credentials/BrowserlessApi.credentials.js",
-			"dist/credentials/LocalChromeApi.credentials.js"
+			"dist/credentials/LocalChromeApi.credentials.js",
+			"dist/credentials/StannpApi.credentials.js"
 		],
 		"nodes": [
 			"dist/nodes/ExampleNode/ExampleNode.node.js",
 			"dist/nodes/HttpBin/HttpBin.node.js",
-			"dist/nodes/Ventriloquist/Ventriloquist.node.js"
+			"dist/nodes/Ventriloquist/Ventriloquist.node.js",
+			"dist/nodes/Stannp/Stannp.node.js"
 		]
 	},
 	"devDependencies": {

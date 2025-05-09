@@ -1,0 +1,27 @@
+{
+    "node": "n8n-nodes-ventriloquist.stannp",
+    "nodeVersion": "1.0",
+    "codexVersion": "1.0",
+    "categories": [
+        "Communication",
+        "Marketing & Content"
+    ],
+    "resources": {
+        "primaryDocumentation": [
+            {
+                "url": "https://www.stannp.com/api-documentation"
+            }
+        ]
+    },
+    "alias": [
+        "Mail",
+        "Post",
+        "Letter",
+        "Direct Mail"
+    ],
+    "subcategories": {
+        "Marketing & Content": [
+            "Direct Mail"
+        ]
+    }
+}
