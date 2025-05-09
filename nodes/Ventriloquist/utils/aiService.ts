@@ -1148,20 +1148,8 @@ export class AIService {
       );
 
       // Generate the OpenAI schema from the fields for proper structured extraction
-      // Make sure to save the current outputStructure option
-      const originalOutputStructure = this.options?.outputStructure;
-
-      // Temporarily set outputStructure to 'array' for table data
-      if (this.options) {
-        this.options.outputStructure = 'array';
-      }
-
+      // The `generateOpenAISchema` method will use `this.options.outputStructure` which is already correctly set.
       const schema = this.generateOpenAISchema(fields);
-
-      // Restore the original outputStructure
-      if (this.options) {
-        this.options.outputStructure = originalOutputStructure;
-      }
 
       // Log the schema being used
       if (isDebugMode) {
@@ -1177,13 +1165,15 @@ export class AIService {
       }
 
       // Build a more detailed prompt that passes our schema
-      const arrayPrompt = `
-TASK: Extract specific fields from each row in the table according to the field specifications below.
+      // Prompt needs to be conditional based on outputStructure
+      const jsonFence = '```'; // Define the fence
+      let tablePrompt = `
+TASK: Extract specific fields from the table according to the field specifications below.
 
 INPUT DATA:
-\`\`\`json
+${jsonFence}json
 ${JSON.stringify(tableContent, null, 2)}
-\`\`\`
+${jsonFence}
 
 FIELD SPECIFICATIONS:
 ${fields.map((field, index) => {
@@ -1202,19 +1192,30 @@ ${fields.map((field, index) => {
 }).join('\n\n')}
 
 IMPORTANT GUIDELINES:
-1. Return a properly formatted array of objects, with each object representing a row.
-2. Preserve the original data structure for all values - if the input contains arrays, they must remain arrays in the output.
-3. Maintain the exact data types of all values - strings, numbers, booleans, arrays, objects should all be preserved.
-4. Do not flatten or convert arrays to strings in the output.
-5. Ensure your response is proper JSON that can be directly parsed.
+1. Adhere strictly to the JSON schema provided to you for the overall output structure (single object or array of objects).
+2. For each field defined in the schema, extract and provide the data as specified by the field's type and description.
 `;
+
+      if (outputStructure === 'object') {
+        tablePrompt += `3. If consolidating data from multiple table rows into a single object (when the schema asks for a single object):
+    - For each field, provide a single, consolidated value.
+    - If a field inherently represents multiple distinct values from the source (e.g., multiple similar items from different rows intended for a single field name), use an array of those distinct values for that specific field IF the field's schema type is 'array'. Otherwise, provide the most representative single value.
+`;
+      } else { // outputStructure is 'array'
+        tablePrompt += `3. If generating an array of objects (when the schema asks for an array):
+    - Each object in the array should correspond to a logical item (e.g., a row) from the input data.
+`;
+      }
+
+      tablePrompt += `4. Maintain data types as specified in the schema (string, number, boolean, array, object).
+5. Ensure your entire response is a single, valid JSON that can be directly parsed and matches the provided schema.`;
 
       // Add this message to the thread
       await this.openai.beta.threads.messages.create(
         sharedThread.id,
         {
           role: "user",
-          content: arrayPrompt,
+          content: tablePrompt, // Use the dynamically generated prompt
         }
       );
 
@@ -1272,16 +1273,34 @@ IMPORTANT GUIDELINES:
               'processTableContent'
             );
 
-            // Make sure we have an array of objects for table data
-            if (!Array.isArray(extractedData)) {
+            // Conditional array wrapping based on outputStructure
+            if (outputStructure === 'array' && !Array.isArray(extractedData)) {
               this.logDebug(
-                `Expected array but got ${typeof extractedData}. Converting to array.`,
+                `Output structure is array, but got ${typeof extractedData}. Converting to array.`,
                 'warn',
                 'processTableContent'
               );
-              // If not an array, wrap it in an array
               extractedData = [extractedData];
+            } else if (outputStructure === 'object' && Array.isArray(extractedData) && extractedData.length === 1) {
+              // If expecting an object and AI returned an array of one, take the first element.
+              // This can happen if the AI still wraps a single object result in an array.
+              this.logDebug(
+                `Output structure is object, but got an array of one. Taking first element.`,
+                'warn',
+                'processTableContent'
+              );
+              extractedData = extractedData[0];
+            } else if (outputStructure === 'object' && Array.isArray(extractedData)) {
+              // Expecting object, got array of multiple items. This is a mismatch.
+              this.logDebug(
+                `Output structure is object, but AI returned an array of multiple items. This is unexpected. Using array as is.`,
+                'warn',
+                'processTableContent'
+              );
+              // Keep extractedData as is (an array) and let downstream handle or log error further.
             }
+            // If outputStructure is 'object' and extractedData is already an object, do nothing.
+
           } catch (e) {
             // Handle the case where OpenAI might return a string or non-JSON format
             this.logger.warn(
