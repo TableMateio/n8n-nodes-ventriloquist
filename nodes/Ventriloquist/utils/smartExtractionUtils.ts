@@ -220,11 +220,9 @@ export async function extractSmartContent(
       const extractedContent = await page.$$eval(selector, (elements: Element[]) => {
         if (elements.length === 0) return '';
 
-        // Use only the first element found
-        const element = elements[0];
-
-        // Return the outer HTML including the element itself
-        return element.outerHTML;
+        // Get all elements that match the selector
+        // Build combined content from all matched elements
+        return elements.map(element => element.outerHTML).join('\n');
       });
 
       content = extractedContent;
@@ -235,7 +233,7 @@ export async function extractSmartContent(
           nodeName,
           nodeId,
           itemIndex,
-          `Extracted content (${content.length} chars): "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`,
+          `Extracted content from ${content.split('\n').filter(line => line.trim().startsWith('<')).length} elements (${content.length} chars): "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`,
           component,
           functionName
         )
