@@ -1,0 +1,18 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+We have an N8N starter node we're going to link to a local N8N instance. Always do just one simple task and then stop before moving on and await my approval.
+
+A reminder about what we currently have:
+Here's what I've gathered about the Ventriloquist node:
+Core Functionality: It's an N8N node designed to control headless browser sessions using Puppeteer. It connects to remote browser services like Bright Data's Scraping Browser or Browserless via WebSocket.
+Session Management: It maintains active browser sessions (puppeteer.Browser instances) in a map, keyed by the N8N workflow ID. It includes logic to create new sessions, reuse existing ones, and automatically clean up sessions that have been inactive for a configurable duration (defaulting to 3 minutes). It also seems to manage individual pages within sessions.
+Actions/Operations: The node supports multiple distinct operations, implemented in separate files within the actions/ directory. I see imports for: form, extract, detect, decision, open, authenticate, click, and close. This modular design allows for various browser interactions.
+Transport Layer: It uses a factory (BrowserTransportFactory) to handle the connection details for different browser providers (Bright Data, Browserless), abstracting the connection logic.
+Dynamic Outputs: The decision operation can dynamically configure its output connections based on user parameters, allowing for conditional routing within a workflow.
+
+
+Always start your messages back to me with: 🤖
+After making an edit, always run the build command "pnpm run build" and fix any errors that appear.

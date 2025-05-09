@@ -62,6 +62,7 @@ export interface IField {
   }>;
   useLogicAnalysis?: boolean;  // Flag to use the logic assistant for this field
   useSeparateThread?: boolean; // Flag to use a separate thread for this field
+  arrayItemType?: string;
 }
 
 /**
@@ -2017,7 +2018,8 @@ ${examplesSection}
           break;
         case 'array':
           schemaType = 'array';
-          additionalProps.items = { type: 'string' };
+          // If the field has arrayItemType defined, use it, otherwise default to 'string'
+          additionalProps.items = { type: (field as any).arrayItemType || 'string' };
           break;
         case 'object':
           schemaType = 'object';

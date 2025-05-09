@@ -425,6 +425,24 @@ export const description: INodeProperties[] = [
 										description: "Type of the field to extract",
 									},
 									{
+										displayName: "Array Item Type",
+										name: "arrayItemType",
+										type: "options",
+										displayOptions: {
+											show: {
+												type: ["array"], // Show only if 'type' is 'array'
+											},
+										},
+										options: [
+											{ name: "String", value: "string" },
+											{ name: "Number", value: "number" },
+											{ name: "Boolean", value: "boolean" },
+										],
+										default: "string",
+										description: "Specifies the data type of items in the array when 'Type' is set to 'Array'.",
+										// required: true, // Consider making this true if type is 'array' via a function or more complex show/hide logic if N8N supports it
+									},
+									{
 										displayName: "AI Assisted",
 										name: "aiAssisted",
 										type: "boolean",
@@ -1316,6 +1334,8 @@ export async function execute(
 						let fieldName = field.name as string;
 						let isNestedField = false;
 
+						const arrayItemTypeValue = field.arrayItemType as string | undefined; // Get it from the IDataObject
+
 						// Log all field information for debugging
 						if (debugMode) {
 							logWithDebug(
@@ -1325,7 +1345,7 @@ export async function execute(
 								'extraction',
 								'extract.operation',
 								'execute',
-								`Processing field "${fieldName}" with type ${field.type}, AI assisted: ${aiAssisted}`,
+								`Processing field "${fieldName}" with type: ${field.type}, AI assisted: ${aiAssisted}, ArrayItemType from param: ${arrayItemTypeValue}`,
 								'error'
 							);
 						}
@@ -1338,6 +1358,7 @@ export async function execute(
 							name: fieldName,
 							instructions: field.instructions as string || '',
 							type: field.type as string,
+							arrayItemType: arrayItemTypeValue,
 							required: field.format === 'required',
 							// Pass BOTH selector types to ensure compatibility
 							relativeSelectorOptional: relativeSelectorOptional,

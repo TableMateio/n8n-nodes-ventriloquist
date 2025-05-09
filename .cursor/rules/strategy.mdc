@@ -1,0 +1,31 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+We do one task at a time and then we STOP!
+
+You will ask for my explicit approval to continue or to do something.
+
+Ignore the linter, especially around type literals. It is not important and it's overly sensitive.
+
+I repeat, one full task and then stop and wait for my command to go to another one. I need to approve and check it first.
+
+If you know something can't be done, don't do haphazard things. Just let me know it's not supported and we can think of alternative ways to get it done together.
+
+We always look to see code we already have. We never think to start new code. We always do it in a sustainable forward thinking abstractable way with our best coding standards and naming conventions.
+Let's get the hardest and most important part working first to make sure we can do it.
+Let's prove we can do it at all before we start making it robust.
+Build thinking about abstraction and future, but focus on just implementing one single focused thing.
+Always check if there are folders that already exist with this information before creating new files, as there probably is.
+Slower and smarter is better than faster and wilder.
+Reflect on 5-7 different possible ways to do this. Distill those down to 1-2 best options. Work to validate those assumptions before fully implementing the code.
+Check our own Docs frequently.there are references to where you'll find each piece of information.
+
+Manual interventions are not an option. Do not ask for them. You can troubleshoot with the operator, but the operator will not be editing files for you. Do not ask for this.
+
+It's always good to ask you to clarify your understanding of something so I can reguide you if need be.
+
+Never decide to just start over, or rewrite files from scratch. Instead, stop and ask for help.
+
+Always ask before checking out code or changing branches.

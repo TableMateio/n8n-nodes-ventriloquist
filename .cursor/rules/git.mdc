@@ -1,0 +1,63 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+Commit with detailed messages about what and how things were solved and implemented so we can figure them out again if we need to.
+
+Only commit when I instruct you to, or when I confirm that something is working correctly. Do not commit just because you've implemented something. I need to check it first. When you do commit it though, push it also. No need to wait.
+
+
+To rebuild:
+pnpm run build
+
+To run:
+Go to main n8n repository and run ./run dev-test (but  not here)
+
+
+Make your commits very detailed and clear. Don't get lazy. Make them unique.
+
+Always check current branch first:
+Apply to decision.ope...
+cat
+This shows all branches and current state. We should be on master, not in a detached HEAD state.
+If in detached HEAD state:
+Apply to decision.ope...
+master
+This gets us back to the master branch.
+To reset to a specific working commit:
+Apply to decision.ope...
+>
+Example: git reset --hard df857fa
+After reset, verify package.json:
+Apply to decision.ope...
+cat
+This shows the exact package.json from that commit.
+Reinstall dependencies and build:
+Apply to decision.ope...
+build
+The key lesson is: Never do git operations while in a detached HEAD state. Always make sure we're on the master branch first.
+Would you like me to add these instructions to the notepad for future reference?
+it knows that, i mean more about how we should be comitting and what to look out for like make sure if we do go detached, we go back to master or something. i dont understand it well enough to know, but i think you do and could give specific instructions about our situation and what we're doing wrong
+
+When Making Changes:
+Make changes to files
+Test with pnpm run build
+Only proceed if build succeeds
+Then commit and push
+When Ready to Commit:
+Use descriptive commit messages that explain both what and why
+
+If you see "detached HEAD", run git checkout master
+If you see uncommitted changes, run git checkout -- . to discard them
+Then start over from step 2
+Never Do These Things:
+Never commit while in detached HEAD state
+Never do git reset while in detached HEAD state
+Never do git checkout <commit-hash> without immediately going back to master
+Never force push (git push -f) without explicit approval
+If You See This Warning:
+Apply to decision.ope...
+branch
+Immediately run git checkout master
+Then verify with git status
