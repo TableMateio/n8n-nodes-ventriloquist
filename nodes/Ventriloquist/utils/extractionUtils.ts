@@ -101,59 +101,35 @@ export async function extractTextContent(
 	logger: ILogger,
 	nodeName: string,
 	nodeId: string,
-): Promise<string> {
+): Promise<string | string[]> {
 	try {
-		// Modified approach to better handle BR tags and limit consecutive newlines
-		const textContent = await page.$eval(selector, (el) => {
-			// Get the original HTML
-			const originalHtml = el.innerHTML;
-
-			// Create a document fragment to work with
-			const template = document.createElement('template');
-			template.innerHTML = originalHtml;
-			const fragment = template.content;
-
-			// Replace all BR tags with newline placeholder
-			// Using a special placeholder that won't appear in normal text
-			const BR_PLACEHOLDER = '[[BR_NEWLINE_PLACEHOLDER]]';
-			const brElements = fragment.querySelectorAll('br');
-			Array.from(brElements).forEach(br => {
-				br.outerHTML = BR_PLACEHOLDER;
+		// Changed from $eval to $$eval to get all matching elements
+		const textContents = await page.$$eval(selector, (elements) => {
+			return elements.map(el => {
+				// Handle special cases like <br> tags in HTML content
+				const text = el.textContent || '';
+				return text.trim();
 			});
-
-			// Get text content from the modified fragment
-			const tempDiv = document.createElement('div');
-			tempDiv.appendChild(fragment.cloneNode(true));
-			let content = tempDiv.textContent || '';
-
-			// Replace the BR placeholders with actual newlines
-			content = content.replace(new RegExp(BR_PLACEHOLDER, 'g'), '\n');
-
-			// Normalize whitespace: replace multiple spaces with single space
-			content = content.replace(/ {2,}/g, ' ');
-
-			// Limit consecutive newlines to a maximum of 2
-			content = content.replace(/\n{3,}/g, '\n\n');
-
-			// Trim leading and trailing whitespace
-			content = content.trim();
-
-			// Debug info to see what's happening
-			console.log(`Original HTML length: ${originalHtml.length}`);
-			console.log(`BR tags found: ${brElements.length}`);
-			console.log(`Final text length: ${content.length}`);
-
-			return content;
 		});
 
-		const truncatedData = formatExtractedDataForLog(textContent, 'text');
-		logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted text content: ${truncatedData}`);
+		// Log the number of elements found
+		logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Found ${textContents.length} elements matching selector for text extraction`);
 
-		// Log additional debug info
-		const brCount = (textContent.match(/\n/g) || []).length;
-		logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Text has ${brCount} newlines`);
+		// For backwards compatibility, return a single string if only one element was found
+		if (textContents.length === 1) {
+			const truncatedData = formatExtractedDataForLog(textContents[0], 'text');
+			logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted text content: ${truncatedData}`);
 
-		return textContent;
+			// Log additional debug info
+			const brCount = (textContents[0].match(/\n/g) || []).length;
+			logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Text has ${brCount} newlines`);
+
+			return textContents[0];
+		} else {
+			// If multiple elements were found, return them as an array
+			logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted ${textContents.length} text values`);
+			return textContents;
+		}
 	} catch (error) {
 		logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to extract text: ${(error as Error).message}`);
 		throw error;
@@ -173,31 +149,66 @@ export async function extractHtmlContent(
 	logger: ILogger,
 	nodeName: string,
 	nodeId: string,
-): Promise<string | IDataObject> {
+): Promise<string | string[] | IDataObject | IDataObject[]> {
 	try {
-		const htmlContent = await page.$eval(selector, (el) => el.innerHTML);
+		// Changed from $eval to $$eval to get all matching elements
+		const htmlContents = await page.$$eval(selector, (els) => els.map(el => el.innerHTML));
 
-		if (options.outputFormat === 'html') {
-			// Return raw HTML
-			return htmlContent;
-		}
+		// Log the number of elements found
+		logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Found ${htmlContents.length} elements matching selector for HTML extraction`);
 
-		// Return as JSON object with optional metadata
-		const result: IDataObject = {
-			html: htmlContent,
-		};
+		// Handle both single and multiple results with backwards compatibility
+		if (htmlContents.length === 1) {
+			// Single element - maintain backwards compatibility
+			const htmlContent = htmlContents[0];
 
-		if (options.includeMetadata) {
-			result.metadata = {
-				length: htmlContent.length,
-				hasImages: htmlContent.includes('<img'),
-				hasTables: htmlContent.includes('<table'),
-				hasLinks: htmlContent.includes('<a '),
-				hasScripts: htmlContent.includes('<script'),
+			if (options.outputFormat === 'html') {
+				// Return raw HTML
+				return htmlContent;
+			}
+
+			// Return as JSON object with optional metadata
+			const result: IDataObject = {
+				html: htmlContent,
 			};
-		}
 
-		return result;
+			if (options.includeMetadata) {
+				result.metadata = {
+					length: htmlContent.length,
+					hasImages: htmlContent.includes('<img'),
+					hasTables: htmlContent.includes('<table'),
+					hasLinks: htmlContent.includes('<a '),
+					hasScripts: htmlContent.includes('<script'),
+				};
+			}
+
+			return result;
+		} else {
+			// Multiple elements found
+			if (options.outputFormat === 'html') {
+				// Return array of raw HTML strings
+				return htmlContents;
+			}
+
+			// Return array of objects with optional metadata
+			return htmlContents.map(htmlContent => {
+				const result: IDataObject = {
+					html: htmlContent,
+				};
+
+				if (options.includeMetadata) {
+					result.metadata = {
+						length: htmlContent.length,
+						hasImages: htmlContent.includes('<img'),
+						hasTables: htmlContent.includes('<table'),
+						hasLinks: htmlContent.includes('<a '),
+						hasScripts: htmlContent.includes('<script'),
+					};
+				}
+
+				return result;
+			});
+		}
 	} catch (error) {
 		logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to extract HTML: ${(error as Error).message}`);
 		throw error;
@@ -241,17 +252,27 @@ export async function extractAttributeValue(
 	logger: ILogger,
 	nodeName: string,
 	nodeId: string,
-): Promise<string> {
+): Promise<string | string[]> {
 	try {
-		const attributeValue = await page.$eval(
+		// Changed from $eval to $$eval to get all matching elements
+		const attributeValues = await page.$$eval(
 			selector,
-			(el, attr) => el.getAttribute(attr) || '',
+			(els, attr) => els.map(el => el.getAttribute(attr) || ''),
 			attributeName
 		);
 
-		const truncatedAttribute = formatExtractedDataForLog(attributeValue, 'attribute');
-		logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted attribute ${attributeName}: ${truncatedAttribute}`);
-		return attributeValue;
+		// Log the number of elements found
+		logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Found ${attributeValues.length} elements matching selector for attribute ${attributeName}`);
+
+		// Handle both single and multiple results
+		if (attributeValues.length === 1) {
+			const truncatedAttribute = formatExtractedDataForLog(attributeValues[0], 'attribute');
+			logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted attribute ${attributeName}: ${truncatedAttribute}`);
+			return attributeValues[0]; // Return single string for backwards compatibility
+		} else {
+			logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted ${attributeValues.length} attribute values for ${attributeName}`);
+			return attributeValues; // Return array of values
+		}
 	} catch (error) {
 		logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to extract attribute ${attributeName}: ${(error as Error).message}`);
 		throw error;
