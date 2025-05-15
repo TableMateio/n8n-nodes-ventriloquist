@@ -277,15 +277,15 @@ export class BasicExtraction implements IExtraction {
               processedText = processedText.replace(/\n{5,}/g, '\n\n\n\n');
             }
 
-            // Update rawContent to store pre-truncated content
+            // Store full content in data
+            data = processedText;
+
+            // Only truncate for logging purposes
             if (processedText.length > 200) {
               rawContent = processedText.substring(0, 200) + '... [truncated]';
             } else {
               rawContent = processedText;
             }
-
-            // Set data to the cleaned and processed text
-            data = processedText;
           } catch (error) {
             logger.error(`${logPrefix} Error extracting text content: ${(error as Error).message}`);
             throw error;
@@ -321,13 +321,12 @@ export class BasicExtraction implements IExtraction {
                 (els) => els.map(el => el.getAttribute('href') || '')
               );
 
-              // Store all raw content joined together for compatibility
+              // Store full data
+              data = hrefValues.length === 1 ? hrefValues[0] : hrefValues;
+
+              // Only truncate for logging purposes
               rawContent = hrefValues.join('\n');
               if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
-
-              // If only one result was found, keep backwards compatibility by returning a string
-              // Otherwise, return an array of results
-              data = hrefValues.length === 1 ? hrefValues[0] : hrefValues;
             } else {
               // Standard attribute extraction for other cases
               // Changed from $eval to $$eval to get all matching elements
@@ -337,13 +336,12 @@ export class BasicExtraction implements IExtraction {
                 this.config.attributeName
               );
 
-              // Store all raw content joined together for compatibility
+              // Store full data
+              data = attributeValues.length === 1 ? attributeValues[0] : attributeValues;
+
+              // Only truncate for logging purposes
               rawContent = attributeValues.join('\n');
               if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
-
-              // If only one result was found, keep backwards compatibility by returning a string
-              // Otherwise, return an array of results
-              data = attributeValues.length === 1 ? attributeValues[0] : attributeValues;
             }
           } catch (error) {
             logger.error(
@@ -365,13 +363,12 @@ export class BasicExtraction implements IExtraction {
             els.map(el => el.innerHTML)
           );
 
-          // Store all raw content joined together for compatibility
+          // Store full data
+          data = htmlContents.length === 1 ? htmlContents[0] : htmlContents;
+
+          // Only truncate for logging purposes
           rawContent = htmlContents.join('\n');
           if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
-
-          // If only one result was found, keep backwards compatibility by returning a string
-          // Otherwise, return an array of results
-          data = htmlContents.length === 1 ? htmlContents[0] : htmlContents;
           break;
 
         case 'outerHtml':
@@ -380,13 +377,12 @@ export class BasicExtraction implements IExtraction {
             els.map(el => el.outerHTML)
           );
 
-          // Store all raw content joined together for compatibility
+          // Store full data
+          data = outerHtmlContents.length === 1 ? outerHtmlContents[0] : outerHtmlContents;
+
+          // Only truncate for logging purposes
           rawContent = outerHtmlContents.join('\n');
           if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
-
-          // If only one result was found, keep backwards compatibility by returning a string
-          // Otherwise, return an array of results
-          data = outerHtmlContents.length === 1 ? outerHtmlContents[0] : outerHtmlContents;
           break;
 
         case 'smart':
@@ -404,8 +400,14 @@ export class BasicExtraction implements IExtraction {
 
           try {
             // Get raw content from the element
-            rawContent = await this.page.$eval(this.config.selector, (el) => el.textContent?.trim() || '');
-            if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+            const fullContent = await this.page.$eval(this.config.selector, (el) => el.textContent?.trim() || '');
+
+            // Store the full content, only truncate for logging
+            if (fullContent.length > 200) {
+              rawContent = fullContent.substring(0, 200) + '... [truncated]';
+            } else {
+              rawContent = fullContent;
+            }
 
             // Create properly typed smart options
             const smartOptions: ISmartExtractionOptions = {
@@ -432,13 +434,13 @@ export class BasicExtraction implements IExtraction {
               logger.debug(`${logPrefix} Reference context provided for smart extraction: ${smartOptions.referenceName}`);
             }
 
-            // Create a context object with the required properties
-            const extractContext: IMiddlewareContext = {
+            // Create properly typed context object for processing with AI
+            const aiContext = {
               logger: this.context.logger,
               nodeName: this.context.nodeName,
               nodeId: this.context.nodeId,
-              index: this.context.index || 0, // Provide a default value for index
-              sessionId: this.context.sessionId || 'unknown' // Add the sessionId
+              sessionId: this.context.sessionId || 'unknown',
+              index: this.context.index || 0
             };
 
             // Log fields for debugging
@@ -446,17 +448,19 @@ export class BasicExtraction implements IExtraction {
               logger.debug(`${logPrefix} Using ${this.config.fields.items.length} field definitions for manual strategy`);
             }
 
-            const smartResult = await extractSmartContent(
-              this.page,
-              this.config.selector,
+            // Use processWithAI directly with the content we already extracted
+            const aiResult = await processWithAI(
+              fullContent,
               smartOptions,
               this.config.fields?.items,
               this.config.openaiApiKey,
-              extractContext
+              aiContext
             );
 
-            // Set the data from the smart extraction result
-            data = smartResult;
+            // Set the data from the AI processing result
+            data = aiResult.data;
+            // Don't set schema here as we don't have it defined
+
             logger.info(`${logPrefix} Smart extraction successful`);
           } catch (error) {
             logger.error(`${logPrefix} Smart extraction failed: ${(error as Error).message}`);
@@ -471,104 +475,105 @@ export class BasicExtraction implements IExtraction {
           const cellSelector = this.config.cellSelector || 'td, th';
           const tableOutputFormat = this.config.outputFormat || 'json';
           const extractAttributes = this.config.extractAttributes === true;
-          const attributeName = this.config.attributeName || 'href';
-
-          logWithDebug(
-            logger,
-            this.config.debugMode || false,
-            this.context.nodeName,
-            'Extraction',
-            'extractionFactory',
-            'execute',
-            `Table extraction starting: selector=${this.config.selector}, rowSelector=${rowSelector}, cellSelector=${cellSelector}, includeHeaders=${includeHeaders}, outputFormat=${tableOutputFormat}, extractAttributes=${extractAttributes}`,
-            'info'
-          );
 
           try {
             if (tableOutputFormat === 'html') {
-              // Just return the HTML if that's what was requested
-              logger.info(`${logPrefix} Extracting table as HTML`);
-              rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
-              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
-              data = rawContent;
-              logger.info(`${logPrefix} Table HTML extracted successfully, length: ${data.length}`);
+              // Extract full HTML without truncation
+              const fullHtml = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+
+              // Store full HTML in data
+              data = fullHtml;
+
+              // Only truncate for logging purposes
+              if (fullHtml.length > 200) {
+                rawContent = fullHtml.substring(0, 200) + '... [truncated]';
+              } else {
+                rawContent = fullHtml;
+              }
             } else {
-              // Extract as array of rows and cells
-              logWithDebug(
-                logger,
-                this.config.debugMode || false,
-                this.context.nodeName,
-                'Extraction',
-                'extractionFactory',
-                'execute',
-                `Extracting table as structured data`,
-                'info'
-              );
+              // Extract structured data
+              data = await this.page.evaluate(
+                (
+                  selector: string,
+                  rowSel: string,
+                  cellSel: string,
+                  includeHead: boolean,
+                  extractAttrs: boolean,
+                  attrName: string,
+                ) => {
+                  const table = document.querySelector(selector);
+                  if (!table) return { rows: [], headers: [] };
 
-              // First check if the selector exists
-              const tableExists = await this.page.$(this.config.selector);
-              if (!tableExists) {
-                logger.warn(`${logPrefix} Table selector not found: ${this.config.selector}`);
-                throw new Error(`Table selector not found: ${this.config.selector}`);
-              }
+                  // Find all rows
+                  const rowNodes = table.querySelectorAll(rowSel);
+                  const rows: any[][] = [];
+                  let headers: string[] = [];
 
-              // Then check if rows exist
-              const rowsExist = await this.page.$(`${this.config.selector} ${rowSelector}`);
-              if (!rowsExist) {
-                logger.warn(`${logPrefix} No rows found in table with rowSelector: ${rowSelector}`);
-              }
+                  // Process rows
+                  rowNodes.forEach((row, rowIndex) => {
+                    // Skip the first row if we're using it as headers
+                    if (rowIndex === 0 && includeHead) {
+                      const headerCells = row.querySelectorAll(cellSel);
+                      headerCells.forEach((cell) => {
+                        headers.push(cell.textContent?.trim() || '');
+                      });
+                      return;
+                    }
 
-              // Get the raw HTML for raw content
-              rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
-              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+                    // Process regular rows
+                    const cells = row.querySelectorAll(cellSel);
+                    const rowData: any[] = [];
 
-              // Use the extractTableData utility function from extractionUtils.ts
-              data = await extractTableData(
-                this.page,
-                this.config.selector,
-                {
-                  includeHeaders,
-                  rowSelector,
-                  cellSelector,
-                  outputFormat: tableOutputFormat,
-                  extractAttributes,
-                  attributeName: extractAttributes ? attributeName : undefined,
+                    cells.forEach((cell) => {
+                      // Handle text or attribute extraction
+                      if (extractAttrs) {
+                        const link = cell.querySelector('a');
+                        if (link && link.getAttribute(attrName)) {
+                          rowData.push(link.getAttribute(attrName));
+                        } else {
+                          rowData.push(cell.textContent?.trim() || '');
+                        }
+                      } else {
+                        rowData.push(cell.textContent?.trim() || '');
+                      }
+                    });
+
+                    if (rowData.length > 0) {
+                      rows.push(rowData);
+                    }
+                  });
+
+                  return { rows, headers };
                 },
-                logger,
-                nodeName || 'Ventriloquist',
-                nodeId || 'unknown'
+                this.config.selector,
+                rowSelector,
+                cellSelector,
+                includeHeaders,
+                extractAttributes,
+                this.config.attributeName || 'href',
               );
 
-              // Log extraction information including whether attributes are extracted
-              logWithDebug(
-                logger,
-                this.config.debugMode || false,
-                this.context.nodeName,
-                'Extraction',
-                'extractionFactory',
-                'execute',
-                `Table data extracted: ${Array.isArray(data) ? data.length : 'object'} rows found, extracting attributes: ${extractAttributes ? attributeName : 'none'}`,
-                'info'
-              );
+              // Generate raw content representation for logging
+              let tableString = '';
 
-              // Check if smartOptions are enabled and we're using AI processing
-              if (this.config.smartOptions && this.config.smartOptions.aiAssistance && data) {
-                // Log that we're preserving data structures for AI processing
-                logWithDebug(
-                  logger,
-                  this.config.debugMode || false,
-                  this.context.nodeName,
-                  'Extraction',
-                  'extractionFactory',
-                  'execute',
-                  `Preserving original data structures for AI processing to maintain integrity of arrays, objects, and primitive values`,
-                  'info'
-                );
+              if (data.headers && data.headers.length) {
+                tableString += data.headers.join(', ') + '\n';
+              }
+
+              if (data.rows && data.rows.length) {
+                tableString += data.rows.map((row: any[]) => row.join(', ')).join('\n');
+              }
+
+              // Only truncate for logging purposes
+              if (tableString.length > 200) {
+                rawContent = tableString.substring(0, 200) + '... [truncated]';
+              } else {
+                rawContent = tableString;
               }
             }
-          } catch (err) {
-            logger.error(`${logPrefix} Table extraction failed: ${(err as Error).message}`);
-            throw err;
+          } catch (error) {
+            logger.error(`${logPrefix} Table extraction failed: ${(error as Error).message}`);
+            throw error;
           }
           break;
 

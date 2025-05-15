@@ -197,14 +197,20 @@ export class BasicExtraction implements IExtraction {
               nodeId
             );
 
-            // Store raw content as string
+            // Store raw content as string for logging
+            let fullContent = '';
             if (typeof data === 'string') {
-              rawContent = data;
+              fullContent = data;
             } else if (data && typeof data === 'object' && data.html) {
-              rawContent = data.html as string;
+              fullContent = data.html as string;
             }
 
-            if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+            // Only truncate for logging purposes
+            if (fullContent.length > 200) {
+              rawContent = fullContent.substring(0, 200) + '... [truncated]';
+            } else {
+              rawContent = fullContent;
+            }
           } catch (err) {
             logger.error(`${logPrefix} HTML extraction failed: ${(err as Error).message}`);
             throw err;
@@ -222,7 +228,7 @@ export class BasicExtraction implements IExtraction {
             nodeId
           );
 
-          // Store raw content
+          // Store raw content for logging - data remains untruncated
           rawContent = data;
           break;
 
@@ -274,14 +280,18 @@ export class BasicExtraction implements IExtraction {
           }
 
           try {
-            // First extract the text or HTML content
+            // First extract the full text or HTML content
             const content = await this.page.$eval(this.config.selector, (el) => {
               return el.textContent?.trim() || el.innerHTML;
             });
 
-            // Store raw content
-            rawContent = content;
-            if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+            // Store full content for processing
+            // Only truncate for logging purposes
+            if (content.length > 200) {
+              rawContent = content.substring(0, 200) + '... [truncated]';
+            } else {
+              rawContent = content;
+            }
 
             // Prepare the extraction context for AI processing
             const extractContext = {
@@ -360,12 +370,20 @@ export class BasicExtraction implements IExtraction {
 
           try {
             if (tableOutputFormat === 'html') {
-              // Just return the HTML if that's what was requested
-              logger.info(`${logPrefix} Extracting table as HTML`);
-              rawContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
-              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
-              data = rawContent;
-              logger.info(`${logPrefix} Table HTML extracted successfully, length: ${data.length}`);
+              // Get full HTML content
+              const fullHtmlContent = await this.page.$eval(this.config.selector, (el) => el.outerHTML);
+
+              // Store full HTML as data
+              data = fullHtmlContent;
+
+              // Only truncate for logging purposes
+              if (fullHtmlContent.length > 200) {
+                rawContent = fullHtmlContent.substring(0, 200) + '... [truncated]';
+              } else {
+                rawContent = fullHtmlContent;
+              }
+
+              logger.info(`${logPrefix} Table HTML extracted successfully, length: ${fullHtmlContent.length}`);
             } else {
               // Extract as array of rows and cells
               logger.info(`${logPrefix} Extracting table as structured data`);
