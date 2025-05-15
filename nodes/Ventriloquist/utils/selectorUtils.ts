@@ -17,10 +17,48 @@ export async function generateUniqueSelector(
         // Try to generate a specific selector using the page's internal API
         return await page.evaluate((el) => {
             /**
-             * Helper to escape CSS identifiers
+             * Helper to escape CSS identifiers according to CSS specification
+             * Handles all special characters including those at the start of identifiers
+             * Based on CSS specification: https://www.w3.org/TR/CSS21/syndata.html#characters
              */
             const escapeCssIdentifier = (str: string): string => {
-                return str.replace(/[\s!"#$%&'()*+,./;<=>?@[\\\]^`{|}~]/g, '\\$&');
+                let result = '';
+
+                for (let i = 0; i < str.length; i++) {
+                    const char = str.charAt(i);
+                    const code = str.charCodeAt(i);
+
+                    // Escape start character if it's a digit or a hyphen followed by a digit or hyphen
+                    if (i === 0 && (/[0-9]/.test(char) ||
+                        (char === '-' && str.length > 1 && (/[0-9-]/.test(str.charAt(1)))))) {
+                        result += '\\' + code.toString(16) + ' ';
+                    }
+                    // Escape special characters
+                    else if (!/[a-zA-Z0-9_-]/.test(char)) {
+                        // For ASCII characters, use backslash escape
+                        if (code < 128) {
+                            result += '\\' + char;
+                        }
+                        // For non-ASCII, use unicode escape
+                        else {
+                            result += '\\' + code.toString(16) + ' ';
+                        }
+                    }
+                    // Regular characters
+                    else {
+                        result += char;
+                    }
+                }
+
+                return result;
+            };
+
+            /**
+             * Create a CSS selector for an ID
+             * Returns attribute selector format: tagName[id="idValue"]
+             */
+            const createCssIdSelector = (tagName: string, id: string): string => {
+                return `${tagName}[id="${id.replace(/["\\]/g, '\\$&')}"]`;
             };
 
             /**
@@ -38,7 +76,7 @@ export async function generateUniqueSelector(
 
                     // Add id if available (most specific)
                     if (current.id) {
-                        selector += '#' + escapeCssIdentifier(current.id);
+                        selector = createCssIdSelector(current.tagName.toLowerCase(), current.id);
                         // ID should be unique, so we can return right away
                         path.unshift(selector);
                         return path.join(' > ');
@@ -120,7 +158,7 @@ export async function generateUniqueSelector(
 
                 // Add most useful attributes to the selector
                 for (const [attr, value] of Object.entries(attrMap)) {
-                    const attrSelector = `${selector}[${attr}="${escapeCssIdentifier(value)}"]`;
+                    const attrSelector = `${selector}[${attr}="${value.replace(/["\\]/g, '\\$&')}"]`;
                     if (isSelectorUnique(attrSelector, el)) {
                         return attrSelector;
                     }
@@ -130,7 +168,7 @@ export async function generateUniqueSelector(
                 if (Object.keys(attrMap).length > 1) {
                     let combinedSelector = selector;
                     for (const [attr, value] of Object.entries(attrMap)) {
-                        combinedSelector += `[${attr}="${escapeCssIdentifier(value)}"]`;
+                        combinedSelector += `[${attr}="${value.replace(/["\\]/g, '\\$&')}"]`;
                     }
 
                     if (isSelectorUnique(combinedSelector, el)) {
@@ -148,7 +186,7 @@ export async function generateUniqueSelector(
 
                 // Add id if available
                 if (current.id) {
-                    selector += '#' + escapeCssIdentifier(current.id);
+                    selector = createCssIdSelector(current.tagName.toLowerCase(), current.id);
                     fullPath.unshift(selector);
                     break; // ID should be unique in document
                 }
@@ -193,9 +231,20 @@ async function fallbackGenerateSelector(
 ): Promise<string> {
     try {
         return await page.evaluate((el) => {
+            /**
+             * Create a CSS selector for an ID using attribute selector
+             */
+            const createCssIdSelector = (tagName: string, id: string): string => {
+                return `${tagName}[id="${id.replace(/["\\]/g, '\\$&')}"]`;
+            };
+
             const getPath = (element: Element): string => {
                 if (!element.parentElement) {
                     return element.tagName.toLowerCase();
+                }
+
+                if (element.id) {
+                    return createCssIdSelector(element.tagName.toLowerCase(), element.id);
                 }
 
                 const index = Array.from(element.parentElement.children)
