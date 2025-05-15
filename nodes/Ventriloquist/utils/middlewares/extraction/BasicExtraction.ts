@@ -39,6 +39,8 @@ export class BasicExtraction implements IExtraction {
       let data: any = null;
       let rawContent: string = '';
       let schema: any = null;
+      // Store full content for multiple extraction types that might truncate
+      let fullMultipleContent: string = '';
 
       // Perform extraction based on type
       switch (this.config.extractionType) {
@@ -650,11 +652,17 @@ export class BasicExtraction implements IExtraction {
           logger.info(`${logPrefix} Found ${elements.length} elements matching selector`);
 
           // Get raw content as outer HTML of all matching elements
-          rawContent = await this.page.evaluate((selector) => {
+          fullMultipleContent = await this.page.evaluate((selector) => {
             const elements = document.querySelectorAll(selector);
             return Array.from(elements).map(el => el.outerHTML).join('\n');
           }, this.config.selector);
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+
+          // Store the full content for processing, only truncate for logging
+          if (fullMultipleContent.length > 200) {
+            rawContent = fullMultipleContent.substring(0, 200) + '... [truncated]';
+          } else {
+            rawContent = fullMultipleContent;
+          }
 
           // Limit the number of elements if requested
           const limitedElements = limit > 0 ? elements.slice(0, limit) : elements;
@@ -769,9 +777,41 @@ export class BasicExtraction implements IExtraction {
             'info'
           );
 
+          // Always use the full data for AI processing, never truncated content
+          // The actual data to send depends on the extraction type
+          let contentForAI = data; // Default to using the data
+
+          if (this.config.extractionType === 'multiple' && fullMultipleContent) {
+            // For multiple extraction, use the full content we saved earlier
+            contentForAI = fullMultipleContent;
+            logger.info(`${logPrefix} Using fullMultipleContent for AI processing, length: ${fullMultipleContent.length}`);
+          } else if (typeof data === 'string' && data.includes('[truncated]')) {
+            // If data somehow still contains truncation, try to use a different source
+            if (typeof rawContent === 'string' && !rawContent.includes('[truncated]')) {
+              contentForAI = rawContent;
+              logger.info(`${logPrefix} Detected truncation in data, using rawContent instead`);
+            }
+          }
+
+          // Log what content is being sent to the AI
+          logWithDebug(
+            this.context.logger,
+            this.config.debugMode || false,
+            nodeName,
+            'Extraction',
+            'BasicExtraction',
+            'processWithAI',
+            `Sending content to AI - Type: ${typeof contentForAI}, Length: ${
+              typeof contentForAI === 'string'
+                ? contentForAI.length
+                : (Array.isArray(contentForAI) ? contentForAI.length : 'unknown')
+            }`,
+            'info'
+          );
+
           const result = await processWithAI(
-            // Pass the raw data for formatting
-            rawContent,
+            // Pass the appropriate content for formatting
+            contentForAI,
             // Convert the smartOptions to the format expected by processWithAI
             {
               enabled: true,

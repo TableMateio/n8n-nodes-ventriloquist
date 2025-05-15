@@ -781,11 +781,51 @@ export class BasicExtraction implements IExtraction {
         let contentForAI = data;
 
         // For HTML content, sometimes we need the raw HTML instead of parsed text
+        // Important: rawContent may contain truncated text, we should never use it for AI processing
         if (this.config.extractionType === 'html' ||
             (this.config.extractionType === 'multiple' &&
              this.config.extractionProperty === 'outerHTML')) {
-          contentForAI = rawContent;
-          logger.info(`${logPrefix} Using raw HTML content for AI processing`);
+
+            // For HTML content, we need to ensure we're using the full content
+            // Re-extract the full HTML content if needed to avoid using truncated content
+            try {
+                // Re-fetch the full HTML to ensure we're not using truncated content
+                if (this.config.extractionType === 'html') {
+                    const fullHtml = await this.page.$$eval(this.config.selector, (els) =>
+                        els.map(el => el.innerHTML).join('\n')
+                    );
+                    contentForAI = fullHtml.length === 1 ? fullHtml[0] : fullHtml;
+                    logger.info(`${logPrefix} Re-extracted full HTML content for AI processing, length: ${typeof contentForAI === 'string' ? contentForAI.length : 'array'}`);
+                } else if (this.config.extractionType === 'multiple') {
+                    const fullHtml = await this.page.evaluate((selector) => {
+                        const elements = document.querySelectorAll(selector);
+                        return Array.from(elements).map(el => el.outerHTML).join('\n');
+                    }, this.config.selector);
+                    contentForAI = fullHtml;
+                    logger.info(`${logPrefix} Re-extracted full HTML content for multiple items, length: ${fullHtml.length}`);
+                }
+            } catch (error) {
+                // If re-extraction fails, fall back to data but log the issue
+                logger.warn(`${logPrefix} Failed to re-extract full HTML content: ${(error as Error).message}. Using original data instead.`);
+            }
+        }
+
+        // Add debug logging to see what's being sent to the AI
+        if (isDebugMode) {
+            const contentPreview = typeof contentForAI === 'string'
+                ? (contentForAI.length > 100 ? contentForAI.substring(0, 100) + '...' : contentForAI)
+                : (Array.isArray(contentForAI) ? `Array with ${contentForAI.length} items` : typeof contentForAI);
+
+            logWithDebug(
+                this.context.logger,
+                true, // Force display this debug message
+                this.context.nodeName,
+                'extraction',
+                'extractionFactory',
+                'processWithAI',
+                `Content being sent to AI: ${contentPreview}`,
+                'info'
+            );
         }
 
         // Log the field definitions for manual strategy
