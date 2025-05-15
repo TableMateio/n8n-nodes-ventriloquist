@@ -9,6 +9,7 @@ import { extractTextContent, extractHtmlContent, extractAttributeValue, extractT
 import { processWithAI } from '../../smartExtractionUtils';
 import { enhanceFieldsWithRelativeSelectorContent } from '../../processOpenAISchema';
 import { logWithDebug } from '../../loggingUtils';
+import { extractTextFromHtml } from '../../comparisonUtils';
 
 /**
  * Implements basic extraction functionality for common operations
@@ -46,21 +47,138 @@ export class BasicExtraction implements IExtraction {
           const cleanText = this.config.cleanText === true;
           data = await extractTextContent(this.page, this.config.selector, logger, nodeName, nodeId);
 
-          // Store raw content
-          rawContent = data;
+          // Store raw content before any cleaning
+          // It's important to distinguish between the raw data from extractTextContent
+          // and the data after cleaning for logging and debugging.
+          const rawExtractedData = Array.isArray(data) ? [...data] : data;
 
           if (cleanText) {
-            logger.info(`${logPrefix} Cleaning text content - original length: ${data.length}`);
-            // First replace all whitespace (including non-breaking spaces, tabs, etc.) with regular spaces
-            // but preserve newlines
-            data = data.replace(/[^\S\n\r]+/g, ' ');
-            // Then replace multiple consecutive spaces with a single space
-            data = data.replace(/ {2,}/g, ' ');
-            // Replace spaces around newlines
-            data = data.replace(/[ \t]*\n[ \t]*/g, '\n');
-            // Finally replace multiple consecutive newlines with a single newline
-            data = data.replace(/\n{2,}/g, '\n');
-            logger.info(`${logPrefix} Text cleaned - new length: ${data.length}`);
+            logger.info(`${logPrefix} [CleanText] Starting text cleaning for selector ${this.config.selector}. Initial data type: ${typeof data}, isArray: ${Array.isArray(data)}`);
+            const logCleaningInfo = (original: any, modified: any, stage: string) => {
+              const originalLength = typeof original === 'string' ? original.length : (Array.isArray(original) ? original.map(s => String(s).length).join(',') : 'N/A');
+              const modifiedLength = typeof modified === 'string' ? modified.length : (Array.isArray(modified) ? modified.map(s => String(s).length).join(',') : 'N/A');
+              logger.info(`${logPrefix} [CleanText - ${stage}] Original length(s): ${originalLength}, New length(s): ${modifiedLength}`);
+            };
+
+            let processedData;
+            if (typeof data === 'string') {
+              logger.info(`${logPrefix} [CleanText] Data is a string. BEFORE extractTextFromHtml: ${data.substring(0, 100)}... (length: ${data.length})`);
+
+              // Step 1: First use our HTML cleaner to get all tags/entities handled
+              processedData = extractTextFromHtml(data);
+
+              // Step 2: Apply additional whitespace cleanup
+              if (typeof processedData === 'string') {
+                // Replace all tab characters with spaces
+                processedData = processedData.replace(/\t+/g, ' ');
+
+                // Replace multiple spaces with single spaces
+                processedData = processedData.replace(/[ \xA0]+/g, ' ');
+
+                // Remove spaces before and after newlines
+                processedData = processedData.replace(/[ ]*\n[ ]*/g, '\n');
+
+                // Replace leading/trailing spaces on each line
+                const lines = processedData.split('\n');
+                processedData = lines
+                  .map((line: string) => line.trim())
+                  .filter((line: string) => line.length > 0)
+                  .join('\n');
+
+                // Final cleanup to ensure no multi-line breaks (more than 2)
+                processedData = processedData.replace(/\n{3,}/g, '\n\n');
+              }
+
+              logger.info(`${logPrefix} [CleanText] Data is a string. AFTER extractTextFromHtml: ${(processedData as string).substring(0, 100)}... (length: ${(processedData as string).length})`);
+              logCleaningInfo(data, processedData, 'extractTextFromHtml');
+            } else if (Array.isArray(data)) {
+              logger.info(`${logPrefix} [CleanText] Data is an array. Length: ${data.length}`);
+              processedData = data.map((item, itemIndex) => {
+                if (typeof item === 'string') {
+                  logger.info(`${logPrefix} [CleanText] Array item[${itemIndex}] is a string. BEFORE extractTextFromHtml: ${item.substring(0, 100)}... (length: ${item.length})`);
+
+                  // First clean HTML
+                  let cleanedItem = extractTextFromHtml(item);
+
+                  // Additional whitespace cleanup
+                  cleanedItem = cleanedItem.replace(/\t+/g, ' ');
+                  cleanedItem = cleanedItem.replace(/[ \xA0]+/g, ' ');
+                  cleanedItem = cleanedItem.replace(/[ ]*\n[ ]*/g, '\n');
+
+                  const lines = cleanedItem.split('\n');
+                  cleanedItem = lines
+                    .map((line: string) => line.trim())
+                    .filter((line: string) => line.length > 0)
+                    .join('\n');
+
+                  cleanedItem = cleanedItem.replace(/\n{3,}/g, '\n\n');
+
+                  logger.info(`${logPrefix} [CleanText] Array item[${itemIndex}] is a string. AFTER extractTextFromHtml: ${cleanedItem.substring(0, 100)}... (length: ${cleanedItem.length})`);
+                  return cleanedItem;
+                }
+                logger.warn(`${logPrefix} [CleanText] Array item[${itemIndex}] is NOT a string (type: ${typeof item}). Skipping.`);
+                return item;
+              });
+              // For array logging, we might log total length changes or skip detailed per-item logging here
+              logCleaningInfo(data, processedData, 'extractTextFromHtml (Array)');
+            } else {
+              processedData = data; // If not string or array, do nothing
+            }
+
+            data = processedData;
+            logger.info(`${logPrefix} Text cleaning finished.`);
+          } else {
+            // Even without clean text option, apply minimal cleaning to handle most problematic cases
+            // This is important for text content extraction so we get consistent behavior
+            logger.info(`${logPrefix} [CleanText] Applying minimal text cleaning for text content extraction`);
+
+            if (typeof data === 'string') {
+              // Remove iframes at minimum
+              data = data.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
+
+              // Remove clearly invisible elements like scripts
+              data = data.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+              data = data.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+
+              // Basic cleanup of whitespace
+              data = data.replace(/\t+/g, ' ');
+              data = data.replace(/[ ]{3,}/g, ' ');
+
+              // Remove empty lines and normalize consecutive newlines
+              const lines = data.split('\n');
+              data = lines
+                .map((line: string) => line.trim())
+                .filter((line: string) => line.length > 0)
+                .join('\n');
+
+              data = data.replace(/\n{3,}/g, '\n\n');
+
+              logger.info(`${logPrefix} [CleanText] Applied minimal cleaning to text content`);
+            } else if (Array.isArray(data)) {
+              data = data.map(item => {
+                if (typeof item === 'string') {
+                  // Apply the same minimal cleaning to each item
+                  let cleaned = item;
+                  cleaned = cleaned.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
+                  cleaned = cleaned.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+                  cleaned = cleaned.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+                  cleaned = cleaned.replace(/\t+/g, ' ');
+                  cleaned = cleaned.replace(/[ ]{3,}/g, ' ');
+
+                  // Split into lines, trim, filter out empty lines, and rejoin
+                  const lines = cleaned.split('\n');
+                  cleaned = lines
+                    .map((line: string) => line.trim())
+                    .filter((line: string) => line.length > 0)
+                    .join('\n');
+
+                  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+                  return cleaned;
+                }
+                return item;
+              });
+            }
           }
           break;
 

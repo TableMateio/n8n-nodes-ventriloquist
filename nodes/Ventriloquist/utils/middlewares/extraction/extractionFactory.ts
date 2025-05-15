@@ -152,74 +152,143 @@ export class BasicExtraction implements IExtraction {
 
       switch (this.config.extractionType) {
         case 'text':
-          // Modified to handle BR tags and excessive newlines
-          const textContent = await this.page.$eval(this.config.selector, (el) => {
-            // Get the original HTML
-            const originalHtml = el.innerHTML;
+          // Extract text content with improved HTML handling and whitespace normalization
+          logger.info(`${logPrefix} Extracting text content from selector: ${this.config.selector}`);
 
-            // First, directly replace all <br> tags with newlines in the HTML
-            // This is a more direct approach than using the document fragment
-            let modifiedHtml = originalHtml.replace(/<br\s*\/?>/gi, '\n');
+          try {
+            const textContent = await this.page.$eval(this.config.selector, (el) => {
+              // Try to get innerText first, which has better handling of visibility
+              const innerText = (el as HTMLElement).innerText || '';
 
-            // Create a temporary div to extract text
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = modifiedHtml;
+              // Get outerHTML as fallback, especially useful for debugging
+              const outerHTML = el.outerHTML || '';
 
-            // Get text content
-            let content = tempDiv.textContent || '';
+              return {
+                innerText,
+                outerHTML
+              };
+            });
 
-            // Remove excessive whitespace at the beginning (common in HTML)
-            content = content.replace(/^\s+/, '');
+            // Strongly prefer innerText, as it already handles browser-level rendering
+            let processedText = textContent.innerText && textContent.innerText.trim().length > 0
+              ? textContent.innerText
+              : textContent.outerHTML;
 
-            // Normalize whitespace: replace multiple spaces with single space
-            content = content.replace(/ {2,}/g, ' ');
+            // Store raw content before any cleaning
+            rawContent = processedText;
 
-            // Limit consecutive newlines to a maximum of 2
-            content = content.replace(/\n{3,}/g, '\n\n');
-
-            // Trim leading and trailing whitespace
-            content = content.trim();
-
-            return content;
-          });
-
-          // Store raw content
-          rawContent = textContent;
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
-
-          // Set data to the extracted text
-          data = textContent;
-
-          // Apply additional text cleaning if the option is enabled
-          if (this.config.cleanText) {
-            logger.info(`${logPrefix} Applying additional text cleaning`);
-
-            if (Array.isArray(data)) {
-              // Clean each element in the array
-              data = data.map(item => {
-                // Replace any remaining excessive whitespace
-                let cleaned = item.replace(/ {2,}/g, ' ');
-                // Ensure single newlines are preserved
-                cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
-                return cleaned.trim();
-              });
-            } else if (typeof data === 'string') {
-              // Replace any remaining excessive whitespace
-              data = data.replace(/ {2,}/g, ' ');
-              // Ensure single newlines are preserved
-              data = data.replace(/\n{3,}/g, '\n\n');
-              data = data.trim();
+            // Log the raw extraction
+            logger.info(`${logPrefix} Raw extracted content type: ${typeof processedText}, length: ${processedText.length}`);
+            if (processedText.length > 100) {
+              logger.info(`${logPrefix} Raw extracted content preview: ${processedText.substring(0, 100)}...`);
             }
 
-            // Update rawContent to reflect cleaned data
-            if (Array.isArray(data)) {
-              rawContent = data.join('\n');
+            // Basic cleaning that happens regardless of cleanText option
+            // Remove problematic and invisible HTML elements that commonly cause issues
+            if (processedText.includes('<iframe') ||
+                processedText.includes('<script') ||
+                processedText.includes('<style')) {
+
+              logger.info(`${logPrefix} Detected HTML elements in content, applying basic removal...`);
+
+              // Remove iframes completely - these often create the biggest problems
+              processedText = processedText.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
+
+              // Remove scripts
+              processedText = processedText.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+
+              // Remove styles
+              processedText = processedText.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+            }
+
+            // Apply enhanced text cleaning if enabled
+            if (this.config.cleanText) {
+              logger.info(`${logPrefix} CleanText enabled, applying enhanced text cleaning`);
+
+              // First handle <br> tags properly before any other HTML cleaning
+              processedText = processedText.replace(/<br\s*\/?>/gi, '\n');
+
+              // Remove all other HTML tags
+              processedText = processedText.replace(/<[^>]*>/g, '');
+
+              // Decode common HTML entities
+              const htmlEntities: Record<string, string> = {
+                '&nbsp;': ' ',
+                '&amp;': '&',
+                '&lt;': '<',
+                '&gt;': '>',
+                '&quot;': '"',
+                '&#39;': "'",
+                '&apos;': "'",
+                '&mdash;': '—',
+                '&ndash;': '–'
+              };
+
+              for (const [entity, replacement] of Object.entries(htmlEntities)) {
+                processedText = processedText.replace(new RegExp(entity, 'g'), replacement);
+              }
+
+              // Handle numeric HTML entities
+              processedText = processedText.replace(/&#(\d+);/g, (match, dec) =>
+                String.fromCharCode(parseInt(dec, 10)));
+
+              // Handle hex HTML entities
+              processedText = processedText.replace(/&#[xX]([A-Fa-f0-9]+);/g, (match, hex) =>
+                String.fromCharCode(parseInt(hex, 16)));
+
+              // Advanced whitespace normalization
+
+              // First handle tabs
+              processedText = processedText.replace(/\t+/g, ' ');
+
+              // Normalize line breaks
+              processedText = processedText.replace(/\r\n?/g, '\n');
+
+              // Replace multiple spaces with a single space
+              processedText = processedText.replace(/[ \xA0]+/g, ' ');
+
+              // Remove spaces before and after newlines
+              processedText = processedText.replace(/ *\n */g, '\n');
+
+              // Split by lines, trim each line, and remove empty lines
+              const lines = processedText.split('\n');
+              const nonEmptyLines = lines
+                .map((line: string) => line.trim())
+                .filter((line: string) => line.length > 0);
+
+              // Join lines with single newlines
+              processedText = nonEmptyLines.join('\n');
+
+              // Final pass to replace more than 2 consecutive newlines with just 2
+              processedText = processedText.replace(/\n{3,}/g, '\n\n');
+
+              logger.info(`${logPrefix} Text cleaned successfully, reduced from ${rawContent.length} to ${processedText.length} chars`);
             } else {
-              rawContent = data;
-            }
-            if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+              // Even without cleanText enabled, apply minimal cleanup for consistent behavior
+              logger.info(`${logPrefix} CleanText disabled, applying minimal cleanup`);
 
-            logger.info(`${logPrefix} Text cleaned successfully`);
+              // Basic tab handling
+              processedText = processedText.replace(/\t+/g, ' ');
+
+              // Replace multiple consecutive spaces
+              processedText = processedText.replace(/[ ]{3,}/g, ' ');
+
+              // Handle excessive newlines but preserve more formatting than full clean
+              processedText = processedText.replace(/\n{5,}/g, '\n\n\n\n');
+            }
+
+            // Update rawContent to store pre-truncated content
+            if (processedText.length > 200) {
+              rawContent = processedText.substring(0, 200) + '... [truncated]';
+            } else {
+              rawContent = processedText;
+            }
+
+            // Set data to the cleaned and processed text
+            data = processedText;
+          } catch (error) {
+            logger.error(`${logPrefix} Error extracting text content: ${(error as Error).message}`);
+            throw error;
           }
           break;
 
@@ -562,15 +631,54 @@ export class BasicExtraction implements IExtraction {
                 // Clean text if the option is enabled
                 if (this.config.cleanText) {
                   logger.info(`${logPrefix} Cleaning text content - original length: ${textContent.length}`);
-                  // First replace all whitespace (including non-breaking spaces, tabs, etc.) with regular spaces
-                  textContent = textContent.replace(/[\s\n\r\t\f\v]+/g, ' ');
-                  // Then replace multiple consecutive spaces with a single space
-                  textContent = textContent.replace(/ {2,}/g, ' ');
-                  // Replace newlines around spaces/whitespace
-                  textContent = textContent.replace(/\s*\n\s*/g, '\n');
-                  // Finally replace multiple consecutive newlines
-                  textContent = textContent.replace(/\n{2,}/g, '\n');
+
+                  // First check for HTML content that needs special handling
+                  if (textContent.includes('<iframe') ||
+                      textContent.includes('<script') ||
+                      textContent.includes('<style')) {
+
+                    // Remove problematic HTML elements
+                    textContent = textContent.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
+                    textContent = textContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+                    textContent = textContent.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+                  }
+
+                  // Handle <br> tags properly
+                  textContent = textContent.replace(/<br\s*\/?>/gi, '\n');
+
+                  // Remove all other HTML tags
+                  textContent = textContent.replace(/<[^>]*>/g, '');
+
+                  // First handle tabs and other whitespace characters
+                  textContent = textContent.replace(/[\t\f\v]+/g, ' ');
+
+                  // Normalize line breaks
+                  textContent = textContent.replace(/\r\n?/g, '\n');
+
+                  // Replace multiple spaces with a single space
+                  textContent = textContent.replace(/[ \xA0]+/g, ' ');
+
+                  // Remove spaces before and after newlines
+                  textContent = textContent.replace(/ *\n */g, '\n');
+
+                  // Split by lines, trim each line, and remove empty lines
+                  const lines = textContent.split('\n');
+                  const nonEmptyLines = lines
+                    .map((line: string) => line.trim())
+                    .filter((line: string) => line.length > 0);
+
+                  // Join lines with single newlines
+                  textContent = nonEmptyLines.join('\n');
+
+                  // Final pass to replace more than 2 consecutive newlines with just 2
+                  textContent = textContent.replace(/\n{3,}/g, '\n\n');
+
                   logger.info(`${logPrefix} Text cleaned - new length: ${textContent.length}`);
+                } else {
+                  // Even without cleanText, do basic cleaning
+                  textContent = textContent.replace(/\t+/g, ' ');
+                  textContent = textContent.replace(/[ ]{3,}/g, ' ');
+                  textContent = textContent.replace(/\n{5,}/g, '\n\n\n\n');
                 }
 
                 return textContent;

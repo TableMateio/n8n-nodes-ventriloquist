@@ -103,32 +103,72 @@ export async function extractTextContent(
 	nodeId: string,
 ): Promise<string | string[]> {
 	try {
-		// Changed from $eval to $$eval to get all matching elements
+		// Get text directly from the DOM to avoid HTML parsing issues
 		const textContents = await page.$$eval(selector, (elements) => {
 			return elements.map(el => {
-				// Handle special cases like <br> tags in HTML content
-				const text = el.textContent || '';
-				return text.trim();
+				// Try to get just the visible text first (preferred)
+				const visibleText = (el as HTMLElement).innerText || '';
+
+				// Also get HTML as fallback (only used if visibleText is completely empty)
+				const htmlContent = el.outerHTML || '';
+
+				// Return both for processing
+				return {
+					text: visibleText,
+					html: htmlContent
+				};
 			});
 		});
 
 		// Log the number of elements found
 		logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Found ${textContents.length} elements matching selector for text extraction`);
 
+		// Process the contents with special attention to newlines and tabs
+		const processedContents = textContents.map(content => {
+			// Strongly prefer innerText, only use HTML as a last resort
+			// This is important because innerText already handles correct visibility and styling
+			let processedText = content.text && content.text.trim().length > 0
+				? content.text
+				: content.html;
+
+			// Clean up the text regardless of source (innerText or HTML)
+			// First remove problematic HTML elements that often cause issues
+			if (processedText.includes('<iframe') || processedText.includes('<script')) {
+				processedText = processedText.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
+				processedText = processedText.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+				processedText = processedText.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+			}
+
+			// Remove excessive newlines (more than 2 consecutive)
+			processedText = processedText.replace(/\n{3,}/g, '\n\n');
+
+			// Replace tabs with spaces
+			processedText = processedText.replace(/\t+/g, ' ');
+
+			// Replace multiple spaces with single spaces
+			processedText = processedText.replace(/[ ]{2,}/g, ' ');
+
+			// Process each line individually for better quality
+			const lines = processedText.split('\n');
+			const nonEmptyLines = lines
+				.map(line => line.trim())
+				.filter(line => line.length > 0);
+
+			// Join with newlines and ensure consistent spacing
+			processedText = nonEmptyLines.join('\n');
+
+			return processedText;
+		});
+
 		// For backwards compatibility, return a single string if only one element was found
-		if (textContents.length === 1) {
-			const truncatedData = formatExtractedDataForLog(textContents[0], 'text');
-			logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted text content: ${truncatedData}`);
-
-			// Log additional debug info
-			const brCount = (textContents[0].match(/\n/g) || []).length;
-			logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Text has ${brCount} newlines`);
-
-			return textContents[0];
+		if (processedContents.length === 1) {
+			const truncatedData = formatExtractedDataForLog(processedContents[0], 'text');
+			logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted content: ${truncatedData}`);
+			return processedContents[0];
 		} else {
 			// If multiple elements were found, return them as an array
-			logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted ${textContents.length} text values`);
-			return textContents;
+			logger.info(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Extracted ${processedContents.length} content values`);
+			return processedContents;
 		}
 	} catch (error) {
 		logger.error(`[Ventriloquist][${nodeName}][${nodeId}][Extract] Failed to extract text: ${(error as Error).message}`);

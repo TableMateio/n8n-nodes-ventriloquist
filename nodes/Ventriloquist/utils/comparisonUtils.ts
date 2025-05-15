@@ -57,24 +57,164 @@ export const DEFAULT_COMPARISON_OPTIONS: IStringComparisonOptions = {
  * Removes all HTML tags while preserving text structure
  */
 export function extractTextFromHtml(html: string): string {
-    if (!html) return '';
+    if (!html || typeof html !== 'string') return '';
 
-    // Replace common block elements with newlines to preserve structure
-    let text = html
-        .replace(/<(\/?)(?:div|p|h[1-6]|br|tr|ul|ol|li|blockquote|pre|header|footer|section|article)[^>]*>/gi,
-                 (_, closing) => closing ? '\n' : '\n')
-        .replace(/<[^>]+>/g, '') // Remove all remaining HTML tags
-        .replace(/&nbsp;/g, ' ') // Replace non-breaking spaces with regular spaces
-        .replace(/&lt;/g, '<')   // Replace common HTML entities
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
+    // Quick check if this is likely HTML or just plain text
+    const containsHtml = /<[a-z][\s\S]*>/i.test(html);
 
-    // Normalize multiple newlines to a single newline
-    text = text.replace(/\n{2,}/g, '\n');
+    // If it's already clean text without HTML, just do whitespace normalization
+    if (!containsHtml) {
+        return normalizeWhitespace(html);
+    }
 
-    return text.trim();
+    // STEP 1: Aggressively remove all invisible/embedded elements with their content
+    let text = html;
+
+    // Remove iframes completely - this is crucial
+    text = text.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
+
+    // Remove all other non-visible elements
+    const nonVisibleTags = [
+        'script', 'style', 'meta', 'link', 'embed', 'object',
+        'canvas', 'applet', 'noscript', 'svg', 'template',
+        'command', 'keygen', 'source', 'param', 'track',
+        'head', 'frame', 'frameset', 'video', 'audio'
+    ];
+
+    // Remove each tag type
+    nonVisibleTags.forEach(tag => {
+        const regex = new RegExp(`<${tag}\\b[^<]*(?:(?!<\\/${tag}>)<[^<]*)*<\\/${tag}>`, 'gi');
+        text = text.replace(regex, '');
+    });
+
+    // STEP 2: Replace common structural elements with newlines
+    const blockElements = [
+        'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'ul', 'ol', 'li', 'table', 'tr', 'pre', 'blockquote',
+        'header', 'footer', 'section', 'article', 'aside',
+        'nav', 'form', 'fieldset', 'figure', 'figcaption',
+        'details', 'summary', 'dd', 'dt'
+    ];
+
+    blockElements.forEach(tag => {
+        const openRegex = new RegExp(`<${tag}[^>]*>`, 'gi');
+        const closeRegex = new RegExp(`<\\/${tag}>`, 'gi');
+        text = text.replace(openRegex, '\n');
+        text = text.replace(closeRegex, '\n');
+    });
+
+    // STEP 3: Handle line breaks
+    text = text.replace(/<br[^>]*>/gi, '\n');
+    text = text.replace(/<hr[^>]*>/gi, '\n');
+
+    // STEP 4: Remove ALL remaining HTML tags (including unclosed tags and attributes)
+    text = text.replace(/<[^>]*>/g, '');
+
+    // STEP 5: Decode HTML entities (comprehensive list)
+    const htmlEntities: Record<string, string> = {
+        '&nbsp;': ' ',
+        '&amp;': '&',
+        '&lt;': '<',
+        '&gt;': '>',
+        '&quot;': '"',
+        '&#39;': "'",
+        '&apos;': "'",
+        '&mdash;': '—',
+        '&ndash;': '–',
+        '&hellip;': '...',
+        '&lsquo;': "'",
+        '&rsquo;': "'",
+        '&ldquo;': '"',
+        '&rdquo;': '"',
+        '&bull;': '•',
+        '&copy;': '©',
+        '&reg;': '®',
+        '&trade;': '™',
+        '&cent;': '¢',
+        '&pound;': '£',
+        '&euro;': '€',
+        '&yen;': '¥',
+        '&deg;': '°',
+        '&sect;': '§',
+        '&para;': '¶',
+        '&dagger;': '†',
+        '&Dagger;': '‡',
+        '&permil;': '‰',
+        '&laquo;': '«',
+        '&raquo;': '»',
+        '&times;': '×',
+        '&divide;': '÷',
+        '&plusmn;': '±',
+        '&micro;': 'µ',
+        '&middot;': '·',
+        '&frac14;': '¼',
+        '&frac12;': '½',
+        '&frac34;': '¾',
+        '&prime;': '′',
+        '&Prime;': '″',
+        '&mu;': 'μ',
+        '&pi;': 'π'
+    };
+
+    // Replace common entities
+    Object.entries(htmlEntities).forEach(([entity, replacement]) => {
+        text = text.replace(new RegExp(entity, 'g'), replacement);
+    });
+
+    // More comprehensive entity decoding for numeric entities
+    text = text.replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(parseInt(dec, 10)));
+    text = text.replace(/&#[xX]([A-Fa-f0-9]+);/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)));
+
+    // STEP 6: Apply unified whitespace normalization
+    return normalizeWhitespace(text);
+}
+
+/**
+ * Apply consistent whitespace normalization rules
+ * This is extracted to a separate function to ensure consistency
+ */
+function normalizeWhitespace(text: string): string {
+    if (!text) return '';
+
+    // Convert all whitespace characters to standard spaces or newlines
+    let cleaned = text;
+
+    // Convert tabs to spaces
+    cleaned = cleaned.replace(/\t+/g, ' ');
+
+    // Normalize Windows and Mac line breaks to Unix style
+    cleaned = cleaned.replace(/\r\n?/g, '\n');
+
+    // Replace consecutive spaces with a single space
+    cleaned = cleaned.replace(/[ \xA0]+/g, ' ');
+
+    // Remove any spaces before or after newlines
+    cleaned = cleaned.replace(/ *\n */g, '\n');
+
+    // Process lines individually
+    const lines = cleaned.split('\n');
+    const filteredLines: string[] = [];
+
+    for (const line of lines) {
+        const trimmedLine = line.trim();
+        if (trimmedLine.length > 0) {
+            filteredLines.push(trimmedLine);
+        }
+    }
+
+    // Join non-empty lines with a single newline
+    cleaned = filteredLines.join('\n');
+
+    // Replace multiple consecutive newlines with a maximum of two (for paragraph breaks)
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+    // Trim leading and trailing whitespace
+    cleaned = cleaned.trim();
+
+    // Final check for any remaining multiple spaces that might have been introduced
+    cleaned = cleaned.replace(/[ ]{2,}/g, ' ');
+
+    return cleaned;
 }
 
 /**
