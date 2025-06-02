@@ -218,7 +218,15 @@ export async function expandLinkedRecords(
 				for (const linkedId of originalLinkedIds) {
 					if (typeof linkedId === 'string' && recordMap?.has(linkedId)) {
 						const linkedRecord = recordMap.get(linkedId)!;
-						expandedRecords.push(linkedRecord);
+
+						// Flatten the linked record to avoid nested 'fields' structure
+						const flattenedLinkedRecord = {
+							id: linkedRecord.id,
+							createdTime: linkedRecord.createdTime,
+							...(linkedRecord.fields as IDataObject)
+						};
+
+						expandedRecords.push(flattenedLinkedRecord);
 					}
 				}
 
