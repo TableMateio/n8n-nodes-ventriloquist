@@ -56,12 +56,12 @@ const properties: INodeProperties[] = [
 		placeholder: 'Add linked record options',
 		options: [
 			{
-				displayName: 'Expand Linked Fields',
-				name: 'fieldsToExpand',
+				displayName: 'Tables to Include in Expansion',
+				name: 'tablesToInclude',
 				type: 'multiOptions',
 				typeOptions: {
-					loadOptionsMethod: 'getLinkedRecordFields',
-					loadOptionsDependsOn: ['base.value', 'table.value'],
+					loadOptionsMethod: 'getTables',
+					loadOptionsDependsOn: ['base.value'],
 				},
 				default: [],
 				description: 'Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
@@ -72,10 +72,10 @@ const properties: INodeProperties[] = [
 				type: 'number',
 				typeOptions: {
 					minValue: 1,
-					maxValue: 3,
+					maxValue: 5,
 				},
 				default: 1,
-				description: 'Maximum depth to expand nested linked records (1-3 levels)',
+				description: 'Maximum depth to expand nested linked records (1-5 levels)',
 			},
 			{
 				displayName: 'Include Original IDs',
@@ -111,8 +111,6 @@ export async function execute(
 			id = this.getNodeParameter('id', i) as string;
 			const linkedRecordExpansion = this.getNodeParameter('linkedRecordExpansion', i, {}) as IDataObject;
 
-			console.log('DEBUG: Get operation - linkedRecordExpansion parameter:', JSON.stringify(linkedRecordExpansion, null, 2));
-
 			const responseData = await apiRequest.call(this, 'GET', `${base}/${table}/${id}`);
 
 			const options = this.getNodeParameter('options', 0, {});
@@ -130,27 +128,20 @@ export async function execute(
 			let record = responseData as IDataObject;
 
 			// Check if linked record expansion is requested
-			if (linkedRecordExpansion.fieldsToExpand &&
-			    Array.isArray(linkedRecordExpansion.fieldsToExpand) &&
-			    linkedRecordExpansion.fieldsToExpand.length > 0) {
-
-				console.log('DEBUG: Get operation - Linked record expansion is enabled');
-				console.log('DEBUG: Get operation - Fields to expand:', linkedRecordExpansion.fieldsToExpand);
+			if (linkedRecordExpansion.tablesToInclude &&
+			    Array.isArray(linkedRecordExpansion.tablesToInclude) &&
+			    linkedRecordExpansion.tablesToInclude.length > 0) {
 
 				try {
 					// Get table schema to identify linked fields
 					const { linkedFields } = await getTableSchema.call(this, base, table);
 
-					console.log('DEBUG: Get operation - Found linked fields:', linkedFields);
-
 					// Set up expansion options
 					const expansionOptions = {
-						fieldsToExpand: linkedRecordExpansion.fieldsToExpand as string[],
+						tablesToInclude: linkedRecordExpansion.tablesToInclude as string[],
 						maxDepth: (linkedRecordExpansion.maxDepth as number) || 1,
 						includeOriginalIds: (linkedRecordExpansion.includeOriginalIds as boolean) || false,
 					};
-
-					console.log('DEBUG: Get operation - Expansion options:', expansionOptions);
 
 					// Expand linked records - pass single record as array, then extract
 					const expandedRecords = await expandLinkedRecords.call(
@@ -163,15 +154,11 @@ export async function execute(
 
 					// Extract the single expanded record
 					record = expandedRecords[0] || record;
-
-					console.log('DEBUG: Get operation - Record after expansion:', JSON.stringify(record, null, 2));
 				} catch (expansionError) {
 					// Log the error but don't fail the entire operation
 					console.error('Error expanding linked records in Get operation:', expansionError);
 					// Continue with non-expanded record
 				}
-			} else {
-				console.log('DEBUG: Get operation - Linked record expansion is NOT enabled or no fields selected');
 			}
 
 			const executionData = this.helpers.constructExecutionMetaData(

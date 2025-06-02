@@ -8,9 +8,31 @@ interface LinkedFieldInfo {
 }
 
 interface LinkedRecordExpansionOptions {
-	fieldsToExpand: string[];
+	tablesToInclude: string[];
 	maxDepth: number;
 	includeOriginalIds: boolean;
+}
+
+interface ExpansionPath {
+	fullPath: string;
+	currentStep: string;
+	remainingPath: string;
+	maxDepth: number;
+}
+
+/**
+ * Determines which linked fields should be expanded based on table inclusion list
+ */
+export function getExpandableFields(
+	linkedFields: LinkedFieldInfo[],
+	options: LinkedRecordExpansionOptions,
+	usedTables: Set<string>
+): LinkedFieldInfo[] {
+	// At any level: Expand any linked field that points to an included table (and hasn't been used)
+	return linkedFields.filter(field =>
+		options.tablesToInclude.includes(field.linkedTableId) &&
+		!usedTables.has(field.linkedTableId)
+	);
 }
 
 /**
@@ -34,11 +56,9 @@ export async function getTableSchema(
 	const linkedFields: LinkedFieldInfo[] = [];
 	const allFields = tableData.fields as IDataObject[];
 
-	console.log('DEBUG: All fields from Airtable:', JSON.stringify(allFields, null, 2));
+	// Removed excessive debugging to prevent console overflow
 
 	for (const field of allFields) {
-		console.log(`DEBUG: Field "${field.name}" has type: "${field.type}"`);
-
 		// Check if this is a linked record field - try multiple possible type names
 		const fieldType = (field.type as string)?.toLowerCase();
 		if (fieldType?.includes('multiplerecordlinks') ||
@@ -47,20 +67,14 @@ export async function getTableSchema(
 		    fieldType?.includes('link') ||
 		    fieldType === 'multipleRecordLinks') {
 
-			console.log(`DEBUG: Found linked field "${field.name}" with type "${field.type}"`);
-
 			const fieldOptions = field.options as IDataObject;
 			const linkedTableId = fieldOptions?.linkedTableId as string;
-
-			console.log(`DEBUG: Field options for "${field.name}":`, JSON.stringify(fieldOptions, null, 2));
 
 			if (linkedTableId) {
 				// Find the linked table name for better debugging
 				const linkedTable = ((response.tables as IDataObject[]) || []).find((table: IDataObject) => {
 					return table.id === linkedTableId;
 				});
-
-				console.log(`DEBUG: Found linked table for "${field.name}": ${linkedTable?.name || 'UNKNOWN'}`);
 
 				linkedFields.push({
 					fieldName: field.name as string,
@@ -71,7 +85,7 @@ export async function getTableSchema(
 		}
 	}
 
-	console.log('DEBUG: Final linkedFields array:', JSON.stringify(linkedFields, null, 2));
+	console.log(`DEBUG: Found ${linkedFields.length} linked fields:`, linkedFields.map(f => f.fieldName));
 
 	return { linkedFields, allFields };
 }
@@ -160,7 +174,7 @@ export async function fetchLinkedRecords(
 }
 
 /**
- * Expands linked record fields in the main records with full record data
+ * Efficient level-by-level expansion with batching within each level
  */
 export async function expandLinkedRecords(
 	this: IExecuteFunctions,
@@ -169,41 +183,73 @@ export async function expandLinkedRecords(
 	linkedFields: LinkedFieldInfo[],
 	options: LinkedRecordExpansionOptions,
 	currentDepth: number = 1,
+	usedTables: Set<string> = new Set()
 ): Promise<IDataObject[]> {
-	if (currentDepth > options.maxDepth || options.fieldsToExpand.length === 0) {
+	console.log(`DEBUG: Level ${currentDepth} expansion with ${records.length} records (max depth ${options.maxDepth})`);
+
+	if (currentDepth > options.maxDepth) {
+		console.log(`DEBUG: Reached max depth ${options.maxDepth}`);
 		return records;
 	}
 
-	// Filter to only fields that are both linked and requested for expansion
-	const fieldsToProcess = linkedFields.filter(field =>
-		options.fieldsToExpand.includes(field.fieldName)
-	);
+	// Get expandable fields at this level
+	const fieldsToProcess = getExpandableFields(linkedFields, options, usedTables);
 
 	if (fieldsToProcess.length === 0) {
+		console.log(`DEBUG: No expandable fields at level ${currentDepth}`);
 		return records;
 	}
 
-	// Collect all linked record IDs by field
-	const linkedRecordIdsByField = collectLinkedRecordIds(records, options.fieldsToExpand);
+	console.log(`DEBUG: Level ${currentDepth} - expanding fields:`,
+		fieldsToProcess.map(f => `${f.fieldName} -> ${f.linkedTableName || f.linkedTableId}`));
 
-	// Fetch linked records for each table
-	const linkedRecordMaps = new Map<string, Map<string, IDataObject>>();
+	// Mark these tables as used for this branch
+	const newUsedTables = new Set(usedTables);
+	fieldsToProcess.forEach(field => newUsedTables.add(field.linkedTableId));
+
+	// Collect unique record IDs needed for this level only
+	const tableRecordIds = new Map<string, Set<string>>();
 
 	for (const field of fieldsToProcess) {
-		const recordIds = Array.from(linkedRecordIdsByField.get(field.fieldName) || []);
+		const tableId = field.linkedTableId;
+		if (!tableRecordIds.has(tableId)) {
+			tableRecordIds.set(tableId, new Set());
+		}
 
-		if (recordIds.length > 0) {
-			const recordMap = await fetchLinkedRecords.call(
-				this,
-				base,
-				field.linkedTableId,
-				recordIds
-			);
-			linkedRecordMaps.set(field.fieldName, recordMap);
+		const recordIdSet = tableRecordIds.get(tableId)!;
+
+		// Collect linked record IDs from all records
+		for (const record of records) {
+			const fields = record.fields as IDataObject;
+			const linkedIds = fields[field.fieldName];
+
+			if (Array.isArray(linkedIds)) {
+				for (const id of linkedIds) {
+					if (typeof id === 'string' && id.startsWith('rec')) {
+						recordIdSet.add(id);
+					}
+				}
+			}
 		}
 	}
 
-	// Expand the records
+	// Batch fetch records for this level (one API call per table)
+	const fetchedRecordsMap = new Map<string, Map<string, IDataObject>>();
+
+	for (const [tableId, recordIds] of tableRecordIds.entries()) {
+		if (recordIds.size > 0) {
+			console.log(`DEBUG: Level ${currentDepth} - fetching ${recordIds.size} records from table ${tableId}`);
+			const recordMap = await fetchLinkedRecords.call(
+				this,
+				base,
+				tableId,
+				Array.from(recordIds)
+			);
+			fetchedRecordsMap.set(tableId, recordMap);
+		}
+	}
+
+	// Expand records with fetched data
 	const expandedRecords = records.map(record => {
 		const recordFields = record.fields as IDataObject;
 		const fields = { ...recordFields };
@@ -212,25 +258,25 @@ export async function expandLinkedRecords(
 			const originalLinkedIds = fields[field.fieldName];
 
 			if (Array.isArray(originalLinkedIds)) {
-				const recordMap = linkedRecordMaps.get(field.fieldName);
+				const tableRecordMap = fetchedRecordsMap.get(field.linkedTableId);
 				const expandedRecords: IDataObject[] = [];
 
 				for (const linkedId of originalLinkedIds) {
-					if (typeof linkedId === 'string' && recordMap?.has(linkedId)) {
-						const linkedRecord = recordMap.get(linkedId)!;
+					if (typeof linkedId === 'string' && tableRecordMap?.has(linkedId)) {
+						const linkedRecord = tableRecordMap.get(linkedId)!;
 
-						// Flatten the linked record to avoid nested 'fields' structure
-						const flattenedLinkedRecord = {
+						// Flatten the linked record
+						const flattenedRecord = {
 							id: linkedRecord.id,
 							createdTime: linkedRecord.createdTime,
 							...(linkedRecord.fields as IDataObject)
 						};
 
-						expandedRecords.push(flattenedLinkedRecord);
+						expandedRecords.push(flattenedRecord);
 					}
 				}
 
-				// Replace or augment the field based on options
+				// Replace or augment the field
 				if (options.includeOriginalIds) {
 					fields[`${field.fieldName}_expanded`] = expandedRecords;
 				} else {
@@ -245,10 +291,116 @@ export async function expandLinkedRecords(
 		};
 	});
 
-	// If we haven't reached max depth, recursively expand nested linked records
+	console.log(`DEBUG: Level ${currentDepth} expansion complete`);
+
+	// Recursively expand the next level if we haven't reached max depth
 	if (currentDepth < options.maxDepth) {
-		// This would require additional logic to handle nested expansion
-		// For now, we'll stick to single-level expansion
+		console.log(`DEBUG: Preparing level ${currentDepth + 1} expansion`);
+
+		// Collect all records that need further expansion, grouped by table
+		const recordsForNextLevel = new Map<string, { records: IDataObject[], linkedFields: LinkedFieldInfo[] }>();
+
+		for (const field of fieldsToProcess) {
+			const tableId = field.linkedTableId;
+
+			// Get schema for this table only once
+			if (!recordsForNextLevel.has(tableId)) {
+				try {
+					const { linkedFields: schemaFields } = await getTableSchema.call(this, base, tableId);
+					recordsForNextLevel.set(tableId, { records: [], linkedFields: schemaFields });
+				} catch (error) {
+					console.error(`Error getting schema for table ${tableId}:`, error);
+					continue;
+				}
+			}
+
+			const tableInfo = recordsForNextLevel.get(tableId)!;
+
+			// Collect all expanded records from all main records for this table
+			for (const record of expandedRecords) {
+				const recordFields = record.fields as IDataObject;
+				const expandedFieldData = recordFields[field.fieldName];
+
+				if (Array.isArray(expandedFieldData) && expandedFieldData.length > 0) {
+					// Convert expanded records to the format expected by expandLinkedRecords
+					const recordsForRecursion = expandedFieldData.map(item => ({
+						id: item.id,
+						fields: item,
+						createdTime: item.createdTime
+					}));
+
+					tableInfo.records.push(...recordsForRecursion);
+				}
+			}
+		}
+
+		// Process each table's records together in one recursive call
+		const recursiveResults = new Map<string, Map<string, IDataObject>>();
+
+		for (const [tableId, { records: tableRecords, linkedFields: tableLinkedFields }] of recordsForNextLevel.entries()) {
+			if (tableRecords.length > 0) {
+				console.log(`DEBUG: Recursively expanding ${tableRecords.length} records from table ${tableId}`);
+
+				// Deduplicate records by ID to avoid processing the same record multiple times
+				const uniqueRecords = new Map<string, IDataObject>();
+				for (const record of tableRecords) {
+					uniqueRecords.set(record.id as string, record);
+				}
+
+				const recursivelyExpanded = await expandLinkedRecords.call(
+					this,
+					base,
+					Array.from(uniqueRecords.values()),
+					tableLinkedFields,
+					options,
+					currentDepth + 1,
+					newUsedTables
+				);
+
+				// Store results by record ID for easy lookup
+				const resultMap = new Map<string, IDataObject>();
+				for (const expandedRecord of recursivelyExpanded) {
+					resultMap.set(expandedRecord.id as string, expandedRecord);
+				}
+				recursiveResults.set(tableId, resultMap);
+			}
+		}
+
+		// Update original records with recursively expanded data
+		const fullyExpandedRecords = expandedRecords.map(record => {
+			const recordFields = record.fields as IDataObject;
+			const updatedFields = { ...recordFields };
+
+			for (const field of fieldsToProcess) {
+				const tableId = field.linkedTableId;
+				const expandedFieldData = updatedFields[field.fieldName];
+				const recursiveResultMap = recursiveResults.get(tableId);
+
+				if (Array.isArray(expandedFieldData) && recursiveResultMap) {
+					const updatedExpandedRecords = expandedFieldData.map(item => {
+						const recursiveResult = recursiveResultMap.get(item.id as string);
+						if (recursiveResult) {
+							// Flatten the recursively expanded record
+							return {
+								id: recursiveResult.id,
+								createdTime: recursiveResult.createdTime,
+								...(recursiveResult.fields as IDataObject)
+							};
+						}
+						return item; // Return original if no recursive expansion found
+					});
+
+					updatedFields[field.fieldName] = updatedExpandedRecords;
+				}
+			}
+
+			return {
+				...record,
+				fields: updatedFields,
+			};
+		});
+
+		return fullyExpandedRecords;
 	}
 
 	return expandedRecords;

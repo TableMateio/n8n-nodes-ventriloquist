@@ -160,3 +160,23 @@ export async function getLinkedRecordFields(
 
 	return result;
 }
+
+export async function getTables(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	const base = this.getNodeParameter('base', undefined, {
+		extractValue: true,
+	}) as string;
+
+	const response = await apiRequest.call(this, 'GET', `meta/bases/${base}/tables`);
+
+	const result: INodePropertyOptions[] = [];
+
+	for (const table of (response.tables as IDataObject[]) || []) {
+		result.push({
+			name: table.name as string,
+			value: table.id as string,
+			description: `Table ID: ${table.id}`,
+		});
+	}
+
+	return result;
+}
