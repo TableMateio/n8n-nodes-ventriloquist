@@ -27,6 +27,22 @@ export function removeIgnored(data: IDataObject, ignore: string | string[]) {
 	}
 }
 
+export function removeEmptyFields(data: IDataObject) {
+	const newData: IDataObject = {};
+
+	for (const [field, value] of Object.entries(data)) {
+		// Skip fields that are null, undefined, empty string, or empty array
+		if (value !== null &&
+			value !== undefined &&
+			value !== '' &&
+			!(Array.isArray(value) && value.length === 0)) {
+			newData[field] = value;
+		}
+	}
+
+	return newData;
+}
+
 export function findMatches(
 	data: UpdateRecord[],
 	keys: string[],

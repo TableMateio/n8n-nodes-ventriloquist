@@ -8,7 +8,7 @@ import type {
 
 import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
 import type { UpdateRecord } from '../../helpers/interfaces';
-import { processAirtableError, removeIgnored } from '../../helpers/utils';
+import { processAirtableError, removeIgnored, removeEmptyFields } from '../../helpers/utils';
 import { apiRequest, apiRequestAllItems, batchUpdate } from '../../transport';
 import { insertUpdateOptions } from '../common.descriptions';
 
@@ -99,6 +99,13 @@ export async function execute(
 
 			if (!columnsToMatchOn.includes('id')) {
 				body.performUpsert = { fieldsToMergeOn: columnsToMatchOn };
+			}
+
+			// Remove empty/null fields if requested
+			if (options.skipEmptyFields) {
+				records.forEach(record => {
+					record.fields = removeEmptyFields(record.fields);
+				});
 			}
 
 			let responseData;

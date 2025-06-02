@@ -10,7 +10,7 @@ import type { IRecord } from '../../helpers/interfaces';
 import { flattenOutput } from '../../helpers/utils';
 import { apiRequest, apiRequestAllItems, downloadRecordAttachments } from '../../transport';
 import { viewRLC } from '../common.descriptions';
-import { getTableSchema, expandLinkedRecords } from '../../helpers/linkedRecordUtils';
+import { getTableSchema, expandLinkedRecords, fillEmptyFields } from '../../helpers/linkedRecordUtils';
 
 const properties: INodeProperties[] = [
 	{
@@ -66,6 +66,13 @@ const properties: INodeProperties[] = [
 				default: [],
 				// eslint-disable-next-line n8n-nodes-base/node-param-description-wrong-for-dynamic-multi-options
 				description: "The fields of type 'attachment' that should be downloaded",
+			},
+			{
+				displayName: 'Include Empty/Null Fields',
+				name: 'includeEmptyFields',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to include fields that are empty/null in Airtable (normally these are omitted from the response)',
 			},
 			{
 				// eslint-disable-next-line n8n-nodes-base/node-param-display-name-wrong-for-dynamic-multi-options
@@ -292,6 +299,17 @@ export async function execute(
 				}
 			} else {
 				console.log('DEBUG: Search - Linked record expansion not configured');
+			}
+
+			// Fill empty fields if requested
+			if (options.includeEmptyFields) {
+				console.log('DEBUG: Search - Filling empty fields with null values');
+				try {
+					records = await fillEmptyFields.call(this, base, table, records);
+				} catch (emptyFieldsError) {
+					console.error('Error filling empty fields:', emptyFieldsError);
+					// Continue with original records if fill fails
+				}
 			}
 
 			const convertedRecords = records.map((record) => ({

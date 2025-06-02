@@ -8,7 +8,7 @@ import type {
 
 import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
 import type { UpdateRecord } from '../../helpers/interfaces';
-import { findMatches, processAirtableError, removeIgnored } from '../../helpers/utils';
+import { findMatches, processAirtableError, removeIgnored, removeEmptyFields } from '../../helpers/utils';
 import { apiRequestAllItems, batchUpdate } from '../../transport';
 import { insertUpdateOptions } from '../common.descriptions';
 
@@ -128,6 +128,13 @@ export async function execute(
 			}
 
 			const body: IDataObject = { typecast: options.typecast ? true : false };
+
+			// Remove empty/null fields if requested
+			if (options.skipEmptyFields) {
+				records.forEach(record => {
+					record.fields = removeEmptyFields(record.fields);
+				});
+			}
 
 			const responseData = await batchUpdate.call(this, endpoint, body, records);
 

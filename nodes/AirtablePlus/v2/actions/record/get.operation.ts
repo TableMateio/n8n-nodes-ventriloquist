@@ -10,7 +10,7 @@ import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
 import type { IRecord } from '../../helpers/interfaces';
 import { flattenOutput, processAirtableError } from '../../helpers/utils';
 import { apiRequest, downloadRecordAttachments } from '../../transport';
-import { getTableSchema, expandLinkedRecords } from '../../helpers/linkedRecordUtils';
+import { getTableSchema, expandLinkedRecords, fillEmptyFields } from '../../helpers/linkedRecordUtils';
 
 const properties: INodeProperties[] = [
 	{
@@ -44,6 +44,13 @@ const properties: INodeProperties[] = [
 				default: [],
 				// eslint-disable-next-line n8n-nodes-base/node-param-description-wrong-for-dynamic-multi-options
 				description: "The fields of type 'attachment' that should be downloaded",
+			},
+			{
+				displayName: 'Include Empty/Null Fields',
+				name: 'includeEmptyFields',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to include fields that are empty/null in Airtable (normally these are omitted from the response)',
 			},
 		],
 	},
@@ -158,6 +165,17 @@ export async function execute(
 					// Log the error but don't fail the entire operation
 					console.error('Error expanding linked records in Get operation:', expansionError);
 					// Continue with non-expanded record
+				}
+			}
+
+			// Fill empty fields if requested
+			if (options.includeEmptyFields) {
+				try {
+					const filledRecords = await fillEmptyFields.call(this, base, table, [record]);
+					record = filledRecords[0] || record;
+				} catch (emptyFieldsError) {
+					console.error('Error filling empty fields in Get operation:', emptyFieldsError);
+					// Continue with original record if fill fails
 				}
 			}
 

@@ -7,7 +7,7 @@ import type {
 } from 'n8n-workflow';
 
 import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
-import { processAirtableError, removeIgnored } from '../../helpers/utils';
+import { processAirtableError, removeIgnored, removeEmptyFields } from '../../helpers/utils';
 import { apiRequest } from '../../transport';
 import { insertUpdateOptions } from '../common.descriptions';
 
@@ -76,6 +76,11 @@ export async function execute(
 				const fields = this.getNodeParameter('columns.value', i, []) as IDataObject;
 
 				body.fields = fields;
+			}
+
+			// Remove empty/null fields if requested
+			if (options.skipEmptyFields) {
+				body.fields = removeEmptyFields(body.fields as IDataObject);
 			}
 
 			const responseData = await apiRequest.call(this, 'POST', endpoint, body);

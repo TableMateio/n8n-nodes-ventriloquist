@@ -180,6 +180,13 @@ export const insertUpdateOptions: INodeProperties[] = [
 					'Whether the Airtable API should attempt mapping of string values for linked records & select options',
 			},
 			{
+				displayName: 'Skip Empty/Null Fields',
+				name: 'skipEmptyFields',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to skip fields with empty, null, or undefined values (prevents overwriting existing data with empty values)',
+			},
+			{
 				displayName: 'Ignore Fields From Input',
 				name: 'ignoreFields',
 				type: 'string',

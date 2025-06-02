@@ -405,3 +405,43 @@ export async function expandLinkedRecords(
 
 	return expandedRecords;
 }
+
+/**
+ * Fills in missing fields with null values based on table schema
+ */
+export async function fillEmptyFields(
+	this: IExecuteFunctions,
+	base: string,
+	tableId: string,
+	records: IDataObject[]
+): Promise<IDataObject[]> {
+	try {
+		// Get the full table schema to know all possible fields
+		const { allFields } = await getTableSchema.call(this, base, tableId);
+
+		// Create a set of all field names
+		const allFieldNames = new Set(allFields.map(field => field.name as string));
+
+		// Fill in missing fields for each record
+		return records.map(record => {
+			const fields = record.fields as IDataObject;
+			const filledFields = { ...fields };
+
+			// Add null for any missing fields
+			for (const fieldName of allFieldNames) {
+				if (!(fieldName in filledFields)) {
+					filledFields[fieldName] = null;
+				}
+			}
+
+			return {
+				...record,
+				fields: filledFields
+			};
+		});
+	} catch (error) {
+		console.error('Error filling empty fields:', error);
+		// Return original records if schema fetch fails
+		return records;
+	}
+}
