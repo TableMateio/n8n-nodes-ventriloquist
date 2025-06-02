@@ -1704,7 +1704,7 @@ IMPORTANT GUIDELINES:
           return []; // Return empty array instead of wrapping string
         }
       } else { // outputStructure is 'object'
-        // For object structure, just return the parsed data (or raw if parse failed)
+        // For object structure, check if we received an array but need an object
         this.logger.info(
           formatOperationLog(
             "SmartExtraction",
@@ -1714,6 +1714,62 @@ IMPORTANT GUIDELINES:
             `Processing result for object output structure: ${this.describeDataStructure(data)}`
           )
         );
+
+        // Special handling for arrays when object output is expected
+        if (Array.isArray(data)) {
+          this.logger.info(
+            formatOperationLog(
+              "SmartExtraction",
+              nodeName,
+              nodeId,
+              index,
+              `Received array data but object output structure was requested. Converting to object.`
+            )
+          );
+
+          // If it's an array with just one item, use that item directly
+          if (data.length === 1) {
+            this.logger.info(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Array has single item, using it directly as the object.`
+              )
+            );
+            return data[0];
+          }
+          // If it's an empty array, return empty object
+          else if (data.length === 0) {
+            this.logger.warn(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Received empty array, returning empty object.`
+              )
+            );
+            return {};
+          }
+          // For arrays with multiple items, convert to object with indices as keys
+          else {
+            this.logger.info(
+              formatOperationLog(
+                "SmartExtraction",
+                nodeName,
+                nodeId,
+                index,
+                `Converting array with ${data.length} items to indexed object.`
+              )
+            );
+            return data.reduce((obj: Record<string, any>, item: any, idx: number) => {
+              obj[idx.toString()] = item;
+              return obj;
+            }, {});
+          }
+        }
 
         // Log the parsed data structure
         if (isDebugMode) {

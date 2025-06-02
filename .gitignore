@@ -1,7 +1,23 @@
-node_modules
+# Node modules
+node_modules/
+
+# Logs
+*.log
+n8nEventLog*
+
+# Binary data
+binaryData/
+
+# Cache
+.cache/
+
+# Temporary files
 .DS_Store
-.tmp
-tmp
+*.tmp
+
+# Keep database but track it
+!database.sqlite
+
 dist
 npm-debug.log*
 yarn.lock

@@ -468,8 +468,152 @@ export class MultipleExtraction implements IExtraction {
    * Execute the multiple extraction
    */
   async execute(): Promise<IExtractionResult> {
-    // For now, use BasicExtraction implementation
-    const basic = new BasicExtraction(this.page, this.config, this.context);
-    return basic.execute();
+    const { page, config, context } = this;
+    const { logger } = context;
+    const {
+      selector,
+      extractionProperty = 'textContent',
+      attributeName,
+      limit = 0,
+      smartOptions,
+    } = config;
+
+    try {
+      logger.info(
+        formatOperationLog(
+          'MultipleExtraction',
+          context.nodeName,
+          context.nodeId,
+          context.index !== undefined ? context.index : 0,
+          `Starting multiple extraction for selector: ${selector}`
+        )
+      );
+
+      // Extract data from all matching elements
+      const values = await page.evaluate(
+        (sel, property, attr, lim) => {
+          const elements = document.querySelectorAll(sel);
+          const result = [];
+
+          // Apply limit if provided
+          const max = lim > 0 ? Math.min(elements.length, lim) : elements.length;
+
+          for (let i = 0; i < max; i++) {
+            const element = elements[i];
+            let value = '';
+
+            if (property === 'textContent') {
+              value = element.textContent || '';
+            } else if (property === 'innerHTML') {
+              value = element.innerHTML;
+            } else if (property === 'outerHTML') {
+              value = element.outerHTML;
+            } else if (property === 'attribute' && attr) {
+              value = element.getAttribute(attr) || '';
+            }
+
+            result.push(value.trim());
+          }
+
+          return result;
+        },
+        selector,
+        extractionProperty,
+        attributeName,
+        limit
+      );
+
+      logger.info(
+        formatOperationLog(
+          'MultipleExtraction',
+          context.nodeName,
+          context.nodeId,
+          context.index !== undefined ? context.index : 0,
+          `Extraction found ${values.length} elements matching selector`
+        )
+      );
+
+      // AI Processing section
+      if (smartOptions && smartOptions.aiAssistance && config.openaiApiKey) {
+        logger.info(
+          formatOperationLog(
+            'MultipleExtraction',
+            context.nodeName,
+            context.nodeId,
+            context.index !== undefined ? context.index : 0,
+            `Using AI processing with model: ${smartOptions.aiModel || 'gpt-3.5-turbo'}`
+          )
+        );
+
+        // Process each item with AI separately to avoid character-by-character parsing
+        const processedResults = [];
+
+        for (const item of values) {
+          const aiResult = await processWithAI(
+            item,
+            {
+              enabled: true,
+              extractionFormat: smartOptions.extractionFormat || 'json',
+              aiModel: smartOptions.aiModel || 'gpt-3.5-turbo',
+              generalInstructions: smartOptions.generalInstructions || '',
+              strategy: smartOptions.strategy || 'auto',
+              includeSchema: smartOptions.includeSchema || false,
+              includeRawData: smartOptions.includeRawData || false,
+              debugMode: smartOptions.debugMode || false,
+              outputStructure: smartOptions.outputStructure || 'object',
+              includeReferenceContext: smartOptions.includeReferenceContext || false,
+              referenceContent: smartOptions.referenceContent || ''
+            },
+            config.fields ? config.fields.items : [],
+            config.openaiApiKey,
+            {
+              logger: context.logger,
+              nodeName: context.nodeName,
+              nodeId: context.nodeId,
+              index: context.index || 0,
+              sessionId: context.sessionId
+            }
+          );
+
+          if (aiResult.success) {
+            processedResults.push(aiResult.data);
+          } else {
+            // Fall back to the original item if AI processing fails
+            processedResults.push(item);
+          }
+        }
+
+        return {
+          success: true,
+          data: processedResults,
+          rawContent: JSON.stringify(values).substring(0, 200) + '...',
+        };
+      }
+
+      // Return raw string array if no AI processing
+      return {
+        success: true,
+        data: values,
+        rawContent: JSON.stringify(values).substring(0, 200) + '...',
+      };
+    } catch (error) {
+      logger.error(
+        formatOperationLog(
+          'MultipleExtraction',
+          context.nodeName,
+          context.nodeId,
+          context.index !== undefined ? context.index : 0,
+          `Multiple extraction failed: ${(error as Error).message}`
+        )
+      );
+
+      return {
+        success: false,
+        error: {
+          message: `Multiple extraction failed: ${(error as Error).message}`,
+          details: error
+        }
+      };
+    }
   }
 }

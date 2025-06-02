@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Get computer name for commit message
+COMPUTER_NAME=$(scutil --get ComputerName)
+
+# Define possible database locations
+DB_STANDARD="$HOME/.n8n/database.sqlite"
+DB_NESTED="$HOME/.n8n/.n8n/database.sqlite"
+
+# Function to find the active database
+find_active_db() {
+  # First check if both exist
+  if [ -f "$DB_STANDARD" ] && [ -f "$DB_NESTED" ]; then
+    # Compare sizes (larger one is likely the active one)
+    SIZE_STANDARD=$(stat -f "%z" "$DB_STANDARD")
+    SIZE_NESTED=$(stat -f "%z" "$DB_NESTED")
+    
+    if [ "$SIZE_NESTED" -gt "$SIZE_STANDARD" ]; then
+      echo "Detected larger database in nested location ($SIZE_NESTED bytes vs $SIZE_STANDARD bytes)"
+      echo "$DB_NESTED"
+    else
+      echo "Detected larger database in standard location ($SIZE_STANDARD bytes vs $SIZE_NESTED bytes)"
+      echo "$DB_STANDARD"
+    fi
+  elif [ -f "$DB_NESTED" ]; then
+    echo "Found only nested database"
+    echo "$DB_NESTED"
+  elif [ -f "$DB_STANDARD" ]; then
+    echo "Found only standard database"
+    echo "$DB_STANDARD"
+  else
+    echo "No database found!"
+    echo ""
+  fi
+}
+
+# Find the active database
+ACTIVE_DB=$(find_active_db)
+
+if [ -z "$ACTIVE_DB" ]; then
+  echo "❌ ERROR: Could not find n8n database!"
+  exit 1
+fi
+
+echo "Using active database: $ACTIVE_DB"
+
+# Copy the active database to the git repository
+cp "$ACTIVE_DB" ./database.sqlite
+
+# Also copy config files
+rsync -av ~/.n8n/.env ~/.n8n/config ./
+
+# Add all changes
+git add .
+
+# Commit with computer name and timestamp
+git commit -m "Update from $COMPUTER_NAME at $(date)"
+
+# Push to remote (if you have one)
+git push
+
+echo "✅ Changes saved successfully!" 

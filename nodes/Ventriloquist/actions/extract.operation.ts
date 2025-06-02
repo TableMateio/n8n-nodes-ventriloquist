@@ -1390,8 +1390,8 @@ export async function execute(
 			return extractItem;
 		});
 
-		// Using our new utility to process all extraction items
-		const extractionData = await processExtractionItems(
+		// Process all extraction items
+		const extractionResults: IExtractItem[] = await processExtractionItems(
 			typedExtractionItems,
 			{
 				waitForSelector,
@@ -1407,36 +1407,18 @@ export async function execute(
 			openAiApiKey
 		);
 
-		// Add direct logging about extraction items that had AI formatting enabled
-		if (debugMode) {
-			const aiEnabledItems = typedExtractionItems.filter(item => item.aiFormatting?.enabled);
-			logWithDebug(
-				this.logger,
-				true,
-				nodeName,
-				'Extract',
-				'extract.operation',
-				'execute',
-				`${aiEnabledItems.length} items had AI formatting enabled out of ${typedExtractionItems.length} total items`,
-				'error'
-			);
-			logWithDebug(
-				this.logger,
-				true,
-				nodeName,
-				'Extract',
-				'extract.operation',
-				'execute',
-				`AI-enabled items: ${aiEnabledItems.map(i => i.name).join(', ')}`,
-				'error'
-			);
-		}
+		// Log the raw results from processExtractionItems for deep inspection
+		console.log('!!!!!! extract.operation.ts - BEFORE REDUCE - extractionResults: !!!!!!', extractionResults);
+		extractionResults.forEach((item: IExtractItem, idx: number) => {
+			console.log(`!!!!!! ITEM ${idx} [${item.name}] - extractedData (first 100 chars): !!!!!`, typeof item.extractedData === 'string' ? item.extractedData.substring(0,100) : item.extractedData);
+			console.log(`!!!!!! ITEM ${idx} [${item.name}] - rawData (first 100 chars): !!!!!`, typeof item.rawData === 'string' ? item.rawData.substring(0,100) : item.rawData);
+		});
 
 		// Store all extraction results
-		const extractionResults: IDataObject = {
+		const extractionResultsData: IDataObject = {
 			// Only include extractedData array in debug mode
 			...(debugMode ? {
-				extractedData: extractionData.map(item => ({
+				extractedData: extractionResults.map(item => ({
 					id: item.id,
 					name: item.name,
 					extractionType: item.extractionType,
@@ -1447,7 +1429,7 @@ export async function execute(
 				}))
 			} : {}),
 			// Instead of passing all data as is, create a properly mapped output based on the extraction configuration
-			data: extractionData.reduce((result: IDataObject, item: IExtractItem) => {
+			data: extractionResults.reduce((result: IDataObject, item: IExtractItem) => {
 				// Add detailed debug logs
 				if (debugMode) {
 					logWithDebug(
@@ -1833,7 +1815,7 @@ export async function execute(
 			startTime,
 			takeScreenshot: takeScreenshotOption,
 			additionalData: {
-				...extractionResults,
+				...extractionResultsData,
 			},
 			// Do not include input data to avoid exposing previous node data
 		});

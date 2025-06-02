@@ -1,0 +1,78 @@
+#!/bin/bash
+
+# Define possible database locations
+DB_STANDARD="$HOME/.n8n/database.sqlite"
+DB_NESTED="$HOME/.n8n/.n8n/database.sqlite"
+
+# Function to find the active database
+find_active_db() {
+  # First check if both exist
+  if [ -f "$DB_STANDARD" ] && [ -f "$DB_NESTED" ]; then
+    # Compare sizes (larger one is likely the active one)
+    SIZE_STANDARD=$(stat -f "%z" "$DB_STANDARD")
+    SIZE_NESTED=$(stat -f "%z" "$DB_NESTED")
+    
+    if [ "$SIZE_NESTED" -gt "$SIZE_STANDARD" ]; then
+      echo "Detected larger database in nested location ($SIZE_NESTED bytes vs $SIZE_STANDARD bytes)"
+      echo "$DB_NESTED"
+    else
+      echo "Detected larger database in standard location ($SIZE_STANDARD bytes vs $SIZE_NESTED bytes)"
+      echo "$DB_STANDARD"
+    fi
+  elif [ -f "$DB_NESTED" ]; then
+    echo "Found only nested database"
+    echo "$DB_NESTED"
+  elif [ -f "$DB_STANDARD" ]; then
+    echo "Found only standard database"
+    echo "$DB_STANDARD"
+  else
+    echo "No database found!"
+    echo ""
+  fi
+}
+
+# Find the active database
+ACTIVE_DB=$(find_active_db)
+
+if [ -z "$ACTIVE_DB" ]; then
+  echo "❌ ERROR: Could not find n8n database!"
+  exit 1
+fi
+
+echo "Using active database: $ACTIVE_DB"
+
+# Check if there are local changes that might be overwritten
+LOCAL_MODIFIED_TIME=$(stat -f "%m" "$ACTIVE_DB" 2>/dev/null || echo "0")
+REPO_MODIFIED_TIME=$(stat -f "%m" ./database.sqlite 2>/dev/null || echo "0")
+
+if [ "$LOCAL_MODIFIED_TIME" -gt "$REPO_MODIFIED_TIME" ]; then
+  echo "⚠️ WARNING: Your local database is newer than the one in the repository"
+  echo "Local database modified: $(date -r $LOCAL_MODIFIED_TIME)"
+  echo "Repo database modified: $(date -r $REPO_MODIFIED_TIME)"
+  
+  read -p "Do you want to continue and potentially lose changes? (y/N): " confirm
+  if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+    echo "Operation canceled."
+    exit 1
+  fi
+
+  # Create a simple rotation of backups (just keeps 2 files)
+  echo "Creating backup of your current database..."
+  if [ -f "$ACTIVE_DB.backup" ]; then
+    mv "$ACTIVE_DB.backup" "$ACTIVE_DB.backup.old"
+  fi
+  cp "$ACTIVE_DB" "$ACTIVE_DB.backup"
+fi
+
+# Pull latest changes
+git pull
+
+# Copy the database from git to the active location
+cp ./database.sqlite "$ACTIVE_DB"
+
+# Copy other config files
+rsync -av ./.env ./config ~/.n8n/
+
+echo "✅ Changes loaded successfully! n8n database updated at $ACTIVE_DB"
+echo "Recent changes:"
+git log --oneline -n 5 
