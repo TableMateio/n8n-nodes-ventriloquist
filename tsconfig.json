@@ -4,7 +4,12 @@
 		"module": "commonjs",
 		"moduleResolution": "node",
 		"target": "es2019",
-		"lib": ["es2019", "es2020", "es2022.error", "dom"],
+		"lib": [
+			"es2019",
+			"es2020",
+			"es2022.error",
+			"dom"
+		],
 		"removeComments": true,
 		"useUnknownInCatchVariables": false,
 		"forceConsistentCasingInFileNames": true,
@@ -26,5 +31,9 @@
 		"nodes/**/*",
 		"nodes/**/*.json",
 		"package.json"
+	],
+	"exclude": [
+		"nodes/AirtablePlus/test/**/*",
+		"nodes/AirtablePlus/AirtableTrigger.node.ts"
 	]
 }
