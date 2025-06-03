@@ -151,6 +151,25 @@ export const description: INodeProperties[] = [
 								default: false,
 								description: "Whether to clean up the text by replacing multiple consecutive newlines with a single newline",
 							},
+							{
+								displayName: "Convert Type",
+								name: "convertType",
+								type: "options",
+								options: [
+									{
+										name: "None",
+										value: "none",
+										description: "No conversion applied",
+									},
+									{
+										name: "To Number",
+										value: "toNumber",
+										description: "Extract numeric values from currency/price strings (e.g., '$21,000.00 –' becomes '21000.00')",
+									},
+								],
+								default: "none",
+								description: "Type conversion to apply to extracted text",
+							},
 						],
 					},
 					{
@@ -244,8 +263,8 @@ export const description: INodeProperties[] = [
 						name: "fieldProcessingMode",
 						type: "options",
 						options: [
-							{ name: "Process fields simultaneously", value: "batch", description: "Process all fields in one request (faster + cheaper)" },
-							{ name: "Process fields one after the next", value: "individual", description: "Process each field separately (more diligent but expensive)" },
+							{ name: "Process Fields Simultaneously", value: "batch", description: "Process all fields in one request (faster + cheaper)" },
+							{ name: "Process Fields One After the Next", value: "individual", description: "Process each field separately (more diligent but expensive)" },
 						],
 						default: "batch",
 						description: "How to process extraction fields",
@@ -379,7 +398,7 @@ export const description: INodeProperties[] = [
 							},
 						},
 						default: "href",
-						placeholder: "href, src, data-url",
+						placeholder: "href, src, data-ID",
 						description: "Name of the attribute to extract",
 					},
 					{
@@ -439,8 +458,7 @@ export const description: INodeProperties[] = [
 											{ name: "Boolean", value: "boolean" },
 										],
 										default: "string",
-										description: "Specifies the data type of items in the array when 'Type' is set to 'Array'.",
-										// required: true, // Consider making this true if type is 'array' via a function or more complex show/hide logic if N8N supports it
+										description: "Specifies the data type of items in the array when 'Type' is set to 'Array'",
 									},
 									{
 										displayName: "AI Assisted",
@@ -652,7 +670,7 @@ export const description: INodeProperties[] = [
 								name: "attributeName",
 								type: "string",
 								default: "href",
-								placeholder: "href, src, data-id",
+								placeholder: "href, src, data-ID",
 								description: "Name of the attribute to extract from cells (href is common for links)",
 								displayOptions: {
 									show: {
@@ -1289,6 +1307,7 @@ export async function execute(
 				attribute: item.attributeName as string | undefined,
 				textOptions: item.textOptions as {
 					cleanText?: boolean;
+					convertType?: string;
 				} | undefined,
 				htmlOptions: item.htmlOptions as {
 					outputFormat?: string;

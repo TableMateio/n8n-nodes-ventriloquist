@@ -70,6 +70,7 @@ export interface IExtractItem {
   preserveFieldStructure?: boolean;
   textOptions?: {
     cleanText?: boolean;
+    convertType?: string;
   };
   htmlOptions?: {
     outputFormat?: string;
@@ -998,6 +999,9 @@ export async function processExtractionItems(
           debugMode: isDebugMode,
           preserveFieldStructure: extractionItem.preserveFieldStructure || false,
           smartOptions: smartOptsForConfig, // Assign the carefully constructed object
+          // Add text processing options
+          cleanText: extractionItem.textOptions?.cleanText || false,
+          convertType: extractionItem.textOptions?.convertType || '',
         };
 
         // Add API key if available

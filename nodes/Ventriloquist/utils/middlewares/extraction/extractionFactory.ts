@@ -9,6 +9,7 @@ import { extractTableData } from '../../extractionUtils';
 import { logWithDebug } from '../../loggingUtils';
 import { TableExtraction } from './TableExtraction';
 import { MultipleExtraction } from './TableExtraction';
+import { extractTextFromHtml } from '../../comparisonUtils';
 
 /**
  * Extraction configuration interface
@@ -36,6 +37,7 @@ export interface IExtractionConfig {
   includeMetadata?: boolean;
   // Additional properties for Text extraction
   cleanText?: boolean;
+  convertType?: string;
   // Additional properties for Smart extraction
   smartOptions?: {
     extractionFormat?: string;
@@ -94,6 +96,34 @@ export interface IExtractionResult {
  */
 export interface IExtraction {
   execute(): Promise<IExtractionResult>;
+}
+
+/**
+ * Extract numeric values from currency/price strings
+ * Examples: "$21,000.00 –" -> "21000.00", "€1,234.56" -> "1234.56", "Price: $99.99" -> "99.99"
+ */
+function extractNumericValue(text: string): string {
+  if (typeof text !== 'string') {
+    return text;
+  }
+
+  // Remove common currency symbols and prefixes
+  let cleaned = text
+    .replace(/[^\d.,\-\s]/g, ' ') // Keep only digits, commas, periods, hyphens, and spaces
+    .trim();
+
+  // Find the first number-like pattern in the string
+  // This regex matches patterns like: 1,234.56, 1234.56, 1,234, 1234, .56, etc.
+  const numberPattern = /(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/;
+  const match = cleaned.match(numberPattern);
+
+  if (match) {
+    // Remove commas from the matched number and return it
+    return match[1].replace(/,/g, '');
+  }
+
+  // If no clear number pattern found, return the original text
+  return text;
 }
 
 /**
@@ -275,6 +305,16 @@ export class BasicExtraction implements IExtraction {
 
               // Handle excessive newlines but preserve more formatting than full clean
               processedText = processedText.replace(/\n{5,}/g, '\n\n\n\n');
+            }
+
+            // Apply number conversion if enabled
+            if (this.config.convertType === 'toNumber') {
+              logger.info(`${logPrefix} [ConvertType] Starting number conversion for selector ${this.config.selector}. Converting to number.`);
+
+              const originalText = processedText;
+              processedText = extractNumericValue(processedText);
+
+              logger.info(`${logPrefix} [ConvertType] String conversion: "${originalText}" -> "${processedText}"`);
             }
 
             // Store full content in data

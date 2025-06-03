@@ -12,6 +12,34 @@ import { logWithDebug } from '../../loggingUtils';
 import { extractTextFromHtml } from '../../comparisonUtils';
 
 /**
+ * Extract numeric values from currency/price strings
+ * Examples: "$21,000.00 –" -> "21000.00", "€1,234.56" -> "1234.56", "Price: $99.99" -> "99.99"
+ */
+function extractNumericValue(text: string): string {
+  if (typeof text !== 'string') {
+    return text;
+  }
+
+  // Remove common currency symbols and prefixes
+  let cleaned = text
+    .replace(/[^\d.,\-\s]/g, ' ') // Keep only digits, commas, periods, hyphens, and spaces
+    .trim();
+
+  // Find the first number-like pattern in the string
+  // This regex matches patterns like: 1,234.56, 1234.56, 1,234, 1234, .56, etc.
+  const numberPattern = /(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/;
+  const match = cleaned.match(numberPattern);
+
+  if (match) {
+    // Remove commas from the matched number and return it
+    return match[1].replace(/,/g, '');
+  }
+
+  // If no clear number pattern found, return the original text
+  return text;
+}
+
+/**
  * Implements basic extraction functionality for common operations
  */
 export class BasicExtraction implements IExtraction {
@@ -47,12 +75,19 @@ export class BasicExtraction implements IExtraction {
         case 'text':
           // Extract text content from the element
           const cleanText = this.config.cleanText === true;
+          const convertType = this.config.convertType || 'none';
           data = await extractTextContent(this.page, this.config.selector, logger, nodeName, nodeId);
 
           // Store raw content before any cleaning
           // It's important to distinguish between the raw data from extractTextContent
           // and the data after cleaning for logging and debugging.
           const rawExtractedData = Array.isArray(data) ? [...data] : data;
+
+          // Log initial extraction results
+          logger.info(`${logPrefix} [TextExtraction] Initial extraction complete. Data type: ${typeof data}, isArray: ${Array.isArray(data)}, convertType: ${convertType}`);
+          if (typeof data === 'string') {
+            logger.info(`${logPrefix} [TextExtraction] Extracted string: "${data.substring(0, 100)}${data.length > 100 ? '...' : ''}" (length: ${data.length})`);
+          }
 
           if (cleanText) {
             logger.info(`${logPrefix} [CleanText] Starting text cleaning for selector ${this.config.selector}. Initial data type: ${typeof data}, isArray: ${Array.isArray(data)}`);
@@ -181,6 +216,30 @@ export class BasicExtraction implements IExtraction {
                 return item;
               });
             }
+          }
+
+          // Apply number extraction if enabled
+          if (convertType === 'toNumber') {
+            logger.info(`${logPrefix} [ExtractNumbers] Starting number extraction for selector ${this.config.selector}. Data type: ${typeof data}, isArray: ${Array.isArray(data)}`);
+
+            if (typeof data === 'string') {
+              const originalData = data;
+              data = extractNumericValue(data);
+              logger.info(`${logPrefix} [ExtractNumbers] String conversion: "${originalData}" -> "${data}"`);
+            } else if (Array.isArray(data)) {
+              data = data.map((item, itemIndex) => {
+                if (typeof item === 'string') {
+                  const originalItem = item;
+                  const extractedNumber = extractNumericValue(item);
+                  logger.info(`${logPrefix} [ExtractNumbers] Array item[${itemIndex}] conversion: "${originalItem}" -> "${extractedNumber}"`);
+                  return extractedNumber;
+                }
+                logger.warn(`${logPrefix} [ExtractNumbers] Array item[${itemIndex}] is NOT a string (type: ${typeof item}). Skipping.`);
+                return item;
+              });
+            }
+
+            logger.info(`${logPrefix} Number extraction finished.`);
           }
           break;
 
