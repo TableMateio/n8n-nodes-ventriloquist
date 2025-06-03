@@ -1,8 +1,8 @@
 import type { INodeTypeBaseDescription, IVersionedNodeType } from 'n8n-workflow';
 import { VersionedNodeType } from 'n8n-workflow';
 
-import { AirtableV1 } from './v1/AirtableV1.node';
-import { AirtableV2 } from './v2/AirtableV2.node';
+import { AirtableV1 } from './v1/AirtableV1.implementation';
+import { AirtableV2 } from './v2/AirtableV2.implementation';
 
 export class AirtablePlus extends VersionedNodeType {
 	constructor() {

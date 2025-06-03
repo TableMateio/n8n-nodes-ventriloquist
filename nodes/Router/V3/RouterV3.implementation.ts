@@ -6,149 +6,46 @@ import type {
 	INodeType,
 	INodeTypeBaseDescription,
 	INodeTypeDescription,
+	ILoadOptionsFunctions,
+	INodePropertyOptions,
 } from 'n8n-workflow';
 import { ApplicationError, NodeConnectionType, NodeOperationError } from 'n8n-workflow';
 
-interface IRouteCondition {
-	field: string;
-	operator: string;
-	value: string;
-	caseSensitive: boolean;
-	typeValidation: string;
-}
+// Helper function to get type validation strictness
+const getTypeValidationStrictness = (version: number) => {
+	return version >= 3.1 ? 'strict' : 'loose';
+};
 
-interface IRoute {
-	routeName: string;
-	logic: string;
-	conditions: {
-		values: IRouteCondition[];
-	};
-}
+// Configuration for dynamic outputs based on routes
+const configuredOutputs = (parameters: INodeParameters) => {
+	const mode = parameters.mode as string;
 
-interface IOutputConfig {
-	defaultRoute: string;
-	outputFieldName: string;
-	includeExplanation: boolean;
-	stopAtFirstMatch: boolean;
-}
+	if (mode === 'expression') {
+		return Array.from({ length: parameters.numberOutputs as number }, (_, i) => ({
+			type: 'main',
+			displayName: i.toString(),
+		}));
+	} else {
+		const routes = ((parameters.routes as IDataObject)?.values as IDataObject[]) ?? [];
+		const routeOutputs = routes.map((route, index) => {
+			return {
+				type: 'main',
+				displayName: route.routeName || `Route ${index + 1}`,
+			};
+		});
 
-// Helper functions for condition evaluation
-function evaluateCondition(
-	condition: IRouteCondition,
-	item: INodeExecutionData,
-	context: IExecuteFunctions,
-	itemIndex: number,
-): boolean {
-	try {
-		// Get the field value using n8n's expression evaluation
-		const fieldValue = context.evaluateExpression(condition.field, itemIndex);
-		const compareValue = condition.value;
-
-		// Handle empty checks first
-		if (condition.operator === 'isEmpty') {
-			return fieldValue === null || fieldValue === undefined || fieldValue === '';
-		}
-		if (condition.operator === 'isNotEmpty') {
-			return fieldValue !== null && fieldValue !== undefined && fieldValue !== '';
+		// Add fallback output if enabled
+		const options = parameters.options as IDataObject;
+		if (options?.fallbackOutput === 'extra') {
+			routeOutputs.push({
+				type: 'main',
+				displayName: options?.renameFallbackOutput || 'Fallback',
+			});
 		}
 
-		// Handle null/undefined field values
-		if (fieldValue === null || fieldValue === undefined) {
-			return false;
-		}
-
-		// Type coercion based on validation setting
-		let leftValue = fieldValue;
-		let rightValue: any = compareValue;
-
-		if (condition.typeValidation === 'loose') {
-			// Try to coerce types
-			if (typeof fieldValue === 'string' && !isNaN(Number(compareValue))) {
-				rightValue = Number(compareValue);
-			} else if (typeof fieldValue === 'number') {
-				rightValue = Number(compareValue) || compareValue;
-			}
-		}
-
-		// Handle case sensitivity for strings
-		if (typeof leftValue === 'string' && typeof rightValue === 'string' && !condition.caseSensitive) {
-			leftValue = leftValue.toLowerCase();
-			rightValue = rightValue.toLowerCase();
-		}
-
-		// Evaluate based on operator
-		switch (condition.operator) {
-			case 'equals':
-				return leftValue === rightValue;
-			case 'notEquals':
-				return leftValue !== rightValue;
-			case 'contains':
-				return typeof leftValue === 'string' && leftValue.includes(rightValue);
-			case 'notContains':
-				return typeof leftValue === 'string' && !leftValue.includes(rightValue);
-			case 'greaterThan':
-				return Number(leftValue) > Number(rightValue);
-			case 'lessThan':
-				return Number(leftValue) < Number(rightValue);
-			case 'hasProperty':
-				return typeof leftValue === 'object' && leftValue !== null && rightValue in leftValue;
-			default:
-				return false;
-		}
-	} catch (error) {
-		// If evaluation fails, return false
-		return false;
+		return routeOutputs;
 	}
-}
-
-function evaluateRoute(
-	route: IRoute,
-	item: INodeExecutionData,
-	context: IExecuteFunctions,
-	itemIndex: number,
-): { matches: boolean; explanation: string } {
-	const conditions = route.conditions?.values || [];
-
-	if (conditions.length === 0) {
-		return { matches: false, explanation: 'No conditions defined' };
-	}
-
-	const results: boolean[] = [];
-	const explanations: string[] = [];
-
-	for (const condition of conditions) {
-		const result = evaluateCondition(condition, item, context, itemIndex);
-		results.push(result);
-
-		const fieldName = condition.field.replace('={{$json.', '').replace('}}', '');
-		explanations.push(
-			`${fieldName} ${condition.operator} ${condition.value}: ${result ? 'true' : 'false'}`
-		);
-	}
-
-	let matches = false;
-	let explanation = '';
-
-	switch (route.logic) {
-		case 'and':
-			matches = results.every(r => r === true);
-			explanation = `${route.routeName}: ALL(${explanations.join(', ')}) = ${matches}`;
-			break;
-		case 'or':
-			matches = results.some(r => r === true);
-			explanation = `${route.routeName}: ANY(${explanations.join(', ')}) = ${matches}`;
-			break;
-		case 'not':
-			matches = !results.every(r => r === true);
-			explanation = `${route.routeName}: NOT(${explanations.join(', ')}) = ${matches}`;
-			break;
-		default:
-			matches = false;
-			explanation = `${route.routeName}: Unknown logic type`;
-	}
-
-	return { matches, explanation };
-}
+};
 
 export class RouterV3 implements INodeType {
 	description: INodeTypeDescription;
@@ -156,15 +53,63 @@ export class RouterV3 implements INodeType {
 	constructor(baseDescription: INodeTypeBaseDescription) {
 		this.description = {
 			...baseDescription,
-			subtitle: 'Router: {{$parameter["routes"].length || 0}} routes',
+			subtitle: `=mode: {{$parameter["mode"] || "rules"}}`,
 			version: [3, 3.1, 3.2],
 			defaults: {
 				name: 'Router',
 				color: '#506000',
 			},
 			inputs: [NodeConnectionType.Main],
-			outputs: [NodeConnectionType.Main],
+			outputs: `={{(${configuredOutputs})($parameter)}}`,
 			properties: [
+				{
+					displayName: 'Mode',
+					name: 'mode',
+					type: 'options',
+					noDataExpression: true,
+					options: [
+						{
+							name: 'Rules',
+							value: 'rules',
+							description: 'Build routing rules with conditions for each output',
+						},
+						{
+							name: 'Expression',
+							value: 'expression',
+							description: 'Write an expression to return the output index',
+						},
+					],
+					default: 'rules',
+					description: 'How data should be routed',
+				},
+				{
+					displayName: 'Number of Outputs',
+					name: 'numberOutputs',
+					type: 'number',
+					displayOptions: {
+						show: {
+							mode: ['expression'],
+						},
+					},
+					default: 4,
+					description: 'How many outputs to create',
+				},
+				{
+					displayName: 'Output Index',
+					name: 'output',
+					type: 'number',
+					validateType: 'number',
+					hint: 'The index to route the item to, starts at 0',
+					displayOptions: {
+						show: {
+							mode: ['expression'],
+						},
+					},
+					// eslint-disable-next-line n8n-nodes-base/node-param-default-wrong-for-number
+					default: '={{}}',
+					description:
+						'The output index to send the input item to. Use an expression to calculate which input item should be routed to which output. The expression must return a number.',
+				},
 				{
 					displayName: 'Routes',
 					name: 'routes',
@@ -174,13 +119,33 @@ export class RouterV3 implements INodeType {
 						multipleValues: true,
 						sortable: true,
 					},
+					displayOptions: {
+						show: {
+							mode: ['rules'],
+						},
+					},
 					default: {
 						values: [
 							{
 								routeName: 'Route1',
-								logic: 'and',
-								conditions: [],
-								groups: [],
+								conditions: {
+									options: {
+										caseSensitive: true,
+										leftValue: '',
+										typeValidation: getTypeValidationStrictness(3.1),
+									},
+									conditions: [
+										{
+											leftValue: '',
+											rightValue: '',
+											operator: {
+												type: 'string',
+												operation: 'equals',
+											},
+										},
+									],
+									combinator: 'and',
+								},
 							},
 						],
 					},
@@ -198,176 +163,92 @@ export class RouterV3 implements INodeType {
 									description: 'Name of this route for identification',
 								},
 								{
-									displayName: 'Logic',
-									name: 'logic',
-									type: 'options',
-									options: [
-										{
-											name: 'AND',
-											value: 'and',
-											description: 'All conditions must be true',
-										},
-										{
-											name: 'OR',
-											value: 'or',
-											description: 'At least one condition must be true',
-										},
-										{
-											name: 'NOT',
-											value: 'not',
-											description: 'Conditions must be false',
-										},
-									],
-									default: 'and',
-									description: 'Logic operator for this route',
-								},
-								{
 									displayName: 'Conditions',
 									name: 'conditions',
 									placeholder: 'Add Condition',
-									type: 'fixedCollection',
+									type: 'filter',
+									default: {},
 									typeOptions: {
-										multipleValues: true,
-										sortable: true,
-									},
-									default: {
-										values: [],
-									},
-									options: [
-										{
-											name: 'values',
-											displayName: 'Condition',
-											values: [
-												{
-													displayName: 'Field',
-													name: 'field',
-													type: 'string',
-													default: '={{$json.}}',
-													placeholder: '={{$json.status}}',
-													description: 'Field to evaluate',
-												},
-												{
-													displayName: 'Operator',
-													name: 'operator',
-													type: 'options',
-													options: [
-														{
-															name: 'Equals',
-															value: 'equals',
-														},
-														{
-															name: 'Not Equals',
-															value: 'notEquals',
-														},
-														{
-															name: 'Contains',
-															value: 'contains',
-														},
-														{
-															name: 'Does Not Contain',
-															value: 'notContains',
-														},
-														{
-															name: 'Greater Than',
-															value: 'greaterThan',
-														},
-														{
-															name: 'Less Than',
-															value: 'lessThan',
-														},
-														{
-															name: 'Is Empty',
-															value: 'isEmpty',
-														},
-														{
-															name: 'Is Not Empty',
-															value: 'isNotEmpty',
-														},
-														{
-															name: 'Has Property',
-															value: 'hasProperty',
-														},
-													],
-													default: 'equals',
-													description: 'Comparison operator',
-												},
-												{
-													displayName: 'Value',
-													name: 'value',
-													type: 'string',
-													default: '',
-													placeholder: 'Active',
-													description: 'Value to compare against',
-													displayOptions: {
-														hide: {
-															operator: ['isEmpty', 'isNotEmpty'],
-														},
-													},
-												},
-												{
-													displayName: 'Case Sensitive',
-													name: 'caseSensitive',
-													type: 'boolean',
-													default: false,
-													description: 'Whether string comparison should be case sensitive',
-													displayOptions: {
-														show: {
-															operator: ['equals', 'notEquals', 'contains', 'notContains'],
-														},
-													},
-												},
-												{
-													displayName: 'Type Validation',
-													name: 'typeValidation',
-													type: 'options',
-													options: [
-														{
-															name: 'Strict',
-															value: 'strict',
-															description: 'Values must match exactly',
-														},
-														{
-															name: 'Loose',
-															value: 'loose',
-															description: 'Allow type coercion',
-														},
-													],
-													default: 'strict',
-													description: 'How to handle type mismatches',
-												},
-											],
+										multipleValues: false,
+										filter: {
+											caseSensitive: '={{!$parameter.options.ignoreCase}}',
+											typeValidation: getTypeValidationStrictness(3.1),
+											version: '={{ $nodeVersion >= 3.2 ? 2 : 1 }}',
 										},
-									],
+									},
+								},
+								{
+									displayName: 'Rename Output',
+									name: 'renameOutput',
+									type: 'boolean',
+									default: false,
+								},
+								{
+									displayName: 'Output Name',
+									name: 'outputKey',
+									type: 'string',
+									default: '',
+									description: 'The label of output to send data to if route matches',
+									displayOptions: {
+										show: {
+											renameOutput: [true],
+										},
+									},
 								},
 							],
 						},
 					],
 				},
 				{
-					displayName: 'Output Configuration',
-					name: 'outputConfig',
+					displayName: 'Options',
+					name: 'options',
 					type: 'collection',
-					placeholder: 'Add Configuration',
-					default: {
-						defaultRoute: 'Unmatched',
-						outputFieldName: 'route',
-						includeExplanation: false,
-						stopAtFirstMatch: true,
+					placeholder: 'Add option',
+					default: {},
+					displayOptions: {
+						show: {
+							mode: ['rules'],
+						},
 					},
 					options: [
 						{
-							displayName: 'Default Route',
-							name: 'defaultRoute',
-							type: 'string',
-							default: 'Unmatched',
-							description: 'Route name for items that don\'t match any conditions',
+							displayName: 'Fallback Output',
+							name: 'fallbackOutput',
+							type: 'options',
+							typeOptions: {
+								loadOptionsDependsOn: ['routes.values', '/routes', '/routes.values'],
+								loadOptionsMethod: 'getFallbackOutputOptions',
+							},
+							default: 'none',
+							description:
+								'If no route matches the item will be sent to this output, by default they will be ignored',
 						},
 						{
-							displayName: 'Output Field Name',
-							name: 'outputFieldName',
+							displayName: 'Ignore Case',
+							description: 'Whether to ignore letter case when evaluating conditions',
+							name: 'ignoreCase',
+							type: 'boolean',
+							default: true,
+						},
+						{
+							displayName: 'Rename Fallback Output',
+							name: 'renameFallbackOutput',
 							type: 'string',
-							default: 'route',
-							description: 'Name of the field to add with the route name',
+							placeholder: 'e.g. Fallback',
+							default: '',
+							displayOptions: {
+								show: {
+									fallbackOutput: ['extra'],
+								},
+							},
+						},
+						{
+							displayName: 'Send data to all matching outputs',
+							name: 'allMatchingOutputs',
+							type: 'boolean',
+							default: false,
+							description:
+								'Whether to send data to all outputs meeting conditions (and not just the first one)',
 						},
 						{
 							displayName: 'Include Explanation',
@@ -377,11 +258,11 @@ export class RouterV3 implements INodeType {
 							description: 'Add an explanation field showing which conditions matched',
 						},
 						{
-							displayName: 'Stop at First Match',
-							name: 'stopAtFirstMatch',
-							type: 'boolean',
-							default: true,
-							description: 'Stop after first matching route or continue to all matches',
+							displayName: 'Output Field Name',
+							name: 'outputFieldName',
+							type: 'string',
+							default: 'route',
+							description: 'Name of the field to add with the route name',
 						},
 					],
 				},
@@ -389,68 +270,160 @@ export class RouterV3 implements INodeType {
 		};
 	}
 
+	methods = {
+		loadOptions: {
+			async getFallbackOutputOptions(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				const routes = (this.getCurrentNodeParameter('routes.values') as INodeParameters[]) ?? [];
+
+				const outputOptions: INodePropertyOptions[] = [
+					{
+						name: 'None (default)',
+						value: 'none',
+						description: 'Items will be ignored',
+					},
+					{
+						name: 'Extra Output',
+						value: 'extra',
+						description: 'Items will be sent to the extra, separate, output',
+					},
+				];
+
+				for (const [index, route] of routes.entries()) {
+					outputOptions.push({
+						name: `Output ${route.outputKey || route.routeName || index}`,
+						value: index,
+						description: `Items will be sent to the same output as when matched route ${index + 1}`,
+					});
+				}
+
+				return outputOptions;
+			},
+		},
+	};
+
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
-		const routes = (this.getNodeParameter('routes.values', 0, []) as IRoute[]) || [];
-		const outputConfig = this.getNodeParameter('outputConfig', 0, {
-			defaultRoute: 'Unmatched',
-			outputFieldName: 'route',
-			includeExplanation: false,
-			stopAtFirstMatch: true,
-		}) as IOutputConfig;
+		const mode = this.getNodeParameter('mode', 0) as string;
 
-		const returnData: INodeExecutionData[][] = [[]];
+		let returnData: INodeExecutionData[][] = [];
 
-		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-			const item = items[itemIndex];
-			let matchedRoute: string | null = null;
-			const allExplanations: string[] = [];
+		if (mode === 'expression') {
+			// Handle expression mode like original Switch node
+			const numberOutputs = this.getNodeParameter('numberOutputs', 0) as number;
+			returnData = new Array(numberOutputs).fill(0).map(() => []);
 
-			// Evaluate each route
-			for (const route of routes) {
-				try {
-					const evaluation = evaluateRoute(route, item, this, itemIndex);
+			for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+				const item = items[itemIndex];
+				const outputIndex = this.getNodeParameter('output', itemIndex) as number;
 
-					if (outputConfig.includeExplanation) {
-						allExplanations.push(evaluation.explanation);
+				if (outputIndex < 0 || outputIndex >= returnData.length) {
+					throw new NodeOperationError(this.getNode(), `Invalid output index ${outputIndex}`, {
+						itemIndex,
+						description: `It has to be between 0 and ${returnData.length - 1}`,
+					});
+				}
+
+				item.pairedItem = { item: itemIndex };
+				returnData[outputIndex].push(item);
+			}
+		} else {
+			// Handle rules mode with improved logic
+			const routes = (this.getNodeParameter('routes.values', 0, []) as INodeParameters[]) || [];
+			const options = this.getNodeParameter('options', 0, {}) as IDataObject;
+
+			if (!routes.length) {
+				return [items];
+			}
+
+			returnData = new Array(routes.length).fill(0).map(() => []);
+
+			// Add fallback output if configured
+			if (options.fallbackOutput === 'extra') {
+				returnData.push([]);
+			}
+
+			for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+				const item = items[itemIndex];
+				let matchFound = false;
+
+				for (const [routeIndex, route] of routes.entries()) {
+					let conditionPass: boolean;
+
+					try {
+						conditionPass = this.getNodeParameter(
+							`routes.values[${routeIndex}].conditions`,
+							itemIndex,
+							false,
+							{
+								extractValue: true,
+							},
+						) as boolean;
+					} catch (error) {
+						if (this.continueOnFail()) {
+							returnData[0].push({ json: { error: error.message } });
+							continue;
+						}
+						throw new NodeOperationError(this.getNode(), `Error evaluating route "${route.routeName}": ${error.message}`, {
+							itemIndex,
+						});
 					}
 
-					if (evaluation.matches) {
-						matchedRoute = route.routeName;
+					if (conditionPass) {
+						matchFound = true;
+						const outputItem: INodeExecutionData = {
+							...item,
+							json: {
+								...item.json,
+							},
+						};
 
-						if (outputConfig.stopAtFirstMatch) {
+						// Add route information if requested
+						if (options.outputFieldName) {
+							outputItem.json[options.outputFieldName as string] = route.routeName || `Route${routeIndex + 1}`;
+						}
+
+						// Add explanation if requested
+						if (options.includeExplanation) {
+							outputItem.json.explanation = `Matched route: ${route.routeName || `Route${routeIndex + 1}`}`;
+						}
+
+						outputItem.pairedItem = { item: itemIndex };
+						returnData[routeIndex].push(outputItem);
+
+						if (!options.allMatchingOutputs) {
 							break;
 						}
 					}
-				} catch (error) {
-					if (this.continueOnFail()) {
-						// Log error but continue
-						continue;
+				}
+
+				// Handle fallback
+				if (!matchFound && options.fallbackOutput !== undefined && options.fallbackOutput !== 'none') {
+					const outputItem: INodeExecutionData = {
+						...item,
+						json: {
+							...item.json,
+						},
+					};
+
+					if (options.outputFieldName) {
+						outputItem.json[options.outputFieldName as string] = options.renameFallbackOutput || 'Fallback';
 					}
-					throw new NodeOperationError(this.getNode(), `Error evaluating route "${route.routeName}": ${error.message}`, {
-						itemIndex,
-					});
+
+					outputItem.pairedItem = { item: itemIndex };
+
+					if (options.fallbackOutput === 'extra') {
+						returnData[returnData.length - 1].push(outputItem);
+					} else {
+						const fallbackIndex = options.fallbackOutput as number;
+						if (fallbackIndex >= 0 && fallbackIndex < routes.length) {
+							returnData[fallbackIndex].push(outputItem);
+						}
+					}
 				}
 			}
-
-			// Create output item
-			const outputItem: INodeExecutionData = {
-				...item,
-				json: {
-					...item.json,
-					[outputConfig.outputFieldName]: matchedRoute || outputConfig.defaultRoute,
-				},
-			};
-
-			// Add explanation if requested
-			if (outputConfig.includeExplanation) {
-				outputItem.json.explanation = allExplanations.join(' | ');
-			}
-
-			outputItem.pairedItem = { item: itemIndex };
-			returnData[0].push(outputItem);
 		}
 
+		if (!returnData.length) return [[]];
 		return returnData;
 	}
 }
