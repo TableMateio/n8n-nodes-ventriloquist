@@ -49,38 +49,41 @@ export function findMatches(
 	fields: IDataObject,
 	updateAll?: boolean,
 ) {
-	if (updateAll) {
-		const matches = data.filter((record) => {
-			for (const key of keys) {
-				if (record.fields[key] !== fields[key]) {
-					return false;
-				}
-			}
-			return true;
-		});
+	// Enhanced matching logic that handles null values more flexibly
+	const matchingRecords = data.filter((record) => {
+		return keys.every(key => {
+			const inputValue = fields[key];
+			const recordValue = record.fields[key];
 
-		if (!matches?.length) {
+			// Both null/undefined/empty - consider a match
+			if ((inputValue === null || inputValue === undefined || inputValue === '') &&
+				(recordValue === null || recordValue === undefined || recordValue === '')) {
+				return true;
+			}
+
+			// Both have values - must be equal
+			if (inputValue !== null && inputValue !== undefined && inputValue !== '' &&
+				recordValue !== null && recordValue !== undefined && recordValue !== '') {
+				return String(inputValue) === String(recordValue);
+			}
+
+			// One null, one has value - not a match
+			return false;
+		});
+	});
+
+	if (updateAll) {
+		if (!matchingRecords?.length) {
 			throw new ApplicationError('No records match provided keys', { level: 'warning' });
 		}
-
-		return matches;
+		return matchingRecords;
 	} else {
-		const match = data.find((record) => {
-			for (const key of keys) {
-				if (record.fields[key] !== fields[key]) {
-					return false;
-				}
-			}
-			return true;
-		});
-
-		if (!match) {
+		if (!matchingRecords?.length) {
 			throw new ApplicationError('Record matching provided keys was not found', {
 				level: 'warning',
 			});
 		}
-
-		return [match];
+		return [matchingRecords[0]];
 	}
 }
 

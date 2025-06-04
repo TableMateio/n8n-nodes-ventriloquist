@@ -119,9 +119,35 @@ export async function execute(
 					};
 					responseData = await apiRequest.call(this, 'POST', endpoint, createBody);
 				} else if (error?.description?.includes('Cannot update more than one record')) {
-					const conditions = columnsToMatchOn
-						.map((column) => `{${column}} = '${records[0].fields[column]}'`)
-						.join(',');
+					// Enhanced matching logic that handles null values more flexibly
+					const inputFields = records[0].fields;
+
+					// Check if all matching fields are null/undefined - if so, skip this record
+					const nonNullMatchFields = columnsToMatchOn.filter(column => {
+						const value = inputFields[column];
+						return value !== null && value !== undefined && value !== '';
+					});
+
+					if (nonNullMatchFields.length === 0) {
+						// All match fields are null/empty - skip without error
+						console.log('DEBUG: All match fields are null/empty - skipping record');
+						const executionData = this.helpers.constructExecutionMetaData(
+							[{ json: { skipped: true, reason: 'All match fields are null/empty', input: inputFields } }],
+							{ itemData: { item: i } },
+						);
+						returnData.push(...executionData);
+						continue;
+					}
+
+					// Build flexible filter conditions - only include non-null fields
+					const conditions = nonNullMatchFields.map((column) => {
+						const value = inputFields[column];
+						// Escape single quotes in values for Airtable formula
+						const escapedValue = String(value).replace(/'/g, "\\'");
+						return `{${column}} = '${escapedValue}'`;
+					});
+
+					// Get all records to check for matches (including null handling)
 					const response = await apiRequestAllItems.call(
 						this,
 						'GET',
@@ -129,14 +155,42 @@ export async function execute(
 						{},
 						{
 							fields: columnsToMatchOn,
-							filterByFormula: `AND(${conditions})`,
+							filterByFormula: conditions.length > 1 ? `AND(${conditions.join(',')})` : conditions[0],
 						},
 					);
-					const matches = response.records as UpdateRecord[];
+
+					let matches = response.records as UpdateRecord[];
+
+					// Additional client-side filtering to handle null-to-null matching
+					// This covers cases where Airtable's filterByFormula doesn't handle nulls well
+					matches = matches.filter(record => {
+						return columnsToMatchOn.every(column => {
+							const inputValue = inputFields[column];
+							const recordValue = record.fields[column];
+
+							// Both null/undefined/empty - consider a match
+							if ((inputValue === null || inputValue === undefined || inputValue === '') &&
+								(recordValue === null || recordValue === undefined || recordValue === '')) {
+								return true;
+							}
+
+							// Both have values - must be equal
+							if (inputValue !== null && inputValue !== undefined && inputValue !== '' &&
+								recordValue !== null && recordValue !== undefined && recordValue !== '') {
+								return String(inputValue) === String(recordValue);
+							}
+
+							// One null, one has value - not a match
+							return false;
+						});
+					});
 
 					const updateRecords: UpdateRecord[] = [];
 
-					if (options.updateAllMatches) {
+					if (matches.length === 0) {
+						// No matches found - this will trigger creation via the original upsert mechanism
+						throw error;
+					} else if (options.updateAllMatches) {
 						updateRecords.push(...matches.map(({ id }) => ({ id, fields: records[0].fields })));
 					} else {
 						updateRecords.push({ id: matches[0].id, fields: records[0].fields });
