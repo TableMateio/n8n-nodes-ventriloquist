@@ -251,17 +251,6 @@ export async function execute(
 				responseData = await apiRequest.call(this, 'GET', endpoint, body, qs);
 			}
 
-			if (options.downloadFields) {
-				const itemWithAttachments = await downloadRecordAttachments.call(
-					this,
-					responseData.records as IRecord[],
-					options.downloadFields as string[],
-					fallbackPairedItems || [{ item: i }],
-				);
-				returnData.push(...itemWithAttachments);
-				continue;
-			}
-
 			let records = responseData.records as IDataObject[];
 
 			// Check if linked record expansion is requested
@@ -310,6 +299,18 @@ export async function execute(
 					console.error('Error filling empty fields:', emptyFieldsError);
 					// Continue with original records if fill fails
 				}
+			}
+
+			// Handle attachment downloads (after linked record expansion)
+			if (options.downloadFields) {
+				const itemWithAttachments = await downloadRecordAttachments.call(
+					this,
+					records as unknown as IRecord[],
+					options.downloadFields as string[],
+					fallbackPairedItems || [{ item: i }],
+				);
+				returnData.push(...itemWithAttachments);
+				continue;
 			}
 
 			const convertedRecords = records.map((record) => ({
