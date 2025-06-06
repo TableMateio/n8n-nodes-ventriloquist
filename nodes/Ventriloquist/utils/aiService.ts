@@ -2561,14 +2561,17 @@ ${content}
 
 FIELDS TO EXTRACT:
 ${fieldDescriptions}
+${this.options?.generalInstructions && this.options.generalInstructions.trim() !== '' ? `\nADDITIONAL INSTRUCTIONS:\n${this.options.generalInstructions}` : ''}
 
 INSTRUCTIONS:
 1. Analyze the content carefully
 2. Extract each field according to its specifications
 3. Return the data in a ${outputStructure === 'array' ? 'properly formatted array of objects' : 'properly formatted object'}
 ${outputStructure === 'array' ? '4. The response should be an array containing objects with the field properties, even if there is only one object' : ''}
+${outputStructure === 'object' ? '4. CRITICAL: Since output structure is "object", you must extract data for exactly ONE entity/record only. Call the extract_data function ONLY ONCE. Do not make multiple function calls.' : ''}
 5. Use appropriate data types for each field (string, number, boolean, etc.)
 6. If a field is not found, set its value to null
+${outputStructure === 'object' ? '\n7. IMPORTANT: Make only ONE function call to extract_data, not multiple calls. Return data for the single most relevant entity based on the instructions.' : ''}
 
 Ensure that your response is valid JSON that can be parsed directly.
 `;
