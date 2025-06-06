@@ -888,6 +888,32 @@ export class Ventriloquist implements INodeType {
 		// Always initialize with at least one output
 		returnData.push([]);
 
+				// Check if we have input data for operations that typically require it
+		// Some operations like 'open' can start without input, others like 'extract' need input
+		if (items.length === 0) {
+			// Try to get the operation parameter even without input items
+			try {
+				const operation = this.getNodeParameter('operation', 0) as string;
+				const operationsRequiringInput = ['extract', 'click', 'form', 'detect', 'authenticate', 'decision'];
+
+				if (operationsRequiringInput.includes(operation)) {
+					this.logger.info(`No input data received for operation '${operation}' - this might indicate unnecessary re-execution`);
+					// Return empty result to prevent upstream re-execution for operations that need input
+					return returnData;
+				} else {
+					this.logger.info(`Operation '${operation}' can start without input data - proceeding`);
+				}
+			} catch (error) {
+				this.logger.info('No input data and cannot determine operation - assuming this is intentional');
+			}
+		}
+
+		// Get static data for caching results between executions
+		const staticData = this.getWorkflowStaticData('node');
+		const executionMode = this.getMode();
+
+		this.logger.info(`Execution mode: ${executionMode}, Input items: ${items.length}`);
+
 		// Get the browser service selected by the user
 		let credentials;
 		let credentialType;
@@ -973,6 +999,34 @@ export class Ventriloquist implements INodeType {
 
 			// Record start time for operation execution
 			const startTime = Date.now();
+
+						// Create a cache key based on operation, input data, and parameters
+			const inputDataString = JSON.stringify(items[i]);
+			const operationParams = this.getNodeParameter('operation', i);
+			const cacheKey = `${operation}_${Buffer.from(inputDataString + JSON.stringify(operationParams)).toString('base64').slice(0, 32)}`;
+
+			// Check if we have cached results for expensive operations (in manual mode only to avoid production issues)
+			const shouldCache = executionMode === 'manual' && ['extract', 'detect', 'decision', 'form'].includes(operation);
+
+			// Initialize cache as an object if it doesn't exist
+			if (!staticData.cache) {
+				staticData.cache = {} as { [key: string]: INodeExecutionData };
+			}
+			const cache = staticData.cache as { [key: string]: INodeExecutionData };
+
+			if (shouldCache && cache[cacheKey]) {
+				this.logger.info(`Using cached result for operation: ${operation}`);
+				const cachedResult = cache[cacheKey];
+
+				// Add execution duration to cached result
+				if (cachedResult.json) {
+					cachedResult.json.executionDuration = Date.now() - startTime;
+					cachedResult.json.fromCache = true;
+				}
+
+				returnData[0].push(cachedResult);
+				continue;
+			}
 
 			try {
 				if (operation === 'open') {
@@ -1203,6 +1257,22 @@ export class Ventriloquist implements INodeType {
 					returnData[0].push(...results);
 				} else {
 					throw new Error(`The operation "${operation}" is not supported!`);
+				}
+
+								// Cache the result for expensive operations (only in manual mode)
+				if (shouldCache && returnData[0].length > 0) {
+					const resultToCache = returnData[0][returnData[0].length - 1];
+
+					// Store result in cache with a shallow copy to avoid references
+					cache[cacheKey] = JSON.parse(JSON.stringify(resultToCache));
+					this.logger.info(`Cached result for operation: ${operation}`);
+
+					// Clean up old cache entries to prevent memory issues (keep only last 10 entries)
+					const cacheKeys = Object.keys(cache);
+					if (cacheKeys.length > 10) {
+						const oldestKey = cacheKeys[0];
+						delete cache[oldestKey];
+					}
 				}
 			} catch (error: any) {
 				// Clean up the session if there's an error
