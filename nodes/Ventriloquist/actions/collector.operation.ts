@@ -2401,8 +2401,8 @@ async function collectItemsFromPage(
 		});
 	}
 
-	// Extract items based on selector
-	const items = await page.evaluate(
+	// Execute field extraction and filtering in browser context
+	const extractionResult = await page.evaluate(
 		(params: {
 			selector: string;
 			linkSelector: string;
@@ -2415,7 +2415,7 @@ async function collectItemsFromPage(
 			filterItems: boolean;
 			filterCriteria: IDataObject[];
 			filterLogic: string;
-		}) => {
+		}): { items: any[]; debugMessages: string[] } => {
 			const {
 				selector,
 				linkSelector,
@@ -2466,11 +2466,14 @@ async function collectItemsFromPage(
 			// Debug function
 			const debugLog = (message: string) => {
 				if (debug) {
-					console.log(`[Collector Debug] ${message}`);
+					debugMessages.push(message);
 				}
 			};
 
-			return elements.map((element, idx) => {
+			// Collect debug messages to return them
+			const debugMessages: string[] = [];
+
+			const items = elements.map((element, idx) => {
 				// Extract link
 				let url = '';
 
@@ -2541,17 +2544,117 @@ async function collectItemsFromPage(
 						// Find the element
 						let fieldElement = null;
 						try {
-							// First try to find it within this item
-							const matchingElements = element.querySelectorAll(fieldSelector);
-							if (matchingElements.length > 0) {
-								fieldElement = matchingElements[0];
-								debugLog(`Item #${idx}: Found element for field "${fieldName}" (${matchingElements.length} matches)`);
+							// Check if the selector has nth-of-type/nth-child at the end (like "a:nth-of-type(2)")
+							// vs in the middle (like "td:nth-of-type(3) a")
+							const endNthMatch = fieldSelector.match(/^(.+?):nth-(?:of-type|child)\((\d+)\)$/);
+							if (endNthMatch) {
+								// Pattern: "a:nth-of-type(2)" - get all "a" elements and take the nth one
+								const baseSelector = endNthMatch[1];
+								const elementIndex = parseInt(endNthMatch[2]) - 1; // Convert to 0-based index
+
+								debugLog(`Item #${idx}: Detected nth selector at end, using base selector "${baseSelector}" with index ${elementIndex}`);
+
+								const matchingElements = element.querySelectorAll(baseSelector);
+								debugLog(`Item #${idx}: Field "${fieldName}" selector "${baseSelector}" found ${matchingElements.length} elements`);
+
+								if (matchingElements.length > elementIndex) {
+									fieldElement = matchingElements[elementIndex];
+									debugLog(`Item #${idx}: Found element for field "${fieldName}" (${matchingElements.length} matches, using index ${elementIndex})`);
+									debugLog(`Item #${idx}: Selected element text: "${fieldElement.textContent?.trim()}", tag: ${fieldElement.tagName}`);
+								} else {
+									debugLog(`Item #${idx}: Not enough elements for field "${fieldName}" using selector "${baseSelector}" (found ${matchingElements.length}, needed index ${elementIndex})`);
+								}
 							} else {
-								debugLog(`Item #${idx}: No elements found for field "${fieldName}" using selector "${fieldSelector}"`);
+								// No nth-of-type at the end, use the selector as-is (handles cases like "td:nth-of-type(3) a")
+								debugLog(`Item #${idx}: Using selector as-is: "${fieldSelector}"`);
+
+								const matchingElements = element.querySelectorAll(fieldSelector);
+								debugLog(`Item #${idx}: Field "${fieldName}" selector "${fieldSelector}" found ${matchingElements.length} elements`);
+
+								if (matchingElements.length > 0) {
+									// If we have multiple elements, prefer one with text content
+									fieldElement = matchingElements[0];
+									if (matchingElements.length > 1) {
+										// Find the first element with non-empty text content
+										const elementWithText = Array.from(matchingElements).find(el => el.textContent && el.textContent.trim() !== '');
+										if (elementWithText) {
+											fieldElement = elementWithText;
+											debugLog(`Item #${idx}: Found element for field "${fieldName}" (${matchingElements.length} matches, using element with text content)`);
+										} else {
+											debugLog(`Item #${idx}: Found element for field "${fieldName}" (${matchingElements.length} matches, no element with text, using first)`);
+										}
+									} else {
+										debugLog(`Item #${idx}: Found element for field "${fieldName}" (${matchingElements.length} matches, using first)`);
+									}
+									debugLog(`Item #${idx}: Selected element text: "${fieldElement.textContent?.trim()}", tag: ${fieldElement.tagName}`);
+								} else {
+									debugLog(`Item #${idx}: No elements found for field "${fieldName}" using selector "${fieldSelector}"`);
+								}
+							}
+
+							// Debug: show all "a" elements in this item for comparison
+							if (fieldSelector.includes('a')) {
+								const allAs = element.querySelectorAll('a');
+								debugLog(`Item #${idx}: Total "a" elements in item: ${allAs.length}`);
+								if (allAs.length > 0) {
+									allAs.forEach((a, aIdx) => {
+										debugLog(`Item #${idx}: a[${aIdx}] text: "${a.textContent?.trim()}", href: "${a.getAttribute('href')}"`);
+									});
+								} else {
+									// If no 'a' elements found, let's debug the item structure
+									debugLog(`Item #${idx}: No 'a' elements found. Item structure debug:`);
+									debugLog(`Item #${idx}: Item tag: ${element.tagName}, class: "${element.className || 'none'}"`);
+									debugLog(`Item #${idx}: Item HTML (first 300 chars): ${element.outerHTML.substring(0, 300)}...`);
+									debugLog(`Item #${idx}: Item children count: ${element.children.length}`);
+
+									// Show all child elements and their structure
+									Array.from(element.children).slice(0, 10).forEach((child, childIdx) => {
+										const childAs = child.querySelectorAll('a');
+										debugLog(`Item #${idx}: Child[${childIdx}] tag: ${child.tagName}, class: "${child.className || 'none'}", 'a' count: ${childAs.length}`);
+										if (childAs.length > 0) {
+											childAs.forEach((a, aIdx) => {
+												debugLog(`Item #${idx}: Child[${childIdx}] a[${aIdx}] text: "${a.textContent?.trim()}", href: "${a.getAttribute('href')}"`);
+											});
+										}
+									});
+
+									// Special check for td elements if this might be a table row
+									if (element.tagName.toLowerCase() === 'tr') {
+										const tds = element.querySelectorAll('td');
+										debugLog(`Item #${idx}: Table row detected, td count: ${tds.length}`);
+										tds.forEach((td, tdIdx) => {
+											const tdAs = td.querySelectorAll('a');
+											debugLog(`Item #${idx}: td[${tdIdx}] 'a' count: ${tdAs.length}, text: "${td.textContent?.trim().substring(0, 50) || 'empty'}"`);
+											if (tdAs.length > 0) {
+												tdAs.forEach((a, aIdx) => {
+													debugLog(`Item #${idx}: td[${tdIdx}] a[${aIdx}] text: "${a.textContent?.trim()}", href: "${a.getAttribute('href')}"`);
+												});
+											}
+										});
+
+										// Test the specific selector that's failing
+										if (fieldSelector === 'td:nth-of-type(3) a') {
+											const thirdTd = element.querySelector('td:nth-of-type(3)');
+											if (thirdTd) {
+												const thirdTdAs = thirdTd.querySelectorAll('a');
+												debugLog(`Item #${idx}: SPECIFIC SELECTOR TEST - td:nth-of-type(3) found: YES, 'a' count in 3rd td: ${thirdTdAs.length}`);
+												if (thirdTdAs.length > 0) {
+													thirdTdAs.forEach((a, aIdx) => {
+														debugLog(`Item #${idx}: SPECIFIC SELECTOR TEST - 3rd td a[${aIdx}] text: "${a.textContent?.trim()}", href: "${a.getAttribute('href')}"`);
+													});
+												} else {
+													debugLog(`Item #${idx}: SPECIFIC SELECTOR TEST - 3rd td HTML: ${thirdTd.outerHTML}`);
+												}
+											} else {
+												debugLog(`Item #${idx}: SPECIFIC SELECTOR TEST - td:nth-of-type(3) NOT FOUND`);
+											}
+										}
+									}
+								}
 							}
 						} catch (error) {
 							// Invalid selector, skip this field
-							debugLog(`Item #${idx}: Invalid selector for field "${fieldName}": ${fieldSelector}`);
+							debugLog(`Item #${idx}: Invalid selector for field "${fieldName}": ${fieldSelector} - Error: ${error}`);
 							result[fieldName] = '';
 							continue;
 						}
@@ -2744,6 +2847,12 @@ async function collectItemsFromPage(
 
 				return result;
 			}).filter(item => item !== null); // Remove filtered items
+
+			// Return both items and debug messages
+			return {
+				items: items,
+				debugMessages: debug ? debugMessages : []
+			};
 		},
 		{
 			selector: actualItemSelector,
@@ -2759,6 +2868,32 @@ async function collectItemsFromPage(
 			filterLogic
 		}
 	);
+
+	// Log debug messages from browser context
+	if (debugMode && extractionResult.debugMessages && extractionResult.debugMessages.length > 0) {
+		this.logger.info(
+			formatOperationLog(
+				'Collector',
+				nodeName,
+				nodeId,
+				index,
+				`🔍 FIELD EXTRACTION DEBUG (from browser context):`
+			)
+		);
+		extractionResult.debugMessages.forEach(message => {
+			this.logger.info(
+				formatOperationLog(
+					'Collector',
+					nodeName,
+					nodeId,
+					index,
+					`[Browser] ${message}`
+				)
+			);
+		});
+	}
+
+	const items = extractionResult.items;
 
 	// Log the extracted items for debugging
 	if (debugMode) {
@@ -2841,13 +2976,13 @@ async function collectItemsFromPage(
 	// Log filtering results
 	if (filterItems && filterCriteria.length > 0) {
 		this.logger.info(
-			formatOperationLog(
-				'Collector',
-				nodeName,
-				nodeId,
-				index,
-				`Filter applied in browser: ${items.length} items returned after filtering`
-			)
+				formatOperationLog(
+					'Collector',
+						nodeName,
+						nodeId,
+						index,
+						`Filter applied in browser: ${items.length} items returned after filtering`
+				)
 		);
 	}
 

@@ -68,6 +68,11 @@ export interface IExtractItem {
   hasOpenAiApiKey?: boolean;
   continueIfNotFound?: boolean;
   preserveFieldStructure?: boolean;
+  extractionOptions?: {
+    includeField?: boolean;
+    cleanText?: boolean;
+    convertType?: string;
+  };
   textOptions?: {
     cleanText?: boolean;
     convertType?: string;
