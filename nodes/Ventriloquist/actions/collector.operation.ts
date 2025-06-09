@@ -98,6 +98,13 @@ interface IPaginationState {
 	maxUrlRepeats: number;
 }
 
+interface ICollectionResult {
+	items: ICollectedItem[];
+	itemsExtracted: number;
+	itemsFiltered: number;
+	debugInfo?: any;
+}
+
 /**
  * Collector operation description
  */
@@ -429,7 +436,7 @@ export const description: INodeProperties[] = [
 						description: "Name of the field to filter on (must match the name of an extracted field)",
 					},
 					{
-						displayName: "Extraction Type",
+						displayName: "Filter Type",
 						name: "extractionType",
 						type: "options",
 						options: [
@@ -520,11 +527,36 @@ export const description: INodeProperties[] = [
 						},
 					},
 					{
+						displayName: "Condition",
+						name: "condition",
+						type: "options",
+						options: [
+							{
+								name: "Exists",
+								value: "exists",
+								description: "Check if the element exists",
+							},
+							{
+								name: "Not Exists",
+								value: "notExists",
+								description: "Check if the element does not exist",
+							},
+						],
+						default: "exists",
+						description: "Condition to check",
+						displayOptions: {
+							show: {
+								extractionType: ["exists"],
+							},
+						},
+					},
+					{
 						displayName: "Value",
 						name: "value",
 						type: "string",
 						default: "",
-						description: "Value to compare against. For 'Contains' and 'Not Contains' conditions, you can use comma-separated values (e.g., 'REMOVED,SOLD,EXPIRED').",
+						placeholder: "SOLD or /\\w+\\.bad/i or VALUE1,VALUE2",
+						description: "Value to compare against. Supports: • Simple text: 'SOLD' • Comma-separated: 'REMOVED,SOLD,EXPIRED' • Regex patterns: '/pattern/flags' (e.g., '/\\w+/i' for case-insensitive word matching)",
 						displayOptions: {
 							hide: {
 								condition: ["exists", "notExists"],
@@ -892,6 +924,13 @@ export async function execute(
 		maxUrlRepeats: 2 // Allow each URL to be seen maximum 2 times before flagging as cycling
 	};
 
+		// Track filtering statistics
+	let totalItemsExtracted = 0;
+	let totalItemsFiltered = 0;
+
+	// Track debug information for output
+	let debugInfo: any = null;
+
 	// Visual marker to clearly indicate a new node is starting
 	this.logger.info(`${'='.repeat(40)}`);
 	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Collector] Starting operation`);
@@ -980,7 +1019,7 @@ export async function execute(
 		}
 
 		// Get pagination configuration
-		const enablePagination = this.getNodeParameter('enablePagination', index, false) as boolean;
+		let enablePagination = this.getNodeParameter('enablePagination', index, false) as boolean;
 		let maxPages = 1;
 		let paginationStrategy = '';
 		let nextPageSelector = '';
@@ -1004,16 +1043,136 @@ export async function execute(
 
 			if (paginationStrategy === 'clickNext') {
 				nextPageSelector = this.getNodeParameter('nextPageSelector', index, '') as string;
+				// If next page selector is empty or just whitespace, disable pagination
+				if (!nextPageSelector || nextPageSelector.trim() === '') {
+					this.logger.info(
+						formatOperationLog(
+							'Collector',
+							nodeName,
+							nodeId,
+							index,
+							'Next page selector is empty - disabling pagination'
+						)
+					);
+					enablePagination = false;
+				}
 			} else if (paginationStrategy === 'urlPattern') {
 				urlPattern = this.getNodeParameter('urlPattern', index, '') as string;
 				startPage = this.getNodeParameter('startPage', index, 1) as number;
 				paginationState.currentPage = startPage;
+				// If URL pattern is empty or just whitespace, disable pagination
+				if (!urlPattern || urlPattern.trim() === '') {
+					this.logger.info(
+						formatOperationLog(
+							'Collector',
+							nodeName,
+							nodeId,
+							index,
+							'URL pattern is empty - disabling pagination'
+						)
+					);
+					enablePagination = false;
+				}
 			}
 
 			if (lastPageDetection === 'selectorPresent') {
 				lastPageSelector = this.getNodeParameter('lastPageSelector', index, '') as string;
 			} else if (lastPageDetection === 'disabledState') {
 				disabledButtonConfig = this.getNodeParameter('disabledButtonConfig.values', index, {}) as IDataObject;
+			}
+		}
+
+		// Debug mode: Validate pagination selectors
+		if (debugMode && enablePagination) {
+			this.logger.info(
+				formatOperationLog(
+					'Collector',
+					nodeName,
+					nodeId,
+					index,
+					`🔄 PAGINATION SELECTOR VALIDATION:`
+				)
+			);
+
+			if (paginationStrategy === 'clickNext' && nextPageSelector) {
+				// Check if next page selector exists
+				const nextPageValidation = await page.evaluate((selector: string) => {
+					const elements = document.querySelectorAll(selector);
+					const result = {
+						selector,
+						found: elements.length > 0,
+						count: elements.length,
+						isDisabled: false,
+						buttonText: '',
+						attributes: {} as Record<string, string>
+					};
+
+					if (elements.length > 0) {
+						const firstElement = elements[0] as HTMLElement;
+						result.isDisabled = firstElement.hasAttribute('disabled') ||
+							firstElement.classList.contains('disabled') ||
+							firstElement.classList.contains('disable');
+						result.buttonText = firstElement.textContent?.trim() || '';
+
+						// Capture some key attributes
+						for (let i = 0; i < firstElement.attributes.length; i++) {
+							const attr = firstElement.attributes[i];
+							if (['class', 'disabled', 'aria-disabled', 'href'].includes(attr.name)) {
+								result.attributes[attr.name] = attr.value;
+							}
+						}
+					}
+
+					return result;
+				}, nextPageSelector);
+
+				const nextPageStatus = nextPageValidation.found ? '✅' : '❌';
+				const disabledText = nextPageValidation.isDisabled ? ' (DISABLED)' : '';
+				this.logger.info(
+					formatOperationLog(
+						'Collector',
+						nodeName,
+						nodeId,
+						index,
+						`${nextPageStatus} Next Page: "${nextPageValidation.selector}" → ${nextPageValidation.count} elements found${disabledText}`
+					)
+				);
+
+				if (nextPageValidation.found && debugMode) {
+					this.logger.info(
+						formatOperationLog(
+							'Collector',
+							nodeName,
+							nodeId,
+							index,
+							`   Text: "${nextPageValidation.buttonText}" | Attributes: ${JSON.stringify(nextPageValidation.attributes)}`
+						)
+					);
+				}
+			}
+
+			if (lastPageDetection === 'selectorPresent' && lastPageSelector) {
+				// Check if last page indicator exists
+				const lastPageValidation = await page.evaluate((selector: string) => {
+					const elements = document.querySelectorAll(selector);
+					return {
+						selector,
+						found: elements.length > 0,
+						count: elements.length,
+						sampleText: elements.length > 0 ? elements[0].textContent?.substring(0, 50) : null
+					};
+				}, lastPageSelector);
+
+				const lastPageStatus = lastPageValidation.found ? '✅' : '❌';
+				this.logger.info(
+					formatOperationLog(
+						'Collector',
+						nodeName,
+						nodeId,
+						index,
+						`${lastPageStatus} Last Page Indicator: "${lastPageValidation.selector}" → ${lastPageValidation.count} elements found`
+					)
+				);
 			}
 		}
 
@@ -1092,7 +1251,7 @@ export async function execute(
 			}
 
 			// Collect items from the current page
-			const pageItems = await collectItemsFromPage.call(
+			const pageResult = await collectItemsFromPage.call(
 				this,
 				page,
 				{
@@ -1116,8 +1275,43 @@ export async function execute(
 				index
 			);
 
+			// Extract items and update statistics
+			const pageItems = pageResult.items;
+			totalItemsExtracted += pageResult.itemsExtracted;
+			totalItemsFiltered += pageResult.itemsFiltered;
+
+			// Capture debug info from first page (if available)
+			if (!debugInfo && pageResult.debugInfo) {
+				debugInfo = pageResult.debugInfo;
+			}
+
 			// Add items from this page to our collection
 			collectedItems.push(...pageItems);
+
+						// Debug mode: Log each collected item with complete extracted data
+			if (debugMode && pageItems.length > 0) {
+				this.logger.info(
+					formatOperationLog(
+						'Collector',
+						nodeName,
+						nodeId,
+						index,
+						`🎯 EXTRACTED DATA FOR COLLECTED ITEMS FROM PAGE ${paginationState.currentPage}:`
+					)
+				);
+
+				pageItems.forEach((item, itemIndex) => {
+					this.logger.info(
+						formatOperationLog(
+							'Collector',
+							nodeName,
+							nodeId,
+							index,
+							`\n📦 COLLECTED ITEM ${itemIndex + 1} EXTRACTED DATA:\n${JSON.stringify(item, null, 2)}\n${'-'.repeat(60)}`
+						)
+					);
+				});
+			}
 
 			this.logger.info(
 				formatOperationLog(
@@ -1171,6 +1365,21 @@ export async function execute(
 
 				// Check for last page indicators
 				if (lastPageDetection === 'buttonMissing' && paginationStrategy === 'clickNext') {
+					// Skip check if nextPageSelector is empty (should have been caught earlier)
+					if (!nextPageSelector || nextPageSelector.trim() === '') {
+						this.logger.info(
+							formatOperationLog(
+								'Collector',
+								nodeName,
+								nodeId,
+								index,
+								'Next page selector is empty - treating as last page reached'
+							)
+						);
+						paginationState.lastPageDetected = true;
+						break;
+					}
+
 					const nextButtonExists = await elementExists(page, nextPageSelector);
 					if (!nextButtonExists) {
 						this.logger.info(
@@ -1186,6 +1395,21 @@ export async function execute(
 						break;
 					}
 				} else if (lastPageDetection === 'disabledState' && paginationStrategy === 'clickNext') {
+					// Skip check if nextPageSelector is empty (should have been caught earlier)
+					if (!nextPageSelector || nextPageSelector.trim() === '') {
+						this.logger.info(
+							formatOperationLog(
+								'Collector',
+								nodeName,
+								nodeId,
+								index,
+								'Next page selector is empty - treating as last page reached'
+							)
+						);
+						paginationState.lastPageDetected = true;
+						break;
+					}
+
 					// Enhanced detection of disabled button states
 					const disabledClasses = ((disabledButtonConfig.disabledClasses as string) || 'disabled,disable,inactive').split(',').map(c => c.trim());
 					const disabledAttributes = ((disabledButtonConfig.disabledAttributes as string) || 'disabled,aria-disabled').split(',').map(a => a.trim());
@@ -1466,6 +1690,21 @@ export async function execute(
 
 				// Navigate to the next page
 				if (paginationStrategy === 'clickNext') {
+					// Check if nextPageSelector is empty (should have been caught earlier)
+					if (!nextPageSelector || nextPageSelector.trim() === '') {
+						this.logger.info(
+							formatOperationLog(
+								'Collector',
+								nodeName,
+								nodeId,
+								index,
+								'Next page selector is empty - stopping pagination'
+							)
+						);
+						paginationState.lastPageDetected = true;
+						break;
+					}
+
 					// Click the next button
 					this.logger.info(
 						formatOperationLog(
@@ -1586,38 +1825,91 @@ export async function execute(
 			}
 		}
 
+		// Extract filter configuration for debug info
+		const filterConfiguration = {
+			filterItems: this.getNodeParameter('filterItems', index, false) as boolean,
+			filterCriteria: this.getNodeParameter('filterCriteria.criteria', index, []) as IDataObject[],
+			filterLogic: this.getNodeParameter('filterLogic', index, 'and') as string
+		};
+
+		// Create collection-level debug info (only if debug mode is enabled)
+		let collectionDebugInfo = null;
+		if (debugMode) {
+			collectionDebugInfo = {
+				collectionSummary: {
+					totalItems: collectedItems.length,
+					totalItemsExtracted: totalItemsExtracted,
+					totalItemsFiltered: totalItemsFiltered,
+					pagesProcessed: paginationState.currentPage,
+					maxPagesAllowed: maxPages,
+					lastPageDetected: paginationState.lastPageDetected,
+					executionTime: Date.now() - startTime,
+					filterCriteria: filterConfiguration.filterItems ? filterConfiguration.filterCriteria : null,
+					filterLogic: filterConfiguration.filterItems ? filterConfiguration.filterLogic : null,
+				},
+				...(debugInfo && { selectorValidation: debugInfo })
+			};
+		}
+
 		// Convert collected items to N8N items
 		const returnItems: INodeExecutionData[] = [];
+
+		// Add collection debug info as the first item if debug mode is enabled
+		if (debugMode && collectionDebugInfo) {
+			returnItems.push({
+				json: {
+					_collectionDebug: true,
+					_debugType: 'collection',
+					sessionId,
+					...collectionDebugInfo
+				}
+			});
+		}
+
+		// Add individual items without collection debug duplication
 		for (const item of collectedItems) {
 			returnItems.push({
 				json: {
 					...item,
 					sessionId,
-					collectionSummary: {
-						totalItems: collectedItems.length,
-						pagesProcessed: paginationState.currentPage,
-						maxPagesAllowed: maxPages,
-						lastPageDetected: paginationState.lastPageDetected,
-					}
+					// Individual item debug info can go here if needed
+					...(debugMode && item.itemDebug && { itemDebug: item.itemDebug })
 				}
 			});
 		}
 
-		// If no items were collected, return at least one item with collection info
-		if (returnItems.length === 0) {
-			returnItems.push({
-				json: {
-					success: true,
-					message: 'No items collected',
-					sessionId,
-					collectionSummary: {
+		// If no items were collected, return collection info and a message item
+		if (collectedItems.length === 0) {
+			let message = 'No items collected';
+			if (totalItemsExtracted > 0 && totalItemsFiltered > 0) {
+				message = `No items collected - ${totalItemsExtracted} items found but all ${totalItemsFiltered} were filtered out`;
+			} else if (totalItemsExtracted === 0) {
+				message = 'No items collected - no items found on page(s)';
+			}
+
+			// If debug mode wasn't enabled above, we still need to add collection info
+			if (!debugMode) {
+				returnItems.push({
+					json: {
+						_collectionResult: true,
+						success: true,
+						message,
+						sessionId,
 						totalItems: 0,
-						pagesProcessed: paginationState.currentPage,
-						maxPagesAllowed: maxPages,
-						lastPageDetected: paginationState.lastPageDetected,
+						pagesProcessed: paginationState.currentPage
 					}
-				}
-			});
+				});
+			} else {
+				// Add a message item alongside the debug info
+				returnItems.push({
+					json: {
+						_messageItem: true,
+						success: true,
+						message,
+						sessionId
+					}
+				});
+			}
 		}
 
 		// Add timing information
@@ -1705,7 +1997,7 @@ async function collectItemsFromPage(
 	nodeName: string,
 	nodeId: string,
 	index: number
-): Promise<ICollectedItem[]> {
+): Promise<ICollectionResult> {
 	const {
 		selectionMethod,
 		containerSelector,
@@ -1754,7 +2046,11 @@ async function collectItemsFromPage(
 					`Container selector not found: ${containerSelector}`
 				)
 			);
-			return [];
+			return {
+				items: [],
+				itemsExtracted: 0,
+				itemsFiltered: 0
+			};
 		}
 	} else {
 		// For direct method, use the provided item selector
@@ -1767,8 +2063,260 @@ async function collectItemsFromPage(
 	const urlTransformation = linkConfig.urlTransformation as boolean || false;
 	const transformationType = linkConfig.transformationType as string || 'absolute';
 
-	// Debug log the configuration
+	// Debug validation results to include in output
+	let selectorValidationResults: any = null;
+
+	// Debug mode: Comprehensive selector validation
 	if (debugMode) {
+		this.logger.info(
+			formatOperationLog(
+				'Collector',
+				nodeName,
+				nodeId,
+				index,
+				`🔍 SELECTOR VALIDATION REPORT:`
+			)
+		);
+
+		// Validate all selectors used in this operation
+		const selectorValidation = await page.evaluate(
+			(selectors: {
+				containerSelector: string;
+				itemSelector: string;
+				actualItemSelector: string;
+				linkSelector: string;
+				additionalFields: IDataObject[];
+				filterCriteria: IDataObject[];
+				selectionMethod: string;
+			}) => {
+				const results: any = {};
+
+				// Check container selector (if using containerItems method)
+				if (selectors.selectionMethod === 'containerItems' && selectors.containerSelector) {
+					const containerElements = document.querySelectorAll(selectors.containerSelector);
+					results.container = {
+						selector: selectors.containerSelector,
+						found: containerElements.length > 0,
+						count: containerElements.length,
+						containerElementTag: containerElements.length > 0 ? containerElements[0].tagName : null,
+						firstChildElementTag: containerElements.length > 0 && containerElements[0].children.length > 0 ? containerElements[0].children[0].tagName : null,
+						childrenCount: containerElements.length > 0 ? containerElements[0].children.length : 0
+					};
+				}
+
+				// Check item selector
+				const itemElements = document.querySelectorAll(selectors.actualItemSelector);
+				results.items = {
+					selector: selectors.actualItemSelector,
+					method: selectors.selectionMethod,
+					found: itemElements.length > 0,
+					count: itemElements.length,
+					firstItemElementTag: itemElements.length > 0 ? itemElements[0].tagName : null,
+					// Add detailed HTML structure for first few items
+					sampleItemsHtml: itemElements.length > 0 ? Array.from(itemElements).slice(0, 3).map((el, idx) => ({
+						itemIndex: idx + 1,
+						tagName: el.tagName,
+						className: el.className || null,
+						id: el.id || null,
+						outerHTML: el.outerHTML.length > 2000 ? el.outerHTML.substring(0, 2000) + '...[truncated]' : el.outerHTML,
+						textContent: el.textContent ? el.textContent.substring(0, 200) + (el.textContent.length > 200 ? '...[truncated]' : '') : null,
+						childElementCount: el.children.length,
+						hasLinks: el.querySelectorAll('a').length > 0,
+						linkCount: el.querySelectorAll('a').length
+					})) : []
+				};
+
+								// Check link selector within first item (if items exist)
+				if (itemElements.length > 0) {
+					const firstItem = itemElements[0];
+					const linkElements = firstItem.querySelectorAll(selectors.linkSelector);
+					const anyLinks = firstItem.querySelectorAll('a');
+
+					results.links = {
+						selector: selectors.linkSelector,
+						found: linkElements.length > 0,
+						count: linkElements.length,
+						fallbackLinksCount: anyLinks.length,
+						targetLinkElementTag: linkElements.length > 0 ? linkElements[0].tagName : null,
+						sampleHrefs: Array.from(linkElements).slice(0, 3).map(el => el.getAttribute('href')).filter(Boolean),
+						// Detailed analysis for debugging
+						firstItemStructure: {
+							tagName: firstItem.tagName,
+							className: firstItem.className || null,
+							childElements: Array.from(firstItem.children).map(child => ({
+								tagName: child.tagName,
+								className: child.className || null,
+								textContent: child.textContent ? child.textContent.substring(0, 100) + (child.textContent.length > 100 ? '...' : '') : null,
+								hasLinks: child.querySelectorAll('a').length > 0,
+								linkCount: child.querySelectorAll('a').length
+							})),
+							allLinksInItem: Array.from(anyLinks).map(link => ({
+								tagName: link.tagName,
+								href: link.getAttribute('href'),
+								textContent: link.textContent ? link.textContent.substring(0, 50) + (link.textContent.length > 50 ? '...' : '') : null,
+								className: link.className || null,
+								parentPath: (() => {
+									let path = [];
+									let current = link.parentElement;
+									while (current && current !== firstItem && path.length < 5) {
+										path.push(`${current.tagName}${current.className ? '.' + current.className.split(' ').join('.') : ''}`);
+										current = current.parentElement;
+									}
+									return path.reverse().join(' > ');
+								})()
+							}))
+						}
+					};
+				} else {
+					results.links = {
+						selector: selectors.linkSelector,
+						found: false,
+						count: 0,
+						note: 'No items found to check links within'
+					};
+				}
+
+								// Check additional field selectors
+				results.additionalFields = [];
+				if (selectors.additionalFields && selectors.additionalFields.length > 0 && itemElements.length > 0) {
+					const firstItem = itemElements[0];
+					for (const field of selectors.additionalFields) {
+						const fieldSelector = field.selector as string;
+						if (fieldSelector) {
+							const fieldElements = firstItem.querySelectorAll(fieldSelector);
+							results.additionalFields.push({
+								name: field.name,
+								selector: fieldSelector,
+								found: fieldElements.length > 0,
+								count: fieldElements.length,
+								targetElementTag: fieldElements.length > 0 ? fieldElements[0].tagName : null,
+								sampleText: fieldElements.length > 0 ? fieldElements[0].textContent?.substring(0, 50) : null
+							});
+						}
+					}
+				}
+
+				// Check filter criteria selectors
+				results.filterSelectors = [];
+				if (selectors.filterCriteria && selectors.filterCriteria.length > 0 && itemElements.length > 0) {
+					const firstItem = itemElements[0];
+					for (const criterion of selectors.filterCriteria) {
+						const filterSelector = criterion.selector as string;
+						if (filterSelector) {
+							const filterElements = firstItem.querySelectorAll(filterSelector);
+							results.filterSelectors.push({
+								fieldName: criterion.fieldName || criterion.name,
+								selector: filterSelector,
+								found: filterElements.length > 0,
+								count: filterElements.length,
+								targetElementTag: filterElements.length > 0 ? filterElements[0].tagName : null,
+								sampleText: filterElements.length > 0 ? filterElements[0].textContent?.substring(0, 50) : null
+							});
+						}
+					}
+				}
+
+				return results;
+			},
+			{
+				containerSelector,
+				itemSelector,
+				actualItemSelector,
+				linkSelector,
+				additionalFields,
+				filterCriteria,
+				selectionMethod
+			}
+		);
+
+		// Log container validation
+		if (selectorValidation.container) {
+			const containerStatus = selectorValidation.container.found ? '✅' : '❌';
+			this.logger.info(
+				formatOperationLog(
+					'Collector',
+					nodeName,
+					nodeId,
+					index,
+					`${containerStatus} Container: "${selectorValidation.container.selector}" → ${selectorValidation.container.count} elements found`
+				)
+			);
+		}
+
+		// Log item validation
+		const itemStatus = selectorValidation.items.found ? '✅' : '❌';
+		this.logger.info(
+			formatOperationLog(
+				'Collector',
+				nodeName,
+				nodeId,
+				index,
+				`${itemStatus} Items: "${selectorValidation.items.selector}" → ${selectorValidation.items.count} elements found`
+			)
+		);
+
+		// Log link validation
+		const linkStatus = selectorValidation.links.found ? '✅' : '❌';
+		this.logger.info(
+			formatOperationLog(
+				'Collector',
+				nodeName,
+				nodeId,
+				index,
+				`${linkStatus} Links: "${selectorValidation.links.selector}" → ${selectorValidation.links.count} elements found in first item`
+			)
+		);
+
+		// Log additional fields validation
+		if (selectorValidation.additionalFields.length > 0) {
+			this.logger.info(
+				formatOperationLog(
+					'Collector',
+					nodeName,
+					nodeId,
+					index,
+					`📋 Additional Fields (${selectorValidation.additionalFields.length}):`
+				)
+			);
+			for (const field of selectorValidation.additionalFields) {
+				const fieldStatus = field.found ? '✅' : '❌';
+				this.logger.info(
+					formatOperationLog(
+						'Collector',
+						nodeName,
+						nodeId,
+						index,
+						`${fieldStatus} "${field.name}": "${field.selector}" → ${field.count} elements`
+					)
+				);
+			}
+		}
+
+		// Log filter selectors validation
+		if (selectorValidation.filterSelectors.length > 0) {
+			this.logger.info(
+				formatOperationLog(
+					'Collector',
+					nodeName,
+					nodeId,
+					index,
+					`🔍 Filter Selectors (${selectorValidation.filterSelectors.length}):`
+				)
+			);
+			for (const filter of selectorValidation.filterSelectors) {
+				const filterStatus = filter.found ? '✅' : '❌';
+				this.logger.info(
+					formatOperationLog(
+						'Collector',
+						nodeName,
+						nodeId,
+						index,
+						`${filterStatus} "${filter.fieldName}": "${filter.selector}" → ${filter.count} elements`
+					)
+				);
+			}
+		}
+
 		this.logger.info(
 			formatOperationLog(
 				'Collector',
@@ -1779,15 +2327,8 @@ async function collectItemsFromPage(
 			)
 		);
 
-		this.logger.info(
-			formatOperationLog(
-				'Collector',
-				nodeName,
-				nodeId,
-				index,
-				`Additional fields: ${JSON.stringify(additionalFields)}`
-			)
-		);
+		// Store validation results for output
+		selectorValidationResults = selectorValidation;
 	}
 
 	// Count the number of items
@@ -1810,31 +2351,54 @@ async function collectItemsFromPage(
 		const itemSamples = await page.evaluate((selector: string) => {
 			const samples = [];
 			const elements = document.querySelectorAll(selector);
-			const maxSamples = Math.min(3, elements.length);
+			const maxSamples = Math.min(5, elements.length); // Show up to 5 items
 
 			for (let i = 0; i < maxSamples; i++) {
 				const element = elements[i];
 				samples.push({
-					outerHTML: element.outerHTML.substring(0, 500) + (element.outerHTML.length > 500 ? '...' : ''),
+					itemIndex: i + 1,
 					tagName: element.tagName,
+					className: element.className || null,
+					id: element.id || null,
 					childElementCount: element.childElementCount,
 					hasLinks: element.querySelectorAll('a').length > 0,
+					linkCount: element.querySelectorAll('a').length,
 					linkHrefs: Array.from(element.querySelectorAll('a')).map(a => a.getAttribute('href')),
+					// COMPLETE HTML - no truncation
+					completeOuterHTML: element.outerHTML
 				});
 			}
 
 			return samples;
 		}, actualItemSelector);
 
+		// Log each item sample with complete HTML
 		this.logger.info(
 			formatOperationLog(
 				'Collector',
 				nodeName,
 				nodeId,
 				index,
-				`Item samples for debugging: ${JSON.stringify(itemSamples)}`
+				`🔍 COMPLETE HTML FOR EACH ITEM (showing ${itemSamples.length} items):`
 			)
 		);
+
+		itemSamples.forEach((sample, idx) => {
+			this.logger.info(
+				formatOperationLog(
+					'Collector',
+					nodeName,
+					nodeId,
+					index,
+					`\n📋 ITEM ${sample.itemIndex} COMPLETE HTML:\n` +
+					`Tag: ${sample.tagName}, Class: ${sample.className || 'none'}, ID: ${sample.id || 'none'}\n` +
+					`Child Elements: ${sample.childElementCount}, Links: ${sample.linkCount}\n` +
+					`Link HREFs: ${JSON.stringify(sample.linkHrefs)}\n` +
+					`COMPLETE HTML:\n${sample.completeOuterHTML}\n` +
+					`${'='.repeat(80)}`
+				)
+			);
+		});
 	}
 
 	// Extract items based on selector
@@ -1848,6 +2412,9 @@ async function collectItemsFromPage(
 			transformationType: string;
 			pageNumber: number;
 			debug: boolean;
+			filterItems: boolean;
+			filterCriteria: IDataObject[];
+			filterLogic: string;
 		}) => {
 			const {
 				selector,
@@ -1857,7 +2424,10 @@ async function collectItemsFromPage(
 				urlTransformation,
 				transformationType,
 				pageNumber,
-				debug
+				debug,
+				filterItems,
+				filterCriteria,
+				filterLogic
 			} = params;
 
 			// Helper function to get absolute URL
@@ -1939,6 +2509,18 @@ async function collectItemsFromPage(
 					pageNumber,
 				};
 
+				// Add item-level debug info if debug mode is enabled
+				if (debug) {
+					result.itemDebug = {
+						tagName: element.tagName?.toLowerCase() || 'unknown',
+						className: element.className || null,
+						id: element.id || null,
+						childElementCount: element.children?.length || 0,
+						textContentLength: element.textContent?.length || 0,
+						outerHTMLLength: element.outerHTML?.length || 0
+					};
+				}
+
 				// Process additional fields
 				if (additionalFields && additionalFields.length > 0) {
 					debugLog(`Item #${idx}: Processing ${additionalFields.length} additional fields`);
@@ -2005,8 +2587,163 @@ async function collectItemsFromPage(
 					}
 				}
 
+				// Apply filtering within the browser context
+				if (filterItems && filterCriteria && filterCriteria.length > 0) {
+					// Add filter debug info to item
+					if (debug && !result.itemDebug) {
+						result.itemDebug = {};
+					}
+					if (debug) {
+						result.itemDebug.filterTests = [];
+					}
+
+					debugLog(`Item #${idx}: Starting filter evaluation with ${filterCriteria.length} criteria`);
+
+					const filterResults = filterCriteria.map((criterion: any, criterionIdx: number) => {
+						const selector = criterion.selector as string;
+						const fieldName = criterion.fieldName as string;
+						const extractionType = criterion.extractionType as string || 'text';
+						const condition = criterion.condition as string;
+						const value = criterion.value as string || '';
+						const caseSensitive = criterion.caseSensitive as boolean;
+						const attributeName = criterion.attributeName as string;
+
+						debugLog(`Item #${idx}: Processing criterion ${criterionIdx}: selector="${selector}", fieldName="${fieldName}", extractionType="${extractionType}", condition="${condition}"`);
+
+						let itemValue = '';
+
+						// First check if we should use field name (already extracted data)
+						if (fieldName && result[fieldName] !== undefined) {
+							itemValue = String(result[fieldName] || '');
+							debugLog(`Item #${idx}: Using field "${fieldName}" value: "${itemValue}"`);
+						}
+						// Otherwise use CSS selector to extract value from DOM
+						else if (selector) {
+							try {
+								if (extractionType === 'exists') {
+									// For exists check, just see if element exists
+									const elements = element.querySelectorAll(selector);
+									itemValue = elements.length > 0 ? 'exists' : '';
+									debugLog(`Item #${idx}: Selector "${selector}" exists: ${elements.length > 0} (found ${elements.length} elements)`);
+								} else {
+									// Extract value using selector
+									const targetElements = element.querySelectorAll(selector);
+									if (targetElements.length > 0) {
+										const targetElement = targetElements[0];
+
+										if (extractionType === 'text') {
+											itemValue = targetElement.textContent?.trim() || '';
+										} else if (extractionType === 'attribute' && attributeName) {
+											itemValue = targetElement.getAttribute(attributeName) || '';
+										} else {
+											itemValue = targetElement.textContent?.trim() || '';
+										}
+									}
+									debugLog(`Item #${idx}: Extracted "${itemValue}" from selector "${selector}"`);
+								}
+							} catch (error) {
+								debugLog(`Item #${idx}: Error with selector "${selector}": ${error}`);
+								itemValue = '';
+							}
+						} else {
+							debugLog(`Item #${idx}: No selector or fieldName provided for criterion ${criterionIdx}`);
+						}
+
+						let conditionResult = false;
+
+						// Apply condition
+						if (extractionType === 'exists') {
+							if (condition === 'exists') {
+								conditionResult = itemValue !== '';
+							} else if (condition === 'notExists') {
+								conditionResult = itemValue === '';
+							} else {
+								conditionResult = itemValue !== ''; // default to exists
+							}
+							debugLog(`Item #${idx}: Exists condition "${condition}" result: ${conditionResult} (itemValue: "${itemValue}")`);
+						} else {
+							// Handle other conditions
+							const compareValue = caseSensitive ? value : (value || '').toLowerCase();
+							const compareItemValue = caseSensitive ? itemValue : itemValue.toLowerCase();
+
+							switch (condition) {
+								case 'contains':
+									if (compareValue.includes(',')) {
+										const valuesToCheck = compareValue.split(',').map(v => v.trim());
+										conditionResult = valuesToCheck.some(val => compareItemValue.includes(val));
+									} else {
+										conditionResult = compareItemValue.includes(compareValue);
+									}
+									break;
+								case 'notContains':
+									if (compareValue.includes(',')) {
+										const valuesToCheck = compareValue.split(',').map(v => v.trim());
+										conditionResult = valuesToCheck.every(val => !compareItemValue.includes(val));
+									} else {
+										conditionResult = !compareItemValue.includes(compareValue);
+									}
+									break;
+								case 'equals':
+									conditionResult = compareItemValue === compareValue;
+									break;
+								case 'startsWith':
+									conditionResult = compareItemValue.startsWith(compareValue);
+									break;
+								case 'endsWith':
+									conditionResult = compareItemValue.endsWith(compareValue);
+									break;
+								case 'exists':
+									conditionResult = itemValue !== '';
+									break;
+								case 'notExists':
+									conditionResult = itemValue === '';
+									break;
+								default:
+									conditionResult = false;
+									break;
+							}
+							debugLog(`Item #${idx}: Condition "${condition}" result: ${conditionResult} (itemValue: "${itemValue}", compareValue: "${compareValue}")`);
+						}
+
+						// Add filter test debug info
+						if (debug) {
+							result.itemDebug.filterTests.push({
+								selector: selector || 'field:' + fieldName,
+								extractionType,
+								condition,
+								value: value || '',
+								extractedValue: itemValue,
+								result: conditionResult
+							});
+						}
+
+						return conditionResult;
+					});
+
+					// Apply filter logic
+					const passesFilter = filterLogic === 'and'
+						? filterResults.every(Boolean)
+						: filterResults.some(Boolean);
+
+					debugLog(`Item #${idx}: Filter results: ${JSON.stringify(filterResults)}, logic: ${filterLogic}, passes: ${passesFilter}`);
+
+					// Add final filter result to debug
+					if (debug) {
+						result.itemDebug.filterResult = {
+							logic: filterLogic,
+							individualResults: filterResults,
+							finalResult: passesFilter
+						};
+					}
+
+					if (!passesFilter) {
+						debugLog(`Item #${idx}: Filtered out by criteria`);
+						return null; // Mark item for filtering
+					}
+				}
+
 				return result;
-			});
+			}).filter(item => item !== null); // Remove filtered items
 		},
 		{
 			selector: actualItemSelector,
@@ -2016,7 +2753,10 @@ async function collectItemsFromPage(
 			urlTransformation,
 			transformationType,
 			pageNumber,
-			debug: debugMode
+			debug: debugMode,
+			filterItems,
+			filterCriteria,
+			filterLogic
 		}
 	);
 
@@ -2031,10 +2771,74 @@ async function collectItemsFromPage(
 				`Extracted ${items.length} items. First item sample: ${JSON.stringify(items[0])}`
 			)
 		);
+
+		// Log HTML for collected items (after filtering)
+		if (items.length > 0) {
+			const collectedItemsHtml = await page.evaluate(
+				(params: { selector: string; collectedItemIndexes: number[]; maxItems: number }) => {
+					const { selector, collectedItemIndexes, maxItems } = params;
+					const allElements = Array.from(document.querySelectorAll(selector));
+
+					return collectedItemIndexes.slice(0, maxItems).map((originalIndex, collectedIndex) => {
+						const element = allElements[originalIndex];
+						if (!element) return null;
+
+						const links = Array.from(element.querySelectorAll('a'));
+						return {
+							collectedIndex: collectedIndex + 1,
+							originalIndex: originalIndex,
+							tagName: element.tagName,
+							className: element.className || null,
+							id: element.id || null,
+							childElementCount: element.children.length,
+							linkCount: links.length,
+							linkHrefs: links.map(link => link.getAttribute('href')).filter(Boolean),
+							completeOuterHTML: element.outerHTML
+						};
+					}).filter(Boolean);
+				},
+				{
+					selector: actualItemSelector,
+					collectedItemIndexes: items.map(item => item.itemIndex),
+					maxItems: 10
+				}
+			);
+
+			this.logger.info(
+				formatOperationLog(
+					'Collector',
+					nodeName,
+					nodeId,
+					index,
+					`🎯 COLLECTED ITEMS HTML (showing first ${Math.min(collectedItemsHtml.length, 10)} collected items):`
+				)
+			);
+
+			collectedItemsHtml.forEach((item, idx) => {
+				if (!item) return; // Skip null items
+
+				this.logger.info(
+					formatOperationLog(
+						'Collector',
+						nodeName,
+						nodeId,
+						index,
+						`\n📦 COLLECTED ITEM ${item.collectedIndex} (originally item #${item.originalIndex + 1}):\n` +
+						`Tag: ${item.tagName}, Class: ${item.className || 'none'}, ID: ${item.id || 'none'}\n` +
+						`Child Elements: ${item.childElementCount}, Links: ${item.linkCount}\n` +
+						`Link HREFs: ${JSON.stringify(item.linkHrefs)}\n` +
+						`COMPLETE HTML:\n${item.completeOuterHTML}\n` +
+						`${'='.repeat(80)}`
+					)
+				);
+			});
+		}
 	}
 
-	// Apply filters if needed
+	// Filtering is now done in the browser evaluation phase
 	let filteredItems = items;
+
+	// Log filtering results
 	if (filterItems && filterCriteria.length > 0) {
 		this.logger.info(
 			formatOperationLog(
@@ -2042,149 +2846,16 @@ async function collectItemsFromPage(
 				nodeName,
 				nodeId,
 				index,
-				`Applying filters (${filterLogic}) to ${items.length} items`
+				`Filter applied in browser: ${items.length} items returned after filtering`
 			)
 		);
-
-		// Log filter criteria for debugging
-		if (debugMode) {
-			this.logger.info(
-				formatOperationLog(
-					'Collector',
-					nodeName,
-					nodeId,
-					index,
-					`Filter criteria: ${JSON.stringify(filterCriteria)}`
-				)
-			);
-		}
-
-		// Filter items directly based on the extracted data
-		filteredItems = items.filter((item: IDataObject) => {
-			// Process each filter criterion
-			const results = filterCriteria.map((criterion: IDataObject) => {
-				const fieldName = criterion.fieldName as string || criterion.name as string || (criterion.selector as string); // Use explicit field name, then name, then selector
-				const condition = criterion.condition as string;
-				const value = criterion.value as string;
-				const caseSensitive = criterion.caseSensitive as boolean;
-
-				// Get the field value from the item
-				let itemValue = '';
-
-				// First try exact match on the field name
-				if (item[fieldName] !== undefined) {
-					itemValue = String(item[fieldName] || '');
-				} else {
-					// Try case-insensitive match on any property
-					const lowerFieldName = fieldName.toLowerCase();
-					for (const key of Object.keys(item)) {
-						if (key.toLowerCase() === lowerFieldName) {
-							itemValue = String(item[key] || '');
-							break;
-						}
-					}
-				}
-
-				if (debugMode) {
-					console.log(`[Filter Debug] Item: ${JSON.stringify(item)}, Field: ${fieldName}, Value: ${itemValue}, Condition: ${condition}, Filter value: ${value}`);
-				}
-
-				// Handle empty values
-				if (itemValue === undefined || itemValue === null) {
-					itemValue = '';
-				}
-
-				// Normalize case if needed
-				let compareValue = value;
-				let compareItemValue = itemValue;
-
-				if (!caseSensitive) {
-					compareValue = value.toLowerCase();
-					compareItemValue = itemValue.toLowerCase();
-				}
-
-				// Apply the condition
-				switch (condition) {
-					case 'contains':
-						if (compareValue.includes(',')) {
-							// Split by comma and check if any value is included
-							const valuesToCheck = compareValue.split(',').map(v => v.trim());
-							return valuesToCheck.some(val => compareItemValue.includes(val));
-						}
-						return compareItemValue.includes(compareValue);
-					case 'notContains':
-						if (compareValue.includes(',')) {
-							// Split by comma and check that none of the values are included
-							const valuesToCheck = compareValue.split(',').map(v => v.trim());
-							return valuesToCheck.every(val => !compareItemValue.includes(val));
-						}
-						return !compareItemValue.includes(compareValue);
-					case 'equals':
-						return compareItemValue === compareValue;
-					case 'startsWith':
-						return compareItemValue.startsWith(compareValue);
-					case 'endsWith':
-						return compareItemValue.endsWith(compareValue);
-					case 'regex':
-						try {
-							const regex = new RegExp(value, caseSensitive ? '' : 'i');
-							return regex.test(itemValue);
-						} catch (error) {
-							console.error(`Invalid regex: ${value}`);
-							return false;
-						}
-					case 'exists':
-						return itemValue !== '';
-					case 'notExists':
-						return itemValue === '';
-					default:
-						return false;
-				}
-			});
-
-			// Apply the filter logic
-			if (filterLogic === 'and') {
-				return results.every(Boolean);
-			} else {
-				return results.some(Boolean);
-			}
-		});
-
-		this.logger.info(
-			formatOperationLog(
-				'Collector',
-				nodeName,
-				nodeId,
-				index,
-				`Filter applied: ${filteredItems.length} items passed the filter out of ${items.length} total`
-			)
-		);
-
-		// Debug log the filtered items
-		if (debugMode) {
-			if (filteredItems.length > 0) {
-				this.logger.info(
-					formatOperationLog(
-						'Collector',
-						nodeName,
-						nodeId,
-						index,
-						`First filtered item sample: ${JSON.stringify(filteredItems[0])}`
-					)
-				);
-			} else {
-				this.logger.info(
-					formatOperationLog(
-						'Collector',
-						nodeName,
-						nodeId,
-						index,
-						`No items passed the filter`
-					)
-				);
-			}
-		}
 	}
+
+	// Calculate filtering statistics
+	// Note: Since filtering happens in browser, we can't easily track the original count
+	// For now, we'll just use the returned items count
+	const itemsExtracted = items.length;
+	const itemsFiltered = 0; // Would need additional tracking to get filtered count
 
 	// Now apply the maxItems limit AFTER filtering
 	if (filteredItems.length > maxItems) {
@@ -2200,5 +2871,10 @@ async function collectItemsFromPage(
 		filteredItems = filteredItems.slice(0, maxItems);
 	}
 
-	return filteredItems;
+	return {
+		items: filteredItems,
+		itemsExtracted,
+		itemsFiltered,
+		...(selectorValidationResults && { debugInfo: selectorValidationResults })
+	};
 }
