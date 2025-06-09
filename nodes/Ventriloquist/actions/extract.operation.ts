@@ -78,6 +78,11 @@ export const description: INodeProperties[] = [
 						type: "options",
 						options: [
 							{
+								name: "Text Content",
+								value: "text",
+								description: "Extract text content from an element",
+							},
+							{
 								name: "Attribute",
 								value: "attribute",
 								description: "Extract specific attribute from an element",
@@ -102,15 +107,9 @@ export const description: INodeProperties[] = [
 								value: "table",
 								description: "Extract data from a table",
 							},
-							{
-								name: "Text Content",
-								value: "text",
-								description: "Extract text content from an element",
-							},
 						],
 						default: "text",
 						description: "What type of data to extract from the page",
-						required: true,
 					},
 					{
 						displayName: "Selector",
@@ -130,26 +129,33 @@ export const description: INodeProperties[] = [
 						description: "Whether to continue with other extractions if this selector isn't found on the page",
 					},
 					{
-						displayName: "Text Options",
-						name: "textOptions",
+						displayName: "Options",
+						name: "extractionOptions",
 						type: "collection",
 						placeholder: "Add Option",
 						default: {},
 						typeOptions: {
 							multipleValues: false,
 						},
-						displayOptions: {
-							show: {
-								extractionType: ["text"],
-							},
-						},
 						options: [
+							{
+								displayName: "Include Field",
+								name: "includeField",
+								type: "boolean",
+								default: true,
+								description: "Whether to include this extraction in the output. Use expressions to conditionally include extractions based on context.",
+							},
 							{
 								displayName: "Clean Text",
 								name: "cleanText",
 								type: "boolean",
 								default: false,
 								description: "Whether to clean up the text by replacing multiple consecutive newlines with a single newline",
+								displayOptions: {
+									show: {
+										'/extractionType': ["text"],
+									},
+								},
 							},
 							{
 								displayName: "Convert Type",
@@ -169,6 +175,11 @@ export const description: INodeProperties[] = [
 								],
 								default: "none",
 								description: "Type conversion to apply to extracted text",
+								displayOptions: {
+									show: {
+										'/extractionType': ["text"],
+									},
+								},
 							},
 						],
 					},
@@ -181,10 +192,10 @@ export const description: INodeProperties[] = [
 						description: "Name of the attribute to extract (only needed when Content to Extract is set to Attribute Value)",
 						displayOptions: {
 							show: {
-								extractionType: ["attribute"],
+								extractionType: ["attribute", ""],
 							},
 						},
-						required: true,
+						required: false,
 					},
 					{
 						displayName: "HTML Options",
@@ -313,8 +324,7 @@ export const description: INodeProperties[] = [
 						},
 						default: "",
 						placeholder: "#header_info, .context-element",
-						description: "CSS selector for the element containing reference context",
-						required: true,
+						description: "CSS selector for the element containing reference context (optional - leave blank to disable)",
 					},
 					{
 						displayName: "Selector Scope",
@@ -354,7 +364,6 @@ export const description: INodeProperties[] = [
 						default: "referenceContext",
 						placeholder: "header_info, pageContext",
 						description: "Name to use for the reference context in the AI prompt",
-						required: true,
 					},
 					{
 						displayName: "Reference Format",
@@ -515,6 +524,13 @@ export const description: INodeProperties[] = [
 										default: {},
 										typeOptions: { multipleValues: false },
 										options: [
+											{
+												displayName: "Include Field",
+												name: "includeField",
+												type: "boolean",
+												default: true,
+												description: "Whether to include this field in the extraction. Use expressions to conditionally include fields based on context.",
+											},
 											{
 												displayName: "Extraction Type",
 												name: "extractionType",
@@ -879,6 +895,29 @@ export const description: INodeProperties[] = [
 	},
 ];
 
+// Add helper function for fuzzy field name matching
+function findMatchingFieldName(targetFieldName: string, aiDataKeys: string[]): string | null {
+	// First try exact match
+	if (aiDataKeys.includes(targetFieldName)) {
+		return targetFieldName;
+	}
+
+	// Create normalized versions for comparison (remove punctuation, spaces, lowercase)
+	const normalizeFieldName = (name: string) =>
+		name.toLowerCase().replace(/[^a-zA-Z0-9]/g, '');
+
+	const normalizedTarget = normalizeFieldName(targetFieldName);
+
+	// Try to find a matching field by normalized comparison
+	for (const aiKey of aiDataKeys) {
+		if (normalizeFieldName(aiKey) === normalizedTarget) {
+			return aiKey;
+		}
+	}
+
+	return null;
+}
+
 /**
  * Execute the extract operation
  */
@@ -1063,6 +1102,14 @@ export async function execute(
 			throw new Error("No extraction items defined");
 		}
 
+		// Ensure each extraction item has a valid extractionType, default to "text" if empty/null/undefined
+		extractionItems.forEach((item) => {
+			if (!item.extractionType || (typeof item.extractionType === 'string' && item.extractionType.trim() === '')) {
+				item.extractionType = "text";
+				this.logger.debug(`Extraction type was empty for item "${item.name}", defaulted to "text"`);
+			}
+		});
+
 		// Convert extraction items to properly typed items
 		const typedExtractionItems: IExtractItem[] = extractionItems.map((item) => {
 			// Log debug information about the item
@@ -1121,6 +1168,9 @@ export async function execute(
 				let referenceAttribute = "";
 				let selectorScope = "global";
 
+				// Create a mutable copy to potentially modify if selector is empty
+				let effectiveIncludeReferenceContext = includeReferenceContext;
+
 				if (includeReferenceContext) {
 					// Get reference selector
 					referenceSelector = this.getNodeParameter(
@@ -1129,37 +1179,43 @@ export async function execute(
 						""
 					) as string;
 
-					// Get reference name
-					referenceName = this.getNodeParameter(
-						`extractionItems.items[${extractionItems.indexOf(item)}].referenceName`,
-						index,
-						"reference"
-					) as string;
-
-					// Get reference format
-					referenceFormat = this.getNodeParameter(
-						`extractionItems.items[${extractionItems.indexOf(item)}].referenceFormat`,
-						index,
-						"text"
-					) as string;
-
-					// Get attribute name if using attribute format
-					if (referenceFormat === "attribute") {
-						referenceAttribute = this.getNodeParameter(
-							`extractionItems.items[${extractionItems.indexOf(
-								item,
-							)}].referenceAttribute`,
+					// If reference selector is empty/blank, treat as if reference context is disabled
+					if (!referenceSelector || referenceSelector.trim() === "") {
+						this.logger.debug(`Reference selector is empty for item "${item.name}", disabling reference context`);
+						effectiveIncludeReferenceContext = false;
+					} else {
+						// Get reference name
+						referenceName = this.getNodeParameter(
+							`extractionItems.items[${extractionItems.indexOf(item)}].referenceName`,
 							index,
-							""
+							"reference"
+						) as string;
+
+						// Get reference format
+						referenceFormat = this.getNodeParameter(
+							`extractionItems.items[${extractionItems.indexOf(item)}].referenceFormat`,
+							index,
+							"text"
+						) as string;
+
+						// Get attribute name if using attribute format
+						if (referenceFormat === "attribute") {
+							referenceAttribute = this.getNodeParameter(
+								`extractionItems.items[${extractionItems.indexOf(
+									item,
+								)}].referenceAttribute`,
+								index,
+								""
+							) as string;
+						}
+
+						// Get selector scope
+						selectorScope = this.getNodeParameter(
+							`extractionItems.items[${extractionItems.indexOf(item)}].selectorScope`,
+							index,
+							"global"
 						) as string;
 					}
-
-					// Get selector scope
-					selectorScope = this.getNodeParameter(
-						`extractionItems.items[${extractionItems.indexOf(item)}].selectorScope`,
-						index,
-						"global"
-					) as string;
 				}
 
 				// Get AI fields if manual strategy is selected
@@ -1173,6 +1229,27 @@ export async function execute(
 
 						// Log the number of AI fields found
 						this.logger.debug(`Found ${aiFields.length} AI fields for item ${item.name}`);
+
+						// Filter out fields where includeField is false
+						const originalFieldCount = aiFields.length;
+						aiFields = aiFields.filter((field) => {
+							const fieldOptions = field.fieldOptions as IDataObject || {};
+							const includeField = fieldOptions.includeField;
+
+							// If includeField is explicitly set to false, exclude this field
+							if (includeField === false) {
+								this.logger.info(`Excluding field "${field.name}" from extraction (includeField=false)`);
+								return false;
+							}
+
+							// Default to true (include field) if includeField is not set or is true
+							return true;
+						});
+
+						// Log field filtering results
+						if (originalFieldCount !== aiFields.length) {
+							this.logger.info(`Filtered fields for item "${item.name}": ${originalFieldCount} → ${aiFields.length} fields (${originalFieldCount - aiFields.length} excluded)`);
+						}
 
 						// TEMPORARY DEBUG: Examine fields with attribute extraction type
 						aiFields.forEach(field => {
@@ -1268,7 +1345,7 @@ export async function execute(
 					strategy: schema, // 'manual' or 'auto'
 					includeSchema,
 					includeRawData,
-					includeReferenceContext,
+					includeReferenceContext: effectiveIncludeReferenceContext,
 					referenceSelector,
 					referenceName,
 					referenceFormat,
@@ -1305,7 +1382,8 @@ export async function execute(
 				selector: item.selector as string,
 				continueIfNotFound: item.continueIfNotFound as boolean | undefined,
 				attribute: item.attributeName as string | undefined,
-				textOptions: item.textOptions as {
+				extractionOptions: item.extractionOptions as {
+					includeField?: boolean;
 					cleanText?: boolean;
 					convertType?: string;
 				} | undefined,
@@ -1409,9 +1487,28 @@ export async function execute(
 			return extractItem;
 		});
 
+		// Filter out extractions where includeField is false
+		const filteredExtractionItems = typedExtractionItems.filter((item) => {
+			const includeField = item.extractionOptions?.includeField;
+
+			// If includeField is explicitly set to false, exclude this extraction
+			if (includeField === false) {
+				this.logger.info(`Excluding extraction "${item.name}" from processing (includeField=false)`);
+				return false;
+			}
+
+			// Default to true (include extraction) if includeField is not set or is true
+			return true;
+		});
+
+		// Log filtering results
+		if (typedExtractionItems.length !== filteredExtractionItems.length) {
+			this.logger.info(`Filtered extractions: ${typedExtractionItems.length} → ${filteredExtractionItems.length} extractions (${typedExtractionItems.length - filteredExtractionItems.length} excluded)`);
+		}
+
 		// Process all extraction items
 		const extractionResults: IExtractItem[] = await processExtractionItems(
-			typedExtractionItems,
+			filteredExtractionItems,
 			{
 				waitForSelector,
 				timeout,
@@ -1644,9 +1741,12 @@ export async function execute(
 										}
 										// Otherwise, try to get the value from AI-processed data if it exists
 										else if (typeof item.extractedData === 'object' && item.extractedData !== null) {
-											// Check if the AI result contains this field
-											if (item.extractedData[fieldName] !== undefined) {
-												fieldBasedResult[fieldName] = item.extractedData[fieldName];
+											// Use fuzzy matching to find the field in AI data
+											const aiDataKeys = Object.keys(item.extractedData);
+											const matchingKey = findMatchingFieldName(fieldName, aiDataKeys);
+
+											if (matchingKey) {
+												fieldBasedResult[fieldName] = item.extractedData[matchingKey];
 
 												this.logger.info(
 													formatOperationLog(
@@ -1654,7 +1754,7 @@ export async function execute(
 														nodeName,
 														nodeId,
 														index,
-														`Using AI-processed value for field [${item.name}.${fieldName}]`
+														`Using AI-processed value for field [${item.name}.${fieldName}]${matchingKey !== fieldName ? ` (matched from "${matchingKey}")` : ''}`
 													)
 												);
 											} else {
@@ -1664,7 +1764,7 @@ export async function execute(
 														nodeName,
 														nodeId,
 														index,
-														`Field [${fieldName}] not found in AI-processed data for [${item.name}]`
+														`Field [${fieldName}] not found in AI-processed data for [${item.name}]. Available fields: ${aiDataKeys.join(', ')}`
 													)
 												);
 
@@ -1838,6 +1938,125 @@ export async function execute(
 			},
 			// Do not include input data to avoid exposing previous node data
 		});
+
+		// Add selector debugging when extraction fails
+		if (extractionResults.length > 0 && extractionResults.some(result => !result.extractedData)) {
+			// Debug: Check what table selectors are actually available on the page
+			const { page } = sessionResult;
+			if (page && debugMode) {
+				try {
+					const availableTableSelectors = await page.evaluate(() => {
+						const tables = document.querySelectorAll('table');
+						const tableInfo: Array<{
+							index: number;
+							id: string;
+							classes: string;
+							hasId: boolean;
+							rowCount: number;
+							selector: string;
+							preview: string;
+						}> = [];
+
+						tables.forEach((table, index) => {
+							const id = table.id;
+							const classes = Array.from(table.classList).join(' ');
+							const hasId = !!id;
+							const rowCount = table.querySelectorAll('tr').length;
+
+							tableInfo.push({
+								index,
+								id: id || '(no id)',
+								classes: classes || '(no classes)',
+								hasId,
+								rowCount,
+								selector: hasId ? `#${id}` : `table:nth-child(${index + 1})`,
+								preview: table.outerHTML.substring(0, 200) + '...'
+							});
+						});
+
+						return tableInfo;
+					});
+
+					this.logger.error(
+						formatOperationLog(
+							"Extract",
+							nodeName,
+							nodeId,
+							index,
+							`[SELECTOR DEBUG] Found ${availableTableSelectors.length} tables on page: ${JSON.stringify(availableTableSelectors, null, 2)}`
+						)
+					);
+
+					// Also check for specific selectors mentioned in failed extractions
+					for (const result of extractionResults) {
+						if (!result.extractedData && result.selector) {
+							const selectorExists = await page.evaluate((sel) => {
+								return !!document.querySelector(sel);
+							}, result.selector);
+
+							this.logger.error(
+								formatOperationLog(
+									"Extract",
+									nodeName,
+									nodeId,
+									index,
+									`[SELECTOR DEBUG] Selector "${result.selector}" exists: ${selectorExists}`
+								)
+							);
+
+							// Try to find similar selectors
+							const similarSelectors = await page.evaluate((targetSel) => {
+								const similar: Array<{
+									id: string;
+									tagName: string;
+									selector: string;
+									similarity: string;
+								}> = [];
+								const selParts = targetSel.replace('#', '').toLowerCase();
+
+								// Check for elements with similar IDs
+								const allElements = document.querySelectorAll('*[id]');
+								allElements.forEach(el => {
+									const id = el.id.toLowerCase();
+									if (id.includes('tbl') || id.includes('table') || id.includes('sale') || id.includes('owner')) {
+										similar.push({
+											id: el.id,
+											tagName: el.tagName,
+											selector: `#${el.id}`,
+											similarity: 'contains table/sale/owner keywords'
+										});
+									}
+								});
+
+								return similar;
+							}, result.selector);
+
+							if (similarSelectors.length > 0) {
+								this.logger.error(
+									formatOperationLog(
+										"Extract",
+										nodeName,
+										nodeId,
+										index,
+										`[SELECTOR DEBUG] Found similar selectors: ${JSON.stringify(similarSelectors, null, 2)}`
+									)
+								);
+							}
+						}
+					}
+				} catch (debugError) {
+					this.logger.warn(
+						formatOperationLog(
+							"Extract",
+							nodeName,
+							nodeId,
+							index,
+							`Error during selector debugging: ${(debugError as Error).message}`
+						)
+					);
+				}
+			}
+		}
 
 		return { json: successResponse };
 	} catch (error) {
