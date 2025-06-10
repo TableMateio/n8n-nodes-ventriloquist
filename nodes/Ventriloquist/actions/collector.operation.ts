@@ -127,7 +127,7 @@ export const description: INodeProperties[] = [
 	// ==================== 2. ITEM SELECTION CONFIGURATION ====================
 	{
 		displayName: "Selection Method",
-		name: "selectionMethod",
+		name: "containerSelectionMethod",
 		type: "options",
 		options: [
 			{
@@ -142,6 +142,7 @@ export const description: INodeProperties[] = [
 			},
 		],
 		default: "containerItems",
+		required: true,
 		description: "How to select elements to collect",
 		displayOptions: {
 			show: {
@@ -150,30 +151,15 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Results Container Selector",
-		name: "resultsSelector",
+		displayName: "Item Selector",
+		name: "itemSelector",
 		type: "string",
 		default: "",
-		placeholder: "ul.results, #search-results, table tbody",
-		description: "CSS selector for container with all results",
+		placeholder: "ul.results, #search-results, table tbody, li, .result, tr",
+		description: "CSS selector for items to collect. For 'Container with auto-detected children' mode: select the container element. For 'Direct Items' mode: select the items directly.",
 		displayOptions: {
 			show: {
 				operation: ["collector"],
-				selectionMethod: ["containerItems"],
-			},
-		},
-	},
-	{
-		displayName: "Direct Item Selector",
-		name: "directItemSelector",
-		type: "string",
-		default: "",
-		placeholder: "li, .result, tr",
-		description: "CSS selector for items to collect",
-		displayOptions: {
-			show: {
-				operation: ["collector"],
-				selectionMethod: ["directItems"],
 			},
 		},
 	},
@@ -945,7 +931,7 @@ export async function execute(
 		const maxItemsPerPage = this.getNodeParameter('maxItemsPerPage', index, 50) as number;
 		const maxTotalItems = this.getNodeParameter('maxTotalItems', index, 200) as number;
 		const takeScreenshotOption = this.getNodeParameter('takeScreenshot', index, false) as boolean;
-		const selectionMethod = this.getNodeParameter('selectionMethod', index, 'containerItems') as string;
+		const selectionMethod = this.getNodeParameter('containerSelectionMethod', index, 'containerItems') as string;
 
 		// Get session information from input if available
 		let sessionIdFromInput = '';
@@ -1208,10 +1194,8 @@ export async function execute(
 			if (waitForSelectors) {
 				let selectorToWaitFor = '';
 
-				if (selectionMethod === 'containerItems') {
-					selectorToWaitFor = this.getNodeParameter('resultsSelector', index, '') as string;
-				} else {
-					selectorToWaitFor = this.getNodeParameter('directItemSelector', index, '') as string;
+				if (selectionMethod === 'containerItems' || selectionMethod === 'directItems') {
+					selectorToWaitFor = this.getNodeParameter('itemSelector', index, '') as string;
 				}
 
 				if (selectorToWaitFor) {
@@ -1256,10 +1240,8 @@ export async function execute(
 				page,
 				{
 					selectionMethod,
-					containerSelector: selectionMethod === 'containerItems' ?
-						this.getNodeParameter('resultsSelector', index, '') as string : '',
-					itemSelector: selectionMethod === 'directItems' ?
-						this.getNodeParameter('directItemSelector', index, '') as string : '',
+					containerSelector: this.getNodeParameter('itemSelector', index, '') as string,
+					itemSelector: this.getNodeParameter('itemSelector', index, '') as string,
 					maxItems: maxItemsPerPage,
 					pageNumber: paginationState.currentPage,
 					linkConfig: (this.getNodeParameter('linkConfiguration.values', index, {}) as IDataObject) || {},
@@ -2801,6 +2783,16 @@ async function collectItemsFromPage(
 								case 'notExists':
 									conditionResult = itemValue === '';
 									break;
+								case 'regex':
+									try {
+										const regex = new RegExp(value, caseSensitive ? '' : 'i');
+										conditionResult = regex.test(itemValue);
+										debugLog(`Item #${idx}: Regex test with pattern "${value}" (flags: ${caseSensitive ? 'none' : 'i'}) against "${itemValue}": ${conditionResult}`);
+									} catch (error) {
+										debugLog(`Item #${idx}: Invalid regex pattern "${value}": ${error}`);
+										conditionResult = false;
+									}
+									break;
 								default:
 									conditionResult = false;
 									break;
@@ -2986,11 +2978,23 @@ async function collectItemsFromPage(
 		);
 	}
 
-	// Calculate filtering statistics
-	// Note: Since filtering happens in browser, we can't easily track the original count
-	// For now, we'll just use the returned items count
-	const itemsExtracted = items.length;
-	const itemsFiltered = 0; // Would need additional tracking to get filtered count
+	// Calculate filtering statistics using the itemCount we already have
+	const totalItemsFound = itemCount; // Items found before filtering
+	const totalItemsAfterFilter = items.length; // Items remaining after filtering
+
+	const itemsExtracted = totalItemsAfterFilter; // Items we're returning
+	const itemsFiltered = totalItemsFound - totalItemsAfterFilter; // Items that were filtered out
+
+	// Log clear statistics for debugging
+	this.logger.info(
+		formatOperationLog(
+			'Collector',
+			nodeName,
+			nodeId,
+			index,
+			`📊 Collection Statistics: Found ${totalItemsFound} → Filtered out ${itemsFiltered} → Returning ${itemsExtracted}`
+		)
+	);
 
 	// Now apply the maxItems limit AFTER filtering
 	if (filteredItems.length > maxItems) {
