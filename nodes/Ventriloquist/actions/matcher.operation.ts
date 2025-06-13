@@ -921,28 +921,19 @@ export async function execute(
 			performanceMode: performanceMode as 'balanced' | 'speed' | 'accuracy',
 			debugMode: enableDetailedLogs,
 			sourceEntity: sourceEntity || {}, // Pass the actual source entity
-			fieldComparisons: fieldComparisons || []
+			fieldComparisons: fieldComparisons || [],
+			// Add action configuration
+			action: actionOnMatch as 'click' | 'extract' | 'none',
+			actionSelector: this.getNodeParameter('actionSelector', index, '') as string,
+			waitAfterAction: this.getNodeParameter('waitAfterAction', index, true) as boolean,
+			waitTime: this.getNodeParameter('waitTime', index, 2000) as number,
+			waitSelector: this.getNodeParameter('waitSelector', index, '') as string
 		};
 
 		// Debug log: print out the sourceEntity and reference values
 		if (enableDetailedLogs) {
 			this.logger.info('[Matcher][DEBUG] About to call entity matcher with sourceEntity: ' + JSON.stringify(matcherConfig.sourceEntity, null, 2));
 			this.logger.info('[Matcher][DEBUG] Reference values from matchCriteria: ' + JSON.stringify(matchCriteria, null, 2));
-		}
-
-		// Configure additional action parameters if an action is selected
-		if (actionOnMatch !== 'none') {
-			matcherConfig.actionSelector = this.getNodeParameter('actionSelector', index, '') as string;
-			matcherConfig.waitAfterAction = this.getNodeParameter('waitAfterAction', index, true) as boolean;
-
-			if (matcherConfig.waitAfterAction) {
-				const waitFor = this.getNodeParameter('waitFor', index, 'navigation') as string;
-				if (waitFor === 'element') {
-					matcherConfig.waitSelector = this.getNodeParameter('waitSelector', index, '') as string;
-				} else if (waitFor === 'delay') {
-					matcherConfig.waitTime = this.getNodeParameter('waitTime', index, 2000) as number;
-				}
-			}
 		}
 
 		// Create and execute entity matcher
