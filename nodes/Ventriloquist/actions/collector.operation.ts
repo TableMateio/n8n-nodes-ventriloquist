@@ -1240,7 +1240,7 @@ export async function execute(
 				page,
 				{
 					selectionMethod,
-					containerSelector: this.getNodeParameter('itemSelector', index, '') as string,
+					containerSelector: '', // This is deprecated, we'll use itemSelector for both cases
 					itemSelector: this.getNodeParameter('itemSelector', index, '') as string,
 					maxItems: maxItemsPerPage,
 					pageNumber: paginationState.currentPage,
@@ -2011,12 +2011,12 @@ async function collectItemsFromPage(
 
 	if (selectionMethod === 'containerItems') {
 		// For container method, we need to extract child elements
-		actualItemSelector = `${containerSelector} > *`;
+		actualItemSelector = `${itemSelector} > *`;
 
 		// Check if container exists
 		const containerExists = await page.evaluate((selector: string) => {
 			return !!document.querySelector(selector);
-		}, containerSelector);
+		}, itemSelector);
 
 		if (!containerExists) {
 			this.logger.warn(
@@ -2025,7 +2025,7 @@ async function collectItemsFromPage(
 					nodeName,
 					nodeId,
 					index,
-					`Container selector not found: ${containerSelector}`
+					`Container selector not found: ${itemSelector}`
 				)
 			);
 			return {
@@ -2034,8 +2034,34 @@ async function collectItemsFromPage(
 				itemsFiltered: 0
 			};
 		}
+
+		// Log the container's children count for debugging
+		if (debugMode) {
+			const containerInfo = await page.evaluate((selector: string) => {
+				const container = document.querySelector(selector);
+				if (!container) return null;
+				return {
+					tagName: container.tagName,
+					className: container.className,
+					childCount: container.children.length,
+					childTags: Array.from(container.children).map(child => child.tagName)
+				};
+			}, itemSelector);
+
+			if (containerInfo) {
+				this.logger.info(
+					formatOperationLog(
+						'Collector',
+						nodeName,
+						nodeId,
+						index,
+						`Container found: ${containerInfo.tagName}${containerInfo.className ? '.' + containerInfo.className : ''} with ${containerInfo.childCount} children (${containerInfo.childTags.join(', ')})`
+					)
+				);
+			}
+		}
 	} else {
-		// For direct method, use the provided item selector
+		// For direct method, use the provided item selector directly
 		actualItemSelector = itemSelector;
 	}
 

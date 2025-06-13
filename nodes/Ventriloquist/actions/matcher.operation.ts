@@ -5,7 +5,8 @@ import {
 	INodeProperties,
 	IWebhookResponseData,
 	Logger as ILogger,
-	INodeType
+	INodeType,
+	NodeOperationError
 } from "n8n-workflow";
 import puppeteer from 'puppeteer-core';
 import { SessionManager } from "../utils/sessionManager";
@@ -163,30 +164,15 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
-		displayName: "Results Container Selector",
-		name: "resultsSelector",
+		displayName: "Item Selector",
+		name: "itemSelector",
 		type: "string",
 		default: "",
-		placeholder: "ul.results, #search-results, table tbody",
-		description: "CSS selector for container with all results",
+		placeholder: "ul.results, #search-results, table tbody, li, .result, tr",
+		description: "CSS selector for items to match against. For 'Container with auto-detected children' mode: select the container element. For 'Direct Items' mode: select the items directly.",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
-				selectionMethod: ["containerItems"],
-			},
-		},
-	},
-	{
-		displayName: "Direct Item Selector",
-		name: "directItemSelector",
-		type: "string",
-		default: "",
-		placeholder: "li, .result, tr",
-		description: "CSS selector for items to match",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				selectionMethod: ["directItems"],
 			},
 		},
 	},
@@ -766,14 +752,12 @@ export async function execute(
 
 		// Get parameters
 		const selectionMethod = this.getNodeParameter('selectionMethod', index, 'containerItems') as string;
-		let resultsSelector = '';
 		let itemSelector = '';
-		let directItemSelector = '';
 
 		if (selectionMethod === 'containerItems') {
-			resultsSelector = this.getNodeParameter('resultsSelector', index, '') as string;
+			itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
 		} else {
-			directItemSelector = this.getNodeParameter('directItemSelector', index, '') as string;
+			itemSelector = this.getNodeParameter('itemSelector', index, '') as string;
 		}
 
 		const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
@@ -787,64 +771,86 @@ export async function execute(
 		this.logger.info(`${'='.repeat(40)}`);
 		this.logger.info(`[Ventriloquist][${nodeName}#${index}][Matcher] Starting operation`);
 
-		// Set up matcher configuration
-		let containerInfo: IContainerInfo = { containerFound: false };
+		// Define the selector to use based on selection method
+		let actualItemSelector: string;
+		let container: boolean | null = null;
 
-		// Wait for elements if requested
-		if (waitForSelectors) {
-			if (selectionMethod === 'containerItems') {
-				if (resultsSelector) {
-					this.logger.info(`[Matcher] Waiting for results container: ${resultsSelector}`);
-					try {
-						await smartWaitForSelector(
-							page,
-							resultsSelector,
-							timeout,
-							250, // Use a reasonable default early exit delay
-							this.logger,
-							nodeName,
-							nodeId
-						);
+		if (selectionMethod === 'containerItems') {
+			// For container method, we need to extract child elements
+			actualItemSelector = `${itemSelector} > *`;
 
-						// Get additional info about the container
-						containerInfo = await page.evaluate((selector: string) => {
-							const container = document.querySelector(selector);
-							if (!container) return { containerFound: false };
-
-							return {
-								containerFound: true,
-								tagName: container.tagName,
-								className: container.className,
-								childCount: container.childElementCount,
-								documentState: {
-									readyState: document.readyState,
-									bodyChildCount: document.body.childElementCount,
-								}
-							};
-						}, resultsSelector);
-
-						this.logger.info(`[Matcher] Found container: ${JSON.stringify(containerInfo)}`);
-					} catch (error) {
-						this.logger.warn(`[Matcher] Container selector timed out: ${(error as Error).message}`);
-						containerInfo.containerFound = false;
-					}
-				}
-			} else if (selectionMethod === 'directItems' && directItemSelector) {
-				this.logger.info(`[Matcher] Waiting for direct item selector: ${directItemSelector}`);
+			// Check if container exists and wait for it if needed
+			if (waitForSelectors) {
 				try {
-					await smartWaitForSelector(
-						page,
-						directItemSelector,
-						timeout,
-						250, // Use a reasonable default early exit delay
-						this.logger,
-						nodeName,
-						nodeId
-					);
+					await page.waitForSelector(itemSelector, { timeout });
+					container = true;
 				} catch (error) {
-					this.logger.warn(`[Matcher] Direct item selector timed out: ${(error as Error).message}`);
+					container = false;
+				}
+			} else {
+				container = await page.evaluate((selector: string) => {
+					return !!document.querySelector(selector);
+				}, itemSelector);
+			}
+
+			if (!container) {
+				this.logger.warn(
+					formatOperationLog(
+						'Matcher',
+						nodeName,
+						nodeId,
+						index,
+						`Container selector not found: ${itemSelector}`
+					)
+				);
+				const error = new NodeOperationError(this.getNode(), `Container selector not found: ${itemSelector}`);
+				const debugInfo: IDataObject = {
+					containerSelector: itemSelector,
+					itemSelector: actualItemSelector,
+					waitForSelectors,
+					timeout
+				};
+				return {
+					json: {
+						success: 0,
+						containerFound: 0,
+						error,
+						debug: debugInfo,
+						matches: [],
+						itemsFound: 0,
+						executionDuration: Date.now() - startTime
+					}
+				};
+			}
+
+			// Log the container's children count for debugging
+			if (enableDetailedLogs) {
+				const containerInfo = await page.evaluate((selector: string) => {
+					const container = document.querySelector(selector);
+					if (!container) return null;
+					return {
+						tagName: container.tagName,
+						className: container.className,
+						childCount: container.children.length,
+						childTags: Array.from(container.children).map(child => child.tagName)
+					};
+				}, itemSelector);
+
+				if (containerInfo) {
+					this.logger.info(
+						formatOperationLog(
+							'Matcher',
+							nodeName,
+							nodeId,
+							index,
+							`Container found: ${containerInfo.tagName}${containerInfo.className ? '.' + containerInfo.className : ''} with ${containerInfo.childCount} children (${containerInfo.childTags.join(', ')})`
+						)
+					);
 				}
 			}
+		} else {
+			// For direct method, use the provided item selector
+			actualItemSelector = itemSelector;
 		}
 
 		// Create match configuration object
@@ -905,22 +911,24 @@ export async function execute(
 
 		// Create entity matcher configuration
 		const matcherConfig: IEntityMatcherConfig = {
-			resultsSelector: selectionMethod === 'containerItems' ? resultsSelector : directItemSelector,
-			itemSelector: selectionMethod === 'directItems' ? '' : itemSelector,
+			resultsSelector: actualItemSelector,
+			itemSelector: selectionMethod === 'containerItems' ? '> *' : '',
 			autoDetectChildren: selectionMethod === 'containerItems',
+			fields: matchCriteria,
 			threshold: Number(matchCriteria[0].threshold) || 0.3,
 			matchMode: matchMode as 'best' | 'all' | 'firstAboveThreshold',
-			limitResults: matchMode === 'all' ? Math.max(10, maxItems) : maxItems,
 			maxItems,
-			sourceEntity,
-			fieldComparisons,
-			fields: [],
 			performanceMode: performanceMode as 'balanced' | 'speed' | 'accuracy',
 			debugMode: enableDetailedLogs,
-			action: actionOnMatch as 'click' | 'extract' | 'none',
-			waitForSelectors,
-			timeout,
+			sourceEntity: sourceEntity || {}, // Pass the actual source entity
+			fieldComparisons: fieldComparisons || []
 		};
+
+		// Debug log: print out the sourceEntity and reference values
+		if (enableDetailedLogs) {
+			this.logger.info('[Matcher][DEBUG] About to call entity matcher with sourceEntity: ' + JSON.stringify(matcherConfig.sourceEntity, null, 2));
+			this.logger.info('[Matcher][DEBUG] Reference values from matchCriteria: ' + JSON.stringify(matchCriteria, null, 2));
+		}
 
 		// Configure additional action parameters if an action is selected
 		if (actionOnMatch !== 'none') {
