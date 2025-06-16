@@ -613,7 +613,12 @@ export class AIService {
       });
 
       // Process fields with reference content if available
-      fieldsToProcess = options.referenceContent
+      // However, for batch mode, we want to handle global reference at the top level
+      // so we skip adding reference content to individual fields in that case
+      const shouldAddReferenceToFields = options.referenceContent &&
+        !(options.fieldProcessingMode === 'batch' && options.includeReferenceContext);
+
+      fieldsToProcess = shouldAddReferenceToFields
         ? processFieldsWithReferenceContent(
             fieldsToProcess.map(field => ({
               name: field.name,
@@ -628,7 +633,14 @@ export class AIService {
             this.logger,
             this.context
           )
-        : fieldsToProcess;
+        : fieldsToProcess.map(field => ({
+            name: field.name,
+            instructions: field.instructions || `Extract the ${field.name}`,
+            type: field.type || 'string',
+            required: field.required,
+            format: field.format,
+            arrayItemType: field.arrayItemType,
+          }));
 
       // Check for nested field structures - if this is needed for nested field extraction
       // Group fields by their prefix (e.g., "AI Test Link.Field1" and "AI Test Link.Field2" belong to "AI Test Link")
@@ -2549,21 +2561,58 @@ ${examplesSection}
       const schema = this.generateOpenAISchema(fields);
 
       // Build a comprehensive prompt that includes all fields
-      let fieldDescriptions = fields.map((field, index) => {
+      // For batch mode, we want to clean field instructions from global reference content
+      // since we'll add it at the top level instead
+      let cleanFields = fields;
+      let hasGlobalReference = false;
+
+      // Check if we have global reference content that should be at the top level
+      if (this.options?.includeReferenceContext && this.options?.referenceContent) {
+        hasGlobalReference = true;
+
+        // Clean the fields by removing the appended reference content from instructions
+        cleanFields = fields.map(field => {
+          const referenceNote = `\n\nUse this as reference: "${this.options?.referenceContent}"`;
+          let cleanInstructions = field.instructions || '';
+
+          // Remove the reference content that was appended to the field
+          if (cleanInstructions.includes(referenceNote)) {
+            cleanInstructions = cleanInstructions.replace(referenceNote, '');
+          }
+
+          return {
+            ...field,
+            instructions: cleanInstructions
+          };
+        });
+      }
+
+      let fieldDescriptions = cleanFields.map((field, index) => {
         return `${index + 1}. ${field.name}: ${field.instructions || `Extract the ${field.name}`}`;
       }).join("\n");
 
-      const batchPrompt = `
-TASK: Extract all the specified fields from the provided content.
+      // Build the batch prompt with proper structure
+      let batchPrompt = `TASK: Extract all the specified fields from the provided content.\n`;
 
-INPUT DATA:
-${content}
+      // Add input data first
+      batchPrompt += `\nINPUT DATA:\n${content}\n`;
 
-FIELDS TO EXTRACT:
-${fieldDescriptions}
-${this.options?.generalInstructions && this.options.generalInstructions.trim() !== '' ? `\nADDITIONAL INSTRUCTIONS:\n${this.options.generalInstructions}` : ''}
+      // Add global reference content after input data if available
+      if (hasGlobalReference && this.options?.referenceContent) {
+        const referenceName = this.options?.referenceName || 'reference';
+        batchPrompt += `\nHere is additional reference material to extract data from. This reference is named '${referenceName}': "${this.options.referenceContent}"\n`;
+      }
 
-INSTRUCTIONS:
+      // Add fields section
+      batchPrompt += `\nFIELDS TO EXTRACT:\n${fieldDescriptions}`;
+
+      // Add additional instructions if provided
+      if (this.options?.generalInstructions && this.options.generalInstructions.trim() !== '') {
+        batchPrompt += `\n\nADDITIONAL INSTRUCTIONS:\n${this.options.generalInstructions}`;
+      }
+
+      // Add processing instructions
+      batchPrompt += `\n\nINSTRUCTIONS:
 1. Analyze the content carefully
 2. Extract each field according to its specifications
 3. Return the data in a ${outputStructure === 'array' ? 'properly formatted array of objects' : 'properly formatted object'}
@@ -2573,8 +2622,7 @@ ${outputStructure === 'object' ? '4. CRITICAL: Since output structure is "object
 6. If a field is not found, set its value to null
 ${outputStructure === 'object' ? '\n7. IMPORTANT: Make only ONE function call to extract_data, not multiple calls. Return data for the single most relevant entity based on the instructions.' : ''}
 
-Ensure that your response is valid JSON that can be parsed directly.
-`;
+Ensure that your response is valid JSON that can be parsed directly.`;
 
       // Send the prompt to the thread
       await this.openai.beta.threads.messages.create(

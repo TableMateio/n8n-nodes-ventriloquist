@@ -212,6 +212,52 @@ export const insertUpdateOptions: INodeProperties[] = [
 					},
 				},
 			},
+			{
+				displayName: 'Array Field Handling',
+				name: 'arrayMergeStrategy',
+				type: 'options',
+				options: [
+					{
+						name: 'Replace',
+						value: 'replace',
+						description: 'Replace existing values completely (default behavior)',
+					},
+					{
+						name: 'Append',
+						value: 'append',
+						description: 'Add new values to existing ones (may create duplicates)',
+					},
+					{
+						name: 'Union',
+						value: 'union',
+						description: 'Merge values while preventing duplicates (recommended)',
+					},
+				],
+				default: 'replace',
+				description: 'How to handle linked records and multi-select fields',
+				displayOptions: {
+					show: {
+						'/operation': ['update', 'upsert'],
+					},
+				},
+			},
+			{
+				displayName: 'Array Fields',
+				name: 'arrayFields',
+				type: 'multiOptions',
+				typeOptions: {
+					loadOptionsMethod: 'getArrayFields',
+					loadOptionsDependsOn: ['table.value', 'base.value'],
+				},
+				default: [],
+				description: 'Select which linked record and multi-select fields to apply array handling to. Leave empty to use replace behavior for all fields.',
+				displayOptions: {
+					show: {
+						'/operation': ['update', 'upsert'],
+						arrayMergeStrategy: ['append', 'union'],
+					},
+				},
+			},
 		],
 	},
 ];

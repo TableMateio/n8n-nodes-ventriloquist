@@ -127,10 +127,19 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
     const hasRequiredFields = comparisonConfig.fieldComparisons.some(fc => fc.mustMatch);
 
     logger.debug(`${logPrefix} Starting comparison of ${extractedItems.length} items against source fields with threshold ${threshold}`);
+    logger.debug(`${logPrefix} Has required fields: ${hasRequiredFields}`);
+    logger.debug(`${logPrefix} Field comparisons: ${JSON.stringify(comparisonConfig.fieldComparisons.map(fc => ({ field: fc.field, mustMatch: fc.mustMatch })))}`);
+
+    let itemsProcessed = 0;
+    let itemsSkippedRequiredFields = 0;
+    let itemsSkippedErrors = 0;
 
     // Process each extracted item
     for (const item of extractedItems) {
       try {
+        itemsProcessed++;
+        logger.debug(`${logPrefix} Processing item #${item.index} (${itemsProcessed}/${extractedItems.length})`);
+
         // Create a record of normalized field values for comparison
         const itemFields: Record<string, string> = {};
 
@@ -158,7 +167,9 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
               if (targetValue) {
                 // Override the field value with the targeted content
                 itemFields[fieldComparison.field] = targetValue;
-                logger.debug(`${logPrefix} Applied target selector "${fieldComparison.selector}" for field "${fieldComparison.field}"`);
+                logger.debug(`${logPrefix} Applied target selector "${fieldComparison.selector}" for field "${fieldComparison.field}": "${targetValue}"`);
+              } else {
+                logger.debug(`${logPrefix} Target selector "${fieldComparison.selector}" for field "${fieldComparison.field}" returned empty value`);
               }
             } catch (error) {
               logger.warn(`${logPrefix} Error applying target selector "${fieldComparison.selector}": ${(error as Error).message}`);
@@ -174,9 +185,12 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
           logger
         );
 
+        logger.debug(`${logPrefix} Item #${item.index} comparison result: overall=${comparisonResult.overallSimilarity.toFixed(4)}, requiredFieldsMet=${comparisonResult.requiredFieldsMet}`);
+
         // Check if required fields are met
         if (hasRequiredFields && !comparisonResult.requiredFieldsMet) {
-          logger.debug(`${logPrefix} Item #${item.index} skipped: required fields did not meet threshold`);
+          itemsSkippedRequiredFields++;
+          logger.debug(`${logPrefix} Item #${item.index} skipped: required fields did not meet threshold (${itemsSkippedRequiredFields} total skipped for required fields)`);
           continue;
         }
 
@@ -185,11 +199,12 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
           const matchConfig = comparisonConfig.fieldComparisons.find(fc => fc.field === field);
           const fieldThreshold = matchConfig?.threshold || threshold;
           const sourceValue = sourceFields[field] || '';
+          const itemValue = itemFields[field] || '';
 
           logger.debug(
             `${logPrefix} Item #${item.index} - Field "${field}" similarity: ${similarity.toFixed(4)} ${
               similarity >= fieldThreshold ? '✓' : '✗'
-            }${matchConfig?.mustMatch ? ' (required)' : ''} (source value: ${sourceValue ? '"' + sourceValue + '"' : 'empty'})`
+            }${matchConfig?.mustMatch ? ' (required)' : ''} (source: "${sourceValue}" vs item: "${itemValue}")`
           );
         }
 
@@ -209,11 +224,14 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
           }`
         );
       } catch (error) {
+        itemsSkippedErrors++;
         logger.warn(
-          `${logPrefix} Error comparing item #${item.index}: ${(error as Error).message}`
+          `${logPrefix} Error comparing item #${item.index}: ${(error as Error).message} (${itemsSkippedErrors} total errors)`
         );
       }
     }
+
+    logger.info(`${logPrefix} Comparison summary: Processed ${itemsProcessed}/${extractedItems.length} items, ${itemsSkippedRequiredFields} skipped for required fields, ${itemsSkippedErrors} errors, ${matches.length} successful comparisons`);
 
     return matches;
   }

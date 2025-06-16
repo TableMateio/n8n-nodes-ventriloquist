@@ -9,8 +9,9 @@ import type {
 import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
 import type { UpdateRecord } from '../../helpers/interfaces';
 import { findMatches, processAirtableError, removeIgnored, removeEmptyFields } from '../../helpers/utils';
-import { apiRequestAllItems, batchUpdate } from '../../transport';
+import { apiRequestAllItems, batchUpdate, apiRequest } from '../../transport';
 import { insertUpdateOptions } from '../common.descriptions';
+import { processRecordFields, type ArrayHandlingOptions } from '../../helpers/arrayHandlingUtils';
 
 const properties: INodeProperties[] = [
 	{
@@ -81,14 +82,41 @@ export async function execute(
 			const records: UpdateRecord[] = [];
 			const options = this.getNodeParameter('options', i, {});
 
+			// Extract array handling options
+			const arrayHandlingOptions: ArrayHandlingOptions = {
+				arrayMergeStrategy: options.arrayMergeStrategy as 'replace' | 'append' | 'union' || 'replace',
+				arrayFields: options.arrayFields as string[] || [],
+			};
+
 			if (dataMode === 'autoMapInputData') {
 				if (columnsToMatchOn.includes('id')) {
 					const { id, ...fields } = items[i].json;
 					recordId = id as string;
 
+					let processedFields = removeIgnored(fields, options.ignoreFields as string);
+
+					// Apply array handling if enabled
+					if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
+						// Fetch existing record for array merging
+						try {
+							const existingRecord = await apiRequest.call(this, 'GET', `${endpoint}/${recordId}`);
+							processedFields = await processRecordFields.call(
+								this,
+								base,
+								table,
+								processedFields,
+								existingRecord.fields as IDataObject,
+								arrayHandlingOptions,
+							);
+						} catch (error) {
+							// If can't fetch existing record, proceed without array handling
+							console.warn(`Could not fetch existing record ${recordId} for array handling:`, error);
+						}
+					}
+
 					records.push({
 						id: recordId,
-						fields: removeIgnored(fields, options.ignoreFields as string),
+						fields: processedFields,
 					});
 				} else {
 					const matches = findMatches(
@@ -100,8 +128,26 @@ export async function execute(
 
 					for (const match of matches) {
 						const id = match.id as string;
-						const fields = items[i].json;
-						records.push({ id, fields: removeIgnored(fields, options.ignoreFields as string) });
+						let fields = removeIgnored(items[i].json, options.ignoreFields as string);
+
+						// Apply array handling if enabled
+						if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
+							try {
+								const existingRecord = await apiRequest.call(this, 'GET', `${endpoint}/${id}`);
+								fields = await processRecordFields.call(
+									this,
+									base,
+									table,
+									fields,
+									existingRecord.fields as IDataObject,
+									arrayHandlingOptions,
+								);
+							} catch (error) {
+								console.warn(`Could not fetch existing record ${id} for array handling:`, error);
+							}
+						}
+
+						records.push({ id, fields });
 					}
 				}
 			}
@@ -109,7 +155,28 @@ export async function execute(
 			if (dataMode === 'defineBelow') {
 				if (columnsToMatchOn.includes('id')) {
 					const { id, ...fields } = this.getNodeParameter('columns.value', i, []) as IDataObject;
-					records.push({ id: id as string, fields });
+					recordId = id as string;
+
+					let processedFields = fields;
+
+					// Apply array handling if enabled
+					if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
+						try {
+							const existingRecord = await apiRequest.call(this, 'GET', `${endpoint}/${recordId}`);
+							processedFields = await processRecordFields.call(
+								this,
+								base,
+								table,
+								fields,
+								existingRecord.fields as IDataObject,
+								arrayHandlingOptions,
+							);
+						} catch (error) {
+							console.warn(`Could not fetch existing record ${recordId} for array handling:`, error);
+						}
+					}
+
+					records.push({ id: recordId, fields: processedFields });
 				} else {
 					const fields = this.getNodeParameter('columns.value', i, []) as IDataObject;
 
@@ -122,7 +189,26 @@ export async function execute(
 
 					for (const match of matches) {
 						const id = match.id as string;
-						records.push({ id, fields: removeIgnored(fields, columnsToMatchOn) });
+						let processedFields = removeIgnored(fields, columnsToMatchOn);
+
+						// Apply array handling if enabled
+						if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
+							try {
+								const existingRecord = await apiRequest.call(this, 'GET', `${endpoint}/${id}`);
+								processedFields = await processRecordFields.call(
+									this,
+									base,
+									table,
+									processedFields,
+									existingRecord.fields as IDataObject,
+									arrayHandlingOptions,
+								);
+							} catch (error) {
+								console.warn(`Could not fetch existing record ${id} for array handling:`, error);
+							}
+						}
+
+						records.push({ id, fields: processedFields });
 					}
 				}
 			}

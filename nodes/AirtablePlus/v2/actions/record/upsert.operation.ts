@@ -38,6 +38,70 @@ const properties: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: 'Matching Strategy',
+		name: 'matchingStrategy',
+		type: 'options',
+		default: 'standard',
+		options: [
+			{
+				name: 'Standard (require all selected columns)',
+				value: 'standard',
+				description: 'All selected matching columns must have values and match exactly',
+			},
+			{
+				name: 'Flexible (minimum required combinations)',
+				value: 'flexible',
+				description: 'Ignore null/empty fields and use minimum required field combinations for matching',
+			},
+		],
+		displayOptions: {
+			show: {
+				'/columns.mappingMode': ['defineBelow', 'autoMapInputData'],
+			},
+			hide: {
+				'/columns.matchingColumns': ['id'],
+			},
+		},
+	},
+	{
+		displayName: 'Field Combination Rules',
+		name: 'requiredCombinations',
+		type: 'fixedCollection',
+		default: { combinations: [{ fields: [''] }] },
+		typeOptions: {
+			multipleValues: true,
+		},
+		description: 'Define which field combinations are acceptable for matching records. If a record has values for all fields in any combination, it will be used for matching. If no combination has complete data, a new record will be created.',
+		displayOptions: {
+			show: {
+				matchingStrategy: ['flexible'],
+				'/columns.mappingMode': ['defineBelow', 'autoMapInputData'],
+			},
+			hide: {
+				'/columns.matchingColumns': ['id'],
+			},
+		},
+		options: [
+			{
+				name: 'combinations',
+				displayName: 'Field Combo',
+				values: [
+					{
+								displayName: 'Required Fields',
+		name: 'fields',
+		type: 'multiOptions',
+		typeOptions: {
+			loadOptionsDependsOn: ['table.value', 'base.value'],
+			loadOptionsMethod: 'getColumns',
+		},
+						default: [],
+						description: 'All selected fields must have non-empty values for this combination to be used for matching',
+					},
+				],
+			},
+		],
+	},
 	...insertUpdateOptions,
 ];
 
@@ -63,6 +127,8 @@ export async function execute(
 	const dataMode = this.getNodeParameter('columns.mappingMode', 0) as string;
 
 	const columnsToMatchOn = this.getNodeParameter('columns.matchingColumns', 0) as string[];
+	const matchingStrategy = this.getNodeParameter('matchingStrategy', 0, 'standard') as 'standard' | 'flexible';
+	const requiredCombinations = this.getNodeParameter('requiredCombinations', 0, { combinations: [] }) as { combinations: Array<{ fields: string[] }> };
 
 	for (let i = 0; i < items.length; i++) {
 		try {
@@ -104,7 +170,8 @@ export async function execute(
 				typecast: options.typecast ? true : false,
 			};
 
-			if (!columnsToMatchOn.includes('id')) {
+			// Only add performUpsert for standard strategy or when using ID matching
+			if (!columnsToMatchOn.includes('id') && matchingStrategy === 'standard') {
 				body.performUpsert = { fieldsToMergeOn: columnsToMatchOn };
 			}
 
@@ -117,78 +184,63 @@ export async function execute(
 
 			let responseData;
 
-			// Check if any matching fields contain null/empty values - if so, use enhanced matching logic immediately
-			const inputFields = records[0].fields;
-			const hasNullMatchFields = columnsToMatchOn.some(column => {
-				const value = inputFields[column];
-				return value === null || value === undefined || value === '';
-			});
+			// Use flexible matching strategy if enabled, otherwise use standard Airtable upsert
+			if (matchingStrategy === 'flexible' && !columnsToMatchOn.includes('id')) {
+				// Flexible matching logic with minimum required combinations
+				const inputFields = records[0].fields;
 
-			// Use enhanced matching logic when we have null/empty fields OR try native upsert first
-			if (hasNullMatchFields && !columnsToMatchOn.includes('id')) {
-				// Enhanced matching logic that handles null values more flexibly
+				console.log('🔧 FLEXIBLE_DEBUG: Input fields:', JSON.stringify(inputFields, null, 2));
+				console.log('🔧 FLEXIBLE_DEBUG: Required combinations:', JSON.stringify(requiredCombinations, null, 2));
 
-				// Check if all matching fields are null/undefined - if so, create new record
-				const nonNullMatchFields = columnsToMatchOn.filter(column => {
-					const value = inputFields[column];
-					return value !== null && value !== undefined && value !== '';
+				// Check which combinations are satisfied (all fields in combination have values)
+				const satisfiedCombinations = requiredCombinations.combinations.filter(combination => {
+					const isValid = combination.fields.every(field => {
+						const value = inputFields[field];
+						const hasValue = value !== null && value !== undefined && value !== '';
+						console.log(`🔧 FLEXIBLE_DEBUG: Field "${field}" = "${value}" (hasValue: ${hasValue})`);
+						return hasValue;
+					});
+					console.log(`🔧 FLEXIBLE_DEBUG: Combination [${combination.fields.join(', ')}] is valid: ${isValid}`);
+					return isValid;
 				});
 
-				if (nonNullMatchFields.length === 0) {
-					// All match fields are null/empty - create new record
+				console.log('🔧 FLEXIBLE_DEBUG: Satisfied combinations:', JSON.stringify(satisfiedCombinations, null, 2));
+
+				if (satisfiedCombinations.length === 0) {
+					// No combinations satisfied - create new record
+					console.log('🔧 FLEXIBLE_DEBUG: No combinations satisfied - creating new record');
 					const createBody = {
 						...body,
 						records: records.map(({ fields }) => ({ fields: removeEmptyFields(fields) })),
 					};
+					console.log('🔧 FLEXIBLE_DEBUG: Create body:', JSON.stringify(createBody, null, 2));
 					responseData = await apiRequest.call(this, 'POST', endpoint, createBody);
 				} else {
-					// Some fields have values - search for matching records
-					// Build flexible filter conditions - only include non-null fields
-					const conditions = nonNullMatchFields.map((column) => {
-						const value = inputFields[column];
-						// Escape single quotes in values for Airtable formula
-						const escapedValue = String(value).replace(/'/g, "\\'");
-						return `{${column}} = '${escapedValue}'`;
-					});
+					// Use the first satisfied combination for matching
+					const fieldsToMatch = satisfiedCombinations[0].fields;
+					console.log('🔧 FLEXIBLE_DEBUG: Using fields for matching:', fieldsToMatch);
 
-					// Get all records to check for matches (including null handling)
+					// Get all records to check for matches
+					const searchParams = {
+						fields: fieldsToMatch,
+					};
+					console.log('🔧 FLEXIBLE_DEBUG: Search params:', JSON.stringify(searchParams, null, 2));
+
 					const response = await apiRequestAllItems.call(
 						this,
 						'GET',
 						endpoint,
 						{},
-						{
-							fields: columnsToMatchOn,
-							filterByFormula: conditions.length > 1 ? `AND(${conditions.join(',')})` : conditions[0],
-						},
+						searchParams,
 					);
 
 					let matches = response.records as UpdateRecord[];
 
-					// Use flexible matching logic - consider it a match if non-null fields match
-					// and null fields in input can match null fields in existing records
+					// Client-side filtering - match records where all fields in the combination match exactly
 					matches = matches.filter(record => {
-						// Check if at least one non-null field matches exactly
-						const hasNonNullMatch = nonNullMatchFields.some(column => {
-							const inputValue = inputFields[column];
-							const recordValue = record.fields[column];
-							return String(inputValue) === String(recordValue);
-						});
-
-						if (!hasNonNullMatch) return false;
-
-						// For fields that are null in input, they can match null fields in record
-						// For fields that have values in input, they must match exactly
-						return columnsToMatchOn.every(column => {
-							const inputValue = inputFields[column];
-							const recordValue = record.fields[column];
-
-							// If input field is null/empty, it can match anything (including null)
-							if (inputValue === null || inputValue === undefined || inputValue === '') {
-								return true;
-							}
-
-							// If input field has a value, it must match exactly
+						return fieldsToMatch.every(field => {
+							const inputValue = inputFields[field];
+							const recordValue = record.fields[field];
 							return String(inputValue) === String(recordValue);
 						});
 					});
@@ -251,7 +303,7 @@ export async function execute(
 					}
 				}
 			} else {
-				// No null/empty fields in matching columns OR using ID-based matching - use standard upsert logic
+				// Standard matching strategy - use Airtable's native upsert functionality
 				try {
 					responseData = await batchUpdate.call(this, endpoint, body, records);
 				} catch (error) {
@@ -261,80 +313,6 @@ export async function execute(
 							records: records.map(({ fields }) => ({ fields: removeEmptyFields(fields) })),
 						};
 						responseData = await apiRequest.call(this, 'POST', endpoint, createBody);
-					} else if (error?.description?.includes('Cannot update more than one record')) {
-						// Fall back to the enhanced matching logic for multiple matches
-						const inputFields = records[0].fields;
-						const nonNullMatchFields = columnsToMatchOn.filter(column => {
-							const value = inputFields[column];
-							return value !== null && value !== undefined && value !== '';
-						});
-
-						const conditions = nonNullMatchFields.map((column) => {
-							const value = inputFields[column];
-							const escapedValue = String(value).replace(/'/g, "\\'");
-							return `{${column}} = '${escapedValue}'`;
-						});
-
-						const response = await apiRequestAllItems.call(
-							this,
-							'GET',
-							endpoint,
-							{},
-							{
-								fields: columnsToMatchOn,
-								filterByFormula: conditions.length > 1 ? `AND(${conditions.join(',')})` : conditions[0],
-							},
-						);
-
-						const matches = response.records as UpdateRecord[];
-						const updateRecords: UpdateRecord[] = [];
-
-						if (matches.length === 0) {
-							// No matches found - create new record
-							const createBody = {
-								...body,
-								records: records.map(({ fields }) => ({ fields: removeEmptyFields(fields) })),
-							};
-							responseData = await apiRequest.call(this, 'POST', endpoint, createBody);
-						} else if (options.updateAllMatches) {
-							for (const match of matches) {
-								let fieldsToUpdate = records[0].fields;
-								if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
-									try {
-										fieldsToUpdate = await processRecordFields.call(
-											this,
-											base,
-											table,
-											records[0].fields,
-											match.fields as IDataObject,
-											arrayHandlingOptions,
-										);
-									} catch (error) {
-										console.warn(`Could not apply array handling for record ${match.id}:`, error);
-									}
-								}
-								updateRecords.push({ id: match.id, fields: fieldsToUpdate });
-							}
-							responseData = await batchUpdate.call(this, endpoint, body, updateRecords);
-						} else {
-							let fieldsToUpdate = records[0].fields;
-							if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
-								try {
-									fieldsToUpdate = await processRecordFields.call(
-										this,
-										base,
-										table,
-										records[0].fields,
-										matches[0].fields as IDataObject,
-										arrayHandlingOptions,
-									);
-								} catch (error) {
-									console.warn(`Could not apply array handling for record ${matches[0].id}:`, error);
-								}
-							}
-							updateRecords.push({ id: matches[0].id, fields: fieldsToUpdate });
-							responseData = await batchUpdate.call(this, endpoint, body, updateRecords);
-						}
 					} else {
 						throw error;
 					}

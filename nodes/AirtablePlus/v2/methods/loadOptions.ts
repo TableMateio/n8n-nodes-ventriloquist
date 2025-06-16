@@ -180,3 +180,73 @@ export async function getTables(this: ILoadOptionsFunctions): Promise<INodePrope
 
 	return result;
 }
+
+export async function getArrayFields(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	const base = this.getNodeParameter('base', undefined, {
+		extractValue: true,
+	}) as string;
+
+	const tableId = encodeURI(
+		this.getNodeParameter('table', undefined, {
+			extractValue: true,
+		}) as string,
+	);
+
+	const response = await apiRequest.call(this, 'GET', `meta/bases/${base}/tables`);
+
+	const tableData = ((response.tables as IDataObject[]) || []).find((table: IDataObject) => {
+		return table.id === tableId;
+	});
+
+	if (!tableData) {
+		throw new NodeOperationError(this.getNode(), 'Table information could not be found!', {
+			level: 'warning',
+		});
+	}
+
+	const result: INodePropertyOptions[] = [];
+
+	for (const field of tableData.fields as IDataObject[]) {
+		const fieldType = (field.type as string)?.toLowerCase();
+
+		// Check for linked record fields
+		if (fieldType?.includes('multiplerecordlinks') ||
+		    fieldType?.includes('foreignkey') ||
+		    fieldType?.includes('linkedrecord') ||
+		    fieldType === 'multipleRecordLinks') {
+
+			const fieldOptions = field.options as IDataObject;
+			const linkedTableId = fieldOptions?.linkedTableId as string;
+			let description = 'Linked Records';
+
+			if (linkedTableId) {
+				const linkedTable = ((response.tables as IDataObject[]) || []).find((table: IDataObject) => {
+					return table.id === linkedTableId;
+				});
+				if (linkedTable) {
+					description = `Linked Records → ${linkedTable.name}`;
+				}
+			}
+
+			result.push({
+				name: field.name as string,
+				value: field.name as string,
+				description,
+			});
+		}
+
+		// Check for multi-select fields
+		else if (fieldType?.includes('multipleselects') ||
+		         fieldType?.includes('multiselect') ||
+		         fieldType === 'multipleSelects') {
+
+			result.push({
+				name: field.name as string,
+				value: field.name as string,
+				description: 'Multi-Select Field',
+			});
+		}
+	}
+
+	return result;
+}
