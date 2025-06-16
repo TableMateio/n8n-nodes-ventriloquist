@@ -204,6 +204,11 @@ export const description: INodeProperties[] = [
 								value: "urlContains",
 								description: "Check if current URL contains string",
 							},
+							{
+								name: "Element(s) Exist",
+								value: "elementExists",
+								description: "Check if element(s) exist on the page. Use comma-separated selectors to check for multiple elements.",
+							},
 						],
 						default: "elementExists",
 						description: "Type of condition to check",
@@ -782,9 +787,9 @@ export const description: INodeProperties[] = [
 						type: "options",
 						options: [
 							{
-								name: "Click Element",
+								name: "Click Element(s)",
 								value: "click",
-								description: "Click on an element",
+								description: "Click on one or more elements. Use comma-separated selectors to try each in order.",
 							},
 							{
 								name: "Extract Data",
