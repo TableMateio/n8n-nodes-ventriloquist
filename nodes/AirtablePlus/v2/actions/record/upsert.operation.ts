@@ -8,7 +8,7 @@ import type {
 
 import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
 import type { UpdateRecord } from '../../helpers/interfaces';
-import { processAirtableError, removeIgnored, removeEmptyFields } from '../../helpers/utils';
+import { processAirtableError, removeIgnored, removeEmptyFields, validateLinkedRecordFields } from '../../helpers/utils';
 import { apiRequest, apiRequestAllItems, batchUpdate } from '../../transport';
 import { insertUpdateOptions } from '../common.descriptions';
 import { processRecordFields, type ArrayHandlingOptions } from '../../helpers/arrayHandlingUtils';
@@ -180,6 +180,26 @@ export async function execute(
 				records.forEach(record => {
 					record.fields = removeEmptyFields(record.fields);
 				});
+			}
+
+			// Validate linked record fields before attempting upsert
+			for (const record of records) {
+				const validationResult = await validateLinkedRecordFields.call(
+					this,
+					base,
+					table,
+					record.fields,
+				);
+
+				if (!validationResult.isValid) {
+					const errorMessage = `Linked record validation failed for item ${i}:\n${validationResult.errors.join('\n')}`;
+					console.error('🚨 LINKED_RECORD_VALIDATION_ERROR:', errorMessage);
+
+					// Create a detailed error that explains the issue
+					const detailedError = new Error(errorMessage);
+					(detailedError as any).description = 'One or more linked record fields contain record IDs that belong to the wrong table. Please check that the record IDs you are trying to link match the table that the field is configured to link to.';
+					throw detailedError;
+				}
 			}
 
 			let responseData;

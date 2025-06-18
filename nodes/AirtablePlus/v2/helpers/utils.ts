@@ -1,7 +1,9 @@
 import set from 'lodash/set';
-import { ApplicationError, type IDataObject, type NodeApiError } from 'n8n-workflow';
+import { ApplicationError, type IDataObject, type NodeApiError, type IExecuteFunctions } from 'n8n-workflow';
 
 import type { UpdateRecord } from './interfaces';
+import { getTableSchema } from './linkedRecordUtils';
+import { apiRequest } from '../transport';
 
 export function removeIgnored(data: IDataObject, ignore: string | string[]) {
 	if (ignore) {
@@ -109,3 +111,73 @@ export const flattenOutput = (record: IDataObject) => {
 		...(fields as IDataObject),
 	};
 };
+
+/**
+ * Validates linked record fields to ensure record IDs belong to the correct linked tables
+ */
+export async function validateLinkedRecordFields(
+	this: IExecuteFunctions,
+	base: string,
+	tableId: string,
+	fieldsData: IDataObject,
+): Promise<{ isValid: boolean; errors: string[] }> {
+	const errors: string[] = [];
+
+	try {
+		// Get the table schema to identify linked record fields
+		const { linkedFields } = await getTableSchema.call(this, base, tableId);
+
+		if (linkedFields.length === 0) {
+			return { isValid: true, errors: [] };
+		}
+
+		// Check each linked field in the provided field data
+		for (const linkedField of linkedFields) {
+			const fieldValue = fieldsData[linkedField.fieldName];
+
+			// Skip if field is not being set or is empty
+			if (!fieldValue || (Array.isArray(fieldValue) && fieldValue.length === 0)) {
+				continue;
+			}
+
+			// Ensure we have an array of record IDs
+			const recordIds = Array.isArray(fieldValue) ? fieldValue : [fieldValue];
+
+			// Validate each record ID
+			for (const recordId of recordIds) {
+				if (typeof recordId === 'string' && recordId.startsWith('rec')) {
+					// Try to fetch the record from the expected linked table to validate it exists there
+					try {
+						await apiRequest.call(
+							this,
+							'GET',
+							`${base}/${linkedField.linkedTableId}/${recordId}`,
+						);
+					} catch (error: any) {
+						// If we get a 404 or similar error, the record doesn't exist in the expected table
+						if (error.httpCode === '404' || error.message?.includes('NOT_FOUND')) {
+							errors.push(
+								`Field "${linkedField.fieldName}": Record ID "${recordId}" does not exist in linked table "${linkedField.linkedTableName || linkedField.linkedTableId}". ` +
+								`This field is configured to link to table "${linkedField.linkedTableId}" but the record ID belongs to a different table.`
+							);
+						} else if (error.message?.includes('ROW_TABLE_DOES_NOT_MATCH_LINKED_TABLE')) {
+							errors.push(
+								`Field "${linkedField.fieldName}": Record ID "${recordId}" belongs to a different table than expected. ` +
+								`This field is configured to link to table "${linkedField.linkedTableName || linkedField.linkedTableId}".`
+							);
+						} else {
+							// Some other error occurred during validation
+							console.warn(`Could not validate linked record ${recordId} in field ${linkedField.fieldName}:`, error);
+						}
+					}
+				}
+			}
+		}
+	} catch (error) {
+		console.error('Error during linked record validation:', error);
+		// If validation itself fails, we'll allow the operation to proceed and let Airtable handle validation
+		return { isValid: true, errors: [] };
+	}
+
+	return { isValid: errors.length === 0, errors };
+}
