@@ -1,0 +1,27 @@
+{
+    "node": "n8n-nodes-ventriloquist.smarty",
+    "nodeVersion": "1.0",
+    "codexVersion": "1.0",
+    "categories": [
+        "Utility",
+        "Data & Storage"
+    ],
+    "resources": {
+        "primaryDocumentation": [
+            {
+                "url": "https://www.smartystreets.com/docs"
+            }
+        ]
+    },
+    "alias": [
+        "Address",
+        "Verification",
+        "Validation",
+        "SmartyStreets"
+    ],
+    "subcategories": {
+        "Utility": [
+            "Address Validation"
+        ]
+    }
+}

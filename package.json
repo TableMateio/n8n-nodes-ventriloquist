@@ -39,7 +39,8 @@
 			"dist/credentials/BrightDataApi.credentials.js",
 			"dist/credentials/BrowserlessApi.credentials.js",
 			"dist/credentials/LocalChromeApi.credentials.js",
-			"dist/credentials/StannpApi.credentials.js"
+			"dist/credentials/StannpApi.credentials.js",
+			"dist/credentials/SmartyApi.credentials.js"
 		],
 		"nodes": [
 			"dist/nodes/ExampleNode/ExampleNode.node.js",
@@ -47,7 +48,8 @@
 			"dist/nodes/Ventriloquist/Ventriloquist.node.js",
 			"dist/nodes/Stannp/Stannp.node.js",
 			"dist/nodes/Router/Router.node.js",
-			"dist/nodes/AirtablePlus/AirtablePlus.node.js"
+			"dist/nodes/AirtablePlus/AirtablePlus.node.js",
+			"dist/nodes/Smarty/Smarty.node.js"
 		]
 	},
 	"devDependencies": {
