@@ -97,6 +97,13 @@ export class Smarty implements INodeType {
 						description: 'Whether to include invalid addresses in the results',
 					},
 					{
+						displayName: 'Always Return Data',
+						name: 'alwaysReturnData',
+						type: 'boolean',
+						default: true,
+						description: 'Whether to always return data even when address cannot be verified (prevents empty output)',
+					},
+					{
 						displayName: 'Continue On Fail',
 						name: 'continueOnFail',
 						type: 'boolean',
@@ -131,6 +138,7 @@ export class Smarty implements INodeType {
 
 					const options = this.getNodeParameter('options', i, {}) as IDataObject;
 					const includeInvalid = options.includeInvalid as boolean || false;
+					const alwaysReturnData = options.alwaysReturnData as boolean || true;
 
 					// Build query parameters
 					const queryParams: IDataObject = {
@@ -160,8 +168,34 @@ export class Smarty implements INodeType {
 
 					const responseData = await this.helpers.request(options_req);
 
+					// Handle response - SmartyStreets returns empty array for unverifiable addresses
+					let resultData = responseData.body || [];
+
+					// If no results and alwaysReturnData is true, return input data with verification status
+					if (Array.isArray(resultData) && resultData.length === 0 && alwaysReturnData) {
+						resultData = [{
+							verification_status: 'unverified',
+							input_street: street,
+							input_street2: street2,
+							input_city: city,
+							input_state: state,
+							input_zipcode: zipcode,
+							message: 'Address could not be verified by SmartyStreets API',
+							api_response: 'empty_result',
+							api_status_code: responseData.statusCode,
+							query_sent: queryParams
+						}];
+					} else if (Array.isArray(resultData) && resultData.length > 0) {
+						// Add verification status to successful results
+						resultData = resultData.map((result: any) => ({
+							...result,
+							verification_status: 'verified',
+							api_status_code: responseData.statusCode
+						}));
+					}
+
 					const executionData = this.helpers.constructExecutionMetaData(
-						this.helpers.returnJsonArray(responseData.body || []),
+						this.helpers.returnJsonArray(resultData),
 						{ itemData: { item: i } },
 					);
 					returnData.push(...executionData);
