@@ -172,7 +172,22 @@ export async function execute(
 
 			// Only add performUpsert for standard strategy or when using ID matching
 			if (!columnsToMatchOn.includes('id') && matchingStrategy === 'standard') {
-				body.performUpsert = { fieldsToMergeOn: columnsToMatchOn };
+				// For standard strategy, filter out columns that have null/empty values in the current record
+				// This makes Standard mode smart about nulls while keeping Flexible mode for field combinations
+				const currentRecord = records[0]; // Use first record to determine available columns
+				const availableColumns = columnsToMatchOn.filter(column => {
+					const value = currentRecord.fields[column];
+					return value !== null && value !== undefined && value !== '';
+				});
+
+				if (availableColumns.length > 0) {
+					body.performUpsert = { fieldsToMergeOn: availableColumns };
+					console.log(`🔧 STANDARD_SMART: Using ${availableColumns.length} of ${columnsToMatchOn.length} matching columns: [${availableColumns.join(', ')}]`);
+				} else {
+					// If no matching columns have values, create a new record
+					console.log(`🔧 STANDARD_SMART: No matching columns have values, will create new record`);
+					// Don't set performUpsert, which will default to creating new records
+				}
 			}
 
 			// Remove empty/null fields if requested
@@ -202,30 +217,7 @@ export async function execute(
 				}
 			}
 
-			// Validate matching columns for standard strategy
-			if (matchingStrategy === 'standard' && !columnsToMatchOn.includes('id') && columnsToMatchOn.length > 0) {
-				for (const record of records) {
-					const missingColumns: string[] = [];
 
-					for (const column of columnsToMatchOn) {
-						const value = record.fields[column];
-						if (value === null || value === undefined || value === '') {
-							missingColumns.push(column);
-						}
-					}
-
-					if (missingColumns.length > 0) {
-						const errorMessage = `Record for item ${i} is missing values for required matching columns: [${missingColumns.join(', ')}]. ` +
-							`When using Standard matching strategy, ALL matching columns must have non-empty values. ` +
-							`Consider using Flexible matching strategy if you want to handle records with missing matching field values.`;
-						console.error('🚨 MATCHING_COLUMNS_VALIDATION_ERROR:', errorMessage);
-
-						const detailedError = new Error(errorMessage);
-						(detailedError as any).description = 'Standard matching strategy requires all matching columns to have values. Switch to Flexible matching strategy or ensure all matching fields have values in your input data.';
-						throw detailedError;
-					}
-				}
-			}
 
 			let responseData;
 
