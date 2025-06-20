@@ -6,52 +6,58 @@ import {
 export class UspsApi implements ICredentialType {
 	name = 'uspsApi';
 	displayName = 'USPS API';
-	documentationUrl = 'https://www.usps.com/business/web-tools-apis/';
+	documentationUrl = 'https://developers.usps.com/';
 	properties: INodeProperties[] = [
 		{
-			displayName: '📮 USPS Setup Instructions',
+			displayName: '📮 USPS Developer Portal Setup',
 			name: 'setupInstructions',
 			type: 'notice',
-			default: '',
+			default: 'Follow the instructions below to get your USPS Consumer Key and Consumer Secret from the USPS Developer Portal.',
 			displayOptions: {
 				show: {},
 			},
 		},
 		{
-			displayName: '',
+			displayName: 'Setup Instructions',
 			name: 'instructions',
 			type: 'notice',
-			default: `
-**Required Setup Steps:**
-
-1. **Go to USPS Web Tools**: https://www.usps.com/business/web-tools-apis/
-2. **Click "Register Now"** under Legacy Web Tools API Library
-3. **Complete Registration Form**:
-   - Business email required
-   - Describe your use case
-   - Accept Terms of Service
-4. **Check Your Email**:
-   - USPS will send your User ID via email
-   - May take a few hours to receive
-5. **Copy Your User ID** from the email
-
-**Cost**: Completely FREE - No monthly fees or usage limits!
-
-**Use Case**: Mail deliverability validation (checking if addresses can receive USPS mail delivery)
-
-**Need Help?** Full documentation: https://www.usps.com/business/web-tools-apis/documentation-updates.htm
-			`,
+			default: '',
+			description: `<strong>USPS Developer Portal Setup:</strong><br/><br/>
+			1. <strong>Go to:</strong> <a href="https://developers.usps.com/" target="_blank">https://developers.usps.com/</a><br/>
+			2. <strong>Create Account</strong> and log in<br/>
+			3. <strong>Add New App:</strong><br/>
+			&nbsp;&nbsp;• App name: "Address Verification System" (or similar)<br/>
+			&nbsp;&nbsp;• Description: Address validation for business applications<br/>
+			&nbsp;&nbsp;• Select APIs you need (Address Validation)<br/>
+			4. <strong>Get Your Credentials:</strong><br/>
+			&nbsp;&nbsp;• Consumer Key (from your app dashboard)<br/>
+			&nbsp;&nbsp;• Consumer Secret (from your app dashboard)<br/>
+			5. <strong>Copy Both Values</strong> into the fields below<br/><br/>
+			<strong>Cost:</strong> Completely FREE - No monthly fees or usage limits!<br/>
+			<strong>Documentation:</strong> <a href="https://developers.usps.com/api-catalog" target="_blank">https://developers.usps.com/api-catalog</a>`,
 			displayOptions: {
 				show: {},
 			},
 		},
 		{
-			displayName: 'User ID',
-			name: 'userId',
+			displayName: 'Consumer Key',
+			name: 'consumerKey',
 			type: 'string',
 			default: '',
-			placeholder: 'Your USPS Web Tools User ID',
-			description: 'Paste your USPS Web Tools User ID here (received via email after registration)',
+			placeholder: 'Your USPS Consumer Key',
+			description: 'Consumer Key from your USPS Developer Portal app',
+			required: true,
+		},
+		{
+			displayName: 'Consumer Secret',
+			name: 'consumerSecret',
+			type: 'string',
+			typeOptions: {
+				password: true,
+			},
+			default: '',
+			placeholder: 'Your USPS Consumer Secret',
+			description: 'Consumer Secret from your USPS Developer Portal app (kept secure)',
 			required: true,
 		},
 	];

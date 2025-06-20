@@ -169,7 +169,8 @@ export class Smarty implements INodeType {
 
 			try {
 				const uspsCredentials = await this.getCredentials('uspsApi');
-				const uspsUserId = uspsCredentials.userId as string;
+				const consumerKey = uspsCredentials.consumerKey as string;
+				const consumerSecret = uspsCredentials.consumerSecret as string;
 
 				// Parse address components for USPS API
 				const addressParts = address.split(',').map(part => part.trim());
@@ -182,54 +183,66 @@ export class Smarty implements INodeType {
 				const state = cityStateZipMatch?.[2] || '';
 				const zip = cityStateZipMatch?.[3] || '';
 
-				// Build USPS XML request
-				const xmlRequest = `<AddressValidateRequest USERID="${uspsUserId}">
-					<Revision>1</Revision>
-					<Address ID="0">
-						<Address1></Address1>
-						<Address2>${streetAddress}</Address2>
-						<City>${city}</City>
-						<State>${state}</State>
-						<Zip5>${zip.split('-')[0]}</Zip5>
-						<Zip4>${zip.split('-')[1] || ''}</Zip4>
-					</Address>
-				</AddressValidateRequest>`;
+				// Get OAuth token first (simplified for now - in production, should cache this)
+				const tokenOptions: IRequestOptions = {
+					method: 'POST',
+					url: 'https://api.usps.com/oauth2/v3/token',
+					headers: {
+						'Content-Type': 'application/json',
+						'Accept': 'application/json',
+					},
+					body: {
+						client_id: consumerKey,
+						client_secret: consumerSecret,
+						grant_type: 'client_credentials'
+					},
+					json: true,
+					resolveWithFullResponse: true,
+				};
+
+				const tokenResponse = await this.helpers.request(tokenOptions);
+				const accessToken = tokenResponse.body?.access_token;
+
+				if (!accessToken) {
+					return { isDeliverable: false, error: 'USPS OAuth token error' };
+				}
+
+				// Build address validation request
+				const requestBody = {
+					streetAddress: streetAddress,
+					city: city,
+					state: state,
+					ZIPCode: zip.split('-')[0] || '',
+					ZIPPlus4: zip.split('-')[1] || ''
+				};
 
 				const uspsOptions: IRequestOptions = {
-					method: 'GET',
-					url: 'https://secure.shippingapis.com/ShippingAPI.dll',
-					qs: {
-						API: 'Verify',
-						XML: xmlRequest,
-					},
+					method: 'POST',
+					url: 'https://api.usps.com/addresses/v3/address',
 					headers: {
-						'Accept': 'application/xml',
+						'Authorization': `Bearer ${accessToken}`,
+						'Content-Type': 'application/json',
+						'Accept': 'application/json',
 					},
+					body: requestBody,
+					json: true,
 					resolveWithFullResponse: true,
 				};
 
 				const uspsResponse = await this.helpers.request(uspsOptions);
+				const responseData = uspsResponse.body;
 
-				// Parse XML response (basic parsing for now)
-				const xmlData = uspsResponse.body as string;
-
-				// Check if the response contains an error
-				if (xmlData.includes('<Error>')) {
-					return { isDeliverable: false, error: 'USPS validation error' };
-				}
-
-				// Check if the response contains address data (basic check)
-				if (xmlData.includes('<Address2>') && xmlData.includes('<City>') && xmlData.includes('<State>')) {
-					// Extract some basic USPS data for debugging
-					const cityMatch = xmlData.match(/<City>([^<]+)<\/City>/);
-					const stateMatch = xmlData.match(/<State>([^<]+)<\/State>/);
-					const zipMatch = xmlData.match(/<Zip5>([^<]+)<\/Zip5>/);
-
+				// Check if the response indicates a valid address
+				if (responseData && responseData.streetAddress && responseData.city && responseData.state) {
 					const uspsData = {
-						city: cityMatch?.[1] || '',
-						state: stateMatch?.[1] || '',
-						zip: zipMatch?.[1] || '',
-						raw_response: xmlData
+						streetAddress: responseData.streetAddress,
+						city: responseData.city,
+						state: responseData.state,
+						zipCode: responseData.ZIPCode,
+						zipPlus4: responseData.ZIPPlus4,
+						deliveryPoint: responseData.deliveryPoint,
+						checkDigit: responseData.checkDigit,
+						raw_response: responseData
 					};
 
 					return { isDeliverable: true, uspsData };
@@ -238,6 +251,8 @@ export class Smarty implements INodeType {
 				return { isDeliverable: false, error: 'USPS could not verify address' };
 
 			} catch (error) {
+				// Log the full error for debugging
+				console.log('USPS API Error Details:', error.response?.body || error.message);
 				return { isDeliverable: false, error: `USPS API error: ${error.message}` };
 			}
 		};
