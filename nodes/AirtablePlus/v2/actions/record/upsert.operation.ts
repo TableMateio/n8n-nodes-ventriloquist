@@ -45,9 +45,9 @@ const properties: INodeProperties[] = [
 		default: 'standard',
 		options: [
 			{
-				name: 'Standard (require all selected columns)',
+				name: 'Standard (soft matching)',
 				value: 'standard',
-				description: 'All selected matching columns must have values and match exactly',
+				description: 'All matching columns must have values - if any column is null/empty, the match fails',
 			},
 			{
 				name: 'Flexible (minimum required combinations)',
@@ -172,22 +172,8 @@ export async function execute(
 
 			// Only add performUpsert for standard strategy or when using ID matching
 			if (!columnsToMatchOn.includes('id') && matchingStrategy === 'standard') {
-				// For standard strategy, filter out columns that have null/empty values in the current record
-				// This makes Standard mode smart about nulls while keeping Flexible mode for field combinations
-				const currentRecord = records[0]; // Use first record to determine available columns
-				const availableColumns = columnsToMatchOn.filter(column => {
-					const value = currentRecord.fields[column];
-					return value !== null && value !== undefined && value !== '';
-				});
-
-				if (availableColumns.length > 0) {
-					body.performUpsert = { fieldsToMergeOn: availableColumns };
-					console.log(`🔧 STANDARD_SMART: Using ${availableColumns.length} of ${columnsToMatchOn.length} matching columns: [${availableColumns.join(', ')}]`);
-				} else {
-					// If no matching columns have values, create a new record
-					console.log(`🔧 STANDARD_SMART: No matching columns have values, will create new record`);
-					// Don't set performUpsert, which will default to creating new records
-				}
+				// Standard mode: ALL matching columns must have values (strict/soft behavior)
+				body.performUpsert = { fieldsToMergeOn: columnsToMatchOn };
 			}
 
 			// Remove empty/null fields if requested
