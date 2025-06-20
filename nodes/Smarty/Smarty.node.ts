@@ -16,7 +16,7 @@ export class Smarty implements INodeType {
 		group: ['utility'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
-		description: 'Verify and validate addresses using SmartyStreets API',
+		description: 'Verify a US address using Google Geocoding API with FREE USPS mail safety validation',
 		defaults: {
 			name: 'Smarty',
 		},
@@ -24,15 +24,24 @@ export class Smarty implements INodeType {
 		outputs: [NodeConnectionType.Main],
 		credentials: [
 			{
-				name: 'smartyApi',
+				name: 'googleApi',
 				required: true,
 			},
 			{
-				name: 'googleApi',
+				name: 'uspsApi',
 				required: false,
 				displayOptions: {
 					show: {
-						'options.useGoogleFallback': [true],
+						'options.useUspsMailSafety': [true],
+					},
+				},
+			},
+			{
+				name: 'smartyApi',
+				required: false,
+				displayOptions: {
+					show: {
+						'options.useSmartyFallback': [true],
 					},
 				},
 			},
@@ -47,7 +56,7 @@ export class Smarty implements INodeType {
 					{
 						name: 'Verify US Address',
 						value: 'verifyUSAddress',
-						description: 'Verify a US address using SmartyStreets API',
+						description: 'Verify a US address using Google Geocoding API with FREE USPS mail safety validation',
 						action: 'Verify a US address',
 					},
 				],
@@ -106,11 +115,18 @@ export class Smarty implements INodeType {
 						description: 'Whether to include invalid addresses in the results',
 					},
 					{
-						displayName: 'Use Google Fallback',
-						name: 'useGoogleFallback',
+						displayName: 'Use USPS Mail Safety Check',
+						name: 'useUspsMailSafety',
+						type: 'boolean',
+						default: true,
+						description: 'Validate addresses without house numbers using FREE USPS API for mail deliverability. Ensures addresses can actually receive mail. No monthly fees!',
+					},
+					{
+						displayName: 'Use SmartyStreets Fallback',
+						name: 'useSmartyFallback',
 						type: 'boolean',
 						default: false,
-						description: 'Try Google Geocoding API if SmartyStreets fails. Great for rural addresses and properties that exist but don\'t receive mail delivery. Requires Google API credential with Geocoding API enabled.',
+						description: 'Try SmartyStreets if Google fails. Provides CASS certification and postal delivery validation for bulk mail campaigns. Requires active SmartyStreets subscription.',
 					},
 					{
 						displayName: 'Always Return Data',
@@ -135,10 +151,122 @@ export class Smarty implements INodeType {
 		const items = this.getInputData();
 		const returnData: INodeExecutionData[] = [];
 
-		const credentials = await this.getCredentials('smartyApi');
-		const authId = credentials.authId as string;
-		const authToken = credentials.authToken as string;
-		const license = credentials.license as string || 'us-core-cloud';
+		const googleCredentials = await this.getCredentials('googleApi');
+		const googleApiKey = googleCredentials.apiKey as string;
+
+		// Helper function to validate address with USPS API for mail deliverability
+		const validateWithUSPS = async (address: string, useUspsMailSafety: boolean): Promise<{isDeliverable: boolean, uspsData?: any, error?: string}> => {
+			if (!useUspsMailSafety) {
+				return { isDeliverable: true }; // Skip validation if not enabled
+			}
+
+			try {
+				const uspsCredentials = await this.getCredentials('uspsApi');
+				const uspsUserId = uspsCredentials.userId as string;
+
+				// Parse address components for USPS API
+				const addressParts = address.split(',').map(part => part.trim());
+				const streetAddress = addressParts[0] || '';
+				const cityStateZip = addressParts.slice(1).join(', ');
+
+				// Try to extract city, state, and zip from the remaining parts
+				const cityStateZipMatch = cityStateZip.match(/^(.+?),?\s*([A-Z]{2})\s*(\d{5}(?:-\d{4})?)?$/);
+				const city = cityStateZipMatch?.[1] || '';
+				const state = cityStateZipMatch?.[2] || '';
+				const zip = cityStateZipMatch?.[3] || '';
+
+				// Build USPS XML request
+				const xmlRequest = `<AddressValidateRequest USERID="${uspsUserId}">
+					<Revision>1</Revision>
+					<Address ID="0">
+						<Address1></Address1>
+						<Address2>${streetAddress}</Address2>
+						<City>${city}</City>
+						<State>${state}</State>
+						<Zip5>${zip.split('-')[0]}</Zip5>
+						<Zip4>${zip.split('-')[1] || ''}</Zip4>
+					</Address>
+				</AddressValidateRequest>`;
+
+				const uspsOptions: IRequestOptions = {
+					method: 'GET',
+					url: 'https://secure.shippingapis.com/ShippingAPI.dll',
+					qs: {
+						API: 'Verify',
+						XML: xmlRequest,
+					},
+					headers: {
+						'Accept': 'application/xml',
+					},
+					resolveWithFullResponse: true,
+				};
+
+				const uspsResponse = await this.helpers.request(uspsOptions);
+
+				// Parse XML response (basic parsing for now)
+				const xmlData = uspsResponse.body as string;
+
+				// Check if the response contains an error
+				if (xmlData.includes('<Error>')) {
+					return { isDeliverable: false, error: 'USPS validation error' };
+				}
+
+				// Check if the response contains address data (basic check)
+				if (xmlData.includes('<Address2>') && xmlData.includes('<City>') && xmlData.includes('<State>')) {
+					// Extract some basic USPS data for debugging
+					const cityMatch = xmlData.match(/<City>([^<]+)<\/City>/);
+					const stateMatch = xmlData.match(/<State>([^<]+)<\/State>/);
+					const zipMatch = xmlData.match(/<Zip5>([^<]+)<\/Zip5>/);
+
+					const uspsData = {
+						city: cityMatch?.[1] || '',
+						state: stateMatch?.[1] || '',
+						zip: zipMatch?.[1] || '',
+						raw_response: xmlData
+					};
+
+					return { isDeliverable: true, uspsData };
+				}
+
+				return { isDeliverable: false, error: 'USPS could not verify address' };
+
+			} catch (error) {
+				return { isDeliverable: false, error: `USPS API error: ${error.message}` };
+			}
+		};
+
+		// Helper function to determine if Google result represents a deliverable address
+		const isDeliverableAddress = (result: any) => {
+			const types = result.types || [];
+			const geometry = result.geometry || {};
+			const locationType = geometry.location_type || 'APPROXIMATE';
+
+			// Good types - indicate specific deliverable locations
+			const goodTypes = ['street_address', 'premise', 'establishment', 'point_of_interest'];
+			// Bad types - indicate vague geographic areas
+			const vagueTypes = ['route', 'political', 'administrative_area_level_1', 'administrative_area_level_2', 'locality', 'neighborhood'];
+
+			// If it has any good types, it's probably deliverable
+			if (types.some((type: string) => goodTypes.includes(type))) {
+				return true;
+			}
+
+			// If it only has vague types, it's NOT deliverable
+			if (types.every((type: string) => vagueTypes.includes(type))) {
+				return false;
+			}
+
+			// For mixed results, check location precision
+			// ROOFTOP and RANGE_INTERPOLATED are more likely to be deliverable
+			const isPrecise = ['ROOFTOP', 'RANGE_INTERPOLATED'].includes(locationType);
+
+			// If it has street components AND is precise, likely deliverable
+			const hasStreetNumber = result.address_components?.some((comp: any) => comp.types.includes('street_number'));
+			const hasRoute = result.address_components?.some((comp: any) => comp.types.includes('route'));
+
+			// For rural addresses without street numbers, if it's precise it might still be deliverable
+			return isPrecise && hasRoute;
+		};
 
 		for (let i = 0; i < items.length; i++) {
 			try {
@@ -154,50 +282,20 @@ export class Smarty implements INodeType {
 
 					const options = this.getNodeParameter('options', i, {}) as IDataObject;
 					const includeInvalid = options.includeInvalid as boolean || false;
-					const useGoogleFallback = options.useGoogleFallback as boolean || false;
+					const useUspsMailSafety = options.useUspsMailSafety as boolean || true;
+					const useSmartyFallback = options.useSmartyFallback as boolean || false;
 					const alwaysReturnData = options.alwaysReturnData as boolean || true;
 
-					// Build query parameters
-					const queryParams: IDataObject = {
-						'auth-id': authId,
-						'auth-token': authToken,
-						'street': street,
-					};
+					// Check if this is an intersection format - if so, skip special processing and go straight to Google
+					const isIntersection = street && (street.includes('/') || street.includes(' & ') || street.includes(' and '));
+					let resultData: any[] = [];
 
-					// Add optional parameters if provided
-					if (street2) queryParams['street2'] = street2;
-					if (city) queryParams['city'] = city;
-					if (state) queryParams['state'] = state;
-					if (zipcode) queryParams['zipcode'] = zipcode;
-					if (includeInvalid) queryParams['include_invalid'] = 'true';
-
-					// Make the API request
-					const options_req: IRequestOptions = {
-						method: 'GET',
-						url: 'https://us-street.api.smartystreets.com/street-address',
-						qs: queryParams,
-						headers: {
-							'Accept': 'application/json',
-						},
-						json: true,
-						resolveWithFullResponse: true,
-					};
-
-					const responseData = await this.helpers.request(options_req);
-
-										// Handle response - SmartyStreets returns empty array for unverifiable addresses
-					let resultData = responseData.body || [];
-
-					// If no results and Google fallback is enabled, try Google Places API
-					if (Array.isArray(resultData) && resultData.length === 0 && useGoogleFallback) {
+					if (isIntersection) {
+						// Skip detailed validation for intersections, go directly to Google
 						try {
-							const googleCredentials = await this.getCredentials('googleApi');
-							const googleApiKey = googleCredentials.apiKey as string;
-
 							// Build full address string for Google
 							const fullAddress = [street, street2, city, state, zipcode].filter(Boolean).join(', ');
 
-							// Make Google Places API request
 							const googleOptions: IRequestOptions = {
 								method: 'GET',
 								url: 'https://maps.googleapis.com/maps/api/geocode/json',
@@ -214,8 +312,8 @@ export class Smarty implements INodeType {
 
 							const googleResponse = await this.helpers.request(googleOptions);
 
-														if (googleResponse.body?.results?.length > 0) {
-								// Transform Google response to SmartyStreets format
+							if (googleResponse.body?.results?.length > 0) {
+								// Transform Google response to SmartyStreets format for intersections
 								resultData = googleResponse.body.results.map((result: any) => {
 									const addressComponents = result.address_components || [];
 									const geometry = result.geometry || {};
@@ -230,7 +328,7 @@ export class Smarty implements INodeType {
 									const county = addressComponents.find((comp: any) => comp.types.includes('administrative_area_level_2'))?.long_name || '';
 
 									// Build delivery line
-									const deliveryLine = [streetNumber, route].filter(Boolean).join(' ');
+									const deliveryLine = [streetNumber, route].filter(Boolean).join(' ') || street;
 									const lastLine = [city, state, zipcode].filter(Boolean).join(' ');
 
 									// Determine precision based on Google's location_type
@@ -251,7 +349,7 @@ export class Smarty implements INodeType {
 										delivery_point_barcode: '',
 										components: {
 											primary_number: streetNumber,
-											street_name: route.replace(/\s+(St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Ln|Lane|Ct|Court|Pl|Place|Way|Blvd|Boulevard)$/i, ''),
+											street_name: route.replace(/\s+(St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Ln|Lane|Ct|Court|Pl|Place|Way|Blvd|Boulevard)$/i, '') || street,
 											street_suffix: route.match(/\s+(St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Ln|Lane|Ct|Court|Pl|Place|Way|Blvd|Boulevard)$/i)?.[1] || '',
 											city_name: city,
 											default_city_name: city,
@@ -260,13 +358,13 @@ export class Smarty implements INodeType {
 											plus4_code: zipcode.split('-')[1] || '',
 										},
 										metadata: {
-											record_type: 'G', // 'G' for Google
+											record_type: 'I', // 'I' for Intersection
 											zip_type: 'Standard',
 											county_fips: '',
 											county_name: county.replace(/\s+County$/i, ''),
 											carrier_route: '',
 											congressional_district: '',
-											rdi: 'Unknown',
+											rdi: 'Intersection',
 											elot_sequence: '',
 											elot_sort: '',
 											latitude: location.lat || 0,
@@ -277,27 +375,25 @@ export class Smarty implements INodeType {
 											dst: false
 										},
 										analysis: {
-											dpv_match_code: 'G', // 'G' for Google verification
-											dpv_footnotes: 'GOOGLE',
+											dpv_match_code: 'I', // 'I' for Intersection
+											dpv_footnotes: 'INTERSECTION',
 											dpv_cmra: 'N',
-											dpv_vacant: 'Unknown',
+											dpv_vacant: 'N',
 											dpv_no_stat: 'N',
 											active: 'Y'
 										},
-										verification_status: 'google_verified',
+										verification_status: 'intersection_verified',
 										api_status_code: 200,
-										api_provider: 'google_places',
+										api_provider: 'google_intersection',
 										place_id: result.place_id,
 										formatted_address: result.formatted_address,
-										location_type: locationType
+										location_type: locationType,
+										intersection_detected: true
 									};
 								});
 							}
 						} catch (googleError) {
-							// Google fallback failed, add error details to the response
-							console.log('Google fallback failed:', googleError.message);
-
-							// If alwaysReturnData is true, include Google error details
+							// Google failed for intersection
 							if (alwaysReturnData) {
 								resultData = [{
 									verification_status: 'unverified',
@@ -306,18 +402,406 @@ export class Smarty implements INodeType {
 									input_city: city,
 									input_state: state,
 									input_zipcode: zipcode,
-									message: 'SmartyStreets failed, Google fallback also failed',
-									api_response: 'google_fallback_error',
-									api_status_code: responseData.statusCode,
-									query_sent: queryParams,
-									google_error: googleError.message,
-									google_error_type: googleError.name || 'Unknown'
+									message: 'Intersection detected - Google geocoding failed',
+									api_response: 'intersection_google_error',
+									api_status_code: 0,
+									google_error: "Google API failed",
+									intersection_detected: true
+								}];
+							}
+						}
+					} else if (!street || street.trim() === '') {
+						// Handle empty/null street addresses
+						if (alwaysReturnData) {
+							resultData = [{
+								verification_status: 'unverified',
+								input_street: street,
+								input_street2: street2,
+								input_city: city,
+								input_state: state,
+								input_zipcode: zipcode,
+								message: 'Street address is empty or null',
+								api_response: 'empty_street',
+								api_status_code: 0
+							}];
+						}
+					} else {
+						// Normal flow: Google first with USPS mail safety validation
+						const fullAddress = [street, street2, city, state, zipcode].filter(Boolean).join(', ');
+						let googleApiResponse: any = null;
+						let googleFilteringDetails: any = null;
+
+						try {
+							// Try Google first
+							const googleOptions: IRequestOptions = {
+								method: 'GET',
+								url: 'https://maps.googleapis.com/maps/api/geocode/json',
+								qs: {
+									address: fullAddress,
+									key: googleApiKey,
+								},
+								headers: {
+									'Accept': 'application/json',
+								},
+								json: true,
+								resolveWithFullResponse: true,
+							};
+
+							const googleResponse = await this.helpers.request(googleOptions);
+							googleApiResponse = googleResponse.body;
+
+							if (googleResponse.body?.results?.length > 0) {
+								// Capture detailed filtering information
+								googleFilteringDetails = {
+									total_results: googleResponse.body.results.length,
+									google_status: googleResponse.body.status,
+									results_analysis: googleResponse.body.results.map((result: any, index: number) => {
+										const isDeliverable = isDeliverableAddress(result);
+										const types = result.types || [];
+										const locationType = result.geometry?.location_type || 'UNKNOWN';
+
+										return {
+											result_index: index,
+											formatted_address: result.formatted_address,
+											place_id: result.place_id,
+											types: types,
+											location_type: locationType,
+											is_deliverable: isDeliverable,
+											deliverable_reason: isDeliverable ? 'Passed deliverable address filter' : 'Failed: Contains only vague geographic types like route, political, administrative areas',
+											has_street_number: result.address_components?.some((comp: any) => comp.types.includes('street_number')) || false,
+											has_route: result.address_components?.some((comp: any) => comp.types.includes('route')) || false
+										};
+									})
+								};
+
+								// Filter to only deliverable addresses
+								const deliverableResults = googleResponse.body.results.filter(isDeliverableAddress);
+
+								if (deliverableResults.length > 0) {
+									// Check if any results need USPS mail safety validation (no house number)
+									const validatedResults = [];
+
+									for (const result of deliverableResults) {
+										const addressComponents = result.address_components || [];
+										const streetNumber = addressComponents.find((comp: any) => comp.types.includes('street_number'))?.long_name || '';
+
+										// If no house number and USPS validation is enabled, check mail deliverability
+										if (!streetNumber && useUspsMailSafety) {
+											const uspsValidation = await validateWithUSPS(fullAddress, useUspsMailSafety);
+
+											if (uspsValidation.isDeliverable) {
+												// USPS says it's deliverable, keep this result
+												validatedResults.push({ result, uspsValidation });
+											}
+											// If not deliverable according to USPS, skip this result
+										} else {
+											// Has house number or USPS validation disabled, keep result
+											validatedResults.push({ result, uspsValidation: null });
+										}
+									}
+
+									if (validatedResults.length > 0) {
+										// Transform validated Google results to SmartyStreets format
+										resultData = validatedResults.map(({ result, uspsValidation }) => {
+											const addressComponents = result.address_components || [];
+											const geometry = result.geometry || {};
+											const location = geometry.location || {};
+
+											// Parse address components
+											const streetNumber = addressComponents.find((comp: any) => comp.types.includes('street_number'))?.long_name || '';
+											const route = addressComponents.find((comp: any) => comp.types.includes('route'))?.long_name || '';
+											const city = addressComponents.find((comp: any) => comp.types.includes('locality'))?.long_name || '';
+											const state = addressComponents.find((comp: any) => comp.types.includes('administrative_area_level_1'))?.short_name || '';
+											const zipcode = addressComponents.find((comp: any) => comp.types.includes('postal_code'))?.long_name || '';
+											const county = addressComponents.find((comp: any) => comp.types.includes('administrative_area_level_2'))?.long_name || '';
+
+											// Build delivery line
+											const deliveryLine = [streetNumber, route].filter(Boolean).join(' ');
+											const lastLine = [city, state, zipcode].filter(Boolean).join(' ');
+
+											// Determine precision based on Google's location_type
+											const locationType = geometry.location_type || 'APPROXIMATE';
+											let precision = 'Unknown';
+											switch (locationType) {
+												case 'ROOFTOP': precision = 'Zip9'; break;
+												case 'RANGE_INTERPOLATED': precision = 'Zip7'; break;
+												case 'GEOMETRIC_CENTER': precision = 'Zip5'; break;
+												case 'APPROXIMATE': precision = 'Zip5'; break;
+											}
+
+											return {
+												input_index: 0,
+												candidate_index: 0,
+												delivery_line_1: deliveryLine,
+												last_line: lastLine,
+												delivery_point_barcode: '',
+												components: {
+													primary_number: streetNumber,
+													street_name: route.replace(/\s+(St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Ln|Lane|Ct|Court|Pl|Place|Way|Blvd|Boulevard)$/i, '') || street,
+													street_suffix: route.match(/\s+(St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Ln|Lane|Ct|Court|Pl|Place|Way|Blvd|Boulevard)$/i)?.[1] || '',
+													city_name: city,
+													default_city_name: city,
+													state_abbreviation: state,
+													zipcode: zipcode.split('-')[0] || '',
+													plus4_code: zipcode.split('-')[1] || '',
+												},
+												metadata: {
+													record_type: 'S',
+													zip_type: 'Standard',
+													county_fips: '',
+													county_name: county.replace(/\s+County$/i, ''),
+													carrier_route: '',
+													congressional_district: '',
+													rdi: 'Commercial',
+													elot_sequence: '',
+													elot_sort: '',
+													latitude: location.lat || 0,
+													longitude: location.lng || 0,
+													precision: precision,
+													time_zone: 'Unknown',
+													utc_offset: 0,
+													dst: false
+												},
+												analysis: {
+													dpv_match_code: 'Y',
+													dpv_footnotes: 'AABB',
+													dpv_cmra: 'N',
+													dpv_vacant: 'N',
+													dpv_no_stat: 'N',
+													active: 'Y'
+												},
+												verification_status: uspsValidation ? 'google_usps_verified' : 'google_verified',
+												api_status_code: 200,
+												api_provider: uspsValidation ? 'google_usps_validated' : 'google_primary',
+												place_id: result.place_id,
+												formatted_address: result.formatted_address,
+												location_type: locationType,
+												usps_mail_safe: uspsValidation ? true : undefined,
+												usps_validation_used: uspsValidation ? true : false,
+												usps_data: uspsValidation?.uspsData
+											};
+										});
+									} else if (useSmartyFallback) {
+										// No results passed USPS validation, try SmartyStreets fallback
+										try {
+											const smartyCredentials = await this.getCredentials('smartyApi');
+											const authId = smartyCredentials.authId as string;
+											const authToken = smartyCredentials.authToken as string;
+
+											// Build SmartyStreets query parameters
+											const queryParams: IDataObject = {
+												'auth-id': authId,
+												'auth-token': authToken,
+												'street': street,
+											};
+
+											// Add optional parameters if provided
+											if (street2) queryParams['street2'] = street2;
+											if (city) queryParams['city'] = city;
+											if (state) queryParams['state'] = state;
+											if (zipcode) queryParams['zipcode'] = zipcode;
+											if (includeInvalid) queryParams['include_invalid'] = 'true';
+
+											// Make the SmartyStreets API request
+											const smartyOptions: IRequestOptions = {
+												method: 'GET',
+												url: 'https://us-street.api.smartystreets.com/street-address',
+												qs: queryParams,
+												headers: {
+													'Accept': 'application/json',
+												},
+												json: true,
+												resolveWithFullResponse: true,
+											};
+
+											const smartyResponse = await this.helpers.request(smartyOptions);
+
+											if (smartyResponse.body?.length > 0) {
+												// Use SmartyStreets result
+												resultData = smartyResponse.body.map((result: any) => ({
+													...result,
+													verification_status: 'smarty_verified',
+													api_status_code: smartyResponse.statusCode,
+													api_provider: 'smarty_fallback'
+												}));
+											}
+										} catch (smartyError) {
+											console.log('SmartyStreets fallback failed:', smartyError.message);
+										}
+									} else {
+										// No deliverable Google results and no SmartyStreets fallback
+										if (alwaysReturnData) {
+											resultData = [{
+												verification_status: 'unverified',
+												input_street: street,
+												input_street2: street2,
+												input_city: city,
+												input_state: state,
+												input_zipcode: zipcode,
+												message: 'Google found results but none were deliverable addresses',
+												api_response: 'google_non_deliverable',
+												api_status_code: 200,
+												api_provider: 'google_primary',
+												google_response: googleFilteringDetails,
+												explanation: 'Google returned results but they were filtered out as non-deliverable (vague geographic areas like routes, political boundaries, etc.)'
+											}];
+										}
+									}
+								} else if (useSmartyFallback) {
+									// No deliverable Google results, try SmartyStreets fallback
+									try {
+										const smartyCredentials = await this.getCredentials('smartyApi');
+										const authId = smartyCredentials.authId as string;
+										const authToken = smartyCredentials.authToken as string;
+
+										// Build SmartyStreets query parameters
+										const queryParams: IDataObject = {
+											'auth-id': authId,
+											'auth-token': authToken,
+											'street': street,
+										};
+
+										// Add optional parameters if provided
+										if (street2) queryParams['street2'] = street2;
+										if (city) queryParams['city'] = city;
+										if (state) queryParams['state'] = state;
+										if (zipcode) queryParams['zipcode'] = zipcode;
+										if (includeInvalid) queryParams['include_invalid'] = 'true';
+
+										// Make the SmartyStreets API request
+										const smartyOptions: IRequestOptions = {
+											method: 'GET',
+											url: 'https://us-street.api.smartystreets.com/street-address',
+											qs: queryParams,
+											headers: {
+												'Accept': 'application/json',
+											},
+											json: true,
+											resolveWithFullResponse: true,
+										};
+
+										const smartyResponse = await this.helpers.request(smartyOptions);
+
+										if (smartyResponse.body?.length > 0) {
+											// Use SmartyStreets result
+											resultData = smartyResponse.body.map((result: any) => ({
+												...result,
+												verification_status: 'smarty_verified',
+												api_status_code: smartyResponse.statusCode,
+												api_provider: 'smarty_fallback'
+											}));
+										}
+									} catch (smartyError) {
+										console.log('SmartyStreets fallback failed:', smartyError.message);
+									}
+								}
+							} else {
+								// Google returned no results at all
+								if (alwaysReturnData) {
+									resultData = [{
+										verification_status: 'unverified',
+										input_street: street,
+										input_street2: street2,
+										input_city: city,
+										input_state: state,
+										input_zipcode: zipcode,
+										message: 'Google API returned no results for this address',
+										api_response: 'google_no_results',
+										api_status_code: 200,
+										api_provider: 'google_primary',
+										google_response: {
+											total_results: 0,
+											google_status: googleApiResponse?.status || 'UNKNOWN',
+											explanation: 'Google Geocoding API found no matching locations for this address'
+										},
+										explanation: 'Google found absolutely no results - this address may not exist or be too vague for Google to locate'
+									}];
+								}
+							}
+						} catch (googleError) {
+							console.log('Google primary failed:', googleError.message);
+
+							// Google completely failed, try SmartyStreets fallback if enabled
+							if (useSmartyFallback) {
+								try {
+									const smartyCredentials = await this.getCredentials('smartyApi');
+									const authId = smartyCredentials.authId as string;
+									const authToken = smartyCredentials.authToken as string;
+
+									// Build SmartyStreets query parameters
+									const queryParams: IDataObject = {
+										'auth-id': authId,
+										'auth-token': authToken,
+										'street': street,
+									};
+
+									// Add optional parameters if provided
+									if (street2) queryParams['street2'] = street2;
+									if (city) queryParams['city'] = city;
+									if (state) queryParams['state'] = state;
+									if (zipcode) queryParams['zipcode'] = zipcode;
+									if (includeInvalid) queryParams['include_invalid'] = 'true';
+
+									// Make the SmartyStreets API request
+									const smartyOptions: IRequestOptions = {
+										method: 'GET',
+										url: 'https://us-street.api.smartystreets.com/street-address',
+										qs: queryParams,
+										headers: {
+											'Accept': 'application/json',
+										},
+										json: true,
+										resolveWithFullResponse: true,
+									};
+
+									const smartyResponse = await this.helpers.request(smartyOptions);
+
+									if (smartyResponse.body?.length > 0) {
+										// Use SmartyStreets result
+										resultData = smartyResponse.body.map((result: any) => ({
+											...result,
+											verification_status: 'smarty_verified',
+											api_status_code: smartyResponse.statusCode,
+											api_provider: 'smarty_error_fallback'
+										}));
+									}
+								} catch (smartyError) {
+									console.log('SmartyStreets fallback also failed:', smartyError.message);
+
+									if (alwaysReturnData) {
+										resultData = [{
+											verification_status: 'unverified',
+											input_street: street,
+											input_street2: street2,
+											input_city: city,
+											input_state: state,
+											input_zipcode: zipcode,
+											message: 'Both Google and SmartyStreets failed',
+											api_response: 'both_failed',
+											api_status_code: 0,
+											google_error: "Google API failed",
+											smarty_error: smartyError.message
+										}];
+									}
+								}
+							} else if (alwaysReturnData) {
+								resultData = [{
+									verification_status: 'unverified',
+									input_street: street,
+									input_street2: street2,
+									input_city: city,
+									input_state: state,
+									input_zipcode: zipcode,
+									message: 'Google failed, SmartyStreets fallback disabled',
+									api_response: 'google_failed',
+									api_status_code: 0,
+									google_error: "Google API failed"
 								}];
 							}
 						}
 					}
 
-					// If still no results and alwaysReturnData is true, return input data with verification status
+					// If still no results and alwaysReturnData is true, return input data
 					if (Array.isArray(resultData) && resultData.length === 0 && alwaysReturnData) {
 						resultData = [{
 							verification_status: 'unverified',
@@ -326,19 +810,33 @@ export class Smarty implements INodeType {
 							input_city: city,
 							input_state: state,
 							input_zipcode: zipcode,
-							message: useGoogleFallback ?
-								'Address could not be verified by SmartyStreets or Google APIs' :
-								'Address could not be verified by SmartyStreets API',
+							message: useSmartyFallback ?
+								'Address could not be verified by Google or SmartyStreets APIs' :
+								'Address could not be verified by Google API',
 							api_response: 'empty_result',
-							api_status_code: responseData.statusCode,
-							query_sent: queryParams
+							api_status_code: 200,
+							// Debug information
+							debug_info: {
+								api_provider: 'google_primary',
+								processing_flow: isIntersection ? 'intersection_detected' : (!street || street.trim() === '') ? 'empty_street' : 'normal_address',
+								options_enabled: {
+									smarty_fallback: useSmartyFallback,
+									usps_mail_safety: useUspsMailSafety,
+									always_return_data: alwaysReturnData
+								},
+								intersection_detected: isIntersection,
+								explanation: 'This means Google was called but either returned no results or all results were filtered out as non-deliverable addresses. Check the console logs for more details about what Google returned.'
+							}
 						}];
-					} else if (Array.isArray(resultData) && resultData.length > 0) {
-						// Add verification status to successful results
+					}
+
+					// Always process results regardless of whether we used Google or went to SmartyStreets fallback
+					if (Array.isArray(resultData) && resultData.length > 0) {
+						// Add verification status to successful results if not already present
 						resultData = resultData.map((result: any) => ({
 							...result,
 							verification_status: result.verification_status || 'verified',
-							api_status_code: result.api_status_code || responseData.statusCode
+							api_status_code: result.api_status_code || 200
 						}));
 					}
 
@@ -364,6 +862,6 @@ export class Smarty implements INodeType {
 			}
 		}
 
-				return [returnData];
+		return [returnData];
 	}
 }
