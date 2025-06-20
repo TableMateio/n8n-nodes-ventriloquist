@@ -182,7 +182,7 @@ export async function execute(
 				});
 			}
 
-			// Validate linked record fields before attempting upsert
+						// Validate linked record fields before attempting upsert
 			for (const record of records) {
 				const validationResult = await validateLinkedRecordFields.call(
 					this,
@@ -199,6 +199,31 @@ export async function execute(
 					const detailedError = new Error(errorMessage);
 					(detailedError as any).description = 'One or more linked record fields contain record IDs that belong to the wrong table. Please check that the record IDs you are trying to link match the table that the field is configured to link to.';
 					throw detailedError;
+				}
+			}
+
+			// Validate matching columns for standard strategy
+			if (matchingStrategy === 'standard' && !columnsToMatchOn.includes('id') && columnsToMatchOn.length > 0) {
+				for (const record of records) {
+					const missingColumns: string[] = [];
+
+					for (const column of columnsToMatchOn) {
+						const value = record.fields[column];
+						if (value === null || value === undefined || value === '') {
+							missingColumns.push(column);
+						}
+					}
+
+					if (missingColumns.length > 0) {
+						const errorMessage = `Record for item ${i} is missing values for required matching columns: [${missingColumns.join(', ')}]. ` +
+							`When using Standard matching strategy, ALL matching columns must have non-empty values. ` +
+							`Consider using Flexible matching strategy if you want to handle records with missing matching field values.`;
+						console.error('🚨 MATCHING_COLUMNS_VALIDATION_ERROR:', errorMessage);
+
+						const detailedError = new Error(errorMessage);
+						(detailedError as any).description = 'Standard matching strategy requires all matching columns to have values. Switch to Flexible matching strategy or ensure all matching fields have values in your input data.';
+						throw detailedError;
+					}
 				}
 			}
 
