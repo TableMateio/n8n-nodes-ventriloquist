@@ -122,6 +122,13 @@ export class Smarty implements INodeType {
 						description: 'Validate addresses without house numbers using FREE USPS API for mail deliverability. Ensures addresses can actually receive mail. No monthly fees!',
 					},
 					{
+						displayName: 'Attempt Abbreviation Expansion',
+						name: 'attemptAbbreviationExpansion',
+						type: 'boolean',
+						default: true,
+						description: 'Automatically expand common street abbreviations (CR→County Road, SH→State Highway) when Google finds no results. Only expands addresses with house numbers for safety.',
+					},
+					{
 						displayName: 'Use SmartyStreets Fallback',
 						name: 'useSmartyFallback',
 						type: 'boolean',
@@ -265,10 +272,47 @@ export class Smarty implements INodeType {
 			const hasRoute = result.address_components?.some((comp: any) => comp.types.includes('route'));
 
 			// For rural addresses without street numbers, if it's precise it might still be deliverable
-			return isPrecise && hasRoute;
-		};
+					return isPrecise && hasRoute;
+	};
 
-		for (let i = 0; i < items.length; i++) {
+	// Helper function to expand common street abbreviations (NY-focused)
+	const expandStreetAbbreviations = (streetName: string): {expanded: string, wasExpanded: boolean, expansions: string[]} => {
+		if (!streetName || streetName.trim() === '') {
+			return { expanded: streetName, wasExpanded: false, expansions: [] };
+		}
+
+		const expansions: string[] = [];
+		let expanded = streetName;
+
+		// Common NY abbreviations (case-insensitive)
+		const abbreviationMap = [
+			{ pattern: /\bCR\s+(\d+[A-Z]?)\b/gi, replacement: 'County Road $1', description: 'CR → County Road' },
+			{ pattern: /\bCr\s+(\d+[A-Z]?)\b/g, replacement: 'County Road $1', description: 'Cr → County Road' },
+			{ pattern: /\bSH\s+(\d+[A-Z]?)\b/gi, replacement: 'State Highway $1', description: 'SH → State Highway' },
+			{ pattern: /\bSh\s+(\d+[A-Z]?)\b/g, replacement: 'State Highway $1', description: 'Sh → State Highway' },
+			{ pattern: /\bNYS\s+Rte\.?\s+(\d+[A-Z]?)\b/gi, replacement: 'New York State Route $1', description: 'NYS Rte → New York State Route' },
+			{ pattern: /\bNYS\s+Route\s+(\d+[A-Z]?)\b/gi, replacement: 'New York State Route $1', description: 'NYS Route → New York State Route' },
+			{ pattern: /\bRte\.?\s+(\d+[A-Z]?)\b/gi, replacement: 'Route $1', description: 'Rte → Route' },
+		];
+
+		for (const abbrev of abbreviationMap) {
+			if (abbrev.pattern.test(expanded)) {
+				const beforeExpansion = expanded;
+				expanded = expanded.replace(abbrev.pattern, abbrev.replacement);
+				if (beforeExpansion !== expanded) {
+					expansions.push(abbrev.description);
+				}
+			}
+		}
+
+		return {
+			expanded: expanded.trim(),
+			wasExpanded: expansions.length > 0,
+			expansions
+		};
+	};
+
+	for (let i = 0; i < items.length; i++) {
 			try {
 				const operation = this.getNodeParameter('operation', i) as string;
 
@@ -283,6 +327,7 @@ export class Smarty implements INodeType {
 					const options = this.getNodeParameter('options', i, {}) as IDataObject;
 					const includeInvalid = options.includeInvalid as boolean || false;
 					const useUspsMailSafety = options.useUspsMailSafety as boolean || true;
+					const attemptAbbreviationExpansion = options.attemptAbbreviationExpansion as boolean ?? true;
 					const useSmartyFallback = options.useSmartyFallback as boolean || false;
 					const alwaysReturnData = options.alwaysReturnData as boolean || true;
 
@@ -431,8 +476,12 @@ export class Smarty implements INodeType {
 						let googleApiResponse: any = null;
 						let googleFilteringDetails: any = null;
 
+						console.log(`🔍 SMARTY DEBUG: Starting address verification for: "${fullAddress}"`);
+						console.log(`🔍 SMARTY DEBUG: Options - abbreviation expansion: ${attemptAbbreviationExpansion}, USPS: ${useUspsMailSafety}, Smarty fallback: ${useSmartyFallback}`);
+
 						try {
 							// Try Google first
+							console.log(`🔍 SMARTY DEBUG: Making Google API call...`);
 							const googleOptions: IRequestOptions = {
 								method: 'GET',
 								url: 'https://maps.googleapis.com/maps/api/geocode/json',
@@ -449,6 +498,8 @@ export class Smarty implements INodeType {
 
 							const googleResponse = await this.helpers.request(googleOptions);
 							googleApiResponse = googleResponse.body;
+
+							console.log(`🔍 SMARTY DEBUG: Google API response - status: ${googleResponse.body?.status}, results count: ${googleResponse.body?.results?.length || 0}`);
 
 							if (googleResponse.body?.results?.length > 0) {
 								// Capture detailed filtering information
@@ -476,6 +527,14 @@ export class Smarty implements INodeType {
 
 								// Filter to only deliverable addresses
 								const deliverableResults = googleResponse.body.results.filter(isDeliverableAddress);
+
+								console.log(`🔍 SMARTY DEBUG: Google returned ${googleResponse.body.results.length} results, ${deliverableResults.length} are deliverable`);
+								googleResponse.body.results.forEach((result: any, index: number) => {
+									const isDeliverable = isDeliverableAddress(result);
+									const types = result.types || [];
+									const locationType = result.geometry?.location_type || 'UNKNOWN';
+									console.log(`🔍 SMARTY DEBUG: Result ${index}: "${result.formatted_address}" - Types: [${types.join(', ')}] - Location: ${locationType} - Deliverable: ${isDeliverable}`);
+								});
 
 								if (deliverableResults.length > 0) {
 									// Check if any results need USPS mail safety validation (no house number)
@@ -647,32 +706,311 @@ export class Smarty implements INodeType {
 											}];
 										}
 									}
-								} else if (useSmartyFallback) {
-									// No deliverable Google results, try SmartyStreets fallback
+								} else {
+									// No deliverable Google results - try abbreviation expansion if enabled
+									console.log('🔍 SMARTY DEBUG: Google found results but none were deliverable - checking abbreviation expansion');
+
+									const hasHouseNumber = /^\d+/.test(street.trim());
+									const abbreviationAnalysis = expandStreetAbbreviations(street);
+
+									if (attemptAbbreviationExpansion && hasHouseNumber && abbreviationAnalysis.wasExpanded) {
+										console.log('🔍 SMARTY DEBUG: Attempting abbreviation expansion for non-deliverable results:', {
+											original: street,
+											expanded: abbreviationAnalysis.expanded,
+											expansions: abbreviationAnalysis.expansions
+										});
+
+										try {
+											const expandedAddress = [abbreviationAnalysis.expanded, street2, city, state, zipcode].filter(Boolean).join(', ');
+
+											const expandedGoogleOptions: IRequestOptions = {
+												method: 'GET',
+												url: 'https://maps.googleapis.com/maps/api/geocode/json',
+												qs: {
+													address: expandedAddress,
+													key: googleApiKey,
+												},
+												headers: {
+													'Accept': 'application/json',
+												},
+												json: true,
+												resolveWithFullResponse: true,
+											};
+
+											const expandedGoogleResponse = await this.helpers.request(expandedGoogleOptions);
+											console.log(`🔍 SMARTY DEBUG: Abbreviation expansion API response - status: ${expandedGoogleResponse.body?.status}, results count: ${expandedGoogleResponse.body?.results?.length || 0}`);
+
+											if (expandedGoogleResponse.body?.results?.length > 0) {
+												const expandedDeliverableResults = expandedGoogleResponse.body.results.filter(isDeliverableAddress);
+												console.log(`🔍 SMARTY DEBUG: Abbreviation expansion - ${expandedGoogleResponse.body.results.length} results, ${expandedDeliverableResults.length} deliverable`);
+
+												if (expandedDeliverableResults.length > 0) {
+													console.log('🔍 SMARTY DEBUG: Abbreviation expansion successful!');
+
+													// Transform results and mark as abbreviation-expanded
+													resultData = expandedDeliverableResults.map((result: any) => {
+														const addressComponents = result.address_components || [];
+														const geometry = result.geometry || {};
+														const location = geometry.location || {};
+
+														// Parse address components
+														const streetNumber = addressComponents.find((comp: any) => comp.types.includes('street_number'))?.long_name || '';
+														const route = addressComponents.find((comp: any) => comp.types.includes('route'))?.long_name || '';
+														const city = addressComponents.find((comp: any) => comp.types.includes('locality'))?.long_name || '';
+														const state = addressComponents.find((comp: any) => comp.types.includes('administrative_area_level_1'))?.short_name || '';
+														const zipcode = addressComponents.find((comp: any) => comp.types.includes('postal_code'))?.long_name || '';
+														const county = addressComponents.find((comp: any) => comp.types.includes('administrative_area_level_2'))?.long_name || '';
+
+														// Build delivery line
+														const deliveryLine = [streetNumber, route].filter(Boolean).join(' ');
+														const lastLine = [city, state, zipcode].filter(Boolean).join(' ');
+
+														// Determine precision based on Google's location_type
+														const locationType = geometry.location_type || 'APPROXIMATE';
+														let precision = 'Unknown';
+														switch (locationType) {
+															case 'ROOFTOP': precision = 'Zip9'; break;
+															case 'RANGE_INTERPOLATED': precision = 'Zip7'; break;
+															case 'GEOMETRIC_CENTER': precision = 'Zip5'; break;
+															case 'APPROXIMATE': precision = 'Zip5'; break;
+														}
+
+														return {
+															input_index: 0,
+															candidate_index: 0,
+															delivery_line_1: deliveryLine,
+															last_line: lastLine,
+															delivery_point_barcode: '',
+															components: {
+																primary_number: streetNumber,
+																street_name: route.replace(/\s+(St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Ln|Lane|Ct|Court|Pl|Place|Way|Blvd|Boulevard)$/i, '') || abbreviationAnalysis.expanded,
+																street_suffix: route.match(/\s+(St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Ln|Lane|Ct|Court|Pl|Place|Way|Blvd|Boulevard)$/i)?.[1] || '',
+																city_name: city,
+																default_city_name: city,
+																state_abbreviation: state,
+																zipcode: zipcode.split('-')[0] || '',
+																plus4_code: zipcode.split('-')[1] || '',
+															},
+															metadata: {
+																record_type: 'A', // 'A' for Abbreviation-expanded
+																zip_type: 'Standard',
+																county_fips: '',
+																county_name: county.replace(/\s+County$/i, ''),
+																carrier_route: '',
+																congressional_district: '',
+																rdi: 'Commercial',
+																elot_sequence: '',
+																elot_sort: '',
+																latitude: location.lat || 0,
+																longitude: location.lng || 0,
+																precision: precision,
+																time_zone: 'Unknown',
+																utc_offset: 0,
+																dst: false
+															},
+															analysis: {
+																dpv_match_code: 'A', // 'A' for Abbreviation-expanded
+																dpv_footnotes: 'ABBREV',
+																dpv_cmra: 'N',
+																dpv_vacant: 'N',
+																dpv_no_stat: 'N',
+																active: 'Y'
+															},
+															verification_status: 'abbreviation_expanded',
+															api_status_code: 200,
+															api_provider: 'google_abbreviation_expanded',
+															place_id: result.place_id,
+															formatted_address: result.formatted_address,
+															location_type: locationType,
+															abbreviation_expansion: {
+																original_street: street,
+																expanded_street: abbreviationAnalysis.expanded,
+																expansions_applied: abbreviationAnalysis.expansions,
+																expansion_successful: true,
+																triggered_by: 'non_deliverable_results'
+															},
+															original_google_results: {
+																count: googleResponse.body.results.length,
+																non_deliverable_results: googleResponse.body.results.map((r: any) => ({
+																	formatted_address: r.formatted_address,
+																	types: r.types,
+																	reason_filtered: 'Non-deliverable address type'
+																}))
+															}
+														};
+													});
+												} else {
+													console.log('🔍 SMARTY DEBUG: Abbreviation expansion found results but none deliverable - trying SmartyStreets fallback');
+													// Try SmartyStreets fallback if enabled
+													if (useSmartyFallback) {
+														// SmartyStreets fallback logic will be in the next section
+													} else {
+														if (alwaysReturnData) {
+															resultData = [{
+																verification_status: 'unverified',
+																input_street: street,
+																input_street2: street2,
+																input_city: city,
+																input_state: state,
+																input_zipcode: zipcode,
+																message: 'Abbreviation expansion found results but none were deliverable',
+																api_response: 'abbreviation_expansion_non_deliverable',
+																api_status_code: 200,
+																api_provider: 'google_abbreviation_attempted',
+																abbreviation_expansion: {
+																	original_street: street,
+																	expanded_street: abbreviationAnalysis.expanded,
+																	expansions_applied: abbreviationAnalysis.expansions,
+																	expansion_successful: false,
+																	failure_reason: 'Results found but filtered as non-deliverable',
+																	triggered_by: 'non_deliverable_results'
+																},
+																google_response: googleFilteringDetails
+															}];
+														}
+													}
+												}
+											} else {
+												console.log('🔍 SMARTY DEBUG: Abbreviation expansion returned no results - trying SmartyStreets fallback');
+												// Try SmartyStreets fallback if enabled
+												if (useSmartyFallback) {
+													// SmartyStreets fallback logic will be in the next section
+												} else {
+													if (alwaysReturnData) {
+														resultData = [{
+															verification_status: 'unverified',
+															input_street: street,
+															input_street2: street2,
+															input_city: city,
+															input_state: state,
+															input_zipcode: zipcode,
+															message: 'Abbreviation expansion found no results',
+															api_response: 'abbreviation_expansion_failed',
+															api_status_code: 200,
+															api_provider: 'google_abbreviation_attempted',
+															abbreviation_expansion: {
+																original_street: street,
+																expanded_street: abbreviationAnalysis.expanded,
+																expansions_applied: abbreviationAnalysis.expansions,
+																expansion_successful: false,
+																failure_reason: 'No results found even with expanded abbreviations',
+																triggered_by: 'non_deliverable_results'
+															},
+															google_response: googleFilteringDetails
+														}];
+													}
+												}
+											}
+										} catch (expandedGoogleError) {
+											console.log('🔍 SMARTY DEBUG: Abbreviation expansion API call failed:', expandedGoogleError.message);
+											// Try SmartyStreets fallback if enabled
+											if (useSmartyFallback) {
+												// SmartyStreets fallback logic will be in the next section
+											} else {
+												if (alwaysReturnData) {
+													resultData = [{
+														verification_status: 'unverified',
+														input_street: street,
+														input_street2: street2,
+														input_city: city,
+														input_state: state,
+														input_zipcode: zipcode,
+														message: 'Abbreviation expansion attempt failed',
+														api_response: 'abbreviation_expansion_error',
+														api_status_code: 0,
+														api_provider: 'google_abbreviation_attempted',
+														abbreviation_expansion: {
+															original_street: street,
+															expanded_street: abbreviationAnalysis.expanded,
+															expansions_applied: abbreviationAnalysis.expansions,
+															expansion_successful: false,
+															failure_reason: `Google API error: ${expandedGoogleError.message}`,
+															triggered_by: 'non_deliverable_results'
+														},
+														google_response: googleFilteringDetails
+													}];
+												}
+											}
+										}
+									} else {
+										console.log(`🔍 SMARTY DEBUG: Abbreviation expansion not attempted - hasHouseNumber: ${hasHouseNumber}, abbreviationsDetected: ${abbreviationAnalysis.wasExpanded}, expansionEnabled: ${attemptAbbreviationExpansion}`);
+									}
+
+									// If we haven't set resultData yet and SmartyStreets fallback is enabled, try it
+									if (!resultData.length && useSmartyFallback) {
+										try {
+											const smartyCredentials = await this.getCredentials('smartyApi');
+											const authId = smartyCredentials.authId as string;
+											const authToken = smartyCredentials.authToken as string;
+
+											// Build SmartyStreets query parameters
+											const queryParams: IDataObject = {
+												'auth-id': authId,
+												'auth-token': authToken,
+												'street': street,
+											};
+
+											// Add optional parameters if provided
+											if (street2) queryParams['street2'] = street2;
+											if (city) queryParams['city'] = city;
+											if (state) queryParams['state'] = state;
+											if (zipcode) queryParams['zipcode'] = zipcode;
+											if (includeInvalid) queryParams['include_invalid'] = 'true';
+
+											// Make the SmartyStreets API request
+											const smartyOptions: IRequestOptions = {
+												method: 'GET',
+												url: 'https://us-street.api.smartystreets.com/street-address',
+												qs: queryParams,
+												headers: {
+													'Accept': 'application/json',
+												},
+												json: true,
+												resolveWithFullResponse: true,
+											};
+
+											const smartyResponse = await this.helpers.request(smartyOptions);
+
+											if (smartyResponse.body?.length > 0) {
+												// Use SmartyStreets result
+												resultData = smartyResponse.body.map((result: any) => ({
+													...result,
+													verification_status: 'smarty_verified',
+													api_status_code: smartyResponse.statusCode,
+													api_provider: 'smarty_fallback'
+												}));
+											}
+										} catch (smartyError) {
+											console.log('SmartyStreets fallback failed:', smartyError.message);
+										}
+									}
+								}
+							} else {
+								// Google returned no results at all - try abbreviation expansion if safe
+								console.log('Google returned no results for address:', fullAddress);
+
+								// Check if we can safely try abbreviation expansion
+								const hasHouseNumber = /^\d+/.test(street.trim()); // Address starts with a number
+								const abbreviationAnalysis = expandStreetAbbreviations(street);
+
+								if (attemptAbbreviationExpansion && hasHouseNumber && abbreviationAnalysis.wasExpanded) {
+									console.log('Trying abbreviation expansion:', {
+										original: street,
+										expanded: abbreviationAnalysis.expanded,
+										expansions: abbreviationAnalysis.expansions
+									});
+
+									// Try Google again with expanded street name
 									try {
-										const smartyCredentials = await this.getCredentials('smartyApi');
-										const authId = smartyCredentials.authId as string;
-										const authToken = smartyCredentials.authToken as string;
+										const expandedAddress = [abbreviationAnalysis.expanded, street2, city, state, zipcode].filter(Boolean).join(', ');
 
-										// Build SmartyStreets query parameters
-										const queryParams: IDataObject = {
-											'auth-id': authId,
-											'auth-token': authToken,
-											'street': street,
-										};
-
-										// Add optional parameters if provided
-										if (street2) queryParams['street2'] = street2;
-										if (city) queryParams['city'] = city;
-										if (state) queryParams['state'] = state;
-										if (zipcode) queryParams['zipcode'] = zipcode;
-										if (includeInvalid) queryParams['include_invalid'] = 'true';
-
-										// Make the SmartyStreets API request
-										const smartyOptions: IRequestOptions = {
+										const expandedGoogleOptions: IRequestOptions = {
 											method: 'GET',
-											url: 'https://us-street.api.smartystreets.com/street-address',
-											qs: queryParams,
+											url: 'https://maps.googleapis.com/maps/api/geocode/json',
+											qs: {
+												address: expandedAddress,
+												key: googleApiKey,
+											},
 											headers: {
 												'Accept': 'application/json',
 											},
@@ -680,42 +1018,202 @@ export class Smarty implements INodeType {
 											resolveWithFullResponse: true,
 										};
 
-										const smartyResponse = await this.helpers.request(smartyOptions);
+										const expandedGoogleResponse = await this.helpers.request(expandedGoogleOptions);
 
-										if (smartyResponse.body?.length > 0) {
-											// Use SmartyStreets result
-											resultData = smartyResponse.body.map((result: any) => ({
-												...result,
-												verification_status: 'smarty_verified',
-												api_status_code: smartyResponse.statusCode,
-												api_provider: 'smarty_fallback'
-											}));
+										if (expandedGoogleResponse.body?.results?.length > 0) {
+											// Filter to only deliverable addresses
+											const expandedDeliverableResults = expandedGoogleResponse.body.results.filter(isDeliverableAddress);
+
+											if (expandedDeliverableResults.length > 0) {
+												// Success with abbreviation expansion!
+												console.log('Abbreviation expansion successful!');
+
+												// Transform results and mark as abbreviation-expanded
+												resultData = expandedDeliverableResults.map((result: any) => {
+													const addressComponents = result.address_components || [];
+													const geometry = result.geometry || {};
+													const location = geometry.location || {};
+
+													// Parse address components
+													const streetNumber = addressComponents.find((comp: any) => comp.types.includes('street_number'))?.long_name || '';
+													const route = addressComponents.find((comp: any) => comp.types.includes('route'))?.long_name || '';
+													const city = addressComponents.find((comp: any) => comp.types.includes('locality'))?.long_name || '';
+													const state = addressComponents.find((comp: any) => comp.types.includes('administrative_area_level_1'))?.short_name || '';
+													const zipcode = addressComponents.find((comp: any) => comp.types.includes('postal_code'))?.long_name || '';
+													const county = addressComponents.find((comp: any) => comp.types.includes('administrative_area_level_2'))?.long_name || '';
+
+													// Build delivery line
+													const deliveryLine = [streetNumber, route].filter(Boolean).join(' ');
+													const lastLine = [city, state, zipcode].filter(Boolean).join(' ');
+
+													// Determine precision based on Google's location_type
+													const locationType = geometry.location_type || 'APPROXIMATE';
+													let precision = 'Unknown';
+													switch (locationType) {
+														case 'ROOFTOP': precision = 'Zip9'; break;
+														case 'RANGE_INTERPOLATED': precision = 'Zip7'; break;
+														case 'GEOMETRIC_CENTER': precision = 'Zip5'; break;
+														case 'APPROXIMATE': precision = 'Zip5'; break;
+													}
+
+													return {
+														input_index: 0,
+														candidate_index: 0,
+														delivery_line_1: deliveryLine,
+														last_line: lastLine,
+														delivery_point_barcode: '',
+														components: {
+															primary_number: streetNumber,
+															street_name: route.replace(/\s+(St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Ln|Lane|Ct|Court|Pl|Place|Way|Blvd|Boulevard)$/i, '') || abbreviationAnalysis.expanded,
+															street_suffix: route.match(/\s+(St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Ln|Lane|Ct|Court|Pl|Place|Way|Blvd|Boulevard)$/i)?.[1] || '',
+															city_name: city,
+															default_city_name: city,
+															state_abbreviation: state,
+															zipcode: zipcode.split('-')[0] || '',
+															plus4_code: zipcode.split('-')[1] || '',
+														},
+														metadata: {
+															record_type: 'A', // 'A' for Abbreviation-expanded
+															zip_type: 'Standard',
+															county_fips: '',
+															county_name: county.replace(/\s+County$/i, ''),
+															carrier_route: '',
+															congressional_district: '',
+															rdi: 'Commercial',
+															elot_sequence: '',
+															elot_sort: '',
+															latitude: location.lat || 0,
+															longitude: location.lng || 0,
+															precision: precision,
+															time_zone: 'Unknown',
+															utc_offset: 0,
+															dst: false
+														},
+														analysis: {
+															dpv_match_code: 'A', // 'A' for Abbreviation-expanded
+															dpv_footnotes: 'ABBREV',
+															dpv_cmra: 'N',
+															dpv_vacant: 'N',
+															dpv_no_stat: 'N',
+															active: 'Y'
+														},
+														verification_status: 'abbreviation_expanded',
+														api_status_code: 200,
+														api_provider: 'google_abbreviation_expanded',
+														place_id: result.place_id,
+														formatted_address: result.formatted_address,
+														location_type: locationType,
+														abbreviation_expansion: {
+															original_street: street,
+															expanded_street: abbreviationAnalysis.expanded,
+															expansions_applied: abbreviationAnalysis.expansions,
+															expansion_successful: true
+														}
+													};
+												});
+											} else {
+												// Abbreviation expansion found results but none deliverable
+												if (alwaysReturnData) {
+													resultData = [{
+														verification_status: 'unverified',
+														input_street: street,
+														input_street2: street2,
+														input_city: city,
+														input_state: state,
+														input_zipcode: zipcode,
+														message: 'Abbreviation expansion found results but none were deliverable',
+														api_response: 'abbreviation_expansion_non_deliverable',
+														api_status_code: 200,
+														api_provider: 'google_abbreviation_attempted',
+														abbreviation_expansion: {
+															original_street: street,
+															expanded_street: abbreviationAnalysis.expanded,
+															expansions_applied: abbreviationAnalysis.expansions,
+															expansion_successful: false,
+															failure_reason: 'Results found but filtered as non-deliverable'
+														}
+													}];
+												}
+											}
+										} else {
+											// Abbreviation expansion also returned no results
+											if (alwaysReturnData) {
+												resultData = [{
+													verification_status: 'unverified',
+													input_street: street,
+													input_street2: street2,
+													input_city: city,
+													input_state: state,
+													input_zipcode: zipcode,
+													message: 'Google found no results even after abbreviation expansion',
+													api_response: 'abbreviation_expansion_failed',
+													api_status_code: 200,
+													api_provider: 'google_abbreviation_attempted',
+													abbreviation_expansion: {
+														original_street: street,
+														expanded_street: abbreviationAnalysis.expanded,
+														expansions_applied: abbreviationAnalysis.expansions,
+														expansion_successful: false,
+														failure_reason: 'No results found even with expanded abbreviations'
+													}
+												}];
+											}
 										}
-									} catch (smartyError) {
-										console.log('SmartyStreets fallback failed:', smartyError.message);
+									} catch (expandedGoogleError) {
+										console.log('Abbreviation expansion Google call failed:', expandedGoogleError.message);
+										if (alwaysReturnData) {
+											resultData = [{
+												verification_status: 'unverified',
+												input_street: street,
+												input_street2: street2,
+												input_city: city,
+												input_state: state,
+												input_zipcode: zipcode,
+												message: 'Abbreviation expansion attempt failed',
+												api_response: 'abbreviation_expansion_error',
+												api_status_code: 0,
+												api_provider: 'google_abbreviation_attempted',
+												abbreviation_expansion: {
+													original_street: street,
+													expanded_street: abbreviationAnalysis.expanded,
+													expansions_applied: abbreviationAnalysis.expansions,
+													expansion_successful: false,
+													failure_reason: `Google API error: ${expandedGoogleError.message}`
+												}
+											}];
+										}
 									}
-								}
-							} else {
-								// Google returned no results at all
-								if (alwaysReturnData) {
-									resultData = [{
-										verification_status: 'unverified',
-										input_street: street,
-										input_street2: street2,
-										input_city: city,
-										input_state: state,
-										input_zipcode: zipcode,
-										message: 'Google API returned no results for this address',
-										api_response: 'google_no_results',
-										api_status_code: 200,
-										api_provider: 'google_primary',
-										google_response: {
-											total_results: 0,
-											google_status: googleApiResponse?.status || 'UNKNOWN',
-											explanation: 'Google Geocoding API found no matching locations for this address'
-										},
-										explanation: 'Google found absolutely no results - this address may not exist or be too vague for Google to locate'
-									}];
+								} else {
+									// No house number or no abbreviations to expand - original no results response
+									if (alwaysReturnData) {
+										resultData = [{
+											verification_status: 'unverified',
+											input_street: street,
+											input_street2: street2,
+											input_city: city,
+											input_state: state,
+											input_zipcode: zipcode,
+											message: hasHouseNumber ?
+												'Google API returned no results (no abbreviations detected to expand)' :
+												'Google API returned no results (no house number - abbreviation expansion not safe)',
+											api_response: 'google_no_results',
+											api_status_code: 200,
+											api_provider: 'google_primary',
+											google_response: {
+												total_results: 0,
+												google_status: googleApiResponse?.status || 'UNKNOWN',
+												explanation: 'Google Geocoding API found no matching locations for this address'
+											},
+											abbreviation_analysis: {
+												has_house_number: hasHouseNumber,
+												abbreviations_detected: abbreviationAnalysis.wasExpanded,
+												potential_expansions: abbreviationAnalysis.expansions
+											},
+											explanation: hasHouseNumber ?
+												'Google found no results and no common abbreviations were detected to expand' :
+												'Google found no results and abbreviation expansion was not attempted (no house number for safety)'
+										}];
+									}
 								}
 							}
 						} catch (googleError) {
@@ -822,7 +1320,8 @@ export class Smarty implements INodeType {
 								options_enabled: {
 									smarty_fallback: useSmartyFallback,
 									usps_mail_safety: useUspsMailSafety,
-									always_return_data: alwaysReturnData
+									always_return_data: alwaysReturnData,
+									abbreviation_expansion: attemptAbbreviationExpansion
 								},
 								intersection_detected: isIntersection,
 								explanation: 'This means Google was called but either returned no results or all results were filtered out as non-deliverable addresses. Check the console logs for more details about what Google returned.'
