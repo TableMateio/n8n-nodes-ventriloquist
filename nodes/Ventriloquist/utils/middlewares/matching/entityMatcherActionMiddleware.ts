@@ -110,6 +110,17 @@ export class EntityMatcherActionMiddleware implements IMiddleware<IEntityMatcher
 
     if (actionConfig.actionSelector) {
       logger.debug(`${logPrefix} Looking for action selector: ${actionConfig.actionSelector}`);
+
+      // Debug: Log the HTML content of the matched element to see what's inside
+      const elementHtml = await page.evaluate(el => el.outerHTML, element);
+      logger.info(`${logPrefix} Matched element HTML: ${elementHtml.substring(0, 500)}...`);
+
+      // Debug: Check if the selector exists anywhere in the element
+      const selectorExists = await page.evaluate((el, selector) => {
+        return el.querySelector(selector) !== null;
+      }, element, actionConfig.actionSelector);
+      logger.info(`${logPrefix} Selector "${actionConfig.actionSelector}" exists in element: ${selectorExists}`);
+
       targetElement = await element.$(actionConfig.actionSelector);
 
       if (!targetElement) {

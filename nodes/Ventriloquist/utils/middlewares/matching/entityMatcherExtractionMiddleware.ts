@@ -252,39 +252,10 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
                         itemElements = directChildren;
                     }
                 } else {
-                    // Check if the children are of the same tag type (indicating repeating items)
-                    const tagNames = await Promise.all(directChildren.map(
-                        child => page.evaluate(el => el.tagName.toLowerCase(), child)
-                    ));
-
-                    const tagCounts = tagNames.reduce((acc, tag) => {
-                        acc[tag] = (acc[tag] || 0) + 1;
-                        return acc;
-                    }, {} as Record<string, number>);
-
-                    const mostCommonTag = Object.entries(tagCounts)
-                        .sort((a, b) => b[1] - a[1])[0];
-
-                    if (mostCommonTag && mostCommonTag[1] > 1) {
-                        // Use elements with the most common tag
-                        logger.info(`${logPrefix} Auto-detected repeating tag '${mostCommonTag[0]}' (${mostCommonTag[1]} instances)`);
-
-                        // Filter direct children to only include those with the most common tag
-                        itemElements = await Promise.all(
-                            directChildren.map(async (child, i) => {
-                                if (tagNames[i] === mostCommonTag[0]) {
-                                    return child;
-                                }
-                                return null;
-                            })
-                        ).then(results => results.filter(Boolean) as ElementHandle<Element>[]);
-
-                        logger.info(`${logPrefix} Using ${itemElements.length} elements with tag '${mostCommonTag[0]}' as items`);
-                    } else {
-                        // Use all direct children as they don't have a clear pattern
-                        logger.info(`${logPrefix} No repeating tag pattern found, using all ${directChildren.length} direct children as items`);
-                        itemElements = directChildren;
-                    }
+                    // For multiple direct children, use them directly as items
+                    // This is the most common case and fixes the issue where we were going too deep
+                    logger.info(`${logPrefix} Found ${directChildren.length} direct children, using them as items`);
+                    itemElements = directChildren;
                 }
             } else {
                 logger.warn(`${logPrefix} Container has no direct children for auto-detection`);

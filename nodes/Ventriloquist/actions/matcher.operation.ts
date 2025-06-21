@@ -776,8 +776,9 @@ export async function execute(
 		let container: boolean | null = null;
 
 		if (selectionMethod === 'containerItems') {
-			// For container method, we need to extract child elements
-			actualItemSelector = `${itemSelector} > *`;
+			// For container method, use the container selector directly
+			// The extraction middleware will handle finding children
+			actualItemSelector = itemSelector;
 
 			// Check if container exists and wait for it if needed
 			if (waitForSelectors) {
@@ -1005,11 +1006,11 @@ export async function execute(
 		// Create output item with clearer structure
 		let matches = matchResult.matches || matchResult.comparisons || [];
 
-		// When using "best" match mode, filter matches to only include the selected match
-		if (matchMode === 'best' && matchResult.selectedMatch) {
+		// When using "best" or "firstAboveThreshold" match mode, filter matches to only include the selected match
+		if ((matchMode === 'best' || matchMode === 'firstAboveThreshold') && matchResult.selectedMatch) {
 			// Keep only the selected match in the matches array
 			matches = matches.filter((m: IEntityMatchResult) => m.selected === true);
-			this.logger.info(`[Matcher] Filtered matches to only include the best match in "best" match mode`);
+			this.logger.info(`[Matcher] Filtered matches to only include the selected match in "${matchMode}" match mode`);
 		}
 
 		const item = {
