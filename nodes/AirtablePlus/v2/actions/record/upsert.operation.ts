@@ -42,27 +42,24 @@ const properties: INodeProperties[] = [
 		displayName: 'Matching Strategy',
 		name: 'matchingStrategy',
 		type: 'options',
-		default: 'standard',
+		default: 'rigid',
 		options: [
 			{
-				name: 'Standard (soft matching)',
-				value: 'standard',
+				name: 'Rigid (Default)',
+				value: 'rigid',
 				description: 'All matching columns must have values - if any column is null/empty, the match fails',
 			},
 			{
-				name: 'Flexible (minimum required combinations)',
+				name: 'Soft (allow null)',
+				value: 'soft',
+				description: 'Use standard matching columns but ignore null/empty fields when matching',
+			},
+			{
+				name: 'Flexible (custom combinations)',
 				value: 'flexible',
-				description: 'Ignore null/empty fields and use minimum required field combinations for matching',
+				description: 'Use custom field combination rules to define which field combinations are acceptable for matching',
 			},
 		],
-		displayOptions: {
-			show: {
-				'/columns.mappingMode': ['defineBelow', 'autoMapInputData'],
-			},
-			hide: {
-				'/columns.matchingColumns': ['id'],
-			},
-		},
 	},
 	{
 		displayName: 'Field Combination Rules',
@@ -76,10 +73,6 @@ const properties: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				matchingStrategy: ['flexible'],
-				'/columns.mappingMode': ['defineBelow', 'autoMapInputData'],
-			},
-			hide: {
-				'/columns.matchingColumns': ['id'],
 			},
 		},
 		options: [
@@ -88,13 +81,13 @@ const properties: INodeProperties[] = [
 				displayName: 'Field Combo',
 				values: [
 					{
-								displayName: 'Required Fields',
-		name: 'fields',
-		type: 'multiOptions',
-		typeOptions: {
-			loadOptionsDependsOn: ['table.value', 'base.value'],
-			loadOptionsMethod: 'getColumns',
-		},
+						displayName: 'Required Fields',
+						name: 'fields',
+						type: 'multiOptions',
+						typeOptions: {
+							loadOptionsDependsOn: ['table.value', 'base.value'],
+							loadOptionsMethod: 'getColumns',
+						},
 						default: [],
 						description: 'All selected fields must have non-empty values for this combination to be used for matching',
 					},
@@ -127,7 +120,7 @@ export async function execute(
 	const dataMode = this.getNodeParameter('columns.mappingMode', 0) as string;
 
 	const columnsToMatchOn = this.getNodeParameter('columns.matchingColumns', 0) as string[];
-	const matchingStrategy = this.getNodeParameter('matchingStrategy', 0, 'standard') as 'standard' | 'flexible';
+	const matchingStrategy = this.getNodeParameter('matchingStrategy', 0, 'rigid') as 'rigid' | 'soft' | 'flexible';
 	const requiredCombinations = this.getNodeParameter('requiredCombinations', 0, { combinations: [] }) as { combinations: Array<{ fields: string[] }> };
 
 	for (let i = 0; i < items.length; i++) {
@@ -170,11 +163,11 @@ export async function execute(
 				typecast: options.typecast ? true : false,
 			};
 
-			// Only add performUpsert for standard strategy or when using ID matching
-			if (!columnsToMatchOn.includes('id') && matchingStrategy === 'standard') {
-				// Standard mode: ALL matching columns must have values (strict/soft behavior)
-				body.performUpsert = { fieldsToMergeOn: columnsToMatchOn };
-			}
+					// Only add performUpsert for rigid strategy or when using ID matching
+		if (!columnsToMatchOn.includes('id') && matchingStrategy === 'rigid') {
+			// Rigid mode: ALL matching columns must have values (strict behavior)
+			body.performUpsert = { fieldsToMergeOn: columnsToMatchOn };
+		}
 
 			// Remove empty/null fields if requested
 			if (options.skipEmptyFields) {
@@ -182,6 +175,19 @@ export async function execute(
 					record.fields = removeEmptyFields(record.fields);
 				});
 			}
+
+			// Filter empty strings from array fields to prevent "Value '' is not a valid record ID" errors
+			records.forEach(record => {
+				Object.keys(record.fields).forEach(fieldName => {
+					const value = record.fields[fieldName];
+					if (Array.isArray(value)) {
+						// Filter out empty strings, null, and undefined values from arrays
+						record.fields[fieldName] = value.filter(item =>
+							item !== null && item !== undefined && item !== ''
+						);
+					}
+				});
+			});
 
 						// Validate linked record fields before attempting upsert
 			for (const record of records) {
@@ -207,11 +213,78 @@ export async function execute(
 
 			let responseData;
 
-			// Use flexible matching strategy if enabled, otherwise use standard Airtable upsert
-			if (matchingStrategy === 'flexible' && !columnsToMatchOn.includes('id')) {
-				// Flexible matching logic with minimum required combinations
-				const inputFields = records[0].fields;
+					// Handle different matching strategies
+		if ((matchingStrategy === 'soft' || matchingStrategy === 'flexible') && !columnsToMatchOn.includes('id')) {
+							const inputFields = records[0].fields;
 
+			if (matchingStrategy === 'soft') {
+				// Soft matching: use standard matching columns but ignore null/empty fields
+				const fieldsToMatch = columnsToMatchOn.filter(field => {
+					const value = inputFields[field];
+					return value !== null && value !== undefined && value !== '';
+				});
+
+				if (fieldsToMatch.length === 0) {
+					// No valid fields to match on - create new record
+					const createBody = {
+						...body,
+						records: records.map(({ fields }) => ({ fields: removeEmptyFields(fields) })),
+					};
+					responseData = await apiRequest.call(this, 'POST', endpoint, createBody);
+				} else {
+					// Use the valid fields for matching
+					const response = await apiRequestAllItems.call(
+						this,
+						'GET',
+						endpoint,
+						{},
+						{ fields: fieldsToMatch },
+					);
+
+					let matches = response.records as UpdateRecord[];
+					matches = matches.filter(record => {
+						return fieldsToMatch.every(field => {
+							const inputValue = inputFields[field];
+							const recordValue = record.fields[field];
+							return String(inputValue) === String(recordValue);
+						});
+					});
+
+					if (matches.length === 0) {
+						// No matches - create new record
+						const createBody = {
+							...body,
+							records: records.map(({ fields }) => ({ fields: removeEmptyFields(fields) })),
+						};
+						responseData = await apiRequest.call(this, 'POST', endpoint, createBody);
+					} else {
+						// Update existing record(s)
+						const updateRecords: UpdateRecord[] = [];
+						const recordsToUpdate = options.updateAllMatches ? matches : [matches[0]];
+
+						for (const match of recordsToUpdate) {
+							let fieldsToUpdate = records[0].fields;
+							if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
+								try {
+									fieldsToUpdate = await processRecordFields.call(
+										this,
+										base,
+										table,
+										records[0].fields,
+										match.fields as IDataObject,
+										arrayHandlingOptions,
+									);
+								} catch (error) {
+									console.warn(`Could not apply array handling for record ${match.id}:`, error);
+								}
+							}
+							updateRecords.push({ id: match.id, fields: fieldsToUpdate });
+						}
+						responseData = await batchUpdate.call(this, endpoint, body, updateRecords);
+					}
+				}
+			} else {
+				// Flexible matching: use custom field combination rules
 				console.log('🔧 FLEXIBLE_DEBUG: Input fields:', JSON.stringify(inputFields, null, 2));
 				console.log('🔧 FLEXIBLE_DEBUG: Required combinations:', JSON.stringify(requiredCombinations, null, 2));
 
@@ -321,26 +394,27 @@ export async function execute(
 						updateRecords.push({ id: matches[0].id, fields: fieldsToUpdate });
 					}
 
-					if (updateRecords.length > 0) {
-						responseData = await batchUpdate.call(this, endpoint, body, updateRecords);
-					}
-				}
-			} else {
-				// Standard matching strategy - use Airtable's native upsert functionality
-				try {
-					responseData = await batchUpdate.call(this, endpoint, body, records);
-				} catch (error) {
-					if (error.httpCode === '422' && columnsToMatchOn.includes('id')) {
-						const createBody = {
-							...body,
-							records: records.map(({ fields }) => ({ fields: removeEmptyFields(fields) })),
-						};
-						responseData = await apiRequest.call(this, 'POST', endpoint, createBody);
-					} else {
-						throw error;
-					}
+									if (updateRecords.length > 0) {
+					responseData = await batchUpdate.call(this, endpoint, body, updateRecords);
 				}
 			}
+		}
+		} else {
+			// Rigid matching strategy - use Airtable's native upsert functionality
+			try {
+				responseData = await batchUpdate.call(this, endpoint, body, records);
+			} catch (error) {
+				if (error.httpCode === '422' && columnsToMatchOn.includes('id')) {
+					const createBody = {
+						...body,
+						records: records.map(({ fields }) => ({ fields: removeEmptyFields(fields) })),
+					};
+					responseData = await apiRequest.call(this, 'POST', endpoint, createBody);
+				} else {
+					throw error;
+				}
+			}
+		}
 
 			const executionData = this.helpers.constructExecutionMetaData(
 				wrapData(responseData.records as IDataObject[]),

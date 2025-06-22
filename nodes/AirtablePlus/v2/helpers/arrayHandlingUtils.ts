@@ -86,10 +86,15 @@ export function normalizeToArray(value: any): any[] {
 	}
 
 	if (Array.isArray(value)) {
-		return value;
+		// Filter out empty strings, null, and undefined values
+		return value.filter(item => item !== null && item !== undefined && item !== '');
 	}
 
-	// Single value - convert to array
+	// Single value - convert to array, but only if it's not empty
+	if (value === '' || value === null || value === undefined) {
+		return [];
+	}
+
 	return [value];
 }
 
@@ -119,6 +124,11 @@ export function mergeArrayValues(
 			const combined = [...existingArray, ...newArray];
 			const seen = new Set();
 			return combined.filter(item => {
+				// Skip empty strings, null, and undefined values
+				if (item === '' || item === null || item === undefined) {
+					return false;
+				}
+
 				const key = typeof item === 'object' ? JSON.stringify(item) : String(item);
 				if (seen.has(key)) {
 					return false;
