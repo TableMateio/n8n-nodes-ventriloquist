@@ -1,0 +1,709 @@
+{
+  "summary": {
+    "total_comparisons": 18,
+    "average_scores": {
+      "airtable": 0.5,
+      "idi": 5.94
+    },
+    "score_ranges": {
+      "airtable": {
+        "min": 0,
+        "max": 2
+      },
+      "idi": {
+        "min": 0,
+        "max": 8
+      }
+    },
+    "winners": {
+      "IDI": 15,
+      "Airtable": 0,
+      "Tie": 3
+    },
+    "winner_percentages": {
+      "idi": 83.3,
+      "airtable": 0.0,
+      "tie": 16.7
+    }
+  },
+  "detailed_comparisons": [
+    {
+      "name": "Elbie Hoover",
+      "airtable_score": {
+        "score": 2,
+        "details": [
+          "Has Age",
+          "Has 1 address(es)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 1,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 7,
+        "details": [
+          "Has Age",
+          "Has 2 address(es)",
+          "Has 4 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 2,
+          "relation_count": 4
+        }
+      },
+      "score_difference": 5,
+      "winner": "IDI"
+    },
+    {
+      "name": "Christine Witherell",
+      "airtable_score": {
+        "score": 1,
+        "details": [
+          "Has Age"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 8,
+        "details": [
+          "Has Age",
+          "Has 2 address(es)",
+          "Has 5 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 2,
+          "relation_count": 5
+        }
+      },
+      "score_difference": 7,
+      "winner": "IDI"
+    },
+    {
+      "name": "Ardith Allen",
+      "airtable_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "score_difference": 0,
+      "winner": "Tie"
+    },
+    {
+      "name": "Victoria Ferino",
+      "airtable_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "score_difference": 0,
+      "winner": "Tie"
+    },
+    {
+      "name": "Mary Brown",
+      "airtable_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 8,
+        "details": [
+          "Has Age",
+          "Has 2 address(es)",
+          "Has 5 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 2,
+          "relation_count": 5
+        }
+      },
+      "score_difference": 8,
+      "winner": "IDI"
+    },
+    {
+      "name": "Michael Trieu",
+      "airtable_score": {
+        "score": 1,
+        "details": [
+          "Has Age"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 8,
+        "details": [
+          "Has Age",
+          "Has 2 address(es)",
+          "Has 5 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 2,
+          "relation_count": 5
+        }
+      },
+      "score_difference": 7,
+      "winner": "IDI"
+    },
+    {
+      "name": "Byron Vankirk",
+      "airtable_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 8,
+        "details": [
+          "Has Age",
+          "Has 2 address(es)",
+          "Has 5 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 2,
+          "relation_count": 5
+        }
+      },
+      "score_difference": 8,
+      "winner": "IDI"
+    },
+    {
+      "name": "Gregory Nothem",
+      "airtable_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 8,
+        "details": [
+          "Has Age",
+          "Has 2 address(es)",
+          "Has 5 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 2,
+          "relation_count": 5
+        }
+      },
+      "score_difference": 8,
+      "winner": "IDI"
+    },
+    {
+      "name": "Eric Wood",
+      "airtable_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 3,
+        "details": [
+          "Has Age",
+          "Has 1 address(es)",
+          "Has 1 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 1,
+          "relation_count": 1
+        }
+      },
+      "score_difference": 3,
+      "winner": "IDI"
+    },
+    {
+      "name": "Cecelia Hebert",
+      "airtable_score": {
+        "score": 2,
+        "details": [
+          "Has Age",
+          "Has Deceased=True"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": true,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 7,
+        "details": [
+          "Has Age",
+          "Has Deceased=True",
+          "Has 2 address(es)",
+          "Has 3 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": true,
+          "address_count": 2,
+          "relation_count": 3
+        }
+      },
+      "score_difference": 5,
+      "winner": "IDI"
+    },
+    {
+      "name": "Alexander Lock",
+      "airtable_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "score_difference": 0,
+      "winner": "Tie"
+    },
+    {
+      "name": "Edgar Sherman",
+      "airtable_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 6,
+        "details": [
+          "Has Age",
+          "Has Deceased=True",
+          "Has 1 address(es)",
+          "Has 3 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": true,
+          "address_count": 1,
+          "relation_count": 3
+        }
+      },
+      "score_difference": 6,
+      "winner": "IDI"
+    },
+    {
+      "name": "Michael Pistolese",
+      "airtable_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 8,
+        "details": [
+          "Has Age",
+          "Has Deceased=True",
+          "Has 2 address(es)",
+          "Has 4 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": true,
+          "address_count": 2,
+          "relation_count": 4
+        }
+      },
+      "score_difference": 8,
+      "winner": "IDI"
+    },
+    {
+      "name": "Brian Stone",
+      "airtable_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 6,
+        "details": [
+          "Has Age",
+          "Has Deceased=True",
+          "Has 2 address(es)",
+          "Has 2 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": true,
+          "address_count": 2,
+          "relation_count": 2
+        }
+      },
+      "score_difference": 6,
+      "winner": "IDI"
+    },
+    {
+      "name": "James Church",
+      "airtable_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 7,
+        "details": [
+          "Has Age",
+          "Has Deceased=True",
+          "Has 2 address(es)",
+          "Has 3 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": true,
+          "address_count": 2,
+          "relation_count": 3
+        }
+      },
+      "score_difference": 7,
+      "winner": "IDI"
+    },
+    {
+      "name": "Rosemary Lavine",
+      "airtable_score": {
+        "score": 1,
+        "details": [
+          "Has Age"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 7,
+        "details": [
+          "Has Age",
+          "Has Deceased=True",
+          "Has 2 address(es)",
+          "Has 3 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": true,
+          "address_count": 2,
+          "relation_count": 3
+        }
+      },
+      "score_difference": 6,
+      "winner": "IDI"
+    },
+    {
+      "name": "Chad Bugman",
+      "airtable_score": {
+        "score": 0,
+        "details": [],
+        "breakdown": {
+          "has_age": false,
+          "deceased_true": false,
+          "address_count": 0,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 8,
+        "details": [
+          "Has Age",
+          "Has 2 address(es)",
+          "Has 5 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 2,
+          "relation_count": 5
+        }
+      },
+      "score_difference": 8,
+      "winner": "IDI"
+    },
+    {
+      "name": "Ann Hyland",
+      "airtable_score": {
+        "score": 2,
+        "details": [
+          "Has Age",
+          "Has 1 address(es)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 1,
+          "relation_count": 0
+        }
+      },
+      "idi_score": {
+        "score": 8,
+        "details": [
+          "Has Age",
+          "Has 2 address(es)",
+          "Has 5 unique relation(s)"
+        ],
+        "breakdown": {
+          "has_age": true,
+          "deceased_true": false,
+          "address_count": 2,
+          "relation_count": 5
+        }
+      },
+      "score_difference": 6,
+      "winner": "IDI"
+    }
+  ],
+  "differences_for_manual_review": [
+    {
+      "name": "Elbie Hoover",
+      "age_difference": 0,
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Christine Witherell",
+      "age_difference": 0,
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Ardith Allen",
+      "age_difference": "Both have None",
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Victoria Ferino",
+      "age_difference": "Both have None",
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Mary Brown",
+      "age_difference": "IDI has 65, Airtable has None",
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Michael Trieu",
+      "age_difference": 0,
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Byron Vankirk",
+      "age_difference": "IDI has 51, Airtable has None",
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Gregory Nothem",
+      "age_difference": "IDI has 65, Airtable has None",
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Eric Wood",
+      "age_difference": "IDI has 81, Airtable has None",
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "PARENT"
+    },
+    {
+      "name": "Cecelia Hebert",
+      "age_difference": 2,
+      "same_deceased": true,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Alexander Lock",
+      "age_difference": "Both have None",
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Edgar Sherman",
+      "age_difference": "IDI has 98, Airtable has None",
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Michael Pistolese",
+      "age_difference": "IDI has 92, Airtable has None",
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Brian Stone",
+      "age_difference": "IDI has 61, Airtable has None",
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "James Church",
+      "age_difference": "IDI has 91, Airtable has None",
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Rosemary Lavine",
+      "age_difference": 28,
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Chad Bugman",
+      "age_difference": "IDI has 43, Airtable has None",
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    },
+    {
+      "name": "Ann Hyland",
+      "age_difference": 0,
+      "same_deceased": false,
+      "same_bankruptcy": false,
+      "airtable_relation_to_owner": "Owner",
+      "idi_relation_to_owner": "Owner"
+    }
+  ],
+  "generated_at": "2025-06-23T16:13:45.378315"
+}
