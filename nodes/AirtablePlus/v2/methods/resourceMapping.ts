@@ -136,3 +136,134 @@ export async function getColumnsWithRecordId(
 		],
 	};
 }
+
+export async function getColumnsForTargetTable(this: ILoadOptionsFunctions): Promise<ResourceMapperFields> {
+	try {
+		// FIRST: Check if we already have a preserved schema with actual fields
+		// Only preserve if there are real fields, not empty schema
+		try {
+			const linkedTablesConfig = this.getNodeParameter('linkedTablesConfig', undefined, {}) as any;
+			const preservedSchema = linkedTablesConfig?.linkedTables?.[0]?.columns?.schema;
+			if (preservedSchema && Array.isArray(preservedSchema) && preservedSchema.length > 0) {
+				console.log(`✅ [Airtable Plus] Using preserved schema with ${preservedSchema.length} fields`);
+				return { fields: preservedSchema };
+			}
+		} catch (e) {
+			// Expected when no config exists yet
+		}
+
+		// Get the base from the node context - this should always be accessible
+		const base = this.getNodeParameter('base', undefined, {
+			extractValue: true,
+		}) as string;
+
+		// Try multiple approaches to find the target table parameter
+		let targetTableParam: string | null = null;
+
+		// Try direct and relative access approaches (usually fail in fixedCollection context)
+		const directPaths = ['targetTable', '../targetTable', './targetTable'];
+		for (const path of directPaths) {
+			if (!targetTableParam) {
+				try {
+					targetTableParam = this.getNodeParameter(path, undefined, { extractValue: true }) as string;
+					break;
+				} catch (e) {
+					// Expected to fail in most cases for fixedCollection context
+				}
+			}
+		}
+
+		// Try collection path - check all linked table entries
+		if (!targetTableParam) {
+			try {
+				const linkedTablesConfig = this.getNodeParameter('linkedTablesConfig', undefined, {}) as any;
+				if (linkedTablesConfig?.linkedTables && Array.isArray(linkedTablesConfig.linkedTables)) {
+					for (let i = 0; i < linkedTablesConfig.linkedTables.length; i++) {
+						const entry = linkedTablesConfig.linkedTables[i];
+						if (entry?.targetTable) {
+							if (typeof entry.targetTable === 'object' && entry.targetTable.value) {
+								targetTableParam = entry.targetTable.value;
+								break;
+							} else if (typeof entry.targetTable === 'string') {
+								targetTableParam = entry.targetTable;
+								break;
+							}
+						}
+					}
+				}
+			} catch (e) {
+				// Failed to access linkedTablesConfig
+			}
+		}
+
+		// Try legacy approach for backwards compatibility
+		if (!targetTableParam) {
+			try {
+				const rawTargetTableParam = this.getNodeParameter('linkedTablesConfig.linkedTables.0.targetTable', undefined) as any;
+				if (rawTargetTableParam && rawTargetTableParam.value) {
+					targetTableParam = rawTargetTableParam.value;
+				} else if (typeof rawTargetTableParam === 'string') {
+					targetTableParam = rawTargetTableParam;
+				}
+			} catch (e) {
+				// Legacy path failed
+			}
+		}
+
+		if (!targetTableParam) {
+			// Return empty fields if no target table is selected yet
+			return { fields: [] };
+		}
+
+		const targetTableId = encodeURI(targetTableParam);
+
+		const response = await apiRequest.call(this, 'GET', `meta/bases/${base}/tables`);
+
+		const tableData = ((response.tables as IDataObject[]) || []).find((table: IDataObject) => {
+			return table.id === targetTableId;
+		});
+
+		if (!tableData) {
+			throw new NodeOperationError(this.getNode(), 'Target table information could not be found!', {
+				level: 'warning',
+			});
+		}
+
+		const fields: ResourceMapperField[] = [];
+
+		const constructOptions = (field: AirtableSchema) => {
+			if (field?.options?.choices) {
+				return (field.options.choices as IDataObject[]).map((choice) => ({
+					name: choice.name,
+					value: choice.name,
+				})) as INodePropertyOptions[];
+			}
+
+			return undefined;
+		};
+
+		for (const field of tableData.fields as AirtableSchema[]) {
+			const type = mapForeignType(field.type, airtableTypesMap);
+			const isReadOnly = airtableReadOnlyFields.includes(field.type);
+			const options = constructOptions(field);
+			fields.push({
+				id: field.name,
+				displayName: field.name,
+				required: false,
+				defaultMatch: false,
+				canBeUsedToMatch: true,
+				display: true,
+				type,
+				options,
+				readOnly: isReadOnly,
+				removed: isReadOnly,
+			});
+		}
+
+		return { fields };
+	} catch (error) {
+		console.error('[Airtable Plus] ERROR in getColumnsForTargetTable:', error);
+		// Return empty fields instead of throwing to avoid breaking the UI
+		return { fields: [] };
+	}
+}
