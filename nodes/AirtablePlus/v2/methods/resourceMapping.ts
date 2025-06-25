@@ -140,13 +140,17 @@ export async function getColumnsWithRecordId(
 export async function getColumnsForTargetTable(this: ILoadOptionsFunctions): Promise<ResourceMapperFields> {
 	try {
 		// FIRST: Check if we already have a preserved schema with actual fields
-		// Only preserve if there are real fields, not empty schema
+		// Look through all linked table entries to find a preserved schema
 		try {
 			const linkedTablesConfig = this.getNodeParameter('linkedTablesConfig', undefined, {}) as any;
-			const preservedSchema = linkedTablesConfig?.linkedTables?.[0]?.columns?.schema;
-			if (preservedSchema && Array.isArray(preservedSchema) && preservedSchema.length > 0) {
-				console.log(`✅ [Airtable Plus] Using preserved schema with ${preservedSchema.length} fields`);
-				return { fields: preservedSchema };
+			if (linkedTablesConfig?.linkedTables && Array.isArray(linkedTablesConfig.linkedTables)) {
+				for (const entry of linkedTablesConfig.linkedTables) {
+					const preservedSchema = entry?.columns?.schema;
+					if (preservedSchema && Array.isArray(preservedSchema) && preservedSchema.length > 0) {
+						console.log(`✅ [Airtable Plus] Using preserved schema with ${preservedSchema.length} fields`);
+						return { fields: preservedSchema };
+					}
+				}
 			}
 		} catch (e) {
 			// Expected when no config exists yet
