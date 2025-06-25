@@ -40,6 +40,7 @@
 			"dist/credentials/BrowserlessApi.credentials.js",
 			"dist/credentials/LocalChromeApi.credentials.js",
 			"dist/credentials/StannpApi.credentials.js",
+			"dist/credentials/LobApi.credentials.js",
 			"dist/credentials/SmartyApi.credentials.js",
 			"dist/credentials/GoogleApi.credentials.js",
 			"dist/credentials/UspsApi.credentials.js"

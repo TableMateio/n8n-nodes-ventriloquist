@@ -10,25 +10,60 @@ import { NodeOperationError, NodeConnectionType } from 'n8n-workflow';
 
 export class Stannp implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Stannp',
+		displayName: 'Direct Mail',
 		name: 'stannp',
 		icon: 'file:stannp.svg',
 		group: ['output'],
 		version: 1,
-		subtitle: '={{$parameter["operation"]}}',
-		description: 'Interact with Stannp API to send letters and postcards',
+		subtitle: '={{$parameter["service"] + " - " + $parameter["operation"]}}',
+		description: 'Send letters and postcards via multiple direct mail services (Lob, Stannp)',
 		defaults: {
-			name: 'Stannp',
+			name: 'Direct Mail',
 		},
 		inputs: [NodeConnectionType.Main],
 		outputs: [NodeConnectionType.Main],
 		credentials: [
 			{
+				name: 'lobApi',
+				required: true,
+				displayOptions: {
+					show: {
+						service: ['lob'],
+					},
+				},
+			},
+			{
 				name: 'stannpApi',
 				required: true,
+				displayOptions: {
+					show: {
+						service: ['stannp'],
+					},
+				},
 			},
 		],
 		properties: [
+			{
+				displayName: 'Service',
+				name: 'service',
+				type: 'options',
+				noDataExpression: true,
+				options: [
+					{
+						name: 'Lob',
+						value: 'lob',
+						description: 'Use Lob API for direct mail',
+					},
+					{
+						name: 'Stannp',
+						value: 'stannp',
+						description: 'Use Stannp API for direct mail',
+					},
+				],
+				default: 'lob',
+				description: 'Select the direct mail service provider to use',
+			},
+
 			{
 				displayName: 'Operation',
 				name: 'operation',
@@ -38,7 +73,7 @@ export class Stannp implements INodeType {
 					{
 						name: 'Create Letter',
 						value: 'createLetter',
-						description: 'Create a letter using Stannp API',
+						description: 'Create a letter using the selected service',
 						action: 'Create a letter',
 					},
 				],
@@ -48,6 +83,11 @@ export class Stannp implements INodeType {
 				displayName: 'Environment',
 				name: 'environment',
 				type: 'options',
+				displayOptions: {
+					show: {
+						service: ['stannp'],
+					},
+				},
 				options: [
 					{
 						name: 'Test',
@@ -61,14 +101,14 @@ export class Stannp implements INodeType {
 					},
 				],
 				default: 'test',
-				description: 'Whether to run in test or production mode',
+				description: 'Whether to run in test or production mode (Stannp only - Lob uses credential environment)',
 			},
 			{
 				displayName: 'Template ID',
 				name: 'template',
 				type: 'string',
 				default: '',
-				description: 'Your template ID',
+				description: 'Your template ID (Stannp) or Letter Template HTML (Lob)',
 				required: true,
 			},
 			// Recipient information
@@ -199,89 +239,169 @@ export class Stannp implements INodeType {
 		const items = this.getInputData();
 		const returnData: INodeExecutionData[] = [];
 
-		const credentials = await this.getCredentials('stannpApi');
-		const apiKey = credentials.apiKey as string;
-		const server = credentials.server as string || 'us1';
-
 		for (let i = 0; i < items.length; i++) {
 			try {
+				const service = this.getNodeParameter('service', i) as string;
 				const operation = this.getNodeParameter('operation', i) as string;
 
 				if (operation === 'createLetter') {
-					// Build the request parameters
-					const environment = this.getNodeParameter('environment', i) as string;
-					const template = this.getNodeParameter('template', i) as string;
-					const firstName = this.getNodeParameter('recipientFirstName', i) as string;
-					const lastName = this.getNodeParameter('recipientLastName', i) as string;
-					const address1 = this.getNodeParameter('address1', i) as string;
-					const town = this.getNodeParameter('town', i) as string;
-					const region = this.getNodeParameter('region', i) as string;
-					const zipcode = this.getNodeParameter('zipcode', i) as string;
-					const country = this.getNodeParameter('country', i) as string;
+					if (service === 'lob') {
+						// Lob API implementation
+						const credentials = await this.getCredentials('lobApi');
+						const apiKey = credentials.apiKey as string;
 
-					// Optional fields
-					const address2 = this.getNodeParameter('address2', i, '') as string;
-					const address3 = this.getNodeParameter('address3', i, '') as string;
+						const template = this.getNodeParameter('template', i) as string;
+						const firstName = this.getNodeParameter('recipientFirstName', i) as string;
+						const lastName = this.getNodeParameter('recipientLastName', i) as string;
+						const address1 = this.getNodeParameter('address1', i) as string;
+						const town = this.getNodeParameter('town', i) as string;
+						const region = this.getNodeParameter('region', i) as string;
+						const zipcode = this.getNodeParameter('zipcode', i) as string;
+						const country = this.getNodeParameter('country', i) as string;
 
-					// Template variables
-					const templateVariables = this.getNodeParameter('templateVariablesUi', i) as {
-						templateVariablesValues: Array<{ name: string; value: string }>;
-					};
+						// Optional fields
+						const address2 = this.getNodeParameter('address2', i, '') as string;
 
-					// Prepare body parameters
-					const body: IDataObject = {
-						test: environment === 'test' ? '1' : '0',
-						template,
-						'recipient[firstname]': firstName,
-						'recipient[lastname]': lastName,
-						'recipient[address1]': address1,
-						'recipient[town]': town,
-						'recipient[region]': region,
-						'recipient[zipcode]': zipcode,
-						'recipient[country]': country,
-					};
+						// Template variables
+						const templateVariables = this.getNodeParameter('templateVariablesUi', i) as {
+							templateVariablesValues: Array<{ name: string; value: string }>;
+						};
 
-					// Add optional address fields if provided
-					if (address2) {
-						body['recipient[address2]'] = address2;
-					}
-
-					if (address3) {
-						body['recipient[address3]'] = address3;
-					}
-
-					// Add template variables
-					if (templateVariables?.templateVariablesValues?.length) {
-						for (const variable of templateVariables.templateVariablesValues) {
-							body[`recipient[${variable.name}]`] = variable.value;
+						// Build merge variables for Lob
+						const mergeVariables: IDataObject = {};
+						if (templateVariables?.templateVariablesValues?.length) {
+							for (const variable of templateVariables.templateVariablesValues) {
+								mergeVariables[variable.name] = variable.value;
+							}
 						}
+
+						// Prepare Lob API request body
+						const body: IDataObject = {
+							description: `Letter for ${firstName} ${lastName}`,
+							to: {
+								name: `${firstName} ${lastName}`,
+								address_line1: address1,
+								address_city: town,
+								address_state: region,
+								address_zip: zipcode,
+								address_country: country,
+							},
+							file: template, // This could be a template ID or HTML content
+							color: false, // Default to black and white
+							double_sided: false, // Default to single sided
+						};
+
+						// Add optional address line 2
+						if (address2) {
+							(body.to as IDataObject).address_line2 = address2;
+						}
+
+						// Add merge variables if provided
+						if (Object.keys(mergeVariables).length > 0) {
+							body.merge_variables = mergeVariables;
+						}
+
+						// Make the Lob API request
+						const options: IRequestOptions = {
+							method: 'POST',
+							url: 'https://api.lob.com/v1/letters',
+							body,
+							headers: {
+								'Content-Type': 'application/json',
+								'Accept': 'application/json',
+								'Authorization': `Basic ${Buffer.from(apiKey + ':').toString('base64')}`,
+							},
+							json: true,
+							resolveWithFullResponse: true,
+						};
+
+						const responseData = await this.helpers.request(options);
+
+						const executionData = this.helpers.constructExecutionMetaData(
+							this.helpers.returnJsonArray(responseData.body || responseData),
+							{ itemData: { item: i } },
+						);
+						returnData.push(...executionData);
+
+					} else if (service === 'stannp') {
+						// Stannp API implementation (existing code)
+						const credentials = await this.getCredentials('stannpApi');
+						const apiKey = credentials.apiKey as string;
+						const server = credentials.server as string || 'us1';
+
+						const environment = this.getNodeParameter('environment', i) as string;
+						const template = this.getNodeParameter('template', i) as string;
+						const firstName = this.getNodeParameter('recipientFirstName', i) as string;
+						const lastName = this.getNodeParameter('recipientLastName', i) as string;
+						const address1 = this.getNodeParameter('address1', i) as string;
+						const town = this.getNodeParameter('town', i) as string;
+						const region = this.getNodeParameter('region', i) as string;
+						const zipcode = this.getNodeParameter('zipcode', i) as string;
+						const country = this.getNodeParameter('country', i) as string;
+
+						// Optional fields
+						const address2 = this.getNodeParameter('address2', i, '') as string;
+						const address3 = this.getNodeParameter('address3', i, '') as string;
+
+						// Template variables
+						const templateVariables = this.getNodeParameter('templateVariablesUi', i) as {
+							templateVariablesValues: Array<{ name: string; value: string }>;
+						};
+
+						// Prepare body parameters
+						const body: IDataObject = {
+							test: environment === 'test' ? '1' : '0',
+							template,
+							'recipient[firstname]': firstName,
+							'recipient[lastname]': lastName,
+							'recipient[address1]': address1,
+							'recipient[town]': town,
+							'recipient[region]': region,
+							'recipient[zipcode]': zipcode,
+							'recipient[country]': country,
+						};
+
+						// Add optional address fields if provided
+						if (address2) {
+							body['recipient[address2]'] = address2;
+						}
+
+						if (address3) {
+							body['recipient[address3]'] = address3;
+						}
+
+						// Add template variables
+						if (templateVariables?.templateVariablesValues?.length) {
+							for (const variable of templateVariables.templateVariablesValues) {
+								body[`recipient[${variable.name}]`] = variable.value;
+							}
+						}
+
+						// Make the API request
+						const options: IRequestOptions = {
+							method: 'POST',
+							url: `https://api-${server}.stannp.com/v1/letters/create`,
+							body,
+							headers: {
+								'Content-Type': 'application/x-www-form-urlencoded',
+								'Accept': 'application/json',
+							},
+							auth: {
+								username: apiKey,
+								password: '',
+							},
+							json: true,
+							resolveWithFullResponse: true,
+						};
+
+						const responseData = await this.helpers.request(options);
+
+						const executionData = this.helpers.constructExecutionMetaData(
+							this.helpers.returnJsonArray(responseData.body || responseData),
+							{ itemData: { item: i } },
+						);
+						returnData.push(...executionData);
 					}
-
-					// Make the API request
-					const options: IRequestOptions = {
-						method: 'POST',
-						url: `https://api-${server}.stannp.com/v1/letters/create`,
-						body,
-						headers: {
-							'Content-Type': 'application/x-www-form-urlencoded',
-							'Accept': 'application/json',
-						},
-						auth: {
-							username: apiKey,
-							password: '',
-						},
-						json: true,
-						resolveWithFullResponse: true,
-					};
-
-					// Using the request method directly with Basic Auth
-					const responseData = await this.helpers.request(options);
-
-					const executionData = this.helpers.constructExecutionMetaData(
-						this.helpers.returnJsonArray(responseData.body || responseData),
-						{ itemData: { item: i } },
-					);
-					returnData.push(...executionData);
 				}
 			} catch (error) {
 				const continueOnFail = this.getNodeParameter('options.continueOnFail', i, false) as boolean;

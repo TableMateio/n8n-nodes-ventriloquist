@@ -9,6 +9,9 @@
 	"resources": {
 		"primaryDocumentation": [
 			{
+				"url": "https://docs.lob.com/"
+			},
+			{
 				"url": "https://www.stannp.com/api-documentation"
 			}
 		]
@@ -17,7 +20,9 @@
 		"Mail",
 		"Post",
 		"Letter",
-		"Direct Mail"
+		"Direct Mail",
+		"Lob",
+		"Stannp"
 	],
 	"subcategories": {
 		"Marketing & Content": [
