@@ -766,10 +766,47 @@ export class DirectMail implements INodeType {
 							templateVariablesValues: Array<{ name: string; value: string }>;
 						};
 
+						// Build merge variables for conditional preprocessing (Stannp format)
+						const mergeVariables: IDataObject = {
+							// Standard recipient fields
+							firstname: firstName,
+							lastname: lastName,
+							address1: address1,
+							town: town,
+							region: region,
+							zipcode: zipcode,
+							country: country,
+						};
+
+						// Add optional address fields
+						if (address2) {
+							mergeVariables.address2 = address2;
+						}
+						if (address3) {
+							mergeVariables.address3 = address3;
+						}
+
+						// Add custom template variables
+						if (templateVariables?.templateVariablesValues?.length) {
+							for (const variable of templateVariables.templateVariablesValues) {
+								mergeVariables[variable.name] = variable.value;
+							}
+						}
+
+						// Preprocess template for conditional logic if it contains HTML-like conditional blocks
+						let processedTemplate = template;
+						if (template && (template.includes('{{#if') || template.includes('{{#unless'))) {
+							console.log(`🔍 STANNP_PREPROCESSING: Starting conditional HTML processing for Stannp...`);
+							console.log(`🔍 STANNP_PREPROCESSING: Original template length: ${template.length}`);
+							processedTemplate = preprocessConditionalHTML(template, mergeVariables);
+							console.log(`🔍 STANNP_PREPROCESSING: Processed template length: ${processedTemplate.length}`);
+							console.log(`🔍 STANNP_PREPROCESSING: Template changed: ${template !== processedTemplate}`);
+						}
+
 						// Prepare body parameters
 						const body: IDataObject = {
 							test: environment === 'test' ? '1' : '0',
-							template,
+							template: processedTemplate, // Use the processed template
 							'recipient[firstname]': firstName,
 							'recipient[lastname]': lastName,
 							'recipient[address1]': address1,
