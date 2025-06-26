@@ -600,7 +600,73 @@ export class DirectMail implements INodeType {
 							resolveWithFullResponse: true,
 						};
 
-						const responseData = await this.helpers.request(options);
+						let responseData;
+						try {
+							responseData = await this.helpers.request(options);
+						} catch (lobError: any) {
+							// Enhanced error handling for Lob merge variable errors
+							if (lobError.statusCode === 422 && lobError.error?.error?.message) {
+								const errorMessage = lobError.error.error.message;
+
+								// Check if this is a merge variable error
+								if (errorMessage.includes('merge variable') && errorMessage.includes('required but missing')) {
+									// Extract the missing variable name
+									const missingVariableMatch = errorMessage.match(/Merge variable '([^']+)' is required but missing/);
+									const missingVariable = missingVariableMatch ? missingVariableMatch[1] : 'unknown';
+
+									// Get all template variables that were provided
+									const providedVariables = Object.keys(mergeVariables);
+
+									// Extract all variables from the HTML template/content
+									const templateVariableMatches = fileContent.match(/\{\{([^}]+)\}\}/g) || [];
+									const templateVariables = templateVariableMatches.map(match =>
+										match.replace(/\{\{|\}\}/g, '').trim()
+									).filter((value, index, self) => self.indexOf(value) === index); // Remove duplicates
+
+									// Find missing variables
+									const missingVariables = templateVariables.filter(variable =>
+										!providedVariables.includes(variable)
+									);
+
+									// Create enhanced error message
+									let enhancedMessage = `❌ LOB MERGE VARIABLE ERROR\n\n`;
+									enhancedMessage += `Missing Required Variable: "${missingVariable}"\n\n`;
+
+									if (missingVariables.length > 0) {
+										enhancedMessage += `🔍 ALL MISSING VARIABLES DETECTED:\n`;
+										missingVariables.forEach(variable => {
+											enhancedMessage += `  • ${variable}\n`;
+										});
+										enhancedMessage += `\n`;
+									}
+
+									enhancedMessage += `📋 TEMPLATE VARIABLES FOUND IN YOUR HTML:\n`;
+									templateVariables.forEach(variable => {
+										const isProvided = providedVariables.includes(variable);
+										enhancedMessage += `  ${isProvided ? '✅' : '❌'} ${variable}\n`;
+									});
+
+									if (providedVariables.length > 0) {
+										enhancedMessage += `\n✅ TEMPLATE VARIABLES YOU PROVIDED:\n`;
+										providedVariables.forEach(variable => {
+											enhancedMessage += `  • ${variable} = "${mergeVariables[variable]}"\n`;
+										});
+									}
+
+									enhancedMessage += `\n💡 TO FIX: Add the missing variables to your "Template Variables" section:\n`;
+									missingVariables.forEach(variable => {
+										enhancedMessage += `  • Name: "${variable}" | Value: [your data]\n`;
+									});
+
+									enhancedMessage += `\n📚 Original Lob Error: ${errorMessage}`;
+
+									throw new Error(enhancedMessage);
+								}
+							}
+
+							// Re-throw other errors unchanged
+							throw lobError;
+						}
 
 						const executionData = this.helpers.constructExecutionMetaData(
 							this.helpers.returnJsonArray(responseData.body || responseData),
