@@ -111,7 +111,7 @@ function normalizeCountryCode(countryInput: string): string {
 export class DirectMail implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Direct Mail',
-		name: 'stannp',
+		name: 'directMail',
 		icon: 'file:directmail.svg',
 		group: ['output'],
 		version: 1,

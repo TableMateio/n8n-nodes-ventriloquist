@@ -1,5 +1,5 @@
 {
-	"node": "n8n-nodes-ventriloquist.stannp",
+	"node": "n8n-nodes-ventriloquist.directMail",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
 	"categories": [
