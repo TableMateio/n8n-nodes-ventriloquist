@@ -174,7 +174,7 @@ function preprocessConditionalHTML(htmlContent: string, mergeVariables: IDataObj
 export class DirectMail implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Direct Mail',
-		name: 'directMail',
+		name: 'stannp',
 		icon: 'file:directmail.svg',
 		group: ['output'],
 		version: 1,
@@ -188,21 +188,11 @@ export class DirectMail implements INodeType {
 		credentials: [
 			{
 				name: 'lobApi',
-				required: true,
-				displayOptions: {
-					show: {
-						service: ['lob'],
-					},
-				},
+				required: false,
 			},
 			{
 				name: 'stannpApi',
-				required: true,
-				displayOptions: {
-					show: {
-						service: ['stannp'],
-					},
-				},
+				required: false,
 			},
 		],
 		properties: [
