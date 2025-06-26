@@ -108,6 +108,69 @@ function normalizeCountryCode(countryInput: string): string {
 	return 'US';
 }
 
+// Function to preprocess HTML with conditional logic
+function preprocessConditionalHTML(htmlContent: string, mergeVariables: IDataObject): string {
+	let processedHTML = htmlContent;
+
+	// Regular expression to match {{#if variable}}...{{/if}} blocks
+	const conditionalRegex = /\{\{#if\s+([^}]+)\}\}([\s\S]*?)\{\{\/if\}\}/g;
+
+	// Process each conditional block
+	processedHTML = processedHTML.replace(conditionalRegex, (match, variableName, content) => {
+		const trimmedVariableName = variableName.trim();
+		const variableValue = mergeVariables[trimmedVariableName];
+
+		// Check if variable exists and has a truthy value
+		const hasValue = variableValue !== undefined &&
+						 variableValue !== null &&
+						 variableValue !== '' &&
+						 String(variableValue).trim() !== '';
+
+		console.log(`🔍 CONDITIONAL_DEBUG: Processing {{#if ${trimmedVariableName}}}`);
+		console.log(`🔍 CONDITIONAL_DEBUG: Variable value: "${variableValue}"`);
+		console.log(`🔍 CONDITIONAL_DEBUG: Has value: ${hasValue}`);
+
+		if (hasValue) {
+			// Keep the content but remove the conditional tags
+			console.log(`🔍 CONDITIONAL_DEBUG: Keeping content for ${trimmedVariableName}`);
+			return content;
+		} else {
+			// Remove the entire conditional block
+			console.log(`🔍 CONDITIONAL_DEBUG: Removing block for ${trimmedVariableName}`);
+			return '';
+		}
+	});
+
+	// Also handle {{#unless variable}}...{{/unless}} blocks (opposite logic)
+	const unlessRegex = /\{\{#unless\s+([^}]+)\}\}([\s\S]*?)\{\{\/unless\}\}/g;
+	processedHTML = processedHTML.replace(unlessRegex, (match, variableName, content) => {
+		const trimmedVariableName = variableName.trim();
+		const variableValue = mergeVariables[trimmedVariableName];
+
+		// Check if variable exists and has a truthy value
+		const hasValue = variableValue !== undefined &&
+						 variableValue !== null &&
+						 variableValue !== '' &&
+						 String(variableValue).trim() !== '';
+
+		console.log(`🔍 CONDITIONAL_DEBUG: Processing {{#unless ${trimmedVariableName}}}`);
+		console.log(`🔍 CONDITIONAL_DEBUG: Variable value: "${variableValue}"`);
+		console.log(`🔍 CONDITIONAL_DEBUG: Has value: ${hasValue}`);
+
+		if (!hasValue) {
+			// Keep the content if variable is falsy (opposite of #if)
+			console.log(`🔍 CONDITIONAL_DEBUG: Keeping content for unless ${trimmedVariableName}`);
+			return content;
+		} else {
+			// Remove the block if variable is truthy
+			console.log(`🔍 CONDITIONAL_DEBUG: Removing unless block for ${trimmedVariableName}`);
+			return '';
+		}
+	});
+
+	return processedHTML;
+}
+
 export class DirectMail implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Direct Mail',
@@ -581,6 +644,19 @@ export class DirectMail implements INodeType {
 							(body.to as IDataObject).address_line2 = address2;
 						}
 
+						// Preprocess HTML for conditional logic (only for HTML content, not template IDs)
+						let finalFileContent = fileContent;
+						if (templateType === 'html' && Object.keys(mergeVariables).length > 0) {
+							console.log(`🔍 PREPROCESSING: Starting conditional HTML processing...`);
+							console.log(`🔍 PREPROCESSING: Original HTML length: ${fileContent.length}`);
+							finalFileContent = preprocessConditionalHTML(fileContent, mergeVariables);
+							console.log(`🔍 PREPROCESSING: Processed HTML length: ${finalFileContent.length}`);
+							console.log(`🔍 PREPROCESSING: HTML changed: ${fileContent !== finalFileContent}`);
+						}
+
+						// Update the body with processed content
+						body.file = finalFileContent;
+
 						// Add merge variables if provided
 						if (Object.keys(mergeVariables).length > 0) {
 							body.merge_variables = mergeVariables;
@@ -617,8 +693,8 @@ export class DirectMail implements INodeType {
 									// Get all template variables that were provided
 									const providedVariables = Object.keys(mergeVariables);
 
-									// Extract all variables from the HTML template/content
-									const templateVariableMatches = fileContent.match(/\{\{([^}]+)\}\}/g) || [];
+									// Extract all variables from the processed HTML template/content
+									const templateVariableMatches = finalFileContent.match(/\{\{([^}]+)\}\}/g) || [];
 									const templateVariables = templateVariableMatches.map(match =>
 										match.replace(/\{\{|\}\}/g, '').trim()
 									).filter((value, index, self) => self.indexOf(value) === index); // Remove duplicates
