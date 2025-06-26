@@ -8,6 +8,106 @@ import type {
 } from 'n8n-workflow';
 import { NodeOperationError, NodeConnectionType } from 'n8n-workflow';
 
+// Country code normalization utility
+interface CountryCodeMapping {
+	[key: string]: string;
+}
+
+const COUNTRY_CODE_MAPPINGS: CountryCodeMapping = {
+	// Common variations for United States
+	'USA': 'US',
+	'UNITED STATES': 'US',
+	'UNITED STATES OF AMERICA': 'US',
+	'US': 'US',
+	'AMERICA': 'US',
+
+	// Common variations for Canada
+	'CAN': 'CA',
+	'CANADA': 'CA',
+	'CA': 'CA',
+
+	// Common variations for United Kingdom
+	'UK': 'GB',
+	'UNITED KINGDOM': 'GB',
+	'GREAT BRITAIN': 'GB',
+	'BRITAIN': 'GB',
+	'ENGLAND': 'GB',
+	'SCOTLAND': 'GB',
+	'WALES': 'GB',
+	'GBR': 'GB',
+	'GB': 'GB',
+
+	// Common variations for Germany
+	'GERMANY': 'DE',
+	'DEUTSCHLAND': 'DE',
+	'DEU': 'DE',
+	'DE': 'DE',
+
+	// Common variations for France
+	'FRANCE': 'FR',
+	'FRA': 'FR',
+	'FR': 'FR',
+
+	// Common variations for Australia
+	'AUSTRALIA': 'AU',
+	'AUS': 'AU',
+	'AU': 'AU',
+
+	// Common variations for Japan
+	'JAPAN': 'JP',
+	'JPN': 'JP',
+	'JP': 'JP',
+
+	// Add more as needed...
+};
+
+function normalizeCountryCode(countryInput: string): string {
+	// Handle null, undefined, or empty string
+	if (!countryInput || typeof countryInput !== 'string') {
+		return 'US'; // Default to US if no country provided
+	}
+
+	// Clean up the input: trim whitespace and convert to uppercase
+	const normalizedInput = countryInput.trim().toUpperCase();
+
+	// If still empty after trimming, default to US
+	if (!normalizedInput) {
+		return 'US';
+	}
+
+	// Check if it's already a valid 2-letter code (basic validation)
+	if (normalizedInput.length === 2 && /^[A-Z]{2}$/.test(normalizedInput)) {
+		return normalizedInput;
+	}
+
+	// Look up in our mapping
+	const mappedCode = COUNTRY_CODE_MAPPINGS[normalizedInput];
+	if (mappedCode) {
+		return mappedCode;
+	}
+
+	// If no mapping found, try to extract just the first 2 letters if it looks like a country code
+	if (normalizedInput.length >= 2 && /^[A-Z]+$/.test(normalizedInput)) {
+		const firstTwoLetters = normalizedInput.substring(0, 2);
+		// Check if first two letters are a valid mapping
+		if (COUNTRY_CODE_MAPPINGS[firstTwoLetters]) {
+			return COUNTRY_CODE_MAPPINGS[firstTwoLetters];
+		}
+		// If it's exactly 2 letters, assume it's a country code
+		if (normalizedInput.length === 2) {
+			return normalizedInput;
+		}
+	}
+
+	// Last resort: default to US for common US variations
+	if (normalizedInput.includes('US') || normalizedInput.includes('AMERICA') || normalizedInput.includes('UNITED')) {
+		return 'US';
+	}
+
+	// If no mapping found, return US as default (safer than potentially invalid code)
+	return 'US';
+}
+
 export class Stannp implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Direct Mail',
@@ -104,11 +204,71 @@ export class Stannp implements INodeType {
 				description: 'Whether to run in test or production mode (Stannp only - Lob uses credential environment)',
 			},
 			{
+				displayName: 'Template Type',
+				name: 'templateType',
+				type: 'options',
+				displayOptions: {
+					show: {
+						service: ['lob'],
+					},
+				},
+				options: [
+					{
+						name: 'Lob Template ID',
+						value: 'template_id',
+						description: 'Use a template created in Lob Dashboard',
+					},
+					{
+						name: 'HTML Content',
+						value: 'html',
+						description: 'Provide HTML content directly',
+					},
+				],
+				default: 'template_id',
+				description: 'How to specify the letter content for Lob',
+			},
+			{
 				displayName: 'Template ID',
 				name: 'template',
 				type: 'string',
+				displayOptions: {
+					show: {
+						service: ['stannp'],
+					},
+				},
 				default: '',
-				description: 'Your template ID (Stannp) or Letter Template HTML (Lob)',
+				description: 'Your Stannp template ID',
+				required: true,
+			},
+			{
+				displayName: 'Lob Template ID',
+				name: 'lobTemplateId',
+				type: 'string',
+				displayOptions: {
+					show: {
+						service: ['lob'],
+						templateType: ['template_id'],
+					},
+				},
+				default: '',
+				description: 'Template ID from Lob Dashboard (e.g., tmpl_xxxxxxxxxxxx)',
+				required: true,
+			},
+			{
+				displayName: 'HTML Content',
+				name: 'htmlContent',
+				type: 'string',
+				typeOptions: {
+					rows: 10,
+				},
+				displayOptions: {
+					show: {
+						service: ['lob'],
+						templateType: ['html'],
+					},
+				},
+				default: '',
+				description: 'HTML content for the letter with merge variables like {{variable_name}}',
 				required: true,
 			},
 			// Recipient information
@@ -179,7 +339,98 @@ export class Stannp implements INodeType {
 				name: 'country',
 				type: 'string',
 				default: 'US',
-				description: 'Country code (e.g. US)',
+				description: 'ISO-3166 alpha-2 country code (e.g., "US" for United States, "CA" for Canada, "GB" for United Kingdom). Common variations like "USA" will be automatically converted to "US".',
+				required: true,
+			},
+			// Sender information (Lob only)
+			{
+				displayName: 'Sender Name',
+				name: 'senderName',
+				type: 'string',
+				displayOptions: {
+					show: {
+						service: ['lob'],
+					},
+				},
+				default: 'Your Company Name',
+				description: 'Name of the sender (required for Lob)',
+				required: true,
+			},
+			{
+				displayName: 'Sender Address Line 1',
+				name: 'senderAddress1',
+				type: 'string',
+				displayOptions: {
+					show: {
+						service: ['lob'],
+					},
+				},
+				default: '',
+				description: 'Sender address line 1 (required for Lob)',
+				required: true,
+			},
+			{
+				displayName: 'Sender City',
+				name: 'senderCity',
+				type: 'string',
+				displayOptions: {
+					show: {
+						service: ['lob'],
+					},
+				},
+				default: '',
+				description: 'Sender city (required for Lob)',
+				required: true,
+			},
+			{
+				displayName: 'Sender State',
+				name: 'senderState',
+				type: 'string',
+				displayOptions: {
+					show: {
+						service: ['lob'],
+					},
+				},
+				default: '',
+				description: 'Sender state (required for Lob)',
+				required: true,
+			},
+			{
+				displayName: 'Sender ZIP Code',
+				name: 'senderZip',
+				type: 'string',
+				displayOptions: {
+					show: {
+						service: ['lob'],
+					},
+				},
+				default: '',
+				description: 'Sender ZIP code (required for Lob)',
+				required: true,
+			},
+			{
+				displayName: 'Mail Use Type',
+				name: 'mailUseType',
+				type: 'options',
+				displayOptions: {
+					show: {
+						service: ['lob'],
+					},
+				},
+				options: [
+					{
+						name: 'Marketing',
+						value: 'marketing',
+						description: 'Marketing mail (promotional content)',
+					},
+					{
+						name: 'Operational',
+						value: 'operational',
+						description: 'Operational mail (transactional/account notifications)',
+					},
+				],
+				default: 'operational',
+				description: 'Type of mail being sent (required for Lob compliance)',
 				required: true,
 			},
 			// Template variables section
@@ -250,14 +501,39 @@ export class Stannp implements INodeType {
 						const credentials = await this.getCredentials('lobApi');
 						const apiKey = credentials.apiKey as string;
 
-						const template = this.getNodeParameter('template', i) as string;
+						const templateType = this.getNodeParameter('templateType', i) as string;
+						let fileContent: string;
+
+						if (templateType === 'template_id') {
+							// Use Lob template ID
+							fileContent = this.getNodeParameter('lobTemplateId', i) as string;
+						} else {
+							// Use HTML content
+							fileContent = this.getNodeParameter('htmlContent', i) as string;
+						}
+
 						const firstName = this.getNodeParameter('recipientFirstName', i) as string;
 						const lastName = this.getNodeParameter('recipientLastName', i) as string;
 						const address1 = this.getNodeParameter('address1', i) as string;
 						const town = this.getNodeParameter('town', i) as string;
 						const region = this.getNodeParameter('region', i) as string;
 						const zipcode = this.getNodeParameter('zipcode', i) as string;
-						const country = this.getNodeParameter('country', i) as string;
+												const countryRaw = this.getNodeParameter('country', i) as string;
+						const country = normalizeCountryCode(countryRaw);
+
+						// Debug logging for country code normalization
+						console.log(`🔍 COUNTRY_DEBUG [${this.getNode().name}]: Raw country input: "${countryRaw}"`);
+						console.log(`🔍 COUNTRY_DEBUG [${this.getNode().name}]: Normalized country: "${country}"`);
+						console.log(`🔍 COUNTRY_DEBUG [${this.getNode().name}]: Country length: ${countryRaw?.length || 'undefined'}`);
+						console.log(`🔍 COUNTRY_DEBUG [${this.getNode().name}]: Has trailing space: ${countryRaw?.endsWith(' ') || false}`);
+
+						// Sender information (required for Lob)
+						const senderName = this.getNodeParameter('senderName', i) as string;
+						const senderAddress1 = this.getNodeParameter('senderAddress1', i) as string;
+						const senderCity = this.getNodeParameter('senderCity', i) as string;
+						const senderState = this.getNodeParameter('senderState', i) as string;
+						const senderZip = this.getNodeParameter('senderZip', i) as string;
+						const mailUseType = this.getNodeParameter('mailUseType', i) as string;
 
 						// Optional fields
 						const address2 = this.getNodeParameter('address2', i, '') as string;
@@ -275,7 +551,7 @@ export class Stannp implements INodeType {
 							}
 						}
 
-						// Prepare Lob API request body
+												// Prepare Lob API request body
 						const body: IDataObject = {
 							description: `Letter for ${firstName} ${lastName}`,
 							to: {
@@ -286,9 +562,18 @@ export class Stannp implements INodeType {
 								address_zip: zipcode,
 								address_country: country,
 							},
-							file: template, // This could be a template ID or HTML content
+							from: {
+								name: senderName,
+								address_line1: senderAddress1,
+								address_city: senderCity,
+								address_state: senderState,
+								address_zip: senderZip,
+								address_country: "US", // Sender assumed to be US-based for now
+							},
+							file: fileContent, // Template ID or HTML content
 							color: false, // Default to black and white
 							double_sided: false, // Default to single sided
+							use_type: mailUseType, // Required for Lob compliance
 						};
 
 						// Add optional address line 2
@@ -337,7 +622,8 @@ export class Stannp implements INodeType {
 						const town = this.getNodeParameter('town', i) as string;
 						const region = this.getNodeParameter('region', i) as string;
 						const zipcode = this.getNodeParameter('zipcode', i) as string;
-						const country = this.getNodeParameter('country', i) as string;
+						const countryRaw = this.getNodeParameter('country', i) as string;
+						const country = normalizeCountryCode(countryRaw);
 
 						// Optional fields
 						const address2 = this.getNodeParameter('address2', i, '') as string;
@@ -405,15 +691,34 @@ export class Stannp implements INodeType {
 				}
 			} catch (error) {
 				const continueOnFail = this.getNodeParameter('options.continueOnFail', i, false) as boolean;
+
+				// Enhanced error handling for country code issues
+				let enhancedError = error;
+				if (error.message && (
+					error.message.includes('ISO-3166') ||
+					error.message.includes('country code') ||
+					error.message.includes('invalid country')
+				)) {
+					const countryRaw = this.getNodeParameter('country', i, '') as string;
+					const normalizedCountry = normalizeCountryCode(countryRaw);
+
+					enhancedError = new Error(
+						`Country code error: "${countryRaw}" was normalized to "${normalizedCountry}" but still failed. ` +
+						`Please use a valid ISO-3166 alpha-2 country code (e.g., "US" for United States, "CA" for Canada, "GB" for United Kingdom). ` +
+						`Original error: ${error.message}`
+					);
+					enhancedError.statusCode = error.statusCode;
+				}
+
 				if (continueOnFail) {
 					const executionErrorData = this.helpers.constructExecutionMetaData(
-						this.helpers.returnJsonArray({ error: error.message }),
+						this.helpers.returnJsonArray({ error: enhancedError.message }),
 						{ itemData: { item: i } },
 					);
 					returnData.push(...executionErrorData);
 					continue;
 				}
-				throw new NodeOperationError(this.getNode(), error, {
+				throw new NodeOperationError(this.getNode(), enhancedError, {
 					itemIndex: i,
 				});
 			}
