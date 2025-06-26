@@ -10,7 +10,7 @@ import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
 import type { UpdateRecord } from '../../helpers/interfaces';
 import { processAirtableError, removeIgnored, removeEmptyFields, validateLinkedRecordFields } from '../../helpers/utils';
 import { apiRequest, apiRequestAllItems, batchUpdate } from '../../transport';
-import { insertUpdateOptions } from '../common.descriptions';
+import { insertUpdateOptions, linkedTablesConfiguration } from '../common.descriptions';
 import { processRecordFields, type ArrayHandlingOptions } from '../../helpers/arrayHandlingUtils';
 
 const properties: INodeProperties[] = [
@@ -96,6 +96,7 @@ const properties: INodeProperties[] = [
 		],
 	},
 	...insertUpdateOptions,
+	linkedTablesConfiguration,
 ];
 
 const displayOptions = {
@@ -416,8 +417,18 @@ export async function execute(
 			}
 		}
 
+						let dataToWrap = responseData.records as IDataObject[];
+
+			// Include input data if option is enabled
+			if (options.includeInputData) {
+				dataToWrap = dataToWrap.map((result) => ({
+					...result,
+					inputData: items[i].json,
+				}));
+			}
+
 			const executionData = this.helpers.constructExecutionMetaData(
-				wrapData(responseData.records as IDataObject[]),
+				wrapData(dataToWrap),
 				{ itemData: { item: i } },
 			);
 

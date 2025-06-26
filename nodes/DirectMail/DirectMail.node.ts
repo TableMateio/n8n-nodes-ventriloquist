@@ -108,11 +108,11 @@ function normalizeCountryCode(countryInput: string): string {
 	return 'US';
 }
 
-export class Stannp implements INodeType {
+export class DirectMail implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Direct Mail',
 		name: 'stannp',
-		icon: 'file:stannp.svg',
+		icon: 'file:directmail.svg',
 		group: ['output'],
 		version: 1,
 		subtitle: '={{$parameter["service"] + " - " + $parameter["operation"]}}',

@@ -897,7 +897,7 @@ export const description: INodeProperties[] = [
 
 // Add helper function for fuzzy field name matching
 function findMatchingFieldName(targetFieldName: string, aiDataKeys: string[]): string | null {
-	// First try exact match
+	// First try exact match - this is the safest
 	if (aiDataKeys.includes(targetFieldName)) {
 		return targetFieldName;
 	}
@@ -908,13 +908,56 @@ function findMatchingFieldName(targetFieldName: string, aiDataKeys: string[]): s
 
 	const normalizedTarget = normalizeFieldName(targetFieldName);
 
-	// Try to find a matching field by normalized comparison
+	// Try to find a matching field by normalized comparison - but be very careful
 	for (const aiKey of aiDataKeys) {
 		if (normalizeFieldName(aiKey) === normalizedTarget) {
 			return aiKey;
 		}
 	}
 
+	// CAREFUL: Partial matching - only for cases where AI added extra words
+	// We need to be very strict to avoid "Address" matching "Addresses"
+	const targetWords = targetFieldName.toLowerCase().split(/\s+/);
+
+	// Only attempt partial matching if target has multiple words OR if the difference is very specific
+	if (targetWords.length > 1) {
+		for (const aiKey of aiDataKeys) {
+			const aiKeyLower = aiKey.toLowerCase();
+			const aiWords = aiKey.toLowerCase().split(/\s+/);
+
+			// SAFETY CHECK: Ensure this isn't a collision with a similar field name
+			// Check if ALL target words are present AND the AI key only added extra words (not changed existing ones)
+			if (targetWords.every(word => aiKeyLower.includes(word))) {
+				// Additional safety: make sure the AI key starts with or contains the target as a phrase
+				const targetPhrase = targetFieldName.toLowerCase();
+				if (aiKeyLower.includes(targetPhrase)) {
+					// Final safety: check length difference isn't too extreme (avoid matching completely different fields)
+					const lengthDiff = Math.abs(aiKey.length - targetFieldName.length);
+					if (lengthDiff <= 20) { // Allow reasonable additions like " and Time"
+						return aiKey;
+					}
+				}
+			}
+		}
+	}
+
+	// VERY STRICT: Only handle obvious AI-added suffixes for single-word fields
+	// This handles "Date" -> "Date and Time" but NOT "Address" -> "Addresses"
+	const commonAISuffixes = [' and time', ' and date', ' information', ' data', ' field'];
+	for (const aiKey of aiDataKeys) {
+		const aiKeyLower = aiKey.toLowerCase();
+		const targetLower = targetFieldName.toLowerCase();
+
+		// Check if AI key starts with the exact target and only adds a known safe suffix
+		if (aiKeyLower.startsWith(targetLower)) {
+			const suffix = aiKeyLower.substring(targetLower.length);
+			if (commonAISuffixes.some(safeSuffix => suffix === safeSuffix)) {
+				return aiKey;
+			}
+		}
+	}
+
+	// If no safe match found, return null rather than risk a collision
 	return null;
 }
 
@@ -1767,6 +1810,20 @@ export async function execute(
 														`Field [${fieldName}] not found in AI-processed data for [${item.name}]. Available fields: ${aiDataKeys.join(', ')}`
 													)
 												);
+
+												// Add debug logging to help understand the field matching issue
+												if (debugMode) {
+													logWithDebug(
+														this.logger,
+														true,
+														nodeName,
+														'extraction',
+														'extract.operation',
+														'execute',
+														`FIELD MATCHING DEBUG: Target field "${fieldName}" not matched. Available AI fields: [${aiDataKeys.join(', ')}]`,
+														'error'
+													);
+												}
 
 												// Set to null to ensure the field exists in the output
 												fieldBasedResult[fieldName] = null;

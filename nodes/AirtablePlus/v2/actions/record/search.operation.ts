@@ -75,6 +75,13 @@ const properties: INodeProperties[] = [
 				description: 'Whether to include fields that are empty/null in Airtable (normally these are omitted from the response)',
 			},
 			{
+				displayName: 'Include Input Data',
+				name: 'includeInputData',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to include the original input data alongside the Airtable response data',
+			},
+			{
 				// eslint-disable-next-line n8n-nodes-base/node-param-display-name-wrong-for-dynamic-multi-options
 				displayName: 'Output Fields',
 				name: 'fields',
@@ -313,9 +320,21 @@ export async function execute(
 				continue;
 			}
 
-			const convertedRecords = records.map((record) => ({
-				json: flattenOutput(record),
-			})) as INodeExecutionData[];
+			const convertedRecords = records.map((record) => {
+				let outputData = flattenOutput(record);
+
+				// Include input data if option is enabled
+				if (options.includeInputData && items[i]) {
+					outputData = {
+						...outputData,
+						inputData: items[i].json,
+					};
+				}
+
+				return {
+					json: outputData,
+				};
+			}) as INodeExecutionData[];
 
 			const itemData = fallbackPairedItems || [{ item: i }];
 

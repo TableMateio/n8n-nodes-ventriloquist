@@ -1546,6 +1546,46 @@ IMPORTANT GUIDELINES:
                     )
                   );
 
+                  // CRITICAL: Validate that function arguments contain only the exact field names from our schema
+                  // This prevents the AI from changing field names like "Start Date" to "Start Date and Time"
+                  if (functionName === 'extract_data') {
+                    const receivedFieldNames = Object.keys(functionArgs);
+
+                    // Log what we received vs what we expected
+                    if (isDebugMode) {
+                      this.logger.error(
+                        formatOperationLog(
+                          "SmartExtraction",
+                          nodeName,
+                          nodeId,
+                          index,
+                          `[FIELD VALIDATION] Function returned fields: ${JSON.stringify(receivedFieldNames)}`
+                        )
+                      );
+                    }
+
+                    // Check if this function call contains unexpected field names
+                    // Note: We can't easily access the original schema here, but we can detect
+                    // common issues like fields with "and Time" suffixes
+                    const suspiciousFields = receivedFieldNames.filter(fieldName =>
+                      fieldName.includes(' and Time') ||
+                      fieldName.includes(' and Date') ||
+                      fieldName.length > 50 // Suspiciously long field names
+                    );
+
+                    if (suspiciousFields.length > 0) {
+                      this.logger.warn(
+                        formatOperationLog(
+                          "SmartExtraction",
+                          nodeName,
+                          nodeId,
+                          index,
+                          `[FIELD VALIDATION WARNING] AI returned suspicious field names that may not match schema: ${JSON.stringify(suspiciousFields)}`
+                        )
+                      );
+                    }
+                  }
+
                   // Here we would normally actually execute the function
                   // But for extraction functions, we're just going to return the parsed args directly
                   // This effectively tells the assistant "yes, I extracted this data"
@@ -2615,12 +2655,15 @@ ${examplesSection}
       batchPrompt += `\n\nINSTRUCTIONS:
 1. Analyze the content carefully
 2. Extract each field according to its specifications
-3. Return the data in a ${outputStructure === 'array' ? 'properly formatted array of objects' : 'properly formatted object'}
-${outputStructure === 'array' ? '4. The response should be an array containing objects with the field properties, even if there is only one object' : ''}
-${outputStructure === 'object' ? '4. CRITICAL: Since output structure is "object", you must extract data for exactly ONE entity/record only. Call the extract_data function ONLY ONCE. Do not make multiple function calls.' : ''}
-5. Use appropriate data types for each field (string, number, boolean, etc.)
-6. If a field is not found, set its value to null
-${outputStructure === 'object' ? '\n7. IMPORTANT: Make only ONE function call to extract_data, not multiple calls. Return data for the single most relevant entity based on the instructions.' : ''}
+3. CRITICAL: Use the EXACT field names as provided in the schema definition. Do not modify, expand, or change field names in any way.
+4. The exact field names you must use are: ${cleanFields.map(f => `"${f.name}"`).join(', ')}
+5. Return the data in a ${outputStructure === 'array' ? 'properly formatted array of objects' : 'properly formatted object'}
+${outputStructure === 'array' ? '6. The response should be an array containing objects with the field properties, even if there is only one object' : ''}
+${outputStructure === 'object' ? '6. CRITICAL: Since output structure is "object", you must extract data for exactly ONE entity/record only. Call the extract_data function ONLY ONCE. Do not make multiple function calls.' : ''}
+7. Use appropriate data types for each field (string, number, boolean, etc.)
+8. If a field is not found, set its value to null
+${outputStructure === 'object' ? '\n9. IMPORTANT: Make only ONE function call to extract_data, not multiple calls. Return data for the single most relevant entity based on the instructions.' : ''}
+10. DO NOT rename fields or add suffixes like "and Time" or "and Date" - use the exact field names provided above.
 
 Ensure that your response is valid JSON that can be parsed directly.`;
 

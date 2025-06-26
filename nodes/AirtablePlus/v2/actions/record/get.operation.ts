@@ -52,6 +52,13 @@ const properties: INodeProperties[] = [
 				default: false,
 				description: 'Whether to include fields that are empty/null in Airtable (normally these are omitted from the response)',
 			},
+			{
+				displayName: 'Include Input Data',
+				name: 'includeInputData',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to include the original input data alongside the Airtable response data',
+			},
 		],
 	},
 	{
@@ -179,8 +186,18 @@ export async function execute(
 				}
 			}
 
+						let dataToWrap = [flattenOutput(record)];
+
+			// Include input data if option is enabled
+			if (options.includeInputData) {
+				dataToWrap = dataToWrap.map((result) => ({
+					...result,
+					inputData: items[i].json,
+				}));
+			}
+
 			const executionData = this.helpers.constructExecutionMetaData(
-				wrapData([flattenOutput(record)]),
+				wrapData(dataToWrap),
 				{ itemData: { item: i } },
 			);
 

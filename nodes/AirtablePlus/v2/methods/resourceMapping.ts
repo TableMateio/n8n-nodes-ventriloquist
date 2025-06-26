@@ -139,23 +139,6 @@ export async function getColumnsWithRecordId(
 
 export async function getColumnsForTargetTable(this: ILoadOptionsFunctions): Promise<ResourceMapperFields> {
 	try {
-		// FIRST: Check if we already have a preserved schema with actual fields
-		// Look through all linked table entries to find a preserved schema
-		try {
-			const linkedTablesConfig = this.getNodeParameter('linkedTablesConfig', undefined, {}) as any;
-			if (linkedTablesConfig?.linkedTables && Array.isArray(linkedTablesConfig.linkedTables)) {
-				for (const entry of linkedTablesConfig.linkedTables) {
-					const preservedSchema = entry?.columns?.schema;
-					if (preservedSchema && Array.isArray(preservedSchema) && preservedSchema.length > 0) {
-						console.log(`✅ [Airtable Plus] Using preserved schema with ${preservedSchema.length} fields`);
-						return { fields: preservedSchema };
-					}
-				}
-			}
-		} catch (e) {
-			// Expected when no config exists yet
-		}
-
 		// Get the base from the node context - this should always be accessible
 		const base = this.getNodeParameter('base', undefined, {
 			extractValue: true,
@@ -163,6 +146,14 @@ export async function getColumnsForTargetTable(this: ILoadOptionsFunctions): Pro
 
 		// Try multiple approaches to find the target table parameter
 		let targetTableParam: string | null = null;
+
+		// Get linkedTablesConfig ONCE to minimize logging
+		let linkedTablesConfig: any = null;
+		try {
+			linkedTablesConfig = this.getNodeParameter('linkedTablesConfig', undefined, {}) as any;
+		} catch (e) {
+			// Expected when no config exists yet
+		}
 
 		// Try direct and relative access approaches (usually fail in fixedCollection context)
 		const directPaths = ['targetTable', '../targetTable', './targetTable'];
@@ -177,26 +168,19 @@ export async function getColumnsForTargetTable(this: ILoadOptionsFunctions): Pro
 			}
 		}
 
-		// Try collection path - check all linked table entries
-		if (!targetTableParam) {
-			try {
-				const linkedTablesConfig = this.getNodeParameter('linkedTablesConfig', undefined, {}) as any;
-				if (linkedTablesConfig?.linkedTables && Array.isArray(linkedTablesConfig.linkedTables)) {
-					for (let i = 0; i < linkedTablesConfig.linkedTables.length; i++) {
-						const entry = linkedTablesConfig.linkedTables[i];
-						if (entry?.targetTable) {
-							if (typeof entry.targetTable === 'object' && entry.targetTable.value) {
-								targetTableParam = entry.targetTable.value;
-								break;
-							} else if (typeof entry.targetTable === 'string') {
-								targetTableParam = entry.targetTable;
-								break;
-							}
-						}
+		// Try collection path - use cached linkedTablesConfig
+		if (!targetTableParam && linkedTablesConfig?.linkedTables && Array.isArray(linkedTablesConfig.linkedTables)) {
+			for (let i = 0; i < linkedTablesConfig.linkedTables.length; i++) {
+				const entry = linkedTablesConfig.linkedTables[i];
+				if (entry?.targetTable) {
+					if (typeof entry.targetTable === 'object' && entry.targetTable.value) {
+						targetTableParam = entry.targetTable.value;
+						break;
+					} else if (typeof entry.targetTable === 'string') {
+						targetTableParam = entry.targetTable;
+						break;
 					}
 				}
-			} catch (e) {
-				// Failed to access linkedTablesConfig
 			}
 		}
 
@@ -216,8 +200,26 @@ export async function getColumnsForTargetTable(this: ILoadOptionsFunctions): Pro
 
 		if (!targetTableParam) {
 			// Return empty fields if no target table is selected yet
+			console.log('🔍 [Airtable Plus] No target table selected, returning empty fields');
 			return { fields: [] };
 		}
+
+		// NOW check if we have a preserved schema that MATCHES this specific target table
+		if (linkedTablesConfig?.linkedTables && Array.isArray(linkedTablesConfig.linkedTables)) {
+			for (const entry of linkedTablesConfig.linkedTables) {
+				// Check if this entry's target table matches our current target table
+				const entryTargetTable = entry?.targetTable?.value || entry?.targetTable;
+				if (entryTargetTable === targetTableParam) {
+					const preservedSchema = entry?.columns?.schema;
+					if (preservedSchema && Array.isArray(preservedSchema) && preservedSchema.length > 0) {
+						console.log(`✅ [Airtable Plus] Using preserved schema for table ${targetTableParam} with ${preservedSchema.length} fields`);
+						return { fields: preservedSchema };
+					}
+				}
+			}
+		}
+
+		console.log(`🔄 [Airtable Plus] Fetching fresh schema for target table: ${targetTableParam}`);
 
 		const targetTableId = encodeURI(targetTableParam);
 
@@ -264,6 +266,7 @@ export async function getColumnsForTargetTable(this: ILoadOptionsFunctions): Pro
 			});
 		}
 
+		console.log(`✨ [Airtable Plus] Generated fresh schema for table ${targetTableParam} with ${fields.length} fields`);
 		return { fields };
 	} catch (error) {
 		console.error('[Airtable Plus] ERROR in getColumnsForTargetTable:', error);

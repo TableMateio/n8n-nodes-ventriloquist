@@ -161,6 +161,57 @@ export async function getLinkedRecordFields(
 	return result;
 }
 
+export async function getTableColumns(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	try {
+		// Get base from parent context
+		const base = this.getNodeParameter('/base', undefined, {
+			extractValue: true,
+		}) as string;
+
+		// Get target table from current context - should work better in nested collections
+		let targetTableId: string;
+		try {
+			targetTableId = this.getNodeParameter('targetTable', undefined, {
+				extractValue: true,
+			}) as string;
+		} catch (error) {
+			console.log('🔍 getTableColumns - Could not access targetTable:', error.message);
+			return [];
+		}
+
+		if (!targetTableId) {
+			return [];
+		}
+
+		const response = await apiRequest.call(this, 'GET', `meta/bases/${base}/tables`);
+
+		const tableData = ((response.tables as IDataObject[]) || []).find((table: IDataObject) => {
+			return table.id === targetTableId;
+		});
+
+		if (!tableData) {
+			throw new NodeOperationError(this.getNode(), 'Target table information could not be found!', {
+				level: 'warning',
+			});
+		}
+
+		const result: INodePropertyOptions[] = [];
+
+		for (const field of tableData.fields as IDataObject[]) {
+			result.push({
+				name: field.name as string,
+				value: field.name as string,
+				description: `Type: ${field.type}`,
+			});
+		}
+
+		return result;
+	} catch (error) {
+		console.error('🔍 ERROR in getTableColumns:', error);
+		return [];
+	}
+}
+
 export async function getTables(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 	const base = this.getNodeParameter('base', undefined, {
 		extractValue: true,

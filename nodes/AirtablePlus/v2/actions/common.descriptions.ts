@@ -163,6 +163,90 @@ export const viewRLC: INodeProperties = {
 	],
 };
 
+export const linkedTablesConfiguration: INodeProperties = {
+	displayName: 'Linked Tables Configuration',
+	name: 'linkedTablesConfig',
+	type: 'fixedCollection',
+	default: { linkedTables: [] },
+	typeOptions: {
+		multipleValues: true,
+	},
+	description: 'Configure which linked tables to create records in and map their fields',
+	displayOptions: {
+		show: {
+			'/options.createLinkedRecords': [true],
+		},
+	},
+	options: [
+		{
+			name: 'linkedTables',
+			displayName: 'Linked Table',
+			values: [
+				{
+					displayName: 'Target Table',
+					name: 'targetTable',
+					type: 'resourceLocator',
+					default: { mode: 'list', value: '' },
+					required: true,
+					typeOptions: {
+						loadOptionsDependsOn: ['base.value'],
+					},
+					modes: [
+						{
+							displayName: 'From List',
+							name: 'list',
+							type: 'list',
+							typeOptions: {
+								searchListMethod: 'tableSearch',
+								searchable: true,
+							},
+						},
+						{
+							displayName: 'ID',
+							name: 'id',
+							type: 'string',
+							validation: [
+								{
+									type: 'regex',
+									properties: {
+										regex: '[a-zA-Z0-9]{2,}',
+										errorMessage: 'Not a valid Airtable Table ID',
+									},
+								},
+							],
+							placeholder: 'tbl3dirwqeidke',
+						},
+					],
+				},
+				{
+					displayName: 'Columns',
+					name: 'columns',
+					type: 'resourceMapper',
+					default: {
+						mappingMode: 'defineBelow',
+						value: null,
+					},
+					noDataExpression: true,
+					required: true,
+					typeOptions: {
+						loadOptionsDependsOn: ['base.value', 'targetTable.value'],
+						resourceMapper: {
+							resourceMapperMethod: 'getColumnsForTargetTable',
+							mode: 'add',
+							fieldWords: {
+								singular: 'column',
+								plural: 'columns',
+							},
+							addAllFields: true,
+							multiKeyMatch: false,
+						},
+					},
+				},
+			],
+		},
+	],
+};
+
 export const insertUpdateOptions: INodeProperties[] = [
 	{
 		displayName: 'Options',
@@ -198,6 +282,13 @@ export const insertUpdateOptions: INodeProperties[] = [
 				},
 				default: '',
 				description: 'Comma-separated list of fields in input to ignore when updating',
+			},
+			{
+				displayName: 'Include Input Data',
+				name: 'includeInputData',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to include the original input data alongside the Airtable response data',
 			},
 			{
 				displayName: 'Update All Matches',
@@ -257,6 +348,13 @@ export const insertUpdateOptions: INodeProperties[] = [
 						arrayMergeStrategy: ['append', 'union'],
 					},
 				},
+			},
+			{
+				displayName: 'Create Records in Linked Table',
+				name: 'createLinkedRecords',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to create records in linked tables and automatically link them to the main record',
 			},
 		],
 	},

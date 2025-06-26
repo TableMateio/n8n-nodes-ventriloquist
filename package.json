@@ -49,7 +49,7 @@
 			"dist/nodes/ExampleNode/ExampleNode.node.js",
 			"dist/nodes/HttpBin/HttpBin.node.js",
 			"dist/nodes/Ventriloquist/Ventriloquist.node.js",
-			"dist/nodes/Stannp/Stannp.node.js",
+			"dist/nodes/DirectMail/DirectMail.node.js",
 			"dist/nodes/Router/Router.node.js",
 			"dist/nodes/AirtablePlus/AirtablePlus.node.js",
 			"dist/nodes/Smarty/Smarty.node.js"

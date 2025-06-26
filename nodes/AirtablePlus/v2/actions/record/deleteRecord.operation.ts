@@ -22,6 +22,23 @@ const properties: INodeProperties[] = [
 		description:
 			'ID of the record to delete. <a href="https://support.airtable.com/docs/record-id" target="_blank">More info</a>.',
 	},
+	{
+		displayName: 'Options',
+		name: 'options',
+		type: 'collection',
+		default: {},
+		description: 'Additional options',
+		placeholder: 'Add option',
+		options: [
+			{
+				displayName: 'Include Input Data',
+				name: 'includeInputData',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to include the original input data alongside the Airtable response data',
+			},
+		],
+	},
 ];
 
 const displayOptions = {
@@ -45,11 +62,22 @@ export async function execute(
 		let id;
 		try {
 			id = this.getNodeParameter('id', i) as string;
+			const options = this.getNodeParameter('options', i, {});
 
-			const responseData = await apiRequest.call(this, 'DELETE', `${base}/${table}/${id}`);
+						const responseData = await apiRequest.call(this, 'DELETE', `${base}/${table}/${id}`);
+
+			let dataToWrap = responseData as IDataObject[];
+
+			// Include input data if option is enabled
+			if (options.includeInputData) {
+				dataToWrap = dataToWrap.map((result) => ({
+					...result,
+					inputData: items[i].json,
+				}));
+			}
 
 			const executionData = this.helpers.constructExecutionMetaData(
-				wrapData(responseData as IDataObject[]),
+				wrapData(dataToWrap),
 				{ itemData: { item: i } },
 			);
 

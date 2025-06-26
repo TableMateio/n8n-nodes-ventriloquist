@@ -9,7 +9,7 @@ import type {
 import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
 import { processAirtableError, removeIgnored, removeEmptyFields } from '../../helpers/utils';
 import { apiRequest } from '../../transport';
-import { insertUpdateOptions } from '../common.descriptions';
+import { insertUpdateOptions, linkedTablesConfiguration } from '../common.descriptions';
 
 const properties: INodeProperties[] = [
 	{
@@ -37,6 +37,7 @@ const properties: INodeProperties[] = [
 		},
 	},
 	...insertUpdateOptions,
+	linkedTablesConfiguration,
 ];
 
 const displayOptions = {
@@ -83,10 +84,28 @@ export async function execute(
 				body.fields = removeEmptyFields(body.fields as IDataObject);
 			}
 
-			const responseData = await apiRequest.call(this, 'POST', endpoint, body);
+						const responseData = await apiRequest.call(this, 'POST', endpoint, body);
+
+			let dataToWrap: IDataObject;
+
+			// Handle both single record and array responses
+			if (Array.isArray(responseData)) {
+				// If it's an array, take the first item for single record creation
+				dataToWrap = responseData[0] || responseData;
+			} else {
+				dataToWrap = responseData as IDataObject;
+			}
+
+			// Include input data if option is enabled
+			if (options.includeInputData) {
+				dataToWrap = {
+					...dataToWrap,
+					inputData: items[i].json,
+				};
+			}
 
 			const executionData = this.helpers.constructExecutionMetaData(
-				wrapData(responseData as IDataObject[]),
+				wrapData([dataToWrap]),
 				{ itemData: { item: i } },
 			);
 

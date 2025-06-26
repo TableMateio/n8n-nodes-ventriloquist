@@ -69,20 +69,21 @@ export const description: INodeProperties[] = [
 			{
 				name: 'Contacts Only',
 				value: 'contacts',
-				description: 'Output only contact records',
+				description: 'Create n8n items for contacts only (addresses still referenced within contacts)',
 			},
 			{
 				name: 'Addresses Only',
 				value: 'addresses',
-				description: 'Output only address records',
+				description: 'Create n8n items for addresses only',
 			},
 			{
 				name: 'Both Contacts and Addresses',
 				value: 'both',
-				description: 'Output both contact and address records',
+				description: 'Create separate n8n items for both contacts and addresses',
 			},
 		],
 		default: 'both',
+		description: 'Choose what type of n8n items to create (does not affect data availability)',
 		displayOptions: {
 			show: {
 				operation: ['format'],
@@ -110,6 +111,31 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ['format'],
+			},
+		},
+	},
+	{
+		displayName: 'Address Data Format',
+		name: 'addressDataFormat',
+		type: 'options',
+		options: [
+			{
+				name: 'Reference IDs',
+				value: 'references',
+				description: 'Store address IDs for linking in Airtable workflows',
+			},
+			{
+				name: 'Embedded Objects',
+				value: 'embedded',
+				description: 'Include full address data within contact records',
+			},
+		],
+		default: 'references',
+		description: 'How to include address data in contact records',
+		displayOptions: {
+			show: {
+				operation: ['format'],
+				outputFormat: ['contacts', 'both'],
 			},
 		},
 	},
@@ -511,6 +537,35 @@ class IDIToContactsConverter {
 	}
 }
 
+// Helper function to embed address data in contacts
+function embedAddressData(contacts: IContactRecord[], addresses: IAddressRecord[]): IContactRecord[] {
+	// Create a lookup map for addresses by ID
+	const addressMap = new Map();
+	addresses.forEach(address => {
+		addressMap.set(address.id, address);
+	});
+
+	// Process each contact and embed address data
+	return contacts.map(contact => {
+		const updatedContact = { ...contact };
+
+		// Replace Contact Addresses references with embedded objects
+		if (contact['Contact Addresses'] && Array.isArray(contact['Contact Addresses'])) {
+			updatedContact['Contact Addresses'] = contact['Contact Addresses'].map(addressId => {
+				const address = addressMap.get(addressId);
+				if (address) {
+					// Return embedded address object (without the reverse Contacts reference to avoid circular data)
+					const { Contacts, ...addressData } = address;
+					return addressData;
+				}
+				return addressId; // Fallback to ID if address not found
+			});
+		}
+
+		return updatedContact;
+	});
+}
+
 // Helper function to parse CSV - handles quoted fields and commas within quotes
 function parseCSV(csvData: string): any[] {
 	const lines = csvData.split('\n');
@@ -564,6 +619,7 @@ export async function execute(
 	const outputFormat = this.getNodeParameter('outputFormat', index, 'both') as string;
 	const includeRelatives = this.getNodeParameter('includeRelatives', index, true) as boolean;
 	const includePropertyData = this.getNodeParameter('includePropertyData', index, false) as boolean;
+	const addressDataFormat = this.getNodeParameter('addressDataFormat', index, 'references') as string;
 
 	const converter = new IDIToContactsConverter();
 	const returnData: INodeExecutionData[] = [];
@@ -594,10 +650,16 @@ export async function execute(
 				originalFileName: binaryData.fileName || 'unknown.csv',
 			};
 
+			// Apply address data format if needed
+			let finalContacts = result.contacts;
+			if (addressDataFormat === 'embedded' && (outputFormat === 'contacts' || outputFormat === 'both')) {
+				finalContacts = embedAddressData(result.contacts, result.addresses);
+			}
+
 			// Return data based on output format
 			switch (outputFormat) {
 				case 'contacts':
-					result.contacts.forEach((contact, contactIndex) => {
+					finalContacts.forEach((contact, contactIndex) => {
 						returnData.push({
 							json: {
 								...contact,
@@ -623,7 +685,7 @@ export async function execute(
 				case 'both':
 				default:
 					// Add all contacts first
-					result.contacts.forEach((contact, contactIndex) => {
+					finalContacts.forEach((contact, contactIndex) => {
 						returnData.push({
 							json: {
 								...contact,
@@ -650,10 +712,16 @@ export async function execute(
 		// Process single JSON row (original behavior)
 		const result = converter.processIDIRow(item.json, includeRelatives);
 
+		// Apply address data format if needed
+		let finalContacts = result.contacts;
+		if (addressDataFormat === 'embedded' && (outputFormat === 'contacts' || outputFormat === 'both')) {
+			finalContacts = embedAddressData(result.contacts, result.addresses);
+		}
+
 		// Return data based on output format
 		switch (outputFormat) {
 			case 'contacts':
-				result.contacts.forEach(contact => {
+				finalContacts.forEach(contact => {
 					returnData.push({
 						json: contact,
 						pairedItem: { item: index },
@@ -673,7 +741,7 @@ export async function execute(
 			case 'both':
 			default:
 				// Add all contacts first
-				result.contacts.forEach(contact => {
+				finalContacts.forEach(contact => {
 					returnData.push({
 						json: {
 							...contact,
