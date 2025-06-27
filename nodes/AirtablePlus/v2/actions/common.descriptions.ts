@@ -163,33 +163,21 @@ export const viewRLC: INodeProperties = {
 	],
 };
 
-export const linkedTablesConfiguration: INodeProperties = {
-	displayName: 'Linked Tables Configuration',
-	name: 'linkedTablesConfig',
-	type: 'fixedCollection',
-	default: { linkedTables: [] },
+// Individual top-level parameters for linked table (single table only)
+export const linkedTargetTable: INodeProperties = {
+	displayName: 'Target Linked Table',
+	name: 'linkedTargetTable',
+	type: 'resourceLocator',
+	default: { mode: 'list', value: '' },
+	required: true,
 	typeOptions: {
-		multipleValues: true,
+		loadOptionsDependsOn: ['base.value'],
 	},
-	description: 'Configure which linked tables to create records in and map their fields',
+	description: 'The linked table where new records will be created',
 	displayOptions: {
 		show: {
-			'/options.createLinkedRecords': [true],
+			'createLinkedRecords': [true],
 		},
-	},
-	options: [
-		{
-			name: 'linkedTables',
-			displayName: 'Linked Table',
-			values: [
-				{
-					displayName: 'Target Table',
-					name: 'targetTable',
-					type: 'resourceLocator',
-					default: { mode: 'list', value: '' },
-					required: true,
-					typeOptions: {
-						loadOptionsDependsOn: ['base.value'],
 					},
 					modes: [
 						{
@@ -201,6 +189,25 @@ export const linkedTablesConfiguration: INodeProperties = {
 								searchable: true,
 							},
 						},
+		{
+			displayName: 'By URL',
+			name: 'url',
+			type: 'string',
+			placeholder: 'https://airtable.com/app12DiScdfes/tblAAAAAAAAAAAAA/viwHdfasdfeieg5p',
+			validation: [
+				{
+					type: 'regex',
+					properties: {
+						regex: 'https://airtable.com/[a-zA-Z0-9]{2,}/([a-zA-Z0-9]{2,})/.*',
+						errorMessage: 'Not a valid Airtable Table URL',
+					},
+				},
+			],
+			extractValue: {
+				type: 'regex',
+				regex: 'https://airtable.com/[a-zA-Z0-9]{2,}/([a-zA-Z0-9]{2,})',
+			},
+		},
 						{
 							displayName: 'ID',
 							name: 'id',
@@ -217,10 +224,11 @@ export const linkedTablesConfiguration: INodeProperties = {
 							placeholder: 'tbl3dirwqeidke',
 						},
 					],
-				},
-				{
-					displayName: 'Columns',
-					name: 'columns',
+};
+
+export const linkedTableColumns: INodeProperties = {
+	displayName: 'Linked Table Columns',
+	name: 'linkedTableColumns',
 					type: 'resourceMapper',
 					default: {
 						mappingMode: 'defineBelow',
@@ -229,7 +237,7 @@ export const linkedTablesConfiguration: INodeProperties = {
 					noDataExpression: true,
 					required: true,
 					typeOptions: {
-						loadOptionsDependsOn: ['base.value', 'targetTable.value'],
+		loadOptionsDependsOn: ['base.value', 'linkedTargetTable.value'],
 						resourceMapper: {
 							resourceMapperMethod: 'getColumnsForTargetTable',
 							mode: 'add',
@@ -241,10 +249,25 @@ export const linkedTablesConfiguration: INodeProperties = {
 							multiKeyMatch: false,
 						},
 					},
-				},
-			],
+	description: 'Map data to the columns in the linked table',
+	displayOptions: {
+		show: {
+			'createLinkedRecords': [true],
 		},
-	],
+	},
+};
+
+export const createLinkedRecordsField: INodeProperties = {
+	displayName: 'Create Records in Linked Table',
+	name: 'createLinkedRecords',
+	type: 'boolean',
+	default: false,
+	description: 'Whether to create records in linked tables and automatically link them to the main record',
+	displayOptions: {
+		show: {
+			operation: ['create', 'update', 'upsert'],
+		},
+	},
 };
 
 export const insertUpdateOptions: INodeProperties[] = [
@@ -254,6 +277,11 @@ export const insertUpdateOptions: INodeProperties[] = [
 		type: 'collection',
 		placeholder: 'Add option',
 		default: {},
+		displayOptions: {
+			show: {
+				operation: ['create', 'update', 'upsert'],
+			},
+		},
 		options: [
 			{
 				displayName: 'Typecast',
@@ -349,13 +377,80 @@ export const insertUpdateOptions: INodeProperties[] = [
 					},
 				},
 			},
+		],
+	},
+];
+
+export const singleLinkedTableFields: INodeProperties[] = [
+	{
+		displayName: 'Linked Target Table',
+		name: 'linkedTargetTable',
+		type: 'resourceLocator',
+		default: { mode: 'list', value: '' },
+		required: true,
+		description: 'Table in which a new record should be created and linked',
+		displayOptions: {
+			show: {
+				createLinkedRecords: [true],
+			},
+		},
+		typeOptions: {
+			loadOptionsDependsOn: ['base.value'],
+		},
+		modes: [
 			{
-				displayName: 'Create Records in Linked Table',
-				name: 'createLinkedRecords',
-				type: 'boolean',
-				default: false,
-				description: 'Whether to create records in linked tables and automatically link them to the main record',
+				displayName: 'From List',
+				name: 'list',
+				type: 'list',
+				typeOptions: {
+					searchListMethod: 'tableSearch',
+					searchable: true,
+				},
+			},
+			{
+				displayName: 'ID',
+				name: 'id',
+				type: 'string',
+				placeholder: 'tblXXXXXXXXXXXXXX',
+				validation: [
+					{
+						type: 'regex',
+						properties: {
+							regex: '[a-zA-Z0-9]{2,}',
+							errorMessage: 'Not a valid Airtable Table ID',
+						},
+					},
+				],
 			},
 		],
+	},
+	{
+		displayName: 'Linked Columns',
+		name: 'linkedColumns',
+		type: 'resourceMapper',
+		default: {
+			mappingMode: 'defineBelow',
+			value: null,
+		},
+		noDataExpression: true,
+		required: true,
+		displayOptions: {
+			show: {
+				createLinkedRecords: [true],
+			},
+		},
+		typeOptions: {
+			loadOptionsDependsOn: ['base.value', 'linkedTargetTable.value'],
+			resourceMapper: {
+				resourceMapperMethod: 'getColumnsForTargetTable',
+				mode: 'add',
+				fieldWords: {
+					singular: 'column',
+					plural: 'columns',
+				},
+				addAllFields: true,
+				multiKeyMatch: false,
+			},
+		},
 	},
 ];

@@ -52,6 +52,7 @@
 			"dist/nodes/DirectMail/DirectMail.node.js",
 			"dist/nodes/Router/Router.node.js",
 			"dist/nodes/AirtablePlus/AirtablePlus.node.js",
+			"dist/nodes/AirtablePlus/AirtableTrigger.node.js",
 			"dist/nodes/Smarty/Smarty.node.js"
 		]
 	},

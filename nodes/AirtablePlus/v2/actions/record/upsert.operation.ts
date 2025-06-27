@@ -10,10 +10,15 @@ import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
 import type { UpdateRecord } from '../../helpers/interfaces';
 import { processAirtableError, removeIgnored, removeEmptyFields, validateLinkedRecordFields } from '../../helpers/utils';
 import { apiRequest, apiRequestAllItems, batchUpdate } from '../../transport';
-import { insertUpdateOptions, linkedTablesConfiguration } from '../common.descriptions';
+import {
+	insertUpdateOptions,
+	linkedTargetTable,
+	linkedTableColumns,
+	createLinkedRecordsField,
+} from '../common.descriptions';
 import { processRecordFields, type ArrayHandlingOptions } from '../../helpers/arrayHandlingUtils';
 
-const properties: INodeProperties[] = [
+export const description: INodeProperties[] = [
 	{
 		displayName: 'Columns',
 		name: 'columns',
@@ -37,12 +42,24 @@ const properties: INodeProperties[] = [
 				multiKeyMatch: true,
 			},
 		},
+		displayOptions: {
+			show: {
+				resource: ['record'],
+				operation: ['upsert'],
+			},
+		},
 	},
 	{
 		displayName: 'Matching Strategy',
 		name: 'matchingStrategy',
 		type: 'options',
 		default: 'rigid',
+		displayOptions: {
+			show: {
+				resource: ['record'],
+				operation: ['upsert'],
+			},
+		},
 		options: [
 			{
 				name: 'Rigid (Default)',
@@ -72,6 +89,8 @@ const properties: INodeProperties[] = [
 		description: 'Define which field combinations are acceptable for matching records. If a record has values for all fields in any combination, it will be used for matching. If no combination has complete data, a new record will be created.',
 		displayOptions: {
 			show: {
+				resource: ['record'],
+				operation: ['upsert'],
 				matchingStrategy: ['flexible'],
 			},
 		},
@@ -95,18 +114,7 @@ const properties: INodeProperties[] = [
 			},
 		],
 	},
-	...insertUpdateOptions,
-	linkedTablesConfiguration,
 ];
-
-const displayOptions = {
-	show: {
-		resource: ['record'],
-		operation: ['upsert'],
-	},
-};
-
-export const description = updateDisplayOptions(displayOptions, properties);
 
 export async function execute(
 	this: IExecuteFunctions,

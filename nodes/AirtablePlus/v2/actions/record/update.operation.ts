@@ -10,10 +10,15 @@ import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
 import type { UpdateRecord } from '../../helpers/interfaces';
 import { findMatches, processAirtableError, removeIgnored, removeEmptyFields } from '../../helpers/utils';
 import { apiRequestAllItems, batchUpdate, apiRequest } from '../../transport';
-import { insertUpdateOptions, linkedTablesConfiguration } from '../common.descriptions';
+import {
+	insertUpdateOptions,
+	linkedTargetTable,
+	linkedTableColumns,
+	createLinkedRecordsField,
+} from '../common.descriptions';
 import { processRecordFields, type ArrayHandlingOptions } from '../../helpers/arrayHandlingUtils';
 
-const properties: INodeProperties[] = [
+export const description: INodeProperties[] = [
 	{
 		displayName: 'Columns',
 		name: 'columns',
@@ -37,19 +42,14 @@ const properties: INodeProperties[] = [
 				multiKeyMatch: true,
 			},
 		},
+		displayOptions: {
+			show: {
+				resource: ['record'],
+				operation: ['update'],
+			},
+		},
 	},
-	...insertUpdateOptions,
-	linkedTablesConfiguration,
 ];
-
-const displayOptions = {
-	show: {
-		resource: ['record'],
-		operation: ['update'],
-	},
-};
-
-export const description = updateDisplayOptions(displayOptions, properties);
 
 export async function execute(
 	this: IExecuteFunctions,

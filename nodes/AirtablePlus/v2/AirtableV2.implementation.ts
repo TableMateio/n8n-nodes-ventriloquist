@@ -19,6 +19,7 @@ export class AirtableV2 implements INodeType {
 			displayName: baseDescription.displayName,
 			name: baseDescription.name,
 			defaults: {
+				...versionDescription.defaults,
 				name: baseDescription.displayName,
 			},
 			usableAsTool: true,

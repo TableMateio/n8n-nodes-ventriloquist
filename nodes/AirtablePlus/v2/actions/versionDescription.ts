@@ -13,7 +13,7 @@ export const versionDescription: INodeTypeDescription = {
 	subtitle: '={{ $parameter["operation"] + ": " + $parameter["resource"] }}',
 	description: 'Read, update, write and delete data from Airtable',
 	defaults: {
-		name: 'Airtable',
+		name: 'Airtable Plus',
 	},
 	inputs: [NodeConnectionType.Main],
 	outputs: [NodeConnectionType.Main],
