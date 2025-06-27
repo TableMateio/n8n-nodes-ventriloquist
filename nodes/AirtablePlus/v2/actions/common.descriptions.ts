@@ -454,3 +454,21 @@ export const singleLinkedTableFields: INodeProperties[] = [
 		},
 	},
 ];
+
+export const linkedRecordField: INodeProperties = {
+	displayName: 'Link Through Field',
+	name: 'linkedRecordField',
+	type: 'options',
+	default: '',
+	required: true,
+	typeOptions: {
+		loadOptionsDependsOn: ['base.value', 'table.value'],
+		loadOptionsMethod: 'getLinkedRecordFields',
+	},
+	description: 'Select which field in the main table should contain the link to the created record',
+	displayOptions: {
+		show: {
+			'createLinkedRecords': [true],
+		},
+	},
+};

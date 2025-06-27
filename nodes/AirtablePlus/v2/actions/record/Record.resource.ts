@@ -6,7 +6,7 @@ import * as get from './get.operation';
 import * as search from './search.operation';
 import * as update from './update.operation';
 import * as upsert from './upsert.operation';
-import { baseRLC, tableRLC, insertUpdateOptions, createLinkedRecordsField, linkedTargetTable, linkedTableColumns } from '../common.descriptions';
+import { baseRLC, tableRLC, insertUpdateOptions, createLinkedRecordsField, linkedTargetTable, linkedTableColumns, linkedRecordField } from '../common.descriptions';
 
 export { create, deleteRecord, get, search, update, upsert };
 
@@ -72,5 +72,6 @@ export const description: INodeProperties[] = [
 	...insertUpdateOptions,
 	createLinkedRecordsField,
 				linkedTargetTable,
+			linkedRecordField,
 			linkedTableColumns,
 ];
