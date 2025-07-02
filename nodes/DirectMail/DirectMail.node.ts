@@ -177,7 +177,7 @@ export class DirectMail implements INodeType {
 		name: 'stannp',
 		icon: 'file:directmail.svg',
 		group: ['output'],
-		version: 1,
+		version: [1],
 		subtitle: '={{$parameter["service"] + " - " + $parameter["operation"]}}',
 		description: 'Send letters and postcards via multiple direct mail services (Lob, Stannp)',
 		defaults: {

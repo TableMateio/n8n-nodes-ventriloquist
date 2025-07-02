@@ -17,7 +17,7 @@ export class AirtableTrigger implements INodeType {
 		name: 'airtableTrigger',
 		icon: 'file:airtable.svg',
 		group: ['trigger'],
-		version: 1,
+		version: [1],
 		description: 'Starts the workflow when Airtable events occur',
 		subtitle: '={{$parameter["event"]}}',
 		defaults: {

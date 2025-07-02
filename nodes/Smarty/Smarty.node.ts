@@ -14,7 +14,7 @@ export class Smarty implements INodeType {
 		name: 'smarty',
 		icon: 'file:smarty.svg',
 		group: ['utility'],
-		version: 1,
+		version: [1],
 		subtitle: '={{$parameter["operation"]}}',
 		description: 'Verify a US address using Google Geocoding API with FREE USPS mail safety validation',
 		defaults: {

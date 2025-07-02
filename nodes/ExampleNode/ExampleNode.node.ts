@@ -11,7 +11,7 @@ export class ExampleNode implements INodeType {
 		displayName: 'Example Node',
 		name: 'exampleNode',
 		group: ['transform'],
-		version: 1,
+		version: [1],
 		description: 'Basic Example Node',
 		defaults: {
 			name: 'Example Node',
