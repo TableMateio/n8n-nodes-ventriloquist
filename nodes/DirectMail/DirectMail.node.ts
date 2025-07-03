@@ -188,11 +188,21 @@ export class DirectMail implements INodeType {
 		credentials: [
 			{
 				name: 'lobApi',
-				required: false,
+				required: true,
+				displayOptions: {
+					show: {
+						service: ['lob'],
+					},
+				},
 			},
 			{
 				name: 'stannpApi',
-				required: false,
+				required: true,
+				displayOptions: {
+					show: {
+						service: ['stannp'],
+					},
+				},
 			},
 		],
 		properties: [
