@@ -544,6 +544,13 @@ export class DirectMail implements INodeType {
 						default: false,
 						description: 'Whether to continue workflow execution when the API request fails',
 					},
+					{
+						displayName: 'Output Original Input',
+						name: 'outputOriginalInput',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to include the original input data in the output alongside the API response',
+					},
 				],
 			},
 		],
@@ -740,15 +747,32 @@ export class DirectMail implements INodeType {
 								}
 							}
 
-							// Re-throw other errors unchanged
-							throw lobError;
-						}
+													// Re-throw other errors unchanged
+						throw lobError;
+					}
 
-						const executionData = this.helpers.constructExecutionMetaData(
-							this.helpers.returnJsonArray(responseData.body || responseData),
-							{ itemData: { item: i } },
-						);
-						returnData.push(...executionData);
+					// Check if we should output original input data
+					const outputOriginalInput = this.getNodeParameter('options.outputOriginalInput', i, false) as boolean;
+
+					let outputData;
+					if (outputOriginalInput) {
+						// Merge original input with API response at top level
+						const apiResponse = responseData.body || responseData;
+						const originalInput = items[i].json;
+						outputData = {
+							...originalInput,
+							...apiResponse,
+						};
+					} else {
+						// Just return the API response
+						outputData = responseData.body || responseData;
+					}
+
+					const executionData = this.helpers.constructExecutionMetaData(
+						this.helpers.returnJsonArray(outputData),
+						{ itemData: { item: i } },
+					);
+					returnData.push(...executionData);
 
 					} else if (service === 'stannp') {
 						// Stannp API implementation (existing code)
@@ -859,13 +883,30 @@ export class DirectMail implements INodeType {
 							resolveWithFullResponse: true,
 						};
 
-						const responseData = await this.helpers.request(options);
+											const responseData = await this.helpers.request(options);
 
-						const executionData = this.helpers.constructExecutionMetaData(
-							this.helpers.returnJsonArray(responseData.body || responseData),
-							{ itemData: { item: i } },
-						);
-						returnData.push(...executionData);
+					// Check if we should output original input data
+					const outputOriginalInput = this.getNodeParameter('options.outputOriginalInput', i, false) as boolean;
+
+					let outputData;
+					if (outputOriginalInput) {
+						// Merge original input with API response at top level
+						const apiResponse = responseData.body || responseData;
+						const originalInput = items[i].json;
+						outputData = {
+							...originalInput,
+							...apiResponse,
+						};
+					} else {
+						// Just return the API response
+						outputData = responseData.body || responseData;
+					}
+
+					const executionData = this.helpers.constructExecutionMetaData(
+						this.helpers.returnJsonArray(outputData),
+						{ itemData: { item: i } },
+					);
+					returnData.push(...executionData);
 					}
 				}
 			} catch (error) {
