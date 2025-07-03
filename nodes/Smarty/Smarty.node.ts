@@ -149,6 +149,13 @@ export class Smarty implements INodeType {
 						default: false,
 						description: 'Whether to continue workflow execution when the API request fails',
 					},
+					{
+						displayName: 'Include Input Data',
+						name: 'includeInputData',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to include the original input data at the top level of the output along with the verification results',
+					},
 				],
 			},
 		],
@@ -345,6 +352,7 @@ export class Smarty implements INodeType {
 					const attemptAbbreviationExpansion = options.attemptAbbreviationExpansion as boolean ?? true;
 					const useSmartyFallback = options.useSmartyFallback as boolean || false;
 					const alwaysReturnData = options.alwaysReturnData as boolean || true;
+					const includeInputData = options.includeInputData as boolean || false;
 
 					// Check if this is an intersection format - if so, skip special processing and go straight to Google
 					const isIntersection = street && (street.includes('/') || street.includes(' & ') || street.includes(' and '));
@@ -1352,6 +1360,15 @@ export class Smarty implements INodeType {
 							verification_status: result.verification_status || 'verified',
 							api_status_code: result.api_status_code || 200
 						}));
+
+						// If includeInputData is enabled, merge the original input data at the top level
+						if (includeInputData) {
+							const originalInputData = items[i].json;
+							resultData = resultData.map((result: any) => ({
+								...originalInputData,
+								...result
+							}));
+						}
 					}
 
 					const executionData = this.helpers.constructExecutionMetaData(
@@ -1363,8 +1380,20 @@ export class Smarty implements INodeType {
 			} catch (error) {
 				const continueOnFail = this.getNodeParameter('options.continueOnFail', i, false) as boolean;
 				if (continueOnFail) {
+					let errorResult = { error: error.message };
+
+					// If includeInputData is enabled, merge the original input data at the top level
+					const includeInputData = this.getNodeParameter('options.includeInputData', i, false) as boolean;
+					if (includeInputData) {
+						const originalInputData = items[i].json;
+						errorResult = {
+							...originalInputData,
+							...errorResult
+						};
+					}
+
 					const executionErrorData = this.helpers.constructExecutionMetaData(
-						this.helpers.returnJsonArray({ error: error.message }),
+						this.helpers.returnJsonArray([errorResult]),
 						{ itemData: { item: i } },
 					);
 					returnData.push(...executionErrorData);
