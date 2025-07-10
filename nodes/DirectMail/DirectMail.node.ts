@@ -209,10 +209,10 @@ export class DirectMail implements INodeType {
 			{
 				name: 'returnAddressApi',
 				required: false,
-				displayName: 'Return Address',
+				displayName: 'Return Address (Optional)',
 				displayOptions: {
 					show: {
-						includeReturnAddress: [true],
+						service: ['stannp'],
 					},
 				},
 			},
@@ -314,18 +314,6 @@ export class DirectMail implements INodeType {
 				default: '',
 				description: 'Your Stannp template ID',
 				required: true,
-			},
-			{
-				displayName: 'Include Return Address',
-				name: 'includeReturnAddress',
-				type: 'boolean',
-				displayOptions: {
-					show: {
-						service: ['stannp'],
-					},
-				},
-				default: false,
-				description: 'Whether to include a return address on the letter',
 			},
 
 
