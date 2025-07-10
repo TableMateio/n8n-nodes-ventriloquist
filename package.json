@@ -43,7 +43,9 @@
 			"dist/credentials/LobApi.credentials.js",
 			"dist/credentials/SmartyApi.credentials.js",
 			"dist/credentials/GoogleApi.credentials.js",
-			"dist/credentials/UspsApi.credentials.js"
+			"dist/credentials/OpenAIApi.credentials.js",
+			"dist/credentials/UspsApi.credentials.js",
+			"dist/credentials/ReturnAddressApi.credentials.js"
 		],
 		"nodes": [
 			"dist/nodes/ExampleNode/ExampleNode.node.js",

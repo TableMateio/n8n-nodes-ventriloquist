@@ -202,6 +202,16 @@ export class DirectMail implements INodeType {
 					show: {
 						service: ['stannp'],
 					},
+								},
+			},
+			{
+				name: 'returnAddressApi',
+				required: false,
+				displayName: 'Return Address',
+				displayOptions: {
+					show: {
+						includeReturnAddress: [true],
+					},
 				},
 			},
 		],
@@ -303,6 +313,19 @@ export class DirectMail implements INodeType {
 				description: 'Your Stannp template ID',
 				required: true,
 			},
+			{
+				displayName: 'Include Return Address',
+				name: 'includeReturnAddress',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						service: ['stannp'],
+					},
+				},
+				default: false,
+				description: 'Whether to include a return address on the letter',
+			},
+
 			{
 				displayName: 'Lob Template ID',
 				name: 'lobTemplateId',
@@ -780,6 +803,20 @@ export class DirectMail implements INodeType {
 						const apiKey = credentials.apiKey as string;
 						const server = credentials.server as string || 'us1';
 
+						// Get return address credentials if enabled
+						const includeReturnAddress = this.getNodeParameter('includeReturnAddress', i) as boolean;
+						let returnAddressCredentials = null;
+						if (includeReturnAddress) {
+							try {
+								returnAddressCredentials = await this.getCredentials('returnAddressApi');
+							} catch (error) {
+								// Return address credentials should be required when enabled
+								throw new Error(`Return address is enabled but credentials are missing: ${error.message}`);
+							}
+						}
+
+
+
 						const environment = this.getNodeParameter('environment', i) as string;
 						const template = this.getNodeParameter('template', i) as string;
 						const firstName = this.getNodeParameter('recipientFirstName', i) as string;
@@ -863,6 +900,24 @@ export class DirectMail implements INodeType {
 						if (templateVariables?.templateVariablesValues?.length) {
 							for (const variable of templateVariables.templateVariablesValues) {
 								body[`recipient[${variable.name}]`] = variable.value;
+							}
+						}
+
+						// Add return address fields if return address credentials are provided
+						if (returnAddressCredentials) {
+							body['from[name]'] = returnAddressCredentials.name as string;
+							body['from[address1]'] = returnAddressCredentials.address1 as string;
+							body['from[town]'] = returnAddressCredentials.town as string;
+							body['from[region]'] = returnAddressCredentials.region as string;
+							body['from[postcode]'] = returnAddressCredentials.postcode as string;
+							body['from[country]'] = normalizeCountryCode(returnAddressCredentials.country as string);
+
+							// Add optional company and address2 if provided
+							if (returnAddressCredentials.company) {
+								body['from[company]'] = returnAddressCredentials.company as string;
+							}
+							if (returnAddressCredentials.address2) {
+								body['from[address2]'] = returnAddressCredentials.address2 as string;
 							}
 						}
 
