@@ -189,6 +189,7 @@ export class DirectMail implements INodeType {
 			{
 				name: 'lobApi',
 				required: true,
+				displayName: 'Lob API',
 				displayOptions: {
 					show: {
 						service: ['lob'],
@@ -198,11 +199,12 @@ export class DirectMail implements INodeType {
 			{
 				name: 'stannpApi',
 				required: true,
+				displayName: 'Service Provider',
 				displayOptions: {
 					show: {
 						service: ['stannp'],
 					},
-								},
+				},
 			},
 			{
 				name: 'returnAddressApi',
@@ -325,6 +327,7 @@ export class DirectMail implements INodeType {
 				default: false,
 				description: 'Whether to include a return address on the letter',
 			},
+
 
 			{
 				displayName: 'Lob Template ID',
@@ -803,16 +806,12 @@ export class DirectMail implements INodeType {
 						const apiKey = credentials.apiKey as string;
 						const server = credentials.server as string || 'us1';
 
-						// Get return address credentials if enabled
-						const includeReturnAddress = this.getNodeParameter('includeReturnAddress', i) as boolean;
+						// Get return address credentials if provided
 						let returnAddressCredentials = null;
-						if (includeReturnAddress) {
-							try {
-								returnAddressCredentials = await this.getCredentials('returnAddressApi');
-							} catch (error) {
-								// Return address credentials should be required when enabled
-								throw new Error(`Return address is enabled but credentials are missing: ${error.message}`);
-							}
+						try {
+							returnAddressCredentials = await this.getCredentials('returnAddressApi');
+						} catch (error) {
+							// Return address credentials are optional, so ignore if not found
 						}
 
 
