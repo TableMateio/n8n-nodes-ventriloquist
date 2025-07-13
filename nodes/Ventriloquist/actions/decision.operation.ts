@@ -2036,6 +2036,18 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: "Output Input Data",
+		name: "outputInputData",
+		type: "boolean",
+		default: false,
+		description: "Whether to include the input data in the output",
+		displayOptions: {
+			show: {
+				operation: ["decision"],
+			},
+		},
+	},
 ];
 
 /**
@@ -2128,11 +2140,20 @@ export async function execute(
 ): Promise<INodeExecutionData[][] | INodeExecutionData[]> {
 	const startTime = Date.now();
 
+	// Get input data
+	const items = this.getInputData();
+	const item = items[index];
+
 	// Store this parameter at the top level so it's available in the catch block
 	const continueOnFail = this.getNodeParameter(
 		"continueOnFail",
 		index,
 		true,
+	) as boolean;
+	const outputInputData = this.getNodeParameter(
+		"outputInputData",
+		index,
+		false,
 	) as boolean;
 	let screenshot: string | undefined;
 
@@ -4991,6 +5012,7 @@ export async function execute(
 				afterUrl: resultData.afterUrl,
 				navigationError: resultData.navigationError,
 			},
+			inputData: outputInputData ? item.json : undefined,
 		});
 
 		// Store the page reference for future operations to ensure the session is properly maintained
@@ -5200,6 +5222,7 @@ export async function execute(
 					takeScreenshot,
 					continueOnFail,
 				},
+				...(outputInputData ? item.json : {}),
 			},
 		});
 
