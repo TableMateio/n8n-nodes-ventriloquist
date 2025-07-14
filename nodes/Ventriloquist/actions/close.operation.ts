@@ -124,6 +124,11 @@ export async function execute(
 		index,
 		true,
 	) as boolean;
+	const outputInputData = this.getNodeParameter(
+		"outputInputData",
+		index,
+		false,
+	) as boolean;
 
 	try {
 		if (closeMode === "session") {
@@ -285,7 +290,7 @@ export async function execute(
 						closeMode,
 						message: `Browser session ${sessionId} closed successfully`,
 					},
-					inputData: item.json,
+					inputData: outputInputData ? item.json : undefined,
 				});
 
 				return { json: successResponse };
@@ -331,7 +336,7 @@ export async function execute(
 					browserlessConsoleUrl: "https://cloud.browserless.io/dashboard",
 					brightDataConsoleUrl: "https://brightdata.com/cp/zones",
 				},
-				inputData: item.json,
+				inputData: outputInputData ? item.json : undefined,
 			});
 
 			return { json: successResponse };
@@ -460,7 +465,7 @@ export async function execute(
 					failedSessions,
 					message: `Closed ${closedSessions.length} of ${sessionIds.length} sessions successfully`,
 				},
-				inputData: item.json,
+				inputData: outputInputData ? item.json : undefined,
 			});
 
 			return { json: successResponse };

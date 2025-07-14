@@ -3118,7 +3118,10 @@ export async function execute(
 													return routes;
 												}
 
-												return [this.helpers.returnJsonArray([resultData])];
+												return [this.helpers.returnJsonArray([{
+													...resultData,
+													...(outputInputData ? item.json : {})
+												}])];
 											} catch (pageError) {
 												// If we still can't access the page, return with limited data
 												this.logger.warn(
@@ -4987,6 +4990,28 @@ export async function execute(
 		// Add a visual end marker
 		this.logger.info("============ NODE EXECUTION COMPLETE ============");
 
+		// Debug logging for input data
+		this.logger.info(
+			formatOperationLog(
+				"Decision",
+				nodeName,
+				nodeId,
+				index,
+				`DEBUG: outputInputData=${outputInputData}, item.json exists=${!!item.json}`,
+			),
+		);
+		if (outputInputData && item.json) {
+			this.logger.info(
+				formatOperationLog(
+					"Decision",
+					nodeName,
+					nodeId,
+					index,
+					`DEBUG: Input data keys: ${Object.keys(item.json).join(', ')}`,
+				),
+			);
+		}
+
 		// Create standardized success response
 		const successResponse = await createSuccessResponse({
 			operation: "Decision",
@@ -5014,6 +5039,17 @@ export async function execute(
 			},
 			inputData: outputInputData ? item.json : undefined,
 		});
+
+		// Debug logging for success response
+		this.logger.info(
+			formatOperationLog(
+				"Decision",
+				nodeName,
+				nodeId,
+				index,
+				`DEBUG: Success response keys: ${Object.keys(successResponse).join(', ')}`,
+			),
+		);
 
 		// Store the page reference for future operations to ensure the session is properly maintained
 		if (sessionId && workflowId) {
@@ -5102,6 +5138,17 @@ export async function execute(
 					);
 				}
 
+				// DEBUG: Check final output before returning
+				this.logger.info(
+					formatOperationLog(
+						"Decision",
+						nodeName,
+						nodeId,
+						index,
+						`DEBUG: Final routing returnItem.json keys: ${Object.keys(returnItem.json).join(', ')}`,
+					),
+				);
+
 				// CRITICAL FIX: Return the routes IMMEDIATELY to prevent any further code changing routeIndex
 				return routes;
 			} else {
@@ -5140,6 +5187,17 @@ export async function execute(
 		}
 		(returnItem.json.actionDetails as IDataObject).selectorFound = true;
 		(returnItem.json.actionDetails as IDataObject).actionType = actionPerformed;
+
+		// DEBUG: Check final output before returning (non-routing case)
+		this.logger.info(
+			formatOperationLog(
+				"Decision",
+				nodeName,
+				nodeId,
+				index,
+				`DEBUG: Final non-routing returnItem.json keys: ${Object.keys(returnItem.json).join(', ')}`,
+			),
+		);
 
 		return [returnItem];
 	} catch (error) {
