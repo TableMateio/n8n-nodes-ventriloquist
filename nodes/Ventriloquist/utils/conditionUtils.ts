@@ -54,7 +54,7 @@ export interface IConditionGroup {
  * Evaluate a single condition
  */
 export async function evaluateCondition(
-	page: puppeteer.Page,
+	page: puppeteer.Page | null,
 	condition: IDataObject,
 	conditionType: string,
 	waitForSelectors: boolean,
@@ -79,107 +79,138 @@ export async function evaluateCondition(
 
 		let result: IDetectionResult;
 
-		switch (conditionType) {
-			case 'elementExists': {
-				const selector = condition.selector as string;
-				result = await detectElement(page, selector, detectionOptions, thisNode.logger);
-				break;
+		// Check if condition requires a page and page is null
+		const pageRequiredConditions = ['elementExists', 'textContains', 'elementCount', 'urlContains'];
+		if (pageRequiredConditions.includes(conditionType) && !page) {
+			thisNode.logger.warn(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+				`Condition type '${conditionType}' requires a session but no session is available - condition will evaluate to false`));
+
+			result = {
+				success: false,
+				actualValue: 'no session available',
+				details: {
+					conditionType,
+					error: 'No session available for page-based condition'
+				}
+			};
+		} else {
+			switch (conditionType) {
+				case 'elementExists': {
+					const selector = condition.selector as string;
+					result = await detectElement(page!, selector, detectionOptions, thisNode.logger);
+					break;
+				}
+
+				case 'textContains': {
+					const selector = condition.selector as string;
+					const textToCheck = condition.textToCheck as string;
+					const matchType = condition.matchType as string;
+					const caseSensitive = condition.caseSensitive as boolean;
+
+					result = await detectText(
+						page!,
+						selector,
+						textToCheck,
+						matchType,
+						caseSensitive,
+						detectionOptions,
+						thisNode.logger
+					);
+					break;
+				}
+
+				case 'elementCount': {
+					const selector = condition.selector as string;
+					const expectedCount = condition.expectedCount as number;
+					const countComparison = condition.countComparison as string;
+
+					result = await detectCount(
+						page!,
+						selector,
+						expectedCount,
+						countComparison,
+						detectionOptions,
+						thisNode.logger
+					);
+					break;
+				}
+
+				case 'urlContains': {
+					const urlSubstring = condition.urlSubstring as string;
+					const matchType = condition.matchType as string || 'contains';
+					const caseSensitive = condition.caseSensitive as boolean || false;
+
+					result = await detectUrl(
+						page!,
+						urlSubstring,
+						matchType,
+						caseSensitive,
+						detectionOptions,
+						thisNode.logger
+					);
+					break;
+				}
+
+				case 'jsExpression': {
+					const jsExpression = condition.jsExpression as string;
+					// For JavaScript expressions, we might be able to evaluate some without a page
+					// but for now, we'll require a page. This could be enhanced later.
+					if (!page) {
+						thisNode.logger.warn(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+							`JavaScript expression condition requires a session but no session is available - condition will evaluate to false`));
+						result = {
+							success: false,
+							actualValue: 'no session available',
+							details: {
+								conditionType,
+								error: 'No session available for JavaScript expression'
+							}
+						};
+					} else {
+						result = await detectExpression(page, jsExpression, detectionOptions, thisNode.logger);
+					}
+					break;
+				}
+
+				case 'executionCount': {
+					// Get the current execution count from the context
+					// This is typically tracked elsewhere in the system
+					// For now we'll use a dummy value of 1 - this should be replaced with actual tracking
+					const executionCountValue = 1; // This should be retrieved from an execution tracker
+					const expectedCount = condition.executionCountValue as number;
+					const countComparison = condition.executionCountComparison as string;
+
+					result = await detectExecutionCount(
+						executionCountValue,
+						expectedCount,
+						countComparison,
+						detectionOptions,
+						thisNode.logger
+					);
+					break;
+				}
+
+				case 'inputSource': {
+					// Get the source node name from context
+					// This would typically come from the workflow execution context
+					// For now we'll use a dummy placeholder approach
+					const actualSourceNodeName = 'unknown'; // This should be retrieved from workflow context
+					const expectedSourceNodeName = condition.sourceNodeName as string;
+
+					result = await detectInputSource(
+						actualSourceNodeName,
+						expectedSourceNodeName,
+						detectionOptions,
+						thisNode.logger
+					);
+					break;
+				}
+
+				default:
+					// Unrecognized condition type
+					thisNode.logger.warn(`Unrecognized condition type: ${conditionType}`);
+					return false;
 			}
-
-			case 'textContains': {
-				const selector = condition.selector as string;
-				const textToCheck = condition.textToCheck as string;
-				const matchType = condition.matchType as string;
-				const caseSensitive = condition.caseSensitive as boolean;
-
-				result = await detectText(
-					page,
-					selector,
-					textToCheck,
-					matchType,
-					caseSensitive,
-					detectionOptions,
-					thisNode.logger
-				);
-				break;
-			}
-
-			case 'elementCount': {
-				const selector = condition.selector as string;
-				const expectedCount = condition.expectedCount as number;
-				const countComparison = condition.countComparison as string;
-
-				result = await detectCount(
-					page,
-					selector,
-					expectedCount,
-					countComparison,
-					detectionOptions,
-					thisNode.logger
-				);
-				break;
-			}
-
-			case 'urlContains': {
-				const urlSubstring = condition.urlSubstring as string;
-				const matchType = condition.matchType as string || 'contains';
-				const caseSensitive = condition.caseSensitive as boolean || false;
-
-				result = await detectUrl(
-					page,
-					urlSubstring,
-					matchType,
-					caseSensitive,
-					detectionOptions,
-					thisNode.logger
-				);
-				break;
-			}
-
-			case 'jsExpression': {
-				const jsExpression = condition.jsExpression as string;
-				result = await detectExpression(page, jsExpression, detectionOptions, thisNode.logger);
-				break;
-			}
-
-			case 'executionCount': {
-				// Get the current execution count from the context
-				// This is typically tracked elsewhere in the system
-				// For now we'll use a dummy value of 1 - this should be replaced with actual tracking
-				const executionCountValue = 1; // This should be retrieved from an execution tracker
-				const expectedCount = condition.executionCountValue as number;
-				const countComparison = condition.executionCountComparison as string;
-
-				result = await detectExecutionCount(
-					executionCountValue,
-					expectedCount,
-					countComparison,
-					detectionOptions,
-					thisNode.logger
-				);
-				break;
-			}
-
-			case 'inputSource': {
-				// Get the source node name from context
-				// This would typically come from the workflow execution context
-				// For now we'll use a dummy placeholder approach
-				const actualSourceNodeName = 'unknown'; // This should be retrieved from workflow context
-				const expectedSourceNodeName = condition.sourceNodeName as string;
-
-				result = await detectInputSource(
-					actualSourceNodeName,
-					expectedSourceNodeName,
-					detectionOptions,
-					thisNode.logger
-				);
-				break;
-			}
-
-			default:
-				// Unrecognized condition type
-				thisNode.logger.warn(`Unrecognized condition type: ${conditionType}`);
-				return false;
 		}
 
 		return result.success;
@@ -197,7 +228,7 @@ export async function evaluateCondition(
  * Evaluate a condition group with multiple conditions
  */
 export async function evaluateConditionGroup(
-	page: puppeteer.Page,
+	page: puppeteer.Page | null,
 	conditionGroup: IConditionGroup,
 	waitForSelectors: boolean,
 	selectorTimeout: number,

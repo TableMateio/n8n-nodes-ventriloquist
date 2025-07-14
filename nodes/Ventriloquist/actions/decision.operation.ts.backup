@@ -2183,100 +2183,51 @@ export async function execute(
 	);
 
 	try {
-		// Try to get or create a session, but continue if it fails
-		let hasValidSession = false;
+		// Use the centralized session management
+		const sessionResult = await SessionManager.getOrCreatePageSession(
+			this.logger,
+			{
+				explicitSessionId,
+				websocketEndpoint,
+				workflowId,
+				operationName: "Decision",
+				nodeId,
+				nodeName,
+				index,
+			},
+		);
 
+		puppeteerPage = sessionResult.page;
+		sessionId = sessionResult.sessionId;
+
+		if (!puppeteerPage) {
+			throw new Error("Failed to get or create a page");
+		}
+
+		// Update current URL after getting page
+		let currentUrl = "";
 		try {
-			// Use the centralized session management
-			const sessionResult = await SessionManager.getOrCreatePageSession(
-				this.logger,
-				{
-					explicitSessionId,
-					websocketEndpoint,
-					workflowId,
-					operationName: "Decision",
-					nodeId,
+			currentUrl = await puppeteerPage.url();
+			this.logger.info(
+				formatOperationLog(
+					"Decision",
 					nodeName,
+					nodeId,
 					index,
-				},
+					`Current page URL is: ${currentUrl}`,
+				),
 			);
-
-			puppeteerPage = sessionResult.page;
-			sessionId = sessionResult.sessionId;
-			hasValidSession = !!puppeteerPage;
-
-			if (hasValidSession) {
-				this.logger.info(
-					formatOperationLog(
-						"Decision",
-						nodeName,
-						nodeId,
-						index,
-						`Successfully connected to session: ${sessionId}`,
-					),
-				);
-			}
-		} catch (sessionError) {
-			// Log the session error but continue execution
+		} catch (urlError) {
 			this.logger.warn(
 				formatOperationLog(
 					"Decision",
 					nodeName,
 					nodeId,
 					index,
-					`Could not establish session: ${(sessionError as Error).message}`,
+					`Could not get URL after session management: ${(urlError as Error).message}`,
 				),
 			);
-			this.logger.info(
-				formatOperationLog(
-					"Decision",
-					nodeName,
-					nodeId,
-					index,
-					`Continuing without session - some conditions may not work`,
-				),
-			);
-			hasValidSession = false;
-			puppeteerPage = null;
-		}
-
-		// Update current URL after getting page (if we have one)
-		let currentUrl = "";
-		if (hasValidSession && puppeteerPage) {
-			try {
-				currentUrl = await puppeteerPage.url();
-				this.logger.info(
-					formatOperationLog(
-						"Decision",
-						nodeName,
-						nodeId,
-						index,
-						`Current page URL is: ${currentUrl}`,
-					),
-				);
-			} catch (urlError) {
-				this.logger.warn(
-					formatOperationLog(
-						"Decision",
-						nodeName,
-						nodeId,
-						index,
-						`Could not get URL after session management: ${(urlError as Error).message}`,
-					),
-				);
-				currentUrl = "unknown (connection issues)";
-			}
-		} else {
-			currentUrl = "no session";
-			this.logger.info(
-				formatOperationLog(
-					"Decision",
-					nodeName,
-					nodeId,
-					index,
-					`No session available - URL is: ${currentUrl}`,
-				),
-			);
+			currentUrl = "unknown (connection issues)";
 		}
 
 		// Get operation parameters
@@ -2372,48 +2323,40 @@ export async function execute(
 			);
 		}
 
-		// Check if the page is valid (only if we have a session)
-		if (hasValidSession && puppeteerPage) {
-			// Verify the document content to ensure we have a valid page
-			try {
-				const docHtml = await puppeteerPage.evaluate(
-					() => document.documentElement.outerHTML.length,
-				);
-				this.logger.info(
-					formatOperationLog(
-						"Decision",
-						nodeName,
-						nodeId,
-						index,
-						`Document verified - contains ${docHtml} characters of HTML`,
-					),
-				);
-			} catch (docError) {
-				this.logger.warn(
-					formatOperationLog(
-						"Decision",
-						nodeName,
-						nodeId,
-						index,
-						`Cannot access document: ${(docError as Error).message}`,
-					),
-				);
-				if (!continueOnFail) {
-					throw new Error(
-						`Cannot access page document: ${(docError as Error).message}`,
-					);
-				}
-			}
-		} else {
+		// Check if the page is valid
+		if (!puppeteerPage) {
+			throw new Error("Page is null or undefined");
+		}
+
+		// Verify the document content to ensure we have a valid page
+		try {
+			const docHtml = await puppeteerPage.evaluate(
+				() => document.documentElement.outerHTML.length,
+			);
 			this.logger.info(
 				formatOperationLog(
 					"Decision",
 					nodeName,
 					nodeId,
 					index,
-					`No session available - skipping document verification`,
+					`Document verified - contains ${docHtml} characters of HTML`,
 				),
 			);
+		} catch (docError) {
+			this.logger.warn(
+				formatOperationLog(
+					"Decision",
+					nodeName,
+					nodeId,
+					index,
+					`Cannot access document: ${(docError as Error).message}`,
+				),
+			);
+			if (!continueOnFail) {
+				throw new Error(
+					`Cannot access page document: ${(docError as Error).message}`,
+				);
+			}
 		}
 
 		// Get routing parameters
@@ -2429,23 +2372,19 @@ export async function execute(
 		let routeIndex = 0;
 		let pageUrl = "";
 
-		if (hasValidSession && puppeteerPage) {
-			try {
-				pageUrl = await puppeteerPage.url();
-			} catch (urlError) {
-				this.logger.warn(
-					formatOperationLog(
-						"Decision",
-						nodeName,
-						nodeId,
-						index,
-						`Error getting page URL: ${(urlError as Error).message}`,
-					),
-				);
-				pageUrl = "unknown";
-			}
-		} else {
-			pageUrl = "no session";
+		try {
+			pageUrl = await puppeteerPage.url();
+		} catch (urlError) {
+			this.logger.warn(
+				formatOperationLog(
+					"Decision",
+					nodeName,
+					nodeId,
+					index,
+					`Error getting page URL: ${(urlError as Error).message}`,
+				),
+			);
+			pageUrl = "unknown";
 		}
 
 		// Initialize result data for the operation
@@ -2480,7 +2419,7 @@ export async function execute(
 			);
 
 			// Check if the page URL is blank or about:blank, which might indicate a problem
-			if (hasValidSession && (pageUrl === "about:blank" || pageUrl === "")) {
+			if (pageUrl === "about:blank" || pageUrl === "") {
 				this.logger.warn(
 					formatOperationLog(
 						"Decision",
@@ -2500,7 +2439,7 @@ export async function execute(
 					),
 				);
 			}
-		} else if (hasValidSession && puppeteerPage) {
+		} else {
 			// As a fallback, still try to get the session ID from the page
 			try {
 				const pageSessionId = await puppeteerPage.evaluate(() => {
@@ -2545,16 +2484,6 @@ export async function execute(
 					),
 				);
 			}
-		} else {
-			this.logger.info(
-				formatOperationLog(
-					"Decision",
-					nodeName,
-					nodeId,
-					index,
-					`No session available - skipping session ID retrieval from page`,
-				),
-			);
 		}
 
 		// Check each condition group
@@ -2620,7 +2549,6 @@ export async function execute(
 				};
 
 				// Use the properly constructed object
-				// Note: puppeteerPage might be null if no session is available
 				const conditionGroupResult = await evaluateConditionGroup(
 					puppeteerPage,
 					conditionGroup,
@@ -2710,33 +2638,6 @@ export async function execute(
 					}
 
 					if (actionType !== "none") {
-						// Check if we need a session for this action
-						if (!hasValidSession || !puppeteerPage) {
-							this.logger.warn(
-								formatOperationLog(
-									"Decision",
-									nodeName,
-									nodeId,
-									index,
-									`Action "${actionType}" requires a session but no session is available - skipping action`,
-								),
-							);
-
-							// Set up result data for no session case
-							resultData.success = true;
-							resultData.routeTaken = groupName;
-							resultData.actionPerformed = "none";
-							resultData.currentUrl = currentUrl;
-							resultData.pageTitle = "no session";
-							resultData.executionDuration = Date.now() - startTime;
-
-							// Return early result for no session
-							return [this.helpers.returnJsonArray([{
-								...resultData,
-								...(outputInputData ? item.json : {})
-							}])];
-						}
-
 						actionPerformed = actionType;
 						this.logger.info(
 							formatOperationLog(
@@ -3145,8 +3046,8 @@ export async function execute(
 												resultData.success = true;
 												resultData.routeTaken = groupName;
 												resultData.actionPerformed = actionType;
-												resultData.currentUrl = puppeteerPage ? await puppeteerPage.url() : currentUrl;
-												resultData.pageTitle = puppeteerPage ? await puppeteerPage.title() : "no session";
+												resultData.currentUrl = await puppeteerPage.url();
+												resultData.pageTitle = await puppeteerPage.title();
 												resultData.executionDuration = Date.now() - startTime;
 
 												this.logger.info(
@@ -3348,8 +3249,8 @@ export async function execute(
 										resultData.success = true;
 										resultData.routeTaken = groupName;
 										resultData.actionPerformed = actionType;
-										resultData.currentUrl = puppeteerPage ? await puppeteerPage.url() : currentUrl;
-										resultData.pageTitle = puppeteerPage ? await puppeteerPage.title() : "no session";
+										resultData.currentUrl = await puppeteerPage.url();
+										resultData.pageTitle = await puppeteerPage.title();
 										resultData.executionDuration = Date.now() - startTime;
 									} catch (pageError) {
 										// Handle late context destruction
@@ -3466,8 +3367,8 @@ export async function execute(
 
 									// Try to get page details for better error context
 									try {
-										const currentUrl = puppeteerPage ? await puppeteerPage.url() : "no session";
-										const pageTitle = puppeteerPage ? await puppeteerPage.title() : "no session";
+										const currentUrl = await puppeteerPage.url();
+										const pageTitle = await puppeteerPage.title();
 										this.logger.info(
 											formatOperationLog(
 												"Decision",
@@ -3602,7 +3503,7 @@ export async function execute(
 										if (waitForSelectors) {
 											if (detectionMethod === "smart") {
 												const elementExists = await smartWaitForSelector(
-													puppeteerPage!,
+													puppeteerPage,
 													actionSelector,
 													selectorTimeout,
 													earlyExitDelay,
@@ -3615,7 +3516,7 @@ export async function execute(
 													);
 												}
 											} else {
-												await puppeteerPage!.waitForSelector(actionSelector, {
+												await puppeteerPage.waitForSelector(actionSelector, {
 													timeout: selectorTimeout,
 												});
 											}
@@ -3845,11 +3746,11 @@ export async function execute(
 												);
 
 												// Store the current URL for reference
-												const beforeUrl = puppeteerPage ? await puppeteerPage.url() : currentUrl;
+												const beforeUrl = await puppeteerPage.url();
 
 												// Use enhanced navigation wait for better reliability
 												await enhancedNavigationWait(
-													puppeteerPage!,
+													puppeteerPage,
 													"networkidle0",
 													waitTime,
 													this.logger,
@@ -3864,7 +3765,7 @@ export async function execute(
 
 												// Try to capture the final URL after navigation
 												try {
-													const afterUrl = puppeteerPage ? await puppeteerPage.url() : beforeUrl;
+													const afterUrl = await puppeteerPage.url();
 													const urlChanged = afterUrl !== beforeUrl;
 
 													this.logger.info(
@@ -4926,7 +4827,7 @@ export async function execute(
 				try {
 					// Execute the fallback using our utility function
 					const fallbackResult = await executeFallback(
-						puppeteerPage!,
+						puppeteerPage,
 						fallbackOptions,
 						resultData,
 						index,
@@ -4973,7 +4874,7 @@ export async function execute(
 		}
 
 		// Take screenshot if requested
-		if (takeScreenshot && puppeteerPage) {
+		if (takeScreenshot) {
 			try {
 				screenshot = (await puppeteerPage.screenshot({
 					encoding: "base64",
@@ -5007,8 +4908,8 @@ export async function execute(
 
 		// Update result data
 		resultData.executionDuration = Date.now() - startTime;
-		resultData.currentUrl = puppeteerPage ? await puppeteerPage.url() : currentUrl;
-		resultData.pageTitle = puppeteerPage ? await puppeteerPage.title() : "no session";
+		resultData.currentUrl = await puppeteerPage.url();
+		resultData.pageTitle = await puppeteerPage.title();
 		resultData.routeTaken = routeTaken;
 		resultData.actionPerformed = actionPerformed;
 
@@ -5115,7 +5016,7 @@ export async function execute(
 		const successResponse = await createSuccessResponse({
 			operation: "Decision",
 			sessionId: sessionId || "",
-			page: hasValidSession ? puppeteerPage : null,
+			page: puppeteerPage,
 			logger: this.logger,
 			startTime,
 			takeScreenshot: this.getNodeParameter(
@@ -5135,7 +5036,6 @@ export async function execute(
 				beforeUrl: resultData.beforeUrl,
 				afterUrl: resultData.afterUrl,
 				navigationError: resultData.navigationError,
-				hasValidSession,
 			},
 			inputData: outputInputData ? item.json : undefined,
 		});
