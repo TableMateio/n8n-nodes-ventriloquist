@@ -16,6 +16,25 @@ import {
 } from './detectionUtils';
 
 /**
+ * Safely evaluate a JavaScript expression in a given context
+ */
+function evaluateInContext(expression: string, context: any): any {
+	try {
+		// Create a function with the context variables as parameters
+		const contextKeys = Object.keys(context);
+		const contextValues = contextKeys.map(key => context[key]);
+
+		// Create a function that evaluates the expression with the context
+		const func = new Function(...contextKeys, `return ${expression}`);
+
+		// Call the function with the context values
+		return func(...contextValues);
+	} catch (error) {
+		throw new Error(`Expression evaluation failed: ${(error as Error).message}`);
+	}
+}
+
+/**
  * Interface for condition result
  */
 export interface IConditionResult {
@@ -151,23 +170,82 @@ export async function evaluateCondition(
 					break;
 				}
 
-				case 'jsExpression': {
+				case 'expression': {
 					const jsExpression = condition.jsExpression as string;
-					// For JavaScript expressions, we might be able to evaluate some without a page
-					// but for now, we'll require a page. This could be enhanced later.
-					if (!page) {
-						thisNode.logger.warn(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
-							`JavaScript expression condition requires a session but no session is available - condition will evaluate to false`));
-						result = {
-							success: false,
-							actualValue: 'no session available',
-							details: {
-								conditionType,
-								error: 'No session available for JavaScript expression'
-							}
-						};
+
+					// Check if this is an n8n expression (wrapped in {{ }}) or raw JavaScript
+					const isN8nExpression = jsExpression.trim().startsWith('{{') && jsExpression.trim().endsWith('}}');
+
+															if (isN8nExpression) {
+						// n8n expressions can be evaluated without a page using n8n's expression system
+						try {
+							thisNode.logger.debug(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+								`Evaluating n8n expression: ${jsExpression}`));
+
+							// For n8n expressions, we need to evaluate them in the Node.js context
+							// Extract the expression content (remove {{ and }})
+							const expressionContent = jsExpression.trim().slice(2, -2).trim();
+
+							// Get the input data for evaluation
+							const inputData = thisNode.getInputData();
+							const currentItem = inputData[index] || {};
+
+							// Create evaluation context
+							const context = {
+								$json: currentItem.json || {},
+								$input: currentItem,
+								$item: currentItem,
+								$items: inputData
+							};
+
+							// Evaluate the expression
+							const expressionResult = evaluateInContext(expressionContent, context);
+							const success = !!expressionResult;
+
+							result = {
+								success,
+								actualValue: String(expressionResult),
+								details: {
+									conditionType,
+									expression: jsExpression,
+									isN8nExpression: true
+								}
+							};
+
+							thisNode.logger.debug(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+								`n8n expression result: ${expressionResult} (success: ${success})`));
+						} catch (error) {
+							thisNode.logger.warn(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+								`Error evaluating n8n expression: ${(error as Error).message}`));
+							result = {
+								success: false,
+								actualValue: `Error: ${(error as Error).message}`,
+								details: {
+									conditionType,
+									expression: jsExpression,
+									isN8nExpression: true,
+									error: (error as Error).message
+								}
+							};
+						}
 					} else {
-						result = await detectExpression(page, jsExpression, detectionOptions, thisNode.logger);
+						// Raw JavaScript expressions require a page to evaluate in browser context
+						if (!page) {
+							thisNode.logger.warn(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+								`Raw JavaScript expression requires a session but no session is available - condition will evaluate to false`));
+							result = {
+								success: false,
+								actualValue: 'no session available',
+								details: {
+									conditionType,
+									expression: jsExpression,
+									isN8nExpression: false,
+									error: 'No session available for raw JavaScript expression'
+								}
+							};
+						} else {
+							result = await detectExpression(page, jsExpression, detectionOptions, thisNode.logger);
+						}
 					}
 					break;
 				}
