@@ -170,13 +170,19 @@ export async function evaluateCondition(
 					break;
 				}
 
-				case 'expression': {
+								case 'expression': {
 					const jsExpression = condition.jsExpression as string;
+
+					thisNode.logger.info(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+						`[DEBUG] Evaluating expression condition: "${jsExpression}"`));
 
 					// Check if this is an n8n expression (wrapped in {{ }}) or raw JavaScript
 					const isN8nExpression = jsExpression.trim().startsWith('{{') && jsExpression.trim().endsWith('}}');
 
-															if (isN8nExpression) {
+					thisNode.logger.info(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+						`[DEBUG] Expression type: ${isN8nExpression ? 'n8n' : 'raw'}`));
+
+					if (isN8nExpression) {
 						// n8n expressions can be evaluated without a page using n8n's expression system
 						try {
 							thisNode.logger.debug(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
@@ -198,9 +204,17 @@ export async function evaluateCondition(
 								$items: inputData
 							};
 
+							thisNode.logger.info(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+								`[DEBUG] Expression content: "${expressionContent}"`));
+							thisNode.logger.info(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+								`[DEBUG] Context $json: ${JSON.stringify(context.$json)}`));
+
 							// Evaluate the expression
 							const expressionResult = evaluateInContext(expressionContent, context);
 							const success = !!expressionResult;
+
+							thisNode.logger.info(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+								`[DEBUG] Expression result: ${expressionResult}, success: ${success}`));
 
 							result = {
 								success,
@@ -377,6 +391,9 @@ export async function evaluateConditionGroup(
 				singleCondition.expectedCount = conditionGroup.singleExpectedCount;
 			}
 
+			thisNode.logger.info(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+				`[DEBUG] About to evaluate single condition: ${singleConditionType}, condition object: ${JSON.stringify(singleCondition)}`));
+
 			// Evaluate the single condition
 			groupConditionMet = await evaluateCondition(
 				page,
@@ -391,13 +408,18 @@ export async function evaluateConditionGroup(
 				thisNode
 			);
 
+			thisNode.logger.info(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+				`[DEBUG] Single condition (${singleConditionType}) raw result: ${groupConditionMet}`));
+
 			// Apply inversion if needed
 			if (invertSingleCondition) {
 				groupConditionMet = !groupConditionMet;
+				thisNode.logger.info(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+					`[DEBUG] Applied inversion: ${!groupConditionMet} -> ${groupConditionMet}`));
 			}
 
-			thisNode.logger.debug(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
-				`Single condition (${singleConditionType}) result: ${groupConditionMet}`));
+			thisNode.logger.info(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+				`[DEBUG] Single condition (${singleConditionType}) final result: ${groupConditionMet}`));
 
 			if (!groupConditionMet) {
 				failureReason = `Single condition of type '${singleConditionType}' was not met`;
