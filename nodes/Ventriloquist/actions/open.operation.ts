@@ -97,6 +97,13 @@ export const description: INodeProperties[] = [
 		default: false,
 		description: "Whether to capture a screenshot of the page after opening",
 	},
+	{
+		displayName: "Output Input Data",
+		name: "outputInputData",
+		type: "boolean",
+		default: false,
+		description: "Whether to include input data from previous nodes in the response",
+	},
 ];
 
 /**
@@ -142,6 +149,11 @@ export async function execute(
 	) as boolean;
 	const shouldTakeScreenshot = this.getNodeParameter(
 		"takeScreenshot",
+		index,
+		false,
+	) as boolean;
+	const outputInputData = this.getNodeParameter(
+		"outputInputData",
 		index,
 		false,
 	) as boolean;
@@ -294,6 +306,7 @@ export async function execute(
 				this.logger.info("============ NODE EXECUTION COMPLETE ============");
 
 				// Prepare response data
+				const item = this.getInputData()[index];
 				const responseData: IDataObject = {
 					success: true,
 					operation: "open",
@@ -307,6 +320,7 @@ export async function execute(
 					timestamp: new Date().toISOString(),
 					executionDuration: Date.now() - startTime,
 					note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations.",
+					...(outputInputData && item.json ? item.json : {}),
 				};
 
 				// Don't close the browser - it will be used by subsequent operations
@@ -356,6 +370,7 @@ export async function execute(
 
 					// Even with context destroyed, we can return success with the session ID
 					// This allows following nodes to use the session
+					const item = this.getInputData()[index];
 					return {
 						json: {
 							success: true, // Mark as success since the session was created
@@ -369,6 +384,7 @@ export async function execute(
 							timestamp: new Date().toISOString(),
 							executionDuration: Date.now() - startTime,
 							note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations.",
+							...(outputInputData && item.json ? item.json : {}),
 						},
 					};
 				}
@@ -441,6 +457,7 @@ export async function execute(
 
 		if (continueOnFail) {
 			// Return a partial result with error information
+			const item = this.getInputData()[index];
 			return {
 				json: {
 					success: false,
@@ -452,6 +469,7 @@ export async function execute(
 					errorDetails: errorData,
 					timestamp: new Date().toISOString(),
 					executionDuration: Date.now() - startTime,
+					...(outputInputData && item.json ? item.json : {}),
 				},
 			};
 		}

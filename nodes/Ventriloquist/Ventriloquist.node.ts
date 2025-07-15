@@ -26,30 +26,46 @@ import * as clickOperation from './actions/click.operation';
 import * as closeOperation from './actions/close.operation';
 import * as matcherOperation from './actions/matcher.operation';
 import * as collectorOperation from './actions/collector.operation';
+import * as checkOperation from './actions/check.operation';
 
 /**
- * Configure outputs for decision operation based on routing parameters
+ * Configure outputs for decision and check operations based on operation type and routing parameters
  */
 const configureDecisionOutputs = (parameters: INodeParameters) => {
-	// Default to single output if not using routing
-	if (parameters.enableRouting !== true) {
-		return [NodeConnectionType.Main];
+	const operation = parameters.operation as string;
+
+	// Check operation always has exactly 2 outputs: success (0) and failure (1)
+	if (operation === 'check') {
+		return [NodeConnectionType.Main, NodeConnectionType.Main];
 	}
 
-	// Get route count, default to 2 if not specified
-	const routeCount = (parameters.routeCount ?? 2) as number;
-	if (routeCount < 1) {
-		return [NodeConnectionType.Main];
+	// Decision operation routing logic
+	if (operation === 'decision') {
+		// Default to single output if not using routing
+		if (parameters.enableRouting !== true) {
+			return [NodeConnectionType.Main];
+		}
+
+		// Get route count, default to 2 if not specified
+		const routeCount = (parameters.routeCount ?? 2) as number;
+		if (routeCount < 1) {
+			return [NodeConnectionType.Main];
+		}
+
+		// Create specific number of outputs
+		const outputs = [];
+		for (let i = 0; i < routeCount; i++) {
+			outputs.push(NodeConnectionType.Main);
+		}
+
+		return outputs;
 	}
 
-	// Create specific number of outputs
-	const outputs = [];
-	for (let i = 0; i < routeCount; i++) {
-		outputs.push(NodeConnectionType.Main);
-	}
-
-	return outputs;
+	// Default to single output for all other operations
+	return [NodeConnectionType.Main];
 };
+
+
 
 /**
  * Ventriloquist is a custom node for N8N that connects to Bright Data's Browser Scraping Browser
@@ -531,6 +547,12 @@ export class Ventriloquist implements INodeType {
 						action: 'Open',
 					},
 					{
+						name: 'Check',
+						value: 'check',
+						description: 'Check if a session is operational',
+						action: 'Check',
+					},
+					{
 						name: 'Close',
 						value: 'close',
 						description: 'Close a browser session',
@@ -750,6 +772,19 @@ export class Ventriloquist implements INodeType {
 					},
 				},
 			},
+			{
+				displayName: 'Output Input Data',
+				name: 'outputInputData',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to include input data from previous nodes in the response',
+				displayOptions: {
+					show: {
+						resource: ['browserControl'],
+						operation: ['open'],
+					},
+				},
+			},
 
 			// Properties for 'click' operation
 			...clickOperation.description.map(property => ({
@@ -838,6 +873,19 @@ export class Ventriloquist implements INodeType {
 						...(property.displayOptions?.show || {}),
 						resource: ['dataOperations'],
 						operation: ['matcher'],
+					},
+				},
+			})),
+
+			// Properties for 'check' operation
+			...checkOperation.description.map(property => ({
+				...property,
+				displayOptions: {
+					...(property.displayOptions || {}),
+					show: {
+						...(property.displayOptions?.show || {}),
+						resource: ['browserControl'],
+						operation: ['check'],
 					},
 				},
 			})),
@@ -1207,6 +1255,43 @@ export class Ventriloquist implements INodeType {
 					}
 
 					returnData[0].push(result);
+				} else if (operation === 'check') {
+					// Execute check operation
+					const result = await checkOperation.execute.call(
+						this,
+						i,
+						websocketEndpoint,
+						workflowId,
+					);
+
+					// Check operation returns arrays for routing, so we need to handle multiple outputs
+					if (Array.isArray(result)) {
+						// Multi-output routing: create arrays for each output
+						while (returnData.length < 2) {
+							returnData.push([]);
+						}
+
+						// Add results to each output route
+						for (let routeIndex = 0; routeIndex < result.length && routeIndex < 2; routeIndex++) {
+							const routeData = result[routeIndex];
+							if (Array.isArray(routeData) && routeData.length > 0) {
+								// Add execution duration to each result
+								routeData.forEach(item => {
+									if (item.json && !item.json.executionDuration) {
+										item.json.executionDuration = Date.now() - startTime;
+									}
+								});
+								returnData[routeIndex].push(...routeData);
+							}
+						}
+					} else {
+						// Single output (shouldn't happen with check operation, but handle it)
+						const singleResult = result as INodeExecutionData;
+						if (singleResult.json && !singleResult.json.executionDuration) {
+							singleResult.json.executionDuration = Date.now() - startTime;
+						}
+						returnData[0].push(singleResult);
+					}
 				} else if (operation === 'close') {
 					// Execute close operation using the implementation from close.operation.ts
 					const result = await closeOperation.execute.call(

@@ -664,6 +664,18 @@ export const description: INodeProperties[] = [
 			minValue: 0,
 		},
 	},
+	{
+		displayName: "Output Input Data",
+		name: "outputInputData",
+		type: "boolean",
+		default: false,
+		description: "Whether to include input data from previous nodes in the response",
+		displayOptions: {
+			show: {
+				operation: ["form"],
+			},
+		},
+	},
 ];
 
 /**
@@ -739,6 +751,11 @@ export async function execute(
 	) as string;
 	const waitSelector = this.getNodeParameter("waitSelector", index, "") as string;
 	const waitDuration = this.getNodeParameter("waitDuration", index, 1000) as number;
+	const outputInputData = this.getNodeParameter(
+		"outputInputData",
+		index,
+		false,
+	) as boolean;
 
 	// Added for better logging
 	const nodeName = this.getNode().name;
@@ -1090,6 +1107,7 @@ export async function execute(
 		}
 
 		// Return the result data
+		const item = this.getInputData()[index];
 		const resultData: IDataObject = {
 			success: true,
 			operation: "form",
@@ -1099,6 +1117,7 @@ export async function execute(
 			pageTitle: page ? await page.title() : "Page unavailable",
 			timestamp: new Date().toISOString(),
 			executionDuration: Date.now() - startTime,
+			...(outputInputData && item.json ? item.json : {}),
 		};
 
 		if (submitFormAfterFill) {
@@ -1280,6 +1299,7 @@ export async function execute(
 		}
 
 		// Prepare error response data
+		const item = this.getInputData()[index];
 		const errorResponseData = {
 			success: false,
 			error: {
@@ -1289,6 +1309,7 @@ export async function execute(
 				...(errorScreenshot && { screenshot: errorScreenshot }),
 			},
 			sessionId,
+			...(outputInputData && item.json ? item.json : {}),
 		};
 
 		if (continueOnFail) {
