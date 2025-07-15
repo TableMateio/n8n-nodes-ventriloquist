@@ -1108,17 +1108,17 @@ export async function execute(
 
 		// Return the result data
 		const item = this.getInputData()[index];
-		const resultData: IDataObject = {
-			success: true,
-			operation: "form",
-			sessionId,
-			formFields: results,
-			currentUrl: page ? await page.url() : "Page unavailable",
-			pageTitle: page ? await page.title() : "Page unavailable",
-			timestamp: new Date().toISOString(),
-			executionDuration: Date.now() - startTime,
-			...(outputInputData && item.json ? item.json : {}),
-		};
+			const resultData: IDataObject = {
+		...(outputInputData && item.json ? item.json : {}),
+		success: true,
+		operation: "form",
+		sessionId,
+		formFields: results,
+		currentUrl: page ? await page.url() : "Page unavailable",
+		pageTitle: page ? await page.title() : "Page unavailable",
+		timestamp: new Date().toISOString(),
+		executionDuration: Date.now() - startTime,
+	};
 
 		if (submitFormAfterFill) {
 			resultData.formSubmission = formSubmissionResult;
@@ -1298,19 +1298,19 @@ export async function execute(
 			);
 		}
 
-		// Prepare error response data
-		const item = this.getInputData()[index];
-		const errorResponseData = {
-			success: false,
-			error: {
-				message: (error as Error).message,
-				stack: (error as Error).stack,
-				sessionId,
-				...(errorScreenshot && { screenshot: errorScreenshot }),
-			},
+			// Prepare error response data
+	const item = this.getInputData()[index];
+	const errorResponseData = {
+		...(outputInputData && item.json ? item.json : {}),
+		success: false,
+		error: {
+			message: (error as Error).message,
+			stack: (error as Error).stack,
 			sessionId,
-			...(outputInputData && item.json ? item.json : {}),
-		};
+			...(errorScreenshot && { screenshot: errorScreenshot }),
+		},
+		sessionId,
+	};
 
 		if (continueOnFail) {
 			// Return partial results if continue on fail is enabled

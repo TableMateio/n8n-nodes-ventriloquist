@@ -307,21 +307,21 @@ export async function execute(
 
 				// Prepare response data
 				const item = this.getInputData()[index];
-				const responseData: IDataObject = {
-					success: true,
-					operation: "open",
-					...pageInfo,
-					screenshot,
-					incognito,
-					domain,
-					sessionId, // Include session ID in response for other operations to use
-					brightDataSessionId, // Include Bright Data session ID for reference
-					credentialType, // Include the type of credential used
-					timestamp: new Date().toISOString(),
-					executionDuration: Date.now() - startTime,
-					note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations.",
-					...(outputInputData && item.json ? item.json : {}),
-				};
+							const responseData: IDataObject = {
+				...(outputInputData && item.json ? item.json : {}),
+				success: true,
+				operation: "open",
+				...pageInfo,
+				screenshot,
+				incognito,
+				domain,
+				sessionId, // Include session ID in response for other operations to use
+				brightDataSessionId, // Include Bright Data session ID for reference
+				credentialType, // Include the type of credential used
+				timestamp: new Date().toISOString(),
+				executionDuration: Date.now() - startTime,
+				note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations.",
+			};
 
 				// Don't close the browser - it will be used by subsequent operations
 				// The session cleanup mechanism will handle closing it after timeout
@@ -370,23 +370,23 @@ export async function execute(
 
 					// Even with context destroyed, we can return success with the session ID
 					// This allows following nodes to use the session
-					const item = this.getInputData()[index];
-					return {
-						json: {
-							success: true, // Mark as success since the session was created
-							operation: "open",
-							url: url, // Use the original URL since we can't access the current one
-							sessionId, // This is the critical piece of information for subsequent nodes
-							brightDataSessionId,
-							contextDestroyed: true, // Flag to indicate context was destroyed
-							contextDestroyedInfo:
-								"This typically happens with redirects. The browser session was successfully created and can be used by following nodes.",
-							timestamp: new Date().toISOString(),
-							executionDuration: Date.now() - startTime,
-							note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations.",
-							...(outputInputData && item.json ? item.json : {}),
-						},
-					};
+									const item = this.getInputData()[index];
+				return {
+					json: {
+						...(outputInputData && item.json ? item.json : {}),
+						success: true, // Mark as success since the session was created
+						operation: "open",
+						url: url, // Use the original URL since we can't access the current one
+						sessionId, // This is the critical piece of information for subsequent nodes
+						brightDataSessionId,
+						contextDestroyed: true, // Flag to indicate context was destroyed
+						contextDestroyedInfo:
+							"This typically happens with redirects. The browser session was successfully created and can be used by following nodes.",
+						timestamp: new Date().toISOString(),
+						executionDuration: Date.now() - startTime,
+						note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations.",
+					},
+				};
 				}
 
 				// For other post-navigation errors, rethrow to be handled by the outer catch block
@@ -460,6 +460,7 @@ export async function execute(
 			const item = this.getInputData()[index];
 			return {
 				json: {
+					...(outputInputData && item.json ? item.json : {}),
 					success: false,
 					operation: "open",
 					url,
@@ -469,7 +470,6 @@ export async function execute(
 					errorDetails: errorData,
 					timestamp: new Date().toISOString(),
 					executionDuration: Date.now() - startTime,
-					...(outputInputData && item.json ? item.json : {}),
 				},
 			};
 		}

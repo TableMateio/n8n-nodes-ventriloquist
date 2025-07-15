@@ -2732,8 +2732,8 @@ export async function execute(
 
 							// Return early result for no session
 							return [this.helpers.returnJsonArray([{
-								...resultData,
-								...(outputInputData ? item.json : {})
+								...(outputInputData ? item.json : {}),
+								...resultData
 							}])];
 						}
 
@@ -3218,8 +3218,8 @@ export async function execute(
 												}
 
 												return [this.helpers.returnJsonArray([{
-													...resultData,
-													...(outputInputData ? item.json : {})
+													...(outputInputData ? item.json : {}),
+													...resultData
 												}])];
 											} catch (pageError) {
 												// If we still can't access the page, return with limited data
@@ -3251,8 +3251,8 @@ export async function execute(
 												);
 
 												return [this.helpers.returnJsonArray([{
-													...resultData,
-													...(outputInputData ? item.json : {})
+													...(outputInputData ? item.json : {}),
+													...resultData
 												}])];
 											}
 										} else {
@@ -3342,8 +3342,8 @@ export async function execute(
 											}
 
 											return [this.helpers.returnJsonArray([{
-												...resultData,
-												...(outputInputData ? item.json : {})
+												...(outputInputData ? item.json : {}),
+												...resultData
 											}])];
 										}
 									}
@@ -3377,8 +3377,8 @@ export async function execute(
 									}
 
 									return [this.helpers.returnJsonArray([{
-										...resultData,
-										...(outputInputData ? item.json : {})
+										...(outputInputData ? item.json : {}),
+										...resultData
 									}])];
 								} catch (error) {
 									// Handle expected context destruction errors in a special way
@@ -3461,8 +3461,8 @@ export async function execute(
 										}
 
 										return [this.helpers.returnJsonArray([{
-											...resultData,
-											...(outputInputData ? item.json : {})
+											...(outputInputData ? item.json : {}),
+											...resultData
 										}])];
 									}
 
@@ -3521,8 +3521,8 @@ export async function execute(
 
 										// Exit the decision node with the error result
 										return [this.helpers.returnJsonArray([{
-											...resultData,
-											...(outputInputData ? item.json : {})
+											...(outputInputData ? item.json : {}),
+											...resultData
 										}])];
 									}
 
@@ -4483,8 +4483,8 @@ export async function execute(
 
 									// Return the result immediately after successful action
 									return [this.helpers.returnJsonArray([{
-										...resultData,
-										...(outputInputData ? item.json : {})
+										...(outputInputData ? item.json : {}),
+										...resultData
 									}])];
 								} catch (error) {
 									this.logger.error(
@@ -4518,8 +4518,8 @@ export async function execute(
 
 										// Exit the decision node with the error result
 										return [this.helpers.returnJsonArray([{
-											...resultData,
-											...(outputInputData ? item.json : {})
+											...(outputInputData ? item.json : {}),
+											...resultData
 										}])];
 									}
 
@@ -4701,8 +4701,8 @@ export async function execute(
 
 									// Return the result immediately after successful action
 									return [this.helpers.returnJsonArray([{
-										...resultData,
-										...(outputInputData ? item.json : {})
+										...(outputInputData ? item.json : {}),
+										...resultData
 									}])];
 								} catch (error) {
 									this.logger.error(
@@ -4808,8 +4808,8 @@ export async function execute(
 
 									// Return the result immediately after successful action
 									return [this.helpers.returnJsonArray([{
-										...resultData,
-										...(outputInputData ? item.json : {})
+										...(outputInputData ? item.json : {}),
+										...resultData
 									}])];
 								} catch (error) {
 									this.logger.error(
@@ -5392,6 +5392,7 @@ export async function execute(
 			startTime,
 			continueOnFail,
 			additionalData: {
+				...(outputInputData ? item.json : {}),
 				routeTaken: "error",
 				actionPerformed: "none",
 				conditionGroups: this.getNodeParameter(
@@ -5407,7 +5408,6 @@ export async function execute(
 					takeScreenshot,
 					continueOnFail,
 				},
-				...(outputInputData ? item.json : {}),
 			},
 		});
 

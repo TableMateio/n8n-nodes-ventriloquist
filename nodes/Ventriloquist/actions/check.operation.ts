@@ -114,16 +114,16 @@ export async function execute(
 			),
 		);
 
-		const failureResponse = {
-			success: false,
-			operation: "check",
-			sessionId: "",
-			active: false,
-			error: "No session ID provided or found in previous operations",
-			timestamp: new Date().toISOString(),
-			executionDuration: Date.now() - startTime,
-			...(outputInputData && item.json ? item.json : {}),
-		};
+			const failureResponse = {
+		...(outputInputData && item.json ? item.json : {}),
+		success: false,
+		operation: "check",
+		sessionId: "",
+		active: false,
+		error: "No session ID provided or found in previous operations",
+		timestamp: new Date().toISOString(),
+		executionDuration: Date.now() - startTime,
+	};
 
 		// Return to failure output (index 1)
 		return [
@@ -203,17 +203,17 @@ export async function execute(
 			}
 		}
 
-		const successResponse = {
-			success: true,
-			operation: "check",
-			sessionId,
-			active: true,
-			pageInfo,
-			...(screenshot && { screenshot }),
-			timestamp: new Date().toISOString(),
-			executionDuration: Date.now() - startTime,
-			...(outputInputData && item.json ? item.json : {}),
-		};
+			const successResponse = {
+		...(outputInputData && item.json ? item.json : {}),
+		success: true,
+		operation: "check",
+		sessionId,
+		active: true,
+		pageInfo,
+		...(screenshot && { screenshot }),
+		timestamp: new Date().toISOString(),
+		executionDuration: Date.now() - startTime,
+	};
 
 		// Return to success output (index 0)
 		return [
@@ -231,16 +231,16 @@ export async function execute(
 			),
 		);
 
-		const failureResponse = {
-			success: false,
-			operation: "check",
-			sessionId,
-			active: false,
-			error: "Session not active or not found",
-			timestamp: new Date().toISOString(),
-			executionDuration: Date.now() - startTime,
-			...(outputInputData && item.json ? item.json : {}),
-		};
+			const failureResponse = {
+		...(outputInputData && item.json ? item.json : {}),
+		success: false,
+		operation: "check",
+		sessionId,
+		active: false,
+		error: "Session not active or not found",
+		timestamp: new Date().toISOString(),
+		executionDuration: Date.now() - startTime,
+	};
 
 		// Return to failure output (index 1)
 		return [
