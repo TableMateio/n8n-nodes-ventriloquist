@@ -101,7 +101,7 @@ export const description: INodeProperties[] = [
 		displayName: "Output Input Data",
 		name: "outputInputData",
 		type: "boolean",
-		default: false,
+		default: true,
 		description: "Whether to include input data from previous nodes in the response",
 	},
 ];

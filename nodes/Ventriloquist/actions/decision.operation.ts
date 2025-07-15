@@ -2040,7 +2040,7 @@ export const description: INodeProperties[] = [
 		displayName: "Output Input Data",
 		name: "outputInputData",
 		type: "boolean",
-		default: false,
+		default: true,
 		description: "Whether to include the input data in the output",
 		displayOptions: {
 			show: {
