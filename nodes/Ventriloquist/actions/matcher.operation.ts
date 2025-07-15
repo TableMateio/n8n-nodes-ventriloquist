@@ -819,7 +819,8 @@ export async function execute(
 						debug: debugInfo,
 						matches: [],
 						itemsFound: 0,
-						executionDuration: Date.now() - startTime
+						executionDuration: Date.now() - startTime,
+						sessionId
 					}
 				};
 			}
