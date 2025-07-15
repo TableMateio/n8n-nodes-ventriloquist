@@ -660,6 +660,18 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: "Output Input Data",
+		name: "outputInputData",
+		type: "boolean",
+		default: true,
+		description: "Whether to include the input data in the output",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
 ];
 
 /**
@@ -680,6 +692,10 @@ export async function execute(
 
 	// Get session ID or use empty string if not available
 	const sessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
+
+	// Get input data and output settings
+	const item = this.getInputData()[index];
+	const outputInputData = this.getNodeParameter('outputInputData', index, true) as boolean;
 
 	this.logger.info(`[Matcher][${nodeId}] Starting matcher operation`);
 
@@ -813,6 +829,7 @@ export async function execute(
 				};
 				return {
 					json: {
+						...(outputInputData && item.json ? item.json : {}),
 						success: 0,
 						containerFound: 0,
 						error,
@@ -1014,68 +1031,77 @@ export async function execute(
 			this.logger.info(`[Matcher] Filtered matches to only include the selected match in "${matchMode}" match mode`);
 		}
 
-		const item = {
+		const resultData = {
+			...matchResult,
+			// For backward compatibility, keep the matches array, but filtered for best match mode
+			matches,
+			// Add clear distinction between matches and all comparisons
+			actualMatches: matches,
+			allComparisons: matchResult.comparisons || [],
+			// Make it clearer if anything was actually matched
+			matchesFound: (matches.length || 0) > 0,
+			matchSelected: !!matchResult.selectedMatch,
+			// Add standardized formatting to match counts
+			matchCount: matches.length || 0,
+			totalCompared: matchResult.totalCompared || matchResult.comparisons?.length || matchResult.itemsFound || 0,
+			// Include unique selectors for matched elements
+			uniqueSelectors: {
+				selected: matchResult.selectedMatch?.uniqueSelector || null,
+				matches: matches.filter((m: IEntityMatchResult) => m.uniqueSelector).map((m: IEntityMatchResult) => ({
+					index: m.index,
+					selector: m.uniqueSelector,
+					similarity: m.overallSimilarity
+				})) || []
+			},
+			// Add information about matches that helps explain the selection
+			matchDetails: {
+				richestMatch: matchResult.comparisons?.sort((a: IEntityMatchResult, b: IEntityMatchResult) =>
+					(b.informationRichness || 0) - (a.informationRichness || 0)
+				)[0] || null,
+				selectedReason: matchResult.selectedMatch ?
+					`Best overall similarity (${matchResult.selectedMatch.overallSimilarity.toFixed(4)}) with information richness ${(matchResult.selectedMatch.informationRichness || 0).toFixed(4)}` :
+					'No match selected',
+				scoringFactors: [
+					'Overall similarity score (primary factor)',
+					'Information richness (secondary factor, breaks ties)',
+					'Matching of key identifiers and numeric values',
+					'Word overlap and sequence matching'
+				]
+			},
+			// Include the sessionId in the output
+			sessionId,
+			duration: Date.now() - startTime,
+		};
+
+		return {
 			json: {
-				...matchResult,
-				// For backward compatibility, keep the matches array, but filtered for best match mode
-				matches,
-				// Add clear distinction between matches and all comparisons
-				actualMatches: matches,
-				allComparisons: matchResult.comparisons || [],
-				// Make it clearer if anything was actually matched
-				matchesFound: (matches.length || 0) > 0,
-				matchSelected: !!matchResult.selectedMatch,
-				// Add standardized formatting to match counts
-				matchCount: matches.length || 0,
-				totalCompared: matchResult.totalCompared || matchResult.comparisons?.length || matchResult.itemsFound || 0,
-				// Include unique selectors for matched elements
-				uniqueSelectors: {
-					selected: matchResult.selectedMatch?.uniqueSelector || null,
-					matches: matches.filter((m: IEntityMatchResult) => m.uniqueSelector).map((m: IEntityMatchResult) => ({
-						index: m.index,
-						selector: m.uniqueSelector,
-						similarity: m.overallSimilarity
-					})) || []
-				},
-				// Add information about matches that helps explain the selection
-				matchDetails: {
-					richestMatch: matchResult.comparisons?.sort((a: IEntityMatchResult, b: IEntityMatchResult) =>
-						(b.informationRichness || 0) - (a.informationRichness || 0)
-					)[0] || null,
-					selectedReason: matchResult.selectedMatch ?
-						`Best overall similarity (${matchResult.selectedMatch.overallSimilarity.toFixed(4)}) with information richness ${(matchResult.selectedMatch.informationRichness || 0).toFixed(4)}` :
-						'No match selected',
-					scoringFactors: [
-						'Overall similarity score (primary factor)',
-						'Information richness (secondary factor, breaks ties)',
-						'Matching of key identifiers and numeric values',
-						'Word overlap and sequence matching'
-					]
-				},
-				// Include the sessionId in the output
-				sessionId,
-				duration: Date.now() - startTime,
+				...(outputInputData && item.json ? item.json : {}),
+				...resultData
 			}
 		};
 
-		return item;
 	} catch (error: any) {
 		this.logger.error(
 			`[Ventriloquist][${nodeName}#${index}][Matcher][${nodeId}] Error: ${error.message}`,
 		);
 
 		// Return error response
+		const errorResponse = await createErrorResponse({
+			error,
+			operation: "matcher",
+			sessionId,
+			nodeId,
+			nodeName,
+			startTime,
+			logger: this.logger,
+			page
+		});
+
 		return {
-			json: await createErrorResponse({
-				error,
-				operation: "matcher",
-				sessionId,
-				nodeId,
-				nodeName,
-				startTime,
-				logger: this.logger,
-				page
-			})
+			json: {
+				...(outputInputData && item.json ? item.json : {}),
+				...errorResponse
+			}
 		};
 	}
 }

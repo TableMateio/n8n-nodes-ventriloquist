@@ -160,6 +160,18 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: 'Output Input Data',
+		name: 'outputInputData',
+		type: 'boolean',
+		default: true,
+		description: 'Whether to include the input data in the output',
+		displayOptions: {
+			show: {
+				operation: ['authenticate'],
+			},
+		},
+	},
 ];
 
 /**
@@ -185,12 +197,16 @@ export async function execute(
 	// Track execution time
 	const startTime = Date.now();
 	const items = this.getInputData();
+	const item = items[index];
 	let sessionId = '';
 	let page: puppeteer.Page | null = null;
 
 	// Added for better logging
 	const nodeName = this.getNode().name;
 	const nodeId = this.getNode().id;
+
+	// Get input data and output settings
+	const outputInputData = this.getNodeParameter('outputInputData', index, true) as boolean;
 
 	// Visual marker to clearly indicate a new node is starting
 	this.logger.info('============ STARTING NODE EXECUTION ============');
@@ -289,10 +305,15 @@ export async function execute(
 			additionalData: {
 				authenticationType,
 			},
-			inputData: items[index].json,
+			inputData: {},
 		});
 
-		return { json: successResponse };
+		return {
+			json: {
+				...(outputInputData && item.json ? item.json : {}),
+				...successResponse
+			}
+		};
 	} catch (error) {
 		// Use the standardized error response utility
 		const errorResponse = await createErrorResponse({
@@ -306,7 +327,6 @@ export async function execute(
 			takeScreenshot: captureScreenshot,
 			startTime,
 			additionalData: {
-				...items[index].json, // Pass through input data
 				authenticationType,
 			}
 		});
@@ -317,7 +337,10 @@ export async function execute(
 
 		// Return error as response with continue on fail
 		return {
-			json: errorResponse
+			json: {
+				...(outputInputData && item.json ? item.json : {}),
+				...errorResponse
+			}
 		};
 	}
 }
