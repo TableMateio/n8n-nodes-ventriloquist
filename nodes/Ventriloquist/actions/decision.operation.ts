@@ -2153,7 +2153,7 @@ export async function execute(
 	const outputInputData = this.getNodeParameter(
 		"outputInputData",
 		index,
-		false,
+		true,
 	) as boolean;
 	let screenshot: string | undefined;
 
@@ -3250,7 +3250,10 @@ export async function execute(
 													),
 												);
 
-												return [this.helpers.returnJsonArray([resultData])];
+												return [this.helpers.returnJsonArray([{
+													...resultData,
+													...(outputInputData ? item.json : {})
+												}])];
 											}
 										} else {
 											// If we don't have a page reference but navigation was successful, still return success
@@ -3338,7 +3341,10 @@ export async function execute(
 												return routes;
 											}
 
-											return [this.helpers.returnJsonArray([resultData])];
+											return [this.helpers.returnJsonArray([{
+												...resultData,
+												...(outputInputData ? item.json : {})
+											}])];
 										}
 									}
 
@@ -3370,7 +3376,10 @@ export async function execute(
 										resultData.executionDuration = Date.now() - startTime;
 									}
 
-									return [this.helpers.returnJsonArray([resultData])];
+									return [this.helpers.returnJsonArray([{
+										...resultData,
+										...(outputInputData ? item.json : {})
+									}])];
 								} catch (error) {
 									// Handle expected context destruction errors in a special way
 									if (
@@ -3451,7 +3460,10 @@ export async function execute(
 											resultData.pageTitle = "Navigation in progress";
 										}
 
-										return [this.helpers.returnJsonArray([resultData])];
+										return [this.helpers.returnJsonArray([{
+											...resultData,
+											...(outputInputData ? item.json : {})
+										}])];
 									}
 
 									this.logger.error(
@@ -3508,7 +3520,10 @@ export async function execute(
 										resultData.executionDuration = Date.now() - startTime;
 
 										// Exit the decision node with the error result
-										return [this.helpers.returnJsonArray([resultData])];
+										return [this.helpers.returnJsonArray([{
+											...resultData,
+											...(outputInputData ? item.json : {})
+										}])];
 									}
 
 									throw error;
@@ -4467,7 +4482,10 @@ export async function execute(
 									}
 
 									// Return the result immediately after successful action
-									return [this.helpers.returnJsonArray([resultData])];
+									return [this.helpers.returnJsonArray([{
+										...resultData,
+										...(outputInputData ? item.json : {})
+									}])];
 								} catch (error) {
 									this.logger.error(
 										formatOperationLog(
@@ -4499,7 +4517,10 @@ export async function execute(
 										resultData.executionDuration = Date.now() - startTime;
 
 										// Exit the decision node with the error result
-										return [this.helpers.returnJsonArray([resultData])];
+										return [this.helpers.returnJsonArray([{
+											...resultData,
+											...(outputInputData ? item.json : {})
+										}])];
 									}
 
 									// If continueOnFail is not enabled, rethrow the error
@@ -4679,7 +4700,10 @@ export async function execute(
 									}
 
 									// Return the result immediately after successful action
-									return [this.helpers.returnJsonArray([resultData])];
+									return [this.helpers.returnJsonArray([{
+										...resultData,
+										...(outputInputData ? item.json : {})
+									}])];
 								} catch (error) {
 									this.logger.error(
 										formatOperationLog(
@@ -4783,7 +4807,10 @@ export async function execute(
 									}
 
 									// Return the result immediately after successful action
-									return [this.helpers.returnJsonArray([resultData])];
+									return [this.helpers.returnJsonArray([{
+										...resultData,
+										...(outputInputData ? item.json : {})
+									}])];
 								} catch (error) {
 									this.logger.error(
 										formatOperationLog(
