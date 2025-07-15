@@ -2953,7 +2953,10 @@ export async function execute(
 											// Place data in correct route despite error
 											if (routeIndex < routeCount) {
 												routes[routeIndex].push({
-													json: resultData,
+													json: {
+														...(outputInputData ? item.json : {}),
+														...resultData
+													},
 													pairedItem: { item: index },
 												});
 												this.logger.info(
@@ -2968,7 +2971,10 @@ export async function execute(
 											} else {
 												// Fallback to first route if index out of bounds
 												routes[0].push({
-													json: resultData,
+													json: {
+														...(outputInputData ? item.json : {}),
+														...resultData
+													},
 													pairedItem: { item: index },
 												});
 											}
@@ -3038,7 +3044,10 @@ export async function execute(
 										// Place data in correct route
 										if (routeIndex < routeCount) {
 											routes[routeIndex].push({
-												json: resultData,
+												json: {
+													...(outputInputData ? item.json : {}),
+													...resultData
+												},
 												pairedItem: { item: index },
 											});
 											this.logger.info(
@@ -3053,7 +3062,10 @@ export async function execute(
 										} else {
 											// Fallback to first route if index out of bounds
 											routes[0].push({
-												json: resultData,
+												json: {
+													...(outputInputData ? item.json : {}),
+													...resultData
+												},
 												pairedItem: { item: index },
 											});
 											this.logger.warn(
@@ -3185,7 +3197,10 @@ export async function execute(
 													// Put the item in the correct route
 													if (routeIndex >= 0 && routeIndex < routeCount) {
 														routes[routeIndex].push({
-															json: resultData,
+															json: {
+																...(outputInputData ? item.json : {}),
+																...resultData
+															},
 															pairedItem: { item: index },
 														});
 														this.logger.info(
@@ -3200,7 +3215,10 @@ export async function execute(
 													} else {
 														// Default to route 0 if routeIndex is out of bounds
 														routes[0].push({
-															json: resultData,
+															json: {
+																...(outputInputData ? item.json : {}),
+																...resultData
+															},
 															pairedItem: { item: index },
 														});
 														this.logger.warn(
@@ -3309,7 +3327,10 @@ export async function execute(
 												// Put the item in the correct route
 												if (routeIndex >= 0 && routeIndex < routeCount) {
 													routes[routeIndex].push({
-														json: resultData,
+														json: {
+															...(outputInputData ? item.json : {}),
+															...resultData
+														},
 														pairedItem: { item: index },
 													});
 													this.logger.info(
@@ -3324,7 +3345,10 @@ export async function execute(
 												} else {
 													// Default to route 0 if routeIndex is out of bounds
 													routes[0].push({
-														json: resultData,
+														json: {
+															...(outputInputData ? item.json : {}),
+															...resultData
+														},
 														pairedItem: { item: index },
 													});
 													this.logger.warn(

@@ -54,6 +54,7 @@ export async function createSuccessResponse(options: SuccessResponseOptions): Pr
 
   // Create the base success response
   const successResponse: IDataObject = {
+    ...inputData, // Pass through input data first
     success: true,
     operation,
     sessionId,
@@ -62,7 +63,6 @@ export async function createSuccessResponse(options: SuccessResponseOptions): Pr
     timestamp: new Date().toISOString(),
     executionDuration: executionDuration,
     ...additionalData,
-    ...inputData, // Pass through input data
   };
 
   // Add selector if provided
