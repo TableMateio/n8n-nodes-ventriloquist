@@ -172,6 +172,19 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: 'Output TOTP Code',
+		name: 'outputTotpCode',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to include the generated TOTP code in the output (useful for debugging)',
+		displayOptions: {
+			show: {
+				operation: ['authenticate'],
+				authenticationType: ['totp'],
+			},
+		},
+	},
 ];
 
 /**
@@ -207,6 +220,7 @@ export async function execute(
 
 	// Get input data and output settings
 	const outputInputData = this.getNodeParameter('outputInputData', index, true) as boolean;
+	const outputTotpCode = this.getNodeParameter('outputTotpCode', index, false) as boolean;
 
 	// Visual marker to clearly indicate a new node is starting
 	this.logger.info('============ STARTING NODE EXECUTION ============');
@@ -217,6 +231,9 @@ export async function execute(
 	const continueOnFail = this.getNodeParameter('continueOnFail', index, true) as boolean;
 	const captureScreenshot = this.getNodeParameter('captureScreenshot', index, true) as boolean;
 	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
+
+	// Store the generated codes for potential output
+	let generatedTotpCode: string | undefined;
 
 	try {
 		// Use the centralized session management instead of duplicating code
@@ -256,6 +273,7 @@ export async function execute(
 
 			// Generate TOTP code
 			const totpCode = generateTOTPCode(totpSecret, totpEncoding as 'base32' | 'ascii' | 'hex');
+			generatedTotpCode = totpCode; // Store for potential output
 			this.logger.info(formatOperationLog('Authenticate', nodeName, nodeId, index, `Generated TOTP code: ${totpCode}`));
 
 			// Wait for the input field to be visible
@@ -304,6 +322,7 @@ export async function execute(
 			takeScreenshot: captureScreenshot,
 			additionalData: {
 				authenticationType,
+				...(outputTotpCode && generatedTotpCode ? { totpCode: generatedTotpCode } : {}),
 			},
 			inputData: {},
 		});
@@ -328,6 +347,7 @@ export async function execute(
 			startTime,
 			additionalData: {
 				authenticationType,
+				...(outputTotpCode && generatedTotpCode ? { totpCode: generatedTotpCode } : {}),
 			}
 		});
 
