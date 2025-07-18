@@ -465,6 +465,100 @@ async function handleActionTiming(
  * Create the JavaScript code for removing elements
  */
 function createRemoveScript(selector: string, continuous: boolean, persistence: string): string {
+	// For session-wide persistence, we need a more robust approach
+	if (persistence === "session-wide") {
+		return `
+			(function() {
+				console.log('[Manipulate] Session-wide remove script loaded for selector: ${selector}');
+
+				function removeElements() {
+					try {
+						const elements = document.querySelectorAll('${selector.replace(/'/g, "\\'")}');
+						let removed = 0;
+
+						elements.forEach(element => {
+							if (element && element.parentNode) {
+								element.remove();
+								removed++;
+							}
+						});
+
+						if (removed > 0) {
+							console.log('[Manipulate] Session-wide removal: ' + removed + ' elements matching: ${selector}');
+						}
+						return removed;
+					} catch (error) {
+						console.error('[Manipulate] Error removing elements:', error);
+						return 0;
+					}
+				}
+
+				function setupRemovalSystem() {
+					// Remove elements immediately if they exist
+					removeElements();
+
+					// Set up MutationObserver for continuous monitoring
+					if (!window.ventriloquistRemoveObserver_${selector.replace(/[^a-zA-Z0-9]/g, '_')}) {
+						window.ventriloquistRemoveObserver_${selector.replace(/[^a-zA-Z0-9]/g, '_')} = new MutationObserver(function(mutations) {
+							let shouldCheck = false;
+							mutations.forEach(function(mutation) {
+								if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+									// Check if any added nodes match our selector or contain matching elements
+									for (let i = 0; i < mutation.addedNodes.length; i++) {
+										const node = mutation.addedNodes[i];
+										if (node.nodeType === 1) { // Element node
+											if (node.matches && node.matches('${selector.replace(/'/g, "\\'")}')) {
+												shouldCheck = true;
+												break;
+											}
+											if (node.querySelector && node.querySelector('${selector.replace(/'/g, "\\'")}')) {
+												shouldCheck = true;
+												break;
+											}
+										}
+									}
+								}
+							});
+
+							if (shouldCheck) {
+								// Small delay to let the element fully render
+								setTimeout(removeElements, 50);
+							}
+						});
+
+						// Observe the entire document for maximum coverage
+						window.ventriloquistRemoveObserver_${selector.replace(/[^a-zA-Z0-9]/g, '_')}.observe(document.documentElement, {
+							childList: true,
+							subtree: true
+						});
+
+						console.log('[Manipulate] Set up session-wide MutationObserver for: ${selector}');
+					}
+				}
+
+				// Wait for DOM to be ready before setting up the system
+				if (document.readyState === 'loading') {
+					document.addEventListener('DOMContentLoaded', setupRemovalSystem);
+				} else {
+					setupRemovalSystem();
+				}
+
+				// Also try periodically in case elements appear later
+				let checkCount = 0;
+				const periodicCheck = setInterval(function() {
+					removeElements();
+					checkCount++;
+					if (checkCount >= 10) { // Stop after 10 checks (5 seconds)
+						clearInterval(periodicCheck);
+					}
+				}, 500);
+
+				return 0; // Return 0 for session-wide since we can't count elements reliably
+			})();
+		`;
+	}
+
+	// Original implementation for page-wide and one-time
 	return `
 		(function() {
 			console.log('[Manipulate] Executing remove action for selector: ${selector}');
@@ -528,6 +622,97 @@ function createRemoveScript(selector: string, continuous: boolean, persistence: 
 function createBlockScript(events: string[], targetSelectors: string, continuous: boolean, persistence: string): string {
 	const targetsArray = targetSelectors ? targetSelectors.split(',').map(s => s.trim()).filter(Boolean) : [];
 
+	// For session-wide persistence, we need a more robust approach
+	if (persistence === "session-wide") {
+		return `
+			(function() {
+				console.log('[Manipulate] Session-wide event blocking script loaded for events: ${events.join(', ')}');
+
+				const eventsToBlock = ${JSON.stringify(events)};
+				const targetSelectors = ${JSON.stringify(targetsArray)};
+
+				function setupEventBlocking() {
+					eventsToBlock.forEach(function(eventType) {
+						if (targetSelectors.length > 0) {
+							// Block events on specific elements
+							targetSelectors.forEach(function(selector) {
+								try {
+									const elements = document.querySelectorAll(selector);
+									elements.forEach(function(element) {
+										// Check if this element already has our blocking handler
+										if (!element.ventriloquistEventBlocked) {
+											element.addEventListener(eventType, function(e) {
+												console.log('[Manipulate] Session-wide blocked ' + eventType + ' event on:', selector);
+												e.stopImmediatePropagation();
+												e.preventDefault();
+											}, true);
+											element.ventriloquistEventBlocked = true;
+										}
+									});
+								} catch (error) {
+									console.error('[Manipulate] Error setting up event blocking for selector:', selector, error);
+								}
+							});
+						} else {
+							// Block events document-wide (only set up once per event type)
+							if (!window.ventriloquistDocumentBlocked) {
+								window.ventriloquistDocumentBlocked = {};
+							}
+
+							if (!window.ventriloquistDocumentBlocked[eventType]) {
+								document.addEventListener(eventType, function(e) {
+									console.log('[Manipulate] Session-wide blocked ' + eventType + ' event document-wide');
+									e.stopImmediatePropagation();
+									// Don't preventDefault for document-wide to avoid breaking normal functionality
+								}, true);
+								window.ventriloquistDocumentBlocked[eventType] = true;
+							}
+						}
+					});
+				}
+
+				function setupBlockingSystem() {
+					// Set up event blocking immediately
+					setupEventBlocking();
+
+					// Set up MutationObserver to block events on new elements
+					if (targetSelectors.length > 0 && !window.ventriloquistBlockObserver_${events.join('_').replace(/[^a-zA-Z0-9]/g, '_')}) {
+						window.ventriloquistBlockObserver_${events.join('_').replace(/[^a-zA-Z0-9]/g, '_')} = new MutationObserver(function(mutations) {
+							let hasNewNodes = false;
+							mutations.forEach(function(mutation) {
+								if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+									hasNewNodes = true;
+								}
+							});
+
+							if (hasNewNodes) {
+								// Small delay to let elements fully render
+								setTimeout(setupEventBlocking, 50);
+							}
+						});
+
+						window.ventriloquistBlockObserver_${events.join('_').replace(/[^a-zA-Z0-9]/g, '_')}.observe(document.documentElement, {
+							childList: true,
+							subtree: true
+						});
+
+						console.log('[Manipulate] Set up session-wide MutationObserver for event blocking');
+					}
+				}
+
+				// Wait for DOM to be ready before setting up the system
+				if (document.readyState === 'loading') {
+					document.addEventListener('DOMContentLoaded', setupBlockingSystem);
+				} else {
+					setupBlockingSystem();
+				}
+
+				return eventsToBlock;
+			})();
+		`;
+	}
+
+	// Original implementation for page-wide and one-time
 	return `
 		(function() {
 			console.log('[Manipulate] Executing block action for events: ${events.join(', ')}');
