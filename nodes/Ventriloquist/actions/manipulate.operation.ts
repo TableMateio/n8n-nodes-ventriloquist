@@ -139,10 +139,61 @@ export const description: INodeProperties[] = [
 					{
 						displayName: "Events to Block",
 						name: "events",
-						type: "string",
-						default: "contextmenu",
-						placeholder: "contextmenu, mousedown, selectstart, copy, paste",
-						description: "JavaScript events to intercept and block (comma-separated)",
+						type: "multiOptions",
+						options: [
+							{
+								name: "Right-Click (contextmenu)",
+								value: "contextmenu",
+								description: "Block right-click context menus",
+							},
+							{
+								name: "Right Mouse Down",
+								value: "mousedown_right",
+								description: "Block right mouse button press events",
+							},
+							{
+								name: "Right Mouse Up",
+								value: "mouseup_right",
+								description: "Block right mouse button release events",
+							},
+							{
+								name: "Text Selection (selectstart)",
+								value: "selectstart",
+								description: "Block text selection initiation",
+							},
+							{
+								name: "Copy (copy)",
+								value: "copy",
+								description: "Block copy operations",
+							},
+							{
+								name: "Paste (paste)",
+								value: "paste",
+								description: "Block paste operations",
+							},
+							{
+								name: "Cut (cut)",
+								value: "cut",
+								description: "Block cut operations",
+							},
+							{
+								name: "Drag Start (dragstart)",
+								value: "dragstart",
+								description: "Block drag and drop initiation",
+							},
+							{
+								name: "Key Down (keydown)",
+								value: "keydown",
+								description: "Block keyboard key press events",
+							},
+							{
+								name: "All Mouse Events",
+								value: "allmouse",
+								description: "Block all mouse button events",
+							},
+						],
+						default: ["contextmenu"],
+						description: "Select which JavaScript events to intercept and block",
 						displayOptions: {
 							show: {
 								actionType: ["block"],
@@ -317,12 +368,39 @@ export const description: INodeProperties[] = [
 interface IManipulateAction {
 	actionType: "remove" | "block" | "inject" | "add" | "change";
 	selectors?: string;
-	events?: string;
+	events?: string | string[];
 	targetSelectors?: string;
 	timing: "immediate" | "domReady" | "delayed" | "waitForElement" | "continuous" | "smart";
 	delayTime?: number;
 	waitSelector?: string;
 	customCode?: string;
+}
+
+/**
+ * Expand special event types into their constituent events
+ */
+function expandEventList(eventList: string[]): string[] {
+	const expandedEvents: string[] = [];
+
+	for (const event of eventList) {
+		switch (event) {
+			case "mousedown_right":
+				expandedEvents.push("mousedown");
+				break;
+			case "mouseup_right":
+				expandedEvents.push("mouseup");
+				break;
+			case "allmouse":
+				expandedEvents.push("mousedown", "mouseup", "click", "dblclick", "contextmenu");
+				break;
+			default:
+				expandedEvents.push(event);
+				break;
+		}
+	}
+
+	// Remove duplicates
+	return [...new Set(expandedEvents)];
 }
 
 /**
@@ -388,15 +466,25 @@ async function executeBlockAction(
 		return [];
 	}
 
-	// Parse comma-separated events
-	const events = action.events.split(',').map(e => e.trim()).filter(Boolean);
+	// Parse events (handle both string and array formats)
+	let eventList: string[];
+	if (Array.isArray(action.events)) {
+		eventList = action.events;
+	} else if (typeof action.events === 'string') {
+		eventList = action.events.split(',').map(e => e.trim()).filter(Boolean);
+	} else {
+		eventList = [];
+	}
+
+	// Expand special event types
+	const events = expandEventList(eventList);
 	const targetSelectors = action.targetSelectors || "";
 
 	// Handle timing
 	await handleActionTiming(page, action, detectionOptions, logger);
 
 			// Create the event blocking script
-		const blockingScript = createBlockScript(events, targetSelectors, action.timing === "continuous" || action.timing === "smart", persistence, action.timing);
+		const blockingScript = createBlockScript(eventList, targetSelectors, action.timing === "continuous" || action.timing === "smart", persistence, action.timing);
 
 	try {
 		if (persistence === "session-wide") {
@@ -760,12 +848,13 @@ function createSmartRemoveScript(selector: string, persistence: string): string 
 /**
  * Create the JavaScript code for blocking events
  */
-function createBlockScript(events: string[], targetSelectors: string, continuous: boolean, persistence: string, timing?: string): string {
+function createBlockScript(eventList: string[], targetSelectors: string, continuous: boolean, persistence: string, timing?: string): string {
 	const targetsArray = targetSelectors ? targetSelectors.split(',').map(s => s.trim()).filter(Boolean) : [];
+	const events = expandEventList(eventList);
 
 	// For smart timing, use the multi-layered racing strategy
 	if (timing === "smart") {
-		return createSmartBlockScript(events, targetSelectors, persistence);
+		return createSmartBlockScript(eventList, targetSelectors, persistence);
 	}
 
 	// For session-wide persistence, we need a more robust approach
@@ -777,9 +866,39 @@ function createBlockScript(events: string[], targetSelectors: string, continuous
 				const eventsToBlock = ${JSON.stringify(events)};
 				const targetSelectors = ${JSON.stringify(targetsArray)};
 
-				function setupEventBlocking() {
+								function setupEventBlocking() {
 					eventsToBlock.forEach(function(eventType) {
-						if (targetSelectors.length > 0) {
+						// Check if we should use document-wide blocking
+						const shouldUseDocumentWide = targetSelectors.length === 0 ||
+							targetSelectors.some(sel => sel.toLowerCase().trim() === 'body' || sel.toLowerCase().trim() === 'document' || sel.trim() === '');
+
+						if (shouldUseDocumentWide) {
+							// Block events document-wide (more effective for right-click blocking)
+							if (!window.ventriloquistDocumentBlocked) {
+								window.ventriloquistDocumentBlocked = {};
+							}
+
+							if (!window.ventriloquistDocumentBlocked[eventType]) {
+								const eventHandler = function(e) {
+									// Special filtering for right-click events
+									if ((eventType === 'mousedown' || eventType === 'mouseup') && e.button !== 2) {
+										return; // Only block right-click (button 2)
+									}
+
+									console.log('[Manipulate] Session-wide blocked ' + eventType + ' event document-wide');
+									e.stopImmediatePropagation();
+
+									// For context menu, also prevent default to fully block
+									if (eventType === 'contextmenu') {
+										e.preventDefault();
+									}
+								};
+
+								document.addEventListener(eventType, eventHandler, true);
+								window.ventriloquistDocumentBlocked[eventType] = true;
+								console.log('[Manipulate] Session-wide: Set up document-wide blocking for ' + eventType);
+							}
+						} else {
 							// Block events on specific elements
 							targetSelectors.forEach(function(selector) {
 								try {
@@ -787,11 +906,18 @@ function createBlockScript(events: string[], targetSelectors: string, continuous
 									elements.forEach(function(element) {
 										// Check if this element already has our blocking handler
 										if (!element.ventriloquistEventBlocked) {
-											element.addEventListener(eventType, function(e) {
+											const eventHandler = function(e) {
+												// Special filtering for right-click events
+												if ((eventType === 'mousedown' || eventType === 'mouseup') && e.button !== 2) {
+													return; // Only block right-click (button 2)
+												}
+
 												console.log('[Manipulate] Session-wide blocked ' + eventType + ' event on:', selector);
 												e.stopImmediatePropagation();
 												e.preventDefault();
-											}, true);
+											};
+
+											element.addEventListener(eventType, eventHandler, true);
 											element.ventriloquistEventBlocked = true;
 										}
 									});
@@ -799,20 +925,6 @@ function createBlockScript(events: string[], targetSelectors: string, continuous
 									console.error('[Manipulate] Error setting up event blocking for selector:', selector, error);
 								}
 							});
-						} else {
-							// Block events document-wide (only set up once per event type)
-							if (!window.ventriloquistDocumentBlocked) {
-								window.ventriloquistDocumentBlocked = {};
-							}
-
-							if (!window.ventriloquistDocumentBlocked[eventType]) {
-								document.addEventListener(eventType, function(e) {
-									console.log('[Manipulate] Session-wide blocked ' + eventType + ' event document-wide');
-									e.stopImmediatePropagation();
-									// Don't preventDefault for document-wide to avoid breaking normal functionality
-								}, true);
-								window.ventriloquistDocumentBlocked[eventType] = true;
-							}
 						}
 					});
 				}
@@ -868,29 +980,52 @@ function createBlockScript(events: string[], targetSelectors: string, continuous
 
 			function setupEventBlocking() {
 				eventsToBlock.forEach(function(eventType) {
-					if (targetSelectors.length > 0) {
+					// Check if we should use document-wide blocking
+					const shouldUseDocumentWide = targetSelectors.length === 0 ||
+						targetSelectors.some(sel => sel.toLowerCase().trim() === 'body' || sel.toLowerCase().trim() === 'document' || sel.trim() === '');
+
+					if (shouldUseDocumentWide) {
+						// Block events document-wide (more effective for right-click blocking)
+						const eventHandler = function(e) {
+							// Special filtering for right-click events
+							if ((eventType === 'mousedown' || eventType === 'mouseup') && e.button !== 2) {
+								return; // Only block right-click (button 2)
+							}
+
+							console.log('[Manipulate] Blocked ' + eventType + ' event document-wide');
+							e.stopImmediatePropagation();
+
+							// For context menu, also prevent default to fully block
+							if (eventType === 'contextmenu') {
+								e.preventDefault();
+							}
+						};
+
+						document.addEventListener(eventType, eventHandler, true);
+						console.log('[Manipulate] Set up document-wide blocking for ' + eventType);
+					} else {
 						// Block events on specific elements
 						targetSelectors.forEach(function(selector) {
 							try {
 								const elements = document.querySelectorAll(selector);
 								elements.forEach(function(element) {
-									element.addEventListener(eventType, function(e) {
+									const eventHandler = function(e) {
+										// Special filtering for right-click events
+										if ((eventType === 'mousedown' || eventType === 'mouseup') && e.button !== 2) {
+											return; // Only block right-click (button 2)
+										}
+
 										console.log('[Manipulate] Blocked ' + eventType + ' event on:', selector);
 										e.stopImmediatePropagation();
 										e.preventDefault();
-									}, true);
+									};
+
+									element.addEventListener(eventType, eventHandler, true);
 								});
 							} catch (error) {
 								console.error('[Manipulate] Error setting up event blocking for selector:', selector, error);
 							}
 						});
-					} else {
-						// Block events document-wide
-						document.addEventListener(eventType, function(e) {
-							console.log('[Manipulate] Blocked ' + eventType + ' event document-wide');
-							e.stopImmediatePropagation();
-							// Don't preventDefault for document-wide to avoid breaking normal functionality
-						}, true);
 					}
 				});
 			}
@@ -932,9 +1067,10 @@ function createBlockScript(events: string[], targetSelectors: string, continuous
  * Create the JavaScript code for smart multi-layered event blocking
  * Implements the "racing strategy" with multiple timing approaches
  */
-function createSmartBlockScript(events: string[], targetSelectors: string, persistence: string): string {
+function createSmartBlockScript(eventList: string[], targetSelectors: string, persistence: string): string {
 	const isSessionWide = persistence === "session-wide";
 	const targetsArray = targetSelectors ? targetSelectors.split(',').map(s => s.trim()).filter(Boolean) : [];
+	const events = expandEventList(eventList);
 	const observerName = `ventriloquistSmartBlockObserver_${events.join('_').replace(/[^a-zA-Z0-9]/g, '_')}`;
 
 	return `
@@ -944,10 +1080,40 @@ function createSmartBlockScript(events: string[], targetSelectors: string, persi
 			const eventsToBlock = ${JSON.stringify(events)};
 			const targetSelectors = ${JSON.stringify(targetsArray)};
 
-			function setupEventBlocking(context) {
+						function setupEventBlocking(context) {
 				try {
 					eventsToBlock.forEach(function(eventType) {
-						if (targetSelectors.length > 0) {
+						// Check if we should use document-wide blocking
+						const shouldUseDocumentWide = targetSelectors.length === 0 ||
+							targetSelectors.some(sel => sel.toLowerCase().trim() === 'body' || sel.toLowerCase().trim() === 'document' || sel.trim() === '');
+
+						if (shouldUseDocumentWide) {
+							// Block events document-wide (more effective for right-click blocking)
+							if (!window.ventriloquistDocumentBlocked) {
+								window.ventriloquistDocumentBlocked = {};
+							}
+
+							if (!window.ventriloquistDocumentBlocked[eventType]) {
+								const eventHandler = function(e) {
+									// Special filtering for right-click events
+									if ((eventType === 'mousedown' || eventType === 'mouseup') && e.button !== 2) {
+										return; // Only block right-click (button 2)
+									}
+
+									console.log('[Manipulate] ' + context + ': Blocked ' + eventType + ' event document-wide');
+									e.stopImmediatePropagation();
+
+									// For context menu, also prevent default to fully block
+									if (eventType === 'contextmenu') {
+										e.preventDefault();
+									}
+								};
+
+								document.addEventListener(eventType, eventHandler, true);
+								window.ventriloquistDocumentBlocked[eventType] = true;
+								console.log('[Manipulate] ' + context + ': Set up document-wide blocking for ' + eventType);
+							}
+						} else {
 							// Block events on specific elements
 							targetSelectors.forEach(function(selector) {
 								try {
@@ -956,11 +1122,18 @@ function createSmartBlockScript(events: string[], targetSelectors: string, persi
 										// Check if this element already has our blocking handler for this event
 										const flagName = 'ventriloquistBlocked_' + eventType;
 										if (!element[flagName]) {
-											element.addEventListener(eventType, function(e) {
+											const eventHandler = function(e) {
+												// Special filtering for right-click events
+												if ((eventType === 'mousedown' || eventType === 'mouseup') && e.button !== 2) {
+													return; // Only block right-click (button 2)
+												}
+
 												console.log('[Manipulate] ' + context + ': Blocked ' + eventType + ' event on:', selector);
 												e.stopImmediatePropagation();
 												e.preventDefault();
-											}, true);
+											};
+
+											element.addEventListener(eventType, eventHandler, true);
 											element[flagName] = true;
 										}
 									});
@@ -968,20 +1141,6 @@ function createSmartBlockScript(events: string[], targetSelectors: string, persi
 									console.error('[Manipulate] Error setting up event blocking for selector:', selector, error);
 								}
 							});
-						} else {
-							// Block events document-wide (only set up once per event type)
-							if (!window.ventriloquistDocumentBlocked) {
-								window.ventriloquistDocumentBlocked = {};
-							}
-
-							if (!window.ventriloquistDocumentBlocked[eventType]) {
-								document.addEventListener(eventType, function(e) {
-									console.log('[Manipulate] ' + context + ': Blocked ' + eventType + ' event document-wide');
-									e.stopImmediatePropagation();
-									// Don't preventDefault for document-wide to avoid breaking normal functionality
-								}, true);
-								window.ventriloquistDocumentBlocked[eventType] = true;
-							}
 						}
 					});
 				} catch (error) {
