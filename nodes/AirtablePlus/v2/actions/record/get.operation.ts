@@ -8,7 +8,7 @@ import type {
 
 import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
 import type { IRecord } from '../../helpers/interfaces';
-import { flattenOutput, processAirtableError } from '../../helpers/utils';
+import { flattenOutput, processAirtableError, processOutputFieldRenaming } from '../../helpers/utils';
 import { apiRequest, downloadRecordAttachments } from '../../transport';
 import { getTableSchema, expandLinkedRecords, fillEmptyFields } from '../../helpers/linkedRecordUtils';
 

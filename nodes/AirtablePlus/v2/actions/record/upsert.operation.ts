@@ -8,7 +8,7 @@ import type {
 
 import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
 import type { UpdateRecord } from '../../helpers/interfaces';
-import { processAirtableError, removeIgnored, removeEmptyFields, validateLinkedRecordFields } from '../../helpers/utils';
+import { processAirtableError, removeIgnored, removeEmptyFields, validateLinkedRecordFields, processOutputFieldRenaming } from '../../helpers/utils';
 import { apiRequest, apiRequestAllItems, batchUpdate } from '../../transport';
 import {
 	insertUpdateOptions,
@@ -426,6 +426,15 @@ export async function execute(
 		}
 
 						let dataToWrap = responseData.records as IDataObject[];
+
+			// Apply field renaming
+			dataToWrap = dataToWrap.map((result) => {
+				return processOutputFieldRenaming(
+					result,
+					options.renameIdField as string,
+					options.renameOutputFields as string
+				);
+			});
 
 			// Include input data if option is enabled
 			if (options.includeInputData) {

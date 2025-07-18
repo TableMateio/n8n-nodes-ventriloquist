@@ -377,6 +377,22 @@ export const insertUpdateOptions: INodeProperties[] = [
 					},
 				},
 			},
+			{
+				displayName: 'Rename ID Field',
+				name: 'renameIdField',
+				type: 'string',
+				default: '',
+				placeholder: 'Property ID',
+				description: 'Rename the output ID field to avoid clashing with input fields. Leave empty to keep default "id".',
+			},
+			{
+				displayName: 'Rename Output Fields',
+				name: 'renameOutputFields',
+				type: 'string',
+				default: '',
+				placeholder: 'Property Fields',
+				description: 'Rename the output fields container to avoid clashing with input fields. Leave empty to use flattened structure.',
+			},
 		],
 	},
 ];

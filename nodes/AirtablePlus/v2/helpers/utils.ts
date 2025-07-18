@@ -112,6 +112,33 @@ export const flattenOutput = (record: IDataObject) => {
 	};
 };
 
+export const processOutputFieldRenaming = (record: IDataObject, renameIdField?: string, renameOutputFields?: string) => {
+	if (!renameIdField && !renameOutputFields) {
+		// No renaming needed, use standard flatten
+		return flattenOutput(record);
+	}
+
+	const { fields, id, ...rest } = record;
+	const result: IDataObject = { ...rest };
+
+	// Handle ID field renaming
+	if (renameIdField && renameIdField.trim()) {
+		result[renameIdField.trim()] = id;
+	} else {
+		result.id = id;
+	}
+
+	// Handle fields renaming
+	if (renameOutputFields && renameOutputFields.trim()) {
+		result[renameOutputFields.trim()] = fields;
+	} else {
+		// Use standard flattening when no renaming is specified
+		Object.assign(result, fields as IDataObject);
+	}
+
+	return result;
+};
+
 /**
  * Validates linked record fields to ensure record IDs belong to the correct linked tables
  */

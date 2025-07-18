@@ -8,7 +8,7 @@ import type {
 
 import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
 import type { UpdateRecord } from '../../helpers/interfaces';
-import { findMatches, processAirtableError, removeIgnored, removeEmptyFields } from '../../helpers/utils';
+import { findMatches, processAirtableError, removeIgnored, removeEmptyFields, processOutputFieldRenaming } from '../../helpers/utils';
 import { apiRequestAllItems, batchUpdate, apiRequest } from '../../transport';
 import {
 	insertUpdateOptions,
@@ -226,6 +226,15 @@ export async function execute(
 						const responseData = await batchUpdate.call(this, endpoint, body, records);
 
 			let dataToWrap = responseData.records as IDataObject[];
+
+			// Apply field renaming
+			dataToWrap = dataToWrap.map((result) => {
+				return processOutputFieldRenaming(
+					result,
+					options.renameIdField as string,
+					options.renameOutputFields as string
+				);
+			});
 
 			// Include input data if option is enabled
 			if (options.includeInputData) {

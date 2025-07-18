@@ -7,7 +7,7 @@ import type {
 } from 'n8n-workflow';
 
 import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
-import { processAirtableError, removeIgnored, removeEmptyFields } from '../../helpers/utils';
+import { processAirtableError, removeIgnored, removeEmptyFields, processOutputFieldRenaming } from '../../helpers/utils';
 import { apiRequest } from '../../transport';
 import {
 	insertUpdateOptions,
@@ -95,6 +95,13 @@ export async function execute(
 			} else {
 				dataToWrap = responseData as IDataObject;
 			}
+
+			// Apply field renaming before including input data
+			dataToWrap = processOutputFieldRenaming(
+				dataToWrap,
+				options.renameIdField as string,
+				options.renameOutputFields as string
+			);
 
 			// Include input data if option is enabled
 			if (options.includeInputData) {
