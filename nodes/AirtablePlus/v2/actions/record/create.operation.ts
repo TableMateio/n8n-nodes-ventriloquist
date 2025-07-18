@@ -99,8 +99,8 @@ export async function execute(
 			// Include input data if option is enabled
 			if (options.includeInputData) {
 				dataToWrap = {
+					...items[i].json,
 					...dataToWrap,
-					inputData: items[i].json,
 				};
 			}
 

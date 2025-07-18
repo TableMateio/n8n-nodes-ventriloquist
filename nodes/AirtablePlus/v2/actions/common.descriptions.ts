@@ -316,7 +316,7 @@ export const insertUpdateOptions: INodeProperties[] = [
 				name: 'includeInputData',
 				type: 'boolean',
 				default: false,
-				description: 'Whether to include the original input data alongside the Airtable response data',
+				description: 'Whether to merge the original input data at the top level with the Airtable response data',
 			},
 			{
 				displayName: 'Update All Matches',

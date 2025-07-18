@@ -326,8 +326,8 @@ export async function execute(
 				// Include input data if option is enabled
 				if (options.includeInputData && items[i]) {
 					outputData = {
+						...items[i].json,
 						...outputData,
-						inputData: items[i].json,
 					};
 				}
 
