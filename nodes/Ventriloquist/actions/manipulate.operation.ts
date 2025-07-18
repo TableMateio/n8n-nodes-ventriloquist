@@ -187,11 +187,16 @@ export const description: INodeProperties[] = [
 								value: "waitForElement",
 								description: "Wait for specific selector to appear first",
 							},
-							{
-								name: "Continuous",
-								value: "continuous",
-								description: "Use MutationObserver for ongoing monitoring",
-							},
+													{
+							name: "Continuous",
+							value: "continuous",
+							description: "Use MutationObserver for ongoing monitoring",
+						},
+						{
+							name: "Smart (Multi-Layered)",
+							value: "smart",
+							description: "Combines all strategies: immediate, DOM ready, delayed, and continuous monitoring for maximum effectiveness",
+						},
 						],
 						default: "domReady",
 						description: "When to execute this manipulation",
@@ -314,7 +319,7 @@ interface IManipulateAction {
 	selectors?: string;
 	events?: string;
 	targetSelectors?: string;
-	timing: "immediate" | "domReady" | "delayed" | "waitForElement" | "continuous";
+	timing: "immediate" | "domReady" | "delayed" | "waitForElement" | "continuous" | "smart";
 	delayTime?: number;
 	waitSelector?: string;
 	customCode?: string;
@@ -346,7 +351,7 @@ async function executeRemoveAction(
 		await handleActionTiming(page, action, detectionOptions, logger);
 
 		// Create the manipulation script based on persistence
-		const manipulationScript = createRemoveScript(selector, action.timing === "continuous", persistence);
+		const manipulationScript = createRemoveScript(selector, action.timing === "continuous" || action.timing === "smart", persistence, action.timing);
 
 		try {
 			if (persistence === "session-wide") {
@@ -390,8 +395,8 @@ async function executeBlockAction(
 	// Handle timing
 	await handleActionTiming(page, action, detectionOptions, logger);
 
-	// Create the event blocking script
-	const blockingScript = createBlockScript(events, targetSelectors, action.timing === "continuous", persistence);
+			// Create the event blocking script
+		const blockingScript = createBlockScript(events, targetSelectors, action.timing === "continuous" || action.timing === "smart", persistence, action.timing);
 
 	try {
 		if (persistence === "session-wide") {
@@ -458,13 +463,22 @@ async function handleActionTiming(
 		case "continuous":
 			// Continuous monitoring is handled in the script itself
 			break;
+
+		case "smart":
+			// Smart multi-layered timing is handled entirely in the script itself
+			break;
 	}
 }
 
 /**
  * Create the JavaScript code for removing elements
  */
-function createRemoveScript(selector: string, continuous: boolean, persistence: string): string {
+function createRemoveScript(selector: string, continuous: boolean, persistence: string, timing?: string): string {
+	// For smart timing, use the multi-layered racing strategy
+	if (timing === "smart") {
+		return createSmartRemoveScript(selector, persistence);
+	}
+
 	// For session-wide persistence, we need a more robust approach
 	if (persistence === "session-wide") {
 		return `
@@ -617,10 +631,142 @@ function createRemoveScript(selector: string, continuous: boolean, persistence: 
 }
 
 /**
+ * Create the JavaScript code for smart multi-layered element removal
+ * Implements the "racing strategy" with multiple timing approaches
+ */
+function createSmartRemoveScript(selector: string, persistence: string): string {
+	const isSessionWide = persistence === "session-wide";
+	const observerName = `ventriloquistSmartObserver_${selector.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+	return `
+		(function() {
+			console.log('[Manipulate] Smart multi-layered removal system loading for: ${selector}');
+
+			function removeElements(context) {
+				try {
+					const elements = document.querySelectorAll('${selector.replace(/'/g, "\\'")}');
+					let removed = 0;
+
+					elements.forEach(element => {
+						if (element && element.parentNode) {
+							element.remove();
+							removed++;
+						}
+					});
+
+					if (removed > 0) {
+						console.log('[Manipulate] ' + context + ': Removed ' + removed + ' elements matching: ${selector}');
+					}
+					return removed;
+				} catch (error) {
+					console.error('[Manipulate] Error in removeElements:', error);
+					return 0;
+				}
+			}
+
+			function initSmartRemoval() {
+				// === STRATEGY 1: Immediate Execution ===
+				console.log('[Manipulate] Strategy 1: Immediate execution');
+				removeElements('Immediate');
+
+				// === STRATEGY 2: DOM Ready (if not already ready) ===
+				if (document.readyState === 'loading') {
+					document.addEventListener('DOMContentLoaded', function() {
+						console.log('[Manipulate] Strategy 2: DOM ready execution');
+						removeElements('DOM Ready');
+					});
+				} else {
+					console.log('[Manipulate] Strategy 2: DOM already ready, executing now');
+					removeElements('DOM Ready');
+				}
+
+				// === STRATEGY 3: Delayed Execution ===
+				setTimeout(function() {
+					console.log('[Manipulate] Strategy 3: Delayed execution (1 second)');
+					removeElements('Delayed (1s)');
+				}, 1000);
+
+				// === STRATEGY 4: Continuous Monitoring (The Key to "Instant" Removal) ===
+				if (!window.${observerName}) {
+					console.log('[Manipulate] Strategy 4: Setting up continuous monitoring');
+
+					window.${observerName} = new MutationObserver(function(mutations) {
+						let shouldCheck = false;
+
+						mutations.forEach(function(mutation) {
+							if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+								// Check if any added nodes match our selector or contain matching elements
+								for (let i = 0; i < mutation.addedNodes.length; i++) {
+									const node = mutation.addedNodes[i];
+									if (node.nodeType === 1) { // Element node
+										if (node.matches && node.matches('${selector.replace(/'/g, "\\'")}')) {
+											shouldCheck = true;
+											break;
+										}
+										if (node.querySelector && node.querySelector('${selector.replace(/'/g, "\\'")}')) {
+											shouldCheck = true;
+											break;
+										}
+									}
+								}
+							}
+						});
+
+						if (shouldCheck) {
+							// This is the "instant" removal - happens immediately when elements are added
+							removeElements('Mutation Observer (Instant)');
+						}
+					});
+
+					// Observe the entire document for maximum coverage
+					window.${observerName}.observe(document.documentElement, {
+						childList: true,
+						subtree: true
+					});
+
+					console.log('[Manipulate] MutationObserver active - elements will be removed instantly when added');
+				}
+
+				// === STRATEGY 5: Periodic Fallback (Safety Net) ===
+				let fallbackCount = 0;
+				const fallbackInterval = setInterval(function() {
+					removeElements('Periodic Fallback');
+					fallbackCount++;
+					if (fallbackCount >= 6) { // Stop after 6 checks (3 seconds)
+						clearInterval(fallbackInterval);
+						console.log('[Manipulate] Periodic fallback checks completed');
+					}
+				}, 500);
+			}
+
+			// Initialize the smart removal system
+			${isSessionWide ? `
+			// For session-wide persistence, ensure we set up on every page
+			if (document.readyState === 'loading') {
+				document.addEventListener('DOMContentLoaded', initSmartRemoval);
+			} else {
+				initSmartRemoval();
+			}
+			` : `
+			// For page-wide, run immediately
+			initSmartRemoval();
+			`}
+
+			return 0; // Return value for initial execution
+		})();
+	`;
+}
+
+/**
  * Create the JavaScript code for blocking events
  */
-function createBlockScript(events: string[], targetSelectors: string, continuous: boolean, persistence: string): string {
+function createBlockScript(events: string[], targetSelectors: string, continuous: boolean, persistence: string, timing?: string): string {
 	const targetsArray = targetSelectors ? targetSelectors.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+	// For smart timing, use the multi-layered racing strategy
+	if (timing === "smart") {
+		return createSmartBlockScript(events, targetSelectors, persistence);
+	}
 
 	// For session-wide persistence, we need a more robust approach
 	if (persistence === "session-wide") {
@@ -776,6 +922,145 @@ function createBlockScript(events: string[], targetSelectors: string, continuous
 				console.log('[Manipulate] Set up MutationObserver for continuous event blocking');
 			}
 			` : ''}
+
+			return eventsToBlock;
+		})();
+	`;
+}
+
+/**
+ * Create the JavaScript code for smart multi-layered event blocking
+ * Implements the "racing strategy" with multiple timing approaches
+ */
+function createSmartBlockScript(events: string[], targetSelectors: string, persistence: string): string {
+	const isSessionWide = persistence === "session-wide";
+	const targetsArray = targetSelectors ? targetSelectors.split(',').map(s => s.trim()).filter(Boolean) : [];
+	const observerName = `ventriloquistSmartBlockObserver_${events.join('_').replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+	return `
+		(function() {
+			console.log('[Manipulate] Smart multi-layered event blocking system loading for: ${events.join(', ')}');
+
+			const eventsToBlock = ${JSON.stringify(events)};
+			const targetSelectors = ${JSON.stringify(targetsArray)};
+
+			function setupEventBlocking(context) {
+				try {
+					eventsToBlock.forEach(function(eventType) {
+						if (targetSelectors.length > 0) {
+							// Block events on specific elements
+							targetSelectors.forEach(function(selector) {
+								try {
+									const elements = document.querySelectorAll(selector);
+									elements.forEach(function(element) {
+										// Check if this element already has our blocking handler for this event
+										const flagName = 'ventriloquistBlocked_' + eventType;
+										if (!element[flagName]) {
+											element.addEventListener(eventType, function(e) {
+												console.log('[Manipulate] ' + context + ': Blocked ' + eventType + ' event on:', selector);
+												e.stopImmediatePropagation();
+												e.preventDefault();
+											}, true);
+											element[flagName] = true;
+										}
+									});
+								} catch (error) {
+									console.error('[Manipulate] Error setting up event blocking for selector:', selector, error);
+								}
+							});
+						} else {
+							// Block events document-wide (only set up once per event type)
+							if (!window.ventriloquistDocumentBlocked) {
+								window.ventriloquistDocumentBlocked = {};
+							}
+
+							if (!window.ventriloquistDocumentBlocked[eventType]) {
+								document.addEventListener(eventType, function(e) {
+									console.log('[Manipulate] ' + context + ': Blocked ' + eventType + ' event document-wide');
+									e.stopImmediatePropagation();
+									// Don't preventDefault for document-wide to avoid breaking normal functionality
+								}, true);
+								window.ventriloquistDocumentBlocked[eventType] = true;
+							}
+						}
+					});
+				} catch (error) {
+					console.error('[Manipulate] Error in setupEventBlocking:', error);
+				}
+			}
+
+			function initSmartBlocking() {
+				// === STRATEGY 1: Immediate Execution ===
+				console.log('[Manipulate] Strategy 1: Immediate event blocking setup');
+				setupEventBlocking('Immediate');
+
+				// === STRATEGY 2: DOM Ready (if not already ready) ===
+				if (document.readyState === 'loading') {
+					document.addEventListener('DOMContentLoaded', function() {
+						console.log('[Manipulate] Strategy 2: DOM ready event blocking setup');
+						setupEventBlocking('DOM Ready');
+					});
+				} else {
+					console.log('[Manipulate] Strategy 2: DOM already ready, setting up event blocking now');
+					setupEventBlocking('DOM Ready');
+				}
+
+				// === STRATEGY 3: Delayed Execution ===
+				setTimeout(function() {
+					console.log('[Manipulate] Strategy 3: Delayed event blocking setup (1 second)');
+					setupEventBlocking('Delayed (1s)');
+				}, 1000);
+
+				// === STRATEGY 4: Continuous Monitoring for New Elements ===
+				if (targetSelectors.length > 0 && !window.${observerName}) {
+					console.log('[Manipulate] Strategy 4: Setting up continuous monitoring for new elements');
+
+					window.${observerName} = new MutationObserver(function(mutations) {
+						let hasNewNodes = false;
+						mutations.forEach(function(mutation) {
+							if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+								hasNewNodes = true;
+							}
+						});
+
+						if (hasNewNodes) {
+							// Setup event blocking on newly added elements
+							setupEventBlocking('Mutation Observer (New Elements)');
+						}
+					});
+
+					window.${observerName}.observe(document.documentElement, {
+						childList: true,
+						subtree: true
+					});
+
+					console.log('[Manipulate] MutationObserver active - new elements will have events blocked instantly');
+				}
+
+				// === STRATEGY 5: Periodic Fallback (Safety Net) ===
+				let fallbackCount = 0;
+				const fallbackInterval = setInterval(function() {
+					setupEventBlocking('Periodic Fallback');
+					fallbackCount++;
+					if (fallbackCount >= 6) { // Stop after 6 checks (3 seconds)
+						clearInterval(fallbackInterval);
+						console.log('[Manipulate] Periodic event blocking fallback checks completed');
+					}
+				}, 500);
+			}
+
+			// Initialize the smart blocking system
+			${isSessionWide ? `
+			// For session-wide persistence, ensure we set up on every page
+			if (document.readyState === 'loading') {
+				document.addEventListener('DOMContentLoaded', initSmartBlocking);
+			} else {
+				initSmartBlocking();
+			}
+			` : `
+			// For page-wide, run immediately
+			initSmartBlocking();
+			`}
 
 			return eventsToBlock;
 		})();
