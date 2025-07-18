@@ -90,11 +90,17 @@ export async function execute(
 				arrayFields: options.arrayFields as string[] || [],
 			};
 
-						// Extract field update options
+									// Extract field update options
 			const fieldUpdateStrategy = options.fieldUpdateStrategy as 'standard' | 'custom' || 'standard';
 			const fieldUpdateRules: FieldUpdateRule[] = fieldUpdateStrategy === 'custom'
 				? ((options.fieldUpdateRules as any)?.rules as FieldUpdateRule[] || [])
 				: [];
+
+			console.log('🔍 Field update strategy configuration:', {
+				strategy: fieldUpdateStrategy,
+				rulesCount: fieldUpdateRules.length,
+				rules: fieldUpdateRules
+			});
 
 			if (dataMode === 'autoMapInputData') {
 				if (columnsToMatchOn.includes('id')) {
@@ -130,6 +136,11 @@ export async function execute(
 
 					// Apply field update rules if enabled
 					if (fieldUpdateRules.length > 0 && existingRecordFields) {
+						console.log('🚀 Calling processFieldUpdateRules with:', {
+							fieldsToProcess: Object.keys(processedFields),
+							existingFieldsKeys: Object.keys(existingRecordFields),
+							rulesCount: fieldUpdateRules.length
+						});
 						processedFields = await processFieldUpdateRules.call(
 							this,
 							base,
@@ -138,6 +149,11 @@ export async function execute(
 							existingRecordFields,
 							fieldUpdateRules,
 						);
+					} else {
+						console.log('🚫 NOT calling processFieldUpdateRules:', {
+							hasRules: fieldUpdateRules.length > 0,
+							hasExistingFields: !!existingRecordFields
+						});
 					}
 
 					records.push({

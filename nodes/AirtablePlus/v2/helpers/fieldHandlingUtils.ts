@@ -77,10 +77,18 @@ export async function processFieldValue(
 				processedValue: newValue,
 			};
 
-		case 'preserveExisting':
+				case 'preserveExisting':
 			// Don't update if existing value exists and is not null/empty
-			if (existingValue !== null && existingValue !== undefined && existingValue !== '' &&
-			    !(Array.isArray(existingValue) && existingValue.length === 0)) {
+			const hasExistingValue = existingValue !== null && existingValue !== undefined && existingValue !== '' &&
+			    !(Array.isArray(existingValue) && existingValue.length === 0);
+
+			console.log(`🔍 preserveExisting logic for "${fieldName}":`, {
+				existingValue,
+				hasExistingValue,
+				willUpdate: !hasExistingValue
+			});
+
+			if (hasExistingValue) {
 				return {
 					shouldUpdate: false,
 					processedValue: existingValue,
@@ -279,8 +287,16 @@ export async function processFieldUpdateRules(
 	existingFields: IDataObject | null,
 	fieldUpdateRules: FieldUpdateRule[],
 ): Promise<IDataObject> {
+	console.log('🔍 processFieldUpdateRules called with:', {
+		fieldsCount: Object.keys(newFields).length,
+		rulesCount: fieldUpdateRules.length,
+		hasExistingFields: !!existingFields,
+		rules: fieldUpdateRules.map(r => ({ fields: r.fieldNames, strategy: r.strategy }))
+	});
+
 	// If no rules or no existing fields, return as-is
 	if (!fieldUpdateRules.length || !existingFields) {
+		console.log('🚫 Early return - no rules or existing fields');
 		return newFields;
 	}
 
@@ -296,6 +312,13 @@ export async function processFieldUpdateRules(
 	for (const [fieldName, newValue] of Object.entries(newFields)) {
 		const rule = getFieldUpdateRule(fieldName, fieldUpdateRules);
 
+		console.log(`🔍 Processing field "${fieldName}":`, {
+			newValue,
+			existingValue: existingFields[fieldName],
+			hasRule: !!rule,
+			strategy: rule?.strategy
+		});
+
 		if (rule) {
 			// Apply custom strategy for this field
 			const fieldInfo = fieldInfoMap.get(fieldName);
@@ -310,18 +333,31 @@ export async function processFieldUpdateRules(
 					fieldInfo,
 				);
 
+				console.log(`✅ Field "${fieldName}" result:`, {
+					shouldUpdate: result.shouldUpdate,
+					processedValue: result.processedValue
+				});
+
 				if (result.shouldUpdate) {
 					processedFields[fieldName] = result.processedValue;
 				}
 			} else {
 				// Field not found in schema, use default behavior
+				console.log(`⚠️ Field "${fieldName}" not found in schema, using default`);
 				processedFields[fieldName] = newValue;
 			}
 		} else {
 			// No custom rule, use default replace behavior
+			console.log(`📝 Field "${fieldName}" no custom rule, using default`);
 			processedFields[fieldName] = newValue;
 		}
 	}
+
+	console.log('🏁 processFieldUpdateRules result:', {
+		originalCount: Object.keys(newFields).length,
+		processedCount: Object.keys(processedFields).length,
+		processedFields
+	});
 
 	return processedFields;
 }

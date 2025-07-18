@@ -7,7 +7,7 @@ import type {
 } from 'n8n-workflow';
 
 import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
-import type { UpdateRecord } from '../../helpers/interfaces';
+import type { UpdateRecord, FieldUpdateRule } from '../../helpers/interfaces';
 import { processAirtableError, removeIgnored, removeEmptyFields, validateLinkedRecordFields, processOutputFieldRenaming } from '../../helpers/utils';
 import { apiRequest, apiRequestAllItems, batchUpdate } from '../../transport';
 import {
@@ -17,6 +17,7 @@ import {
 	createLinkedRecordsField,
 } from '../common.descriptions';
 import { processRecordFields, type ArrayHandlingOptions } from '../../helpers/arrayHandlingUtils';
+import { processFieldUpdateRules } from '../../helpers/fieldHandlingUtils';
 
 export const description: INodeProperties[] = [
 	{
@@ -143,6 +144,18 @@ export async function execute(
 				arrayFields: options.arrayFields as string[] || [],
 			};
 
+			// Extract field update options
+			const fieldUpdateStrategy = options.fieldUpdateStrategy as 'standard' | 'custom' || 'standard';
+			const fieldUpdateRules: FieldUpdateRule[] = fieldUpdateStrategy === 'custom'
+				? ((options.fieldUpdateRules as any)?.rules as FieldUpdateRule[] || [])
+				: [];
+
+			console.log('🔍 UPSERT Field update strategy configuration:', {
+				strategy: fieldUpdateStrategy,
+				rulesCount: fieldUpdateRules.length,
+				rules: fieldUpdateRules
+			});
+
 			if (dataMode === 'autoMapInputData') {
 				if (columnsToMatchOn.includes('id')) {
 					const { id, ...fields } = items[i].json;
@@ -242,12 +255,22 @@ export async function execute(
 					responseData = await apiRequest.call(this, 'POST', endpoint, createBody);
 				} else {
 					// Use the valid fields for matching
+					// If we have field update rules, fetch all fields, otherwise just matching fields for efficiency
+					const searchParams = fieldUpdateRules.length > 0
+						? {} // Fetch all fields when field update rules are present
+						: { fields: fieldsToMatch }; // Only matching fields for efficiency
+
+					console.log('🔧 UPSERT: Search params for field update rules:', {
+						hasFieldUpdateRules: fieldUpdateRules.length > 0,
+						searchParams
+					});
+
 					const response = await apiRequestAllItems.call(
 						this,
 						'GET',
 						endpoint,
 						{},
-						{ fields: fieldsToMatch },
+						searchParams,
 					);
 
 					let matches = response.records as UpdateRecord[];
@@ -287,6 +310,33 @@ export async function execute(
 									console.warn(`Could not apply array handling for record ${match.id}:`, error);
 								}
 							}
+
+							// Apply field update rules if enabled
+							if (fieldUpdateRules.length > 0) {
+								console.log('🚀 UPSERT Calling processFieldUpdateRules with:', {
+									fieldsToProcess: Object.keys(fieldsToUpdate),
+									existingFieldsKeys: Object.keys(match.fields as IDataObject),
+									rulesCount: fieldUpdateRules.length
+								});
+								try {
+									fieldsToUpdate = await processFieldUpdateRules.call(
+										this,
+										base,
+										table,
+										fieldsToUpdate,
+										match.fields as IDataObject,
+										fieldUpdateRules,
+									);
+								} catch (error) {
+									console.warn(`Could not apply field update rules for record ${match.id}:`, error);
+								}
+							} else {
+								console.log('🚫 UPSERT NOT calling processFieldUpdateRules:', {
+									hasRules: fieldUpdateRules.length > 0,
+									hasExistingFields: !!(match.fields as IDataObject)
+								});
+							}
+
 							updateRecords.push({ id: match.id, fields: fieldsToUpdate });
 						}
 						responseData = await batchUpdate.call(this, endpoint, body, updateRecords);
@@ -326,10 +376,15 @@ export async function execute(
 					console.log('🔧 FLEXIBLE_DEBUG: Using fields for matching:', fieldsToMatch);
 
 					// Get all records to check for matches
-					const searchParams = {
-						fields: fieldsToMatch,
-					};
-					console.log('🔧 FLEXIBLE_DEBUG: Search params:', JSON.stringify(searchParams, null, 2));
+					// If we have field update rules, fetch all fields, otherwise just matching fields for efficiency
+					const searchParams = fieldUpdateRules.length > 0
+						? {} // Fetch all fields when field update rules are present
+						: { fields: fieldsToMatch }; // Only matching fields for efficiency
+
+					console.log('🔧 UPSERT: Search params for field update rules:', {
+						hasFieldUpdateRules: fieldUpdateRules.length > 0,
+						searchParams
+					});
 
 					const response = await apiRequestAllItems.call(
 						this,
@@ -379,6 +434,27 @@ export async function execute(
 								}
 							}
 
+							// Apply field update rules if enabled
+							if (fieldUpdateRules.length > 0) {
+								console.log('🚀 UPSERT (updateAll) Calling processFieldUpdateRules with:', {
+									fieldsToProcess: Object.keys(fieldsToUpdate),
+									existingFieldsKeys: Object.keys(match.fields as IDataObject),
+									rulesCount: fieldUpdateRules.length
+								});
+								try {
+									fieldsToUpdate = await processFieldUpdateRules.call(
+										this,
+										base,
+										table,
+										fieldsToUpdate,
+										match.fields as IDataObject,
+										fieldUpdateRules,
+									);
+								} catch (error) {
+									console.warn(`Could not apply field update rules for record ${match.id}:`, error);
+								}
+							}
+
 							updateRecords.push({ id: match.id, fields: fieldsToUpdate });
 						}
 					} else {
@@ -397,6 +473,27 @@ export async function execute(
 								);
 							} catch (error) {
 								console.warn(`Could not apply array handling for record ${matches[0].id}:`, error);
+							}
+						}
+
+						// Apply field update rules if enabled
+						if (fieldUpdateRules.length > 0) {
+							console.log('🚀 UPSERT (single) Calling processFieldUpdateRules with:', {
+								fieldsToProcess: Object.keys(fieldsToUpdate),
+								existingFieldsKeys: Object.keys(matches[0].fields as IDataObject),
+								rulesCount: fieldUpdateRules.length
+							});
+							try {
+								fieldsToUpdate = await processFieldUpdateRules.call(
+									this,
+									base,
+									table,
+									fieldsToUpdate,
+									matches[0].fields as IDataObject,
+									fieldUpdateRules,
+								);
+							} catch (error) {
+								console.warn(`Could not apply field update rules for record ${matches[0].id}:`, error);
 							}
 						}
 
