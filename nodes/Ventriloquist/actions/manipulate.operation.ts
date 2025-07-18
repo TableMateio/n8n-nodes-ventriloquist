@@ -879,7 +879,7 @@ function createBlockScript(eventList: string[], targetSelectors: string, continu
 							}
 
 							if (!window.ventriloquistDocumentBlocked[eventType]) {
-								const eventHandler = function(e) {
+																const eventHandler = function(e) {
 									// Special filtering for right-click events
 									if ((eventType === 'mousedown' || eventType === 'mouseup') && e.button !== 2) {
 										return; // Only block right-click (button 2)
@@ -887,11 +887,7 @@ function createBlockScript(eventList: string[], targetSelectors: string, continu
 
 									console.log('[Manipulate] Session-wide blocked ' + eventType + ' event document-wide');
 									e.stopImmediatePropagation();
-
-									// For context menu, also prevent default to fully block
-									if (eventType === 'contextmenu') {
-										e.preventDefault();
-									}
+									// NOTE: NOT using preventDefault() to allow browser's default right-click menu
 								};
 
 								document.addEventListener(eventType, eventHandler, true);
@@ -906,7 +902,7 @@ function createBlockScript(eventList: string[], targetSelectors: string, continu
 									elements.forEach(function(element) {
 										// Check if this element already has our blocking handler
 										if (!element.ventriloquistEventBlocked) {
-											const eventHandler = function(e) {
+																						const eventHandler = function(e) {
 												// Special filtering for right-click events
 												if ((eventType === 'mousedown' || eventType === 'mouseup') && e.button !== 2) {
 													return; // Only block right-click (button 2)
@@ -914,7 +910,7 @@ function createBlockScript(eventList: string[], targetSelectors: string, continu
 
 												console.log('[Manipulate] Session-wide blocked ' + eventType + ' event on:', selector);
 												e.stopImmediatePropagation();
-												e.preventDefault();
+												// NOTE: NOT using preventDefault() to allow browser's default right-click menu
 											};
 
 											element.addEventListener(eventType, eventHandler, true);
@@ -986,7 +982,7 @@ function createBlockScript(eventList: string[], targetSelectors: string, continu
 
 					if (shouldUseDocumentWide) {
 						// Block events document-wide (more effective for right-click blocking)
-						const eventHandler = function(e) {
+												const eventHandler = function(e) {
 							// Special filtering for right-click events
 							if ((eventType === 'mousedown' || eventType === 'mouseup') && e.button !== 2) {
 								return; // Only block right-click (button 2)
@@ -994,11 +990,7 @@ function createBlockScript(eventList: string[], targetSelectors: string, continu
 
 							console.log('[Manipulate] Blocked ' + eventType + ' event document-wide');
 							e.stopImmediatePropagation();
-
-							// For context menu, also prevent default to fully block
-							if (eventType === 'contextmenu') {
-								e.preventDefault();
-							}
+							// NOTE: NOT using preventDefault() to allow browser's default right-click menu
 						};
 
 						document.addEventListener(eventType, eventHandler, true);
@@ -1009,7 +1001,7 @@ function createBlockScript(eventList: string[], targetSelectors: string, continu
 							try {
 								const elements = document.querySelectorAll(selector);
 								elements.forEach(function(element) {
-									const eventHandler = function(e) {
+																		const eventHandler = function(e) {
 										// Special filtering for right-click events
 										if ((eventType === 'mousedown' || eventType === 'mouseup') && e.button !== 2) {
 											return; // Only block right-click (button 2)
@@ -1017,7 +1009,7 @@ function createBlockScript(eventList: string[], targetSelectors: string, continu
 
 										console.log('[Manipulate] Blocked ' + eventType + ' event on:', selector);
 										e.stopImmediatePropagation();
-										e.preventDefault();
+										// NOTE: NOT using preventDefault() to allow browser's default right-click menu
 									};
 
 									element.addEventListener(eventType, eventHandler, true);
@@ -1094,7 +1086,7 @@ function createSmartBlockScript(eventList: string[], targetSelectors: string, pe
 							}
 
 							if (!window.ventriloquistDocumentBlocked[eventType]) {
-								const eventHandler = function(e) {
+																const eventHandler = function(e) {
 									// Special filtering for right-click events
 									if ((eventType === 'mousedown' || eventType === 'mouseup') && e.button !== 2) {
 										return; // Only block right-click (button 2)
@@ -1102,11 +1094,7 @@ function createSmartBlockScript(eventList: string[], targetSelectors: string, pe
 
 									console.log('[Manipulate] ' + context + ': Blocked ' + eventType + ' event document-wide');
 									e.stopImmediatePropagation();
-
-									// For context menu, also prevent default to fully block
-									if (eventType === 'contextmenu') {
-										e.preventDefault();
-									}
+									// NOTE: NOT using preventDefault() to allow browser's default right-click menu
 								};
 
 								document.addEventListener(eventType, eventHandler, true);
@@ -1122,7 +1110,7 @@ function createSmartBlockScript(eventList: string[], targetSelectors: string, pe
 										// Check if this element already has our blocking handler for this event
 										const flagName = 'ventriloquistBlocked_' + eventType;
 										if (!element[flagName]) {
-											const eventHandler = function(e) {
+																						const eventHandler = function(e) {
 												// Special filtering for right-click events
 												if ((eventType === 'mousedown' || eventType === 'mouseup') && e.button !== 2) {
 													return; // Only block right-click (button 2)
@@ -1130,7 +1118,7 @@ function createSmartBlockScript(eventList: string[], targetSelectors: string, pe
 
 												console.log('[Manipulate] ' + context + ': Blocked ' + eventType + ' event on:', selector);
 												e.stopImmediatePropagation();
-												e.preventDefault();
+												// NOTE: NOT using preventDefault() to allow browser's default right-click menu
 											};
 
 											element.addEventListener(eventType, eventHandler, true);
