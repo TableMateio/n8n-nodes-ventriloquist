@@ -23,3 +23,22 @@ export type UpdateBody = {
 	};
 	typecast?: boolean;
 };
+
+export type FieldUpdateStrategy =
+	| 'replace'
+	| 'preserveExisting'
+	| 'replaceUnlessNull'
+	| 'append'
+	| 'union';
+
+export interface FieldUpdateRule {
+	fieldNames: string[];
+	strategy: FieldUpdateStrategy;
+}
+
+export interface FieldUpdateOptions {
+	fieldUpdateStrategy: 'standard' | 'custom';
+	fieldUpdateRules?: {
+		rules: FieldUpdateRule[];
+	};
+}

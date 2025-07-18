@@ -7,7 +7,7 @@ import type {
 } from 'n8n-workflow';
 
 import { updateDisplayOptions, wrapData } from '../../../../../utils/utilities';
-import type { UpdateRecord } from '../../helpers/interfaces';
+import type { UpdateRecord, FieldUpdateOptions, FieldUpdateRule } from '../../helpers/interfaces';
 import { findMatches, processAirtableError, removeIgnored, removeEmptyFields, processOutputFieldRenaming } from '../../helpers/utils';
 import { apiRequestAllItems, batchUpdate, apiRequest } from '../../transport';
 import {
@@ -17,6 +17,7 @@ import {
 	createLinkedRecordsField,
 } from '../common.descriptions';
 import { processRecordFields, type ArrayHandlingOptions } from '../../helpers/arrayHandlingUtils';
+import { processFieldUpdateRules } from '../../helpers/fieldHandlingUtils';
 
 export const description: INodeProperties[] = [
 	{
@@ -89,6 +90,12 @@ export async function execute(
 				arrayFields: options.arrayFields as string[] || [],
 			};
 
+						// Extract field update options
+			const fieldUpdateStrategy = options.fieldUpdateStrategy as 'standard' | 'custom' || 'standard';
+			const fieldUpdateRules: FieldUpdateRule[] = fieldUpdateStrategy === 'custom'
+				? ((options.fieldUpdateRules as any)?.rules as FieldUpdateRule[] || [])
+				: [];
+
 			if (dataMode === 'autoMapInputData') {
 				if (columnsToMatchOn.includes('id')) {
 					const { id, ...fields } = items[i].json;
@@ -97,22 +104,40 @@ export async function execute(
 					let processedFields = removeIgnored(fields, options.ignoreFields as string);
 
 					// Apply array handling if enabled
-					if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
-						// Fetch existing record for array merging
+					let existingRecordFields: IDataObject | null = null;
+					if (arrayHandlingOptions.arrayMergeStrategy !== 'replace' || fieldUpdateRules.length > 0) {
+						// Fetch existing record for array merging and/or field update rules
 						try {
 							const existingRecord = await apiRequest.call(this, 'GET', `${endpoint}/${recordId}`);
-							processedFields = await processRecordFields.call(
-								this,
-								base,
-								table,
-								processedFields,
-								existingRecord.fields as IDataObject,
-								arrayHandlingOptions,
-							);
+							existingRecordFields = existingRecord.fields as IDataObject;
+
+							// Apply array handling if enabled
+							if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
+								processedFields = await processRecordFields.call(
+									this,
+									base,
+									table,
+									processedFields,
+									existingRecordFields,
+									arrayHandlingOptions,
+								);
+							}
 						} catch (error) {
 							// If can't fetch existing record, proceed without array handling
 							console.warn(`Could not fetch existing record ${recordId} for array handling:`, error);
 						}
+					}
+
+					// Apply field update rules if enabled
+					if (fieldUpdateRules.length > 0 && existingRecordFields) {
+						processedFields = await processFieldUpdateRules.call(
+							this,
+							base,
+							table,
+							processedFields,
+							existingRecordFields,
+							fieldUpdateRules,
+						);
 					}
 
 					records.push({
@@ -132,20 +157,38 @@ export async function execute(
 						let fields = removeIgnored(items[i].json, options.ignoreFields as string);
 
 						// Apply array handling if enabled
-						if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
+						let existingRecordFields: IDataObject | null = null;
+						if (arrayHandlingOptions.arrayMergeStrategy !== 'replace' || fieldUpdateRules.length > 0) {
 							try {
 								const existingRecord = await apiRequest.call(this, 'GET', `${endpoint}/${id}`);
-								fields = await processRecordFields.call(
-									this,
-									base,
-									table,
-									fields,
-									existingRecord.fields as IDataObject,
-									arrayHandlingOptions,
-								);
+								existingRecordFields = existingRecord.fields as IDataObject;
+
+								// Apply array handling if enabled
+								if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
+									fields = await processRecordFields.call(
+										this,
+										base,
+										table,
+										fields,
+										existingRecordFields,
+										arrayHandlingOptions,
+									);
+								}
 							} catch (error) {
 								console.warn(`Could not fetch existing record ${id} for array handling:`, error);
 							}
+						}
+
+						// Apply field update rules if enabled
+						if (fieldUpdateRules.length > 0 && existingRecordFields) {
+							fields = await processFieldUpdateRules.call(
+								this,
+								base,
+								table,
+								fields,
+								existingRecordFields,
+								fieldUpdateRules,
+							);
 						}
 
 						records.push({ id, fields });
@@ -161,20 +204,38 @@ export async function execute(
 					let processedFields = fields;
 
 					// Apply array handling if enabled
-					if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
+					let existingRecordFields: IDataObject | null = null;
+					if (arrayHandlingOptions.arrayMergeStrategy !== 'replace' || fieldUpdateRules.length > 0) {
 						try {
 							const existingRecord = await apiRequest.call(this, 'GET', `${endpoint}/${recordId}`);
-							processedFields = await processRecordFields.call(
-								this,
-								base,
-								table,
-								fields,
-								existingRecord.fields as IDataObject,
-								arrayHandlingOptions,
-							);
+							existingRecordFields = existingRecord.fields as IDataObject;
+
+							// Apply array handling if enabled
+							if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
+								processedFields = await processRecordFields.call(
+									this,
+									base,
+									table,
+									fields,
+									existingRecordFields,
+									arrayHandlingOptions,
+								);
+							}
 						} catch (error) {
 							console.warn(`Could not fetch existing record ${recordId} for array handling:`, error);
 						}
+					}
+
+					// Apply field update rules if enabled
+					if (fieldUpdateRules.length > 0 && existingRecordFields) {
+						processedFields = await processFieldUpdateRules.call(
+							this,
+							base,
+							table,
+							processedFields,
+							existingRecordFields,
+							fieldUpdateRules,
+						);
 					}
 
 					records.push({ id: recordId, fields: processedFields });
@@ -193,20 +254,38 @@ export async function execute(
 						let processedFields = removeIgnored(fields, columnsToMatchOn);
 
 						// Apply array handling if enabled
-						if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
+						let existingRecordFields: IDataObject | null = null;
+						if (arrayHandlingOptions.arrayMergeStrategy !== 'replace' || fieldUpdateRules.length > 0) {
 							try {
 								const existingRecord = await apiRequest.call(this, 'GET', `${endpoint}/${id}`);
-								processedFields = await processRecordFields.call(
-									this,
-									base,
-									table,
-									processedFields,
-									existingRecord.fields as IDataObject,
-									arrayHandlingOptions,
-								);
+								existingRecordFields = existingRecord.fields as IDataObject;
+
+								// Apply array handling if enabled
+								if (arrayHandlingOptions.arrayMergeStrategy !== 'replace') {
+									processedFields = await processRecordFields.call(
+										this,
+										base,
+										table,
+										processedFields,
+										existingRecordFields,
+										arrayHandlingOptions,
+									);
+								}
 							} catch (error) {
 								console.warn(`Could not fetch existing record ${id} for array handling:`, error);
 							}
+						}
+
+						// Apply field update rules if enabled
+						if (fieldUpdateRules.length > 0 && existingRecordFields) {
+							processedFields = await processFieldUpdateRules.call(
+								this,
+								base,
+								table,
+								processedFields,
+								existingRecordFields,
+								fieldUpdateRules,
+							);
 						}
 
 						records.push({ id, fields: processedFields });

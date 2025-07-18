@@ -378,6 +378,101 @@ export const insertUpdateOptions: INodeProperties[] = [
 				},
 			},
 			{
+				displayName: 'Field Update Strategy',
+				name: 'fieldUpdateStrategy',
+				type: 'options',
+				options: [
+					{
+						name: 'Standard (Replace All)',
+						value: 'standard',
+						description: 'Use current behavior - replace all field values (default)',
+					},
+					{
+						name: 'Custom Per-Field Rules',
+						value: 'custom',
+						description: 'Define specific update strategies for individual fields',
+					},
+				],
+				default: 'standard',
+				description: 'Choose how to handle field updates - standard replacement or custom per-field strategies',
+				displayOptions: {
+					show: {
+						'/operation': ['update', 'upsert'],
+					},
+				},
+			},
+			{
+				displayName: 'Field Update Rules',
+				name: 'fieldUpdateRules',
+				type: 'fixedCollection',
+				typeOptions: {
+					multipleValues: true,
+				},
+				default: { rules: [] },
+				description: 'Define specific update strategies for individual fields',
+				displayOptions: {
+					show: {
+						'/operation': ['update', 'upsert'],
+						fieldUpdateStrategy: ['custom'],
+					},
+				},
+				options: [
+					{
+						name: 'rules',
+						displayName: 'Field Rule',
+						values: [
+							{
+								displayName: 'Fields',
+								name: 'fieldNames',
+								type: 'multiOptions',
+								typeOptions: {
+									loadOptionsMethod: 'getColumns',
+									loadOptionsDependsOn: ['table.value', 'base.value'],
+								},
+								default: [],
+								required: true,
+								description: 'Select the fields to apply this update strategy to',
+							},
+							{
+								displayName: 'Update Strategy',
+								name: 'strategy',
+								type: 'options',
+								options: [
+									{
+										name: 'Replace (Default)',
+										value: 'replace',
+										description: 'Always overwrite the existing value',
+									},
+									{
+										name: 'Preserve Existing',
+										value: 'preserveExisting',
+										description: 'Don\'t update if the field already has a value in Airtable',
+									},
+									{
+										name: 'Replace unless Null',
+										value: 'replaceUnlessNull',
+										description: 'Only update if the new value is not null/empty',
+									},
+									{
+										name: 'Append',
+										value: 'append',
+										description: 'Add new value to existing value (with separator for text)',
+									},
+									{
+										name: 'Union',
+										value: 'union',
+										description: 'Merge values while removing duplicates',
+									},
+								],
+								default: 'replace',
+								required: true,
+								description: 'How to handle updates for this field',
+							},
+						],
+					},
+				],
+			},
+			{
 				displayName: 'Rename ID Field',
 				name: 'renameIdField',
 				type: 'string',
