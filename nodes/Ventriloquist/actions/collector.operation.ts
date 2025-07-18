@@ -879,6 +879,18 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: "Output Input Data",
+		name: "outputInputData",
+		type: "boolean",
+		default: true,
+		description: "Whether to include the input data in the output",
+		displayOptions: {
+			show: {
+				operation: ["collector"],
+			},
+		},
+	},
 ];
 
 /**
@@ -921,17 +933,19 @@ export async function execute(
 	this.logger.info(`${'='.repeat(40)}`);
 	this.logger.info(`[Ventriloquist][${nodeName}#${index}][Collector] Starting operation`);
 
+	// Get common parameters (moved outside try block so they're accessible in catch)
+	const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
+	const timeout = this.getNodeParameter('timeout', index, 10000) as number;
+	const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
+	const debugMode = this.getNodeParameter('debugMode', index, false) as boolean;
+	const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
+	const maxItemsPerPage = this.getNodeParameter('maxItemsPerPage', index, 50) as number;
+	const maxTotalItems = this.getNodeParameter('maxTotalItems', index, 200) as number;
+	const takeScreenshotOption = this.getNodeParameter('takeScreenshot', index, false) as boolean;
+	const selectionMethod = this.getNodeParameter('containerSelectionMethod', index, 'containerItems') as string;
+	const outputInputData = this.getNodeParameter('outputInputData', index, true) as boolean;
+
 	try {
-		// Get common parameters
-		const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
-		const timeout = this.getNodeParameter('timeout', index, 10000) as number;
-		const useHumanDelays = this.getNodeParameter('useHumanDelays', index, true) as boolean;
-		const debugMode = this.getNodeParameter('debugMode', index, false) as boolean;
-		const explicitSessionId = this.getNodeParameter('explicitSessionId', index, '') as string;
-		const maxItemsPerPage = this.getNodeParameter('maxItemsPerPage', index, 50) as number;
-		const maxTotalItems = this.getNodeParameter('maxTotalItems', index, 200) as number;
-		const takeScreenshotOption = this.getNodeParameter('takeScreenshot', index, false) as boolean;
-		const selectionMethod = this.getNodeParameter('containerSelectionMethod', index, 'containerItems') as string;
 
 		// Get session information from input if available
 		let sessionIdFromInput = '';
@@ -1840,6 +1854,7 @@ export async function execute(
 		if (debugMode && collectionDebugInfo) {
 			returnItems.push({
 				json: {
+					...(outputInputData && items[index]?.json ? items[index].json : {}),
 					_collectionDebug: true,
 					_debugType: 'collection',
 					sessionId,
@@ -1852,6 +1867,7 @@ export async function execute(
 		for (const item of collectedItems) {
 			returnItems.push({
 				json: {
+					...(outputInputData && items[index]?.json ? items[index].json : {}),
 					...item,
 					sessionId,
 					// Individual item debug info can go here if needed
@@ -1873,6 +1889,7 @@ export async function execute(
 			if (!debugMode) {
 				returnItems.push({
 					json: {
+						...(outputInputData && items[index]?.json ? items[index].json : {}),
 						_collectionResult: true,
 						success: true,
 						message,
@@ -1885,6 +1902,7 @@ export async function execute(
 				// Add a message item alongside the debug info
 				returnItems.push({
 					json: {
+						...(outputInputData && items[index]?.json ? items[index].json : {}),
 						_messageItem: true,
 						success: true,
 						message,
@@ -1942,6 +1960,7 @@ export async function execute(
 		if (this.getNodeParameter('continueOnFail', index, true) as boolean) {
 			return [{
 				json: {
+					...(outputInputData && items[index]?.json ? items[index].json : {}),
 					success: false,
 					error: (error as Error).message,
 					sessionId,
