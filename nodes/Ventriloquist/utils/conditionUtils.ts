@@ -13,6 +13,7 @@ import {
 	detectExpression,
 	detectExecutionCount,
 	detectInputSource,
+	processDetection,
 } from './detectionUtils';
 
 /**
@@ -54,6 +55,8 @@ export interface IConditionGroup {
 	conditions?: IDataObject[];
 	singleConditionType?: string;
 	singleSelector?: string;
+	singleAttributeName?: string;
+	singleAttributeValue?: string;
 	singleTextToCheck?: string;
 	singleUrlSubstring?: string;
 	singleCountComparison?: string;
@@ -99,7 +102,7 @@ export async function evaluateCondition(
 		let result: IDetectionResult;
 
 		// Check if condition requires a page and page is null
-		const pageRequiredConditions = ['elementExists', 'textContains', 'elementCount', 'urlContains'];
+		const pageRequiredConditions = ['attributeValue', 'elementExists', 'textContains', 'elementCount', 'urlContains'];
 		if (pageRequiredConditions.includes(conditionType) && !page) {
 			thisNode.logger.warn(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
 				`Condition type '${conditionType}' requires a session but no session is available - condition will evaluate to false`));
@@ -117,6 +120,31 @@ export async function evaluateCondition(
 				case 'elementExists': {
 					const selector = condition.selector as string;
 					result = await detectElement(page!, selector, detectionOptions, thisNode.logger);
+					break;
+				}
+
+				case 'attributeValue': {
+					const detection = {
+						detectionType: 'attributeValue',
+						selector: condition.selector as string,
+						attributeName: condition.attributeName as string,
+						attributeValue: condition.attributeValue as string,
+						matchType: condition.matchType as string || 'contains',
+						caseSensitive: condition.caseSensitive as boolean || false,
+					};
+
+					result = await processDetection(
+						page!,
+						detection,
+						'', // currentUrl not needed for attribute detection
+						detectionOptions.waitForSelectors,
+						detectionOptions.selectorTimeout,
+						detectionOptions.detectionMethod,
+						detectionOptions.earlyExitDelay,
+						thisNode.logger,
+						detectionOptions.nodeName,
+						detectionOptions.nodeId
+					);
 					break;
 				}
 
@@ -354,6 +382,7 @@ export async function evaluateConditionGroup(
 
 			// Add specific fields based on condition type
 			switch (singleConditionType) {
+				case 'attributeValue':
 				case 'elementExists':
 				case 'textContains':
 				case 'elementCount':
@@ -375,6 +404,13 @@ export async function evaluateConditionGroup(
 			}
 
 			// Add additional fields for specific condition types
+			if (singleConditionType === 'attributeValue') {
+				singleCondition.attributeName = conditionGroup.singleAttributeName;
+				singleCondition.attributeValue = conditionGroup.singleAttributeValue;
+				singleCondition.matchType = conditionGroup.singleMatchType;
+				singleCondition.caseSensitive = conditionGroup.singleCaseSensitive;
+			}
+
 			if (singleConditionType === 'textContains') {
 				singleCondition.textToCheck = conditionGroup.singleTextToCheck;
 				singleCondition.matchType = conditionGroup.singleMatchType;

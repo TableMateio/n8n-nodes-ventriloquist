@@ -170,6 +170,11 @@ export const description: INodeProperties[] = [
 						type: "options",
 						options: [
 							{
+								name: "Attribute Value",
+								value: "attributeValue",
+								description: "Check if element's attribute has a specific value",
+							},
+							{
 								name: "Element Count",
 								value: "elementCount",
 								description: "Count the elements that match a selector",
@@ -317,6 +322,7 @@ export const description: INodeProperties[] = [
 								"/operation": ["decision"],
 								conditionType: ["one"],
 								singleConditionType: [
+									"attributeValue",
 									"elementExists",
 									"textContains",
 									"elementCount",
@@ -335,6 +341,36 @@ export const description: INodeProperties[] = [
 								"/operation": ["decision"],
 								conditionType: ["one"],
 								singleConditionType: ["textContains"],
+							},
+						},
+					},
+					{
+						displayName: "Attribute Name",
+						name: "singleAttributeName",
+						type: "string",
+						default: "",
+						placeholder: "disabled, data-value, href",
+						description: "Name of the attribute to check",
+						displayOptions: {
+							show: {
+								"/operation": ["decision"],
+								conditionType: ["one"],
+								singleConditionType: ["attributeValue"],
+							},
+						},
+					},
+					{
+						displayName: "Attribute Value",
+						name: "singleAttributeValue",
+						type: "string",
+						default: "",
+						placeholder: "disabled, true, #some-url",
+						description: "Expected value of the attribute",
+						displayOptions: {
+							show: {
+								"/operation": ["decision"],
+								conditionType: ["one"],
+								singleConditionType: ["attributeValue"],
 							},
 						},
 					},
@@ -435,12 +471,12 @@ export const description: INodeProperties[] = [
 							},
 						],
 						default: "contains",
-						description: "How to match the text or URL value",
+						description: "How to match the text, URL, or attribute value",
 						displayOptions: {
 							show: {
 								"/operation": ["decision"],
 								conditionType: ["one"],
-								singleConditionType: ["textContains", "urlContains"],
+								singleConditionType: ["attributeValue", "textContains", "urlContains"],
 							},
 						},
 					},
@@ -454,7 +490,7 @@ export const description: INodeProperties[] = [
 							show: {
 								"/operation": ["decision"],
 								conditionType: ["one"],
-								singleConditionType: ["textContains", "urlContains"],
+								singleConditionType: ["attributeValue", "textContains", "urlContains"],
 							},
 						},
 					},
@@ -507,6 +543,11 @@ export const description: INodeProperties[] = [
 										name: "conditionType",
 										type: "options",
 										options: [
+											{
+												name: "Attribute Value",
+												value: "attributeValue",
+												description: "Check if element's attribute has a specific value",
+											},
 											{
 												name: "Element Count",
 												value: "elementCount",
@@ -636,6 +677,7 @@ export const description: INodeProperties[] = [
 										displayOptions: {
 											show: {
 												conditionType: [
+													"attributeValue",
 													"elementExists",
 													"textContains",
 													"elementCount",
@@ -653,6 +695,32 @@ export const description: INodeProperties[] = [
 										displayOptions: {
 											show: {
 												conditionType: ["textContains"],
+											},
+										},
+									},
+									{
+										displayName: "Attribute Name",
+										name: "attributeName",
+										type: "string",
+										default: "",
+										placeholder: "disabled, data-value, href",
+										description: "Name of the attribute to check",
+										displayOptions: {
+											show: {
+												conditionType: ["attributeValue"],
+											},
+										},
+									},
+									{
+										displayName: "Attribute Value",
+										name: "attributeValue",
+										type: "string",
+										default: "",
+										placeholder: "disabled, true, #some-url",
+										description: "Expected value of the attribute",
+										displayOptions: {
+											show: {
+												conditionType: ["attributeValue"],
 											},
 										},
 									},
@@ -749,10 +817,10 @@ export const description: INodeProperties[] = [
 											},
 										],
 										default: "contains",
-										description: "How to match the text or URL value",
+										description: "How to match the text, URL, or attribute value",
 										displayOptions: {
 											show: {
-												conditionType: ["textContains", "urlContains"],
+												conditionType: ["attributeValue", "textContains", "urlContains"],
 											},
 										},
 									},
@@ -765,7 +833,7 @@ export const description: INodeProperties[] = [
 											"Whether the matching should be case-sensitive",
 										displayOptions: {
 											show: {
-												conditionType: ["textContains", "urlContains"],
+												conditionType: ["attributeValue", "textContains", "urlContains"],
 											},
 										},
 									},
