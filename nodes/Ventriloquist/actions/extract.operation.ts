@@ -2328,7 +2328,133 @@ export async function execute(
 			}
 		}
 
-		return { json: successResponse };
+		// Helper function to get file extension from content type
+		function getFileExtensionFromContentType(contentType: string): string {
+			const typeMap: { [key: string]: string } = {
+				'image/jpeg': 'jpg',
+				'image/jpg': 'jpg',
+				'image/png': 'png',
+				'image/gif': 'gif',
+				'image/webp': 'webp',
+				'image/svg+xml': 'svg',
+				'image/bmp': 'bmp',
+				'image/tiff': 'tiff',
+				'application/pdf': 'pdf'
+			};
+			return typeMap[contentType.toLowerCase()] || 'bin';
+		}
+
+		// Process extraction results to separate binary data from JSON data
+		let binaryData: { [key: string]: any } = {};
+		let hasBinaryData = false;
+
+		// Process each extraction result and prepare final data structure
+		const processedExtractionData = extractionResults.reduce((result: IDataObject, item: IExtractItem) => {
+			if (item.extractedData !== undefined) {
+				// Special handling for image extraction with binary data
+				if (item.extractionType === 'image' && item.extractedData) {
+					const processImageData = (imgData: any, keyPrefix: string) => {
+						if (imgData && typeof imgData === 'object') {
+							// Check if we have binary data to extract
+							if (imgData.binaryData || imgData.data) {
+								const base64Data = imgData.binaryData || imgData.data;
+								const contentType = imgData.contentType || 'image/unknown';
+								const fileName = `${keyPrefix}_${Date.now()}.${getFileExtensionFromContentType(contentType)}`;
+
+								// Add to N8N binary data format
+								binaryData[keyPrefix] = {
+									data: base64Data,
+									mimeType: contentType,
+									fileName: fileName,
+									fileSize: imgData.size || undefined
+								};
+								hasBinaryData = true;
+
+								this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
+									`Extracted binary data for [${keyPrefix}]: ${fileName} (${contentType}, ${imgData.size || 'unknown'} bytes)`));
+
+								// Return only metadata for JSON (remove binary data)
+								const jsonMetadata = { ...imgData };
+								delete jsonMetadata.binaryData;
+								delete jsonMetadata.data;
+								return jsonMetadata;
+							}
+						}
+						// Return as-is if no binary data
+						return imgData;
+					};
+
+					if (Array.isArray(item.extractedData)) {
+						// Handle array of images
+						const processedArray = item.extractedData.map((img, idx) =>
+							processImageData(img, `${item.name}_${idx}`)
+						);
+						result[item.name] = processedArray;
+					} else {
+						// Handle single image
+						result[item.name] = processImageData(item.extractedData, item.name);
+					}
+				} else {
+					// Non-image extraction - use data as-is
+					result[item.name] = item.extractedData;
+				}
+
+				// Add schema if present
+				if (item.schema && item.aiFormatting?.includeSchema) {
+					result[`${item.name}_schema`] = item.schema;
+				}
+
+				// Add raw data if requested
+				if (item.rawData !== undefined && item.aiFormatting?.includeRawData) {
+					result[`${item.name}_raw`] = item.rawData;
+				}
+			} else {
+				result[item.name] = null;
+			}
+			return result;
+		}, {});
+
+		// Create the final extraction results data structure
+		const finalExtractionResultsData: IDataObject = {
+			...(debugMode ? {
+				extractedData: extractionResults.map(item => ({
+					id: item.id,
+					name: item.name,
+					extractionType: item.extractionType,
+					selector: item.selector,
+					extractedData: item.extractedData,
+					rawData: item.rawData,
+					schema: item.schema
+				}))
+			} : {}),
+			data: processedExtractionData,
+		};
+
+		// Create the success response
+		const finalSuccessResponse = await createSuccessResponse({
+			operation: "extract",
+			sessionId,
+			page: pageForResponse || page,
+			logger: this.logger,
+			startTime,
+			takeScreenshot: takeScreenshotOption,
+			additionalData: {
+				...finalExtractionResultsData,
+			},
+		});
+
+		// Return with binary data if present
+		if (hasBinaryData) {
+			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
+				`Returning ${Object.keys(binaryData).length} binary files alongside JSON data`));
+
+			return {
+				json: finalSuccessResponse,
+				binary: binaryData
+			};
+		}
+
+		return { json: finalSuccessResponse };
 	} catch (error) {
 		// Use the standardized error response utility
 		const errorResponse = await createErrorResponse({
