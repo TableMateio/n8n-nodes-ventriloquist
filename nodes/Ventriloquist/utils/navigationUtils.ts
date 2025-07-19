@@ -989,3 +989,136 @@ export async function submitFormAndWaitForNavigation(
 		}
 	}
 }
+
+/**
+ * Transform URL based on transformation type and current page context
+ */
+export function transformUrl(
+	url: string,
+	transformationType: string,
+	currentPageUrl: string,
+	options?: {
+		replaceFrom?: string;
+		replaceTo?: string;
+	}
+): string {
+	if (!url) return '';
+
+	switch (transformationType) {
+		case 'absolute':
+			return getAbsoluteUrl(url, currentPageUrl);
+		case 'addDomain':
+			return addDomainToUrl(url, currentPageUrl);
+		case 'replace':
+			return replaceInUrl(url, options?.replaceFrom || '', options?.replaceTo || '');
+		default:
+			return url;
+	}
+}
+
+/**
+ * Convert relative URL to absolute URL using current page context
+ */
+export function getAbsoluteUrl(url: string, currentPageUrl: string): string {
+	try {
+		return new URL(url, currentPageUrl).href;
+	} catch {
+		return url;
+	}
+}
+
+/**
+ * Add domain to URLs that start with '/'
+ */
+export function addDomainToUrl(url: string, currentPageUrl: string): string {
+	if (url.startsWith('/')) {
+		try {
+			const baseUrl = new URL(currentPageUrl);
+			return `${baseUrl.origin}${url}`;
+		} catch {
+			return url;
+		}
+	}
+	return url;
+}
+
+/**
+ * Replace part of URL with another string
+ */
+export function replaceInUrl(url: string, replaceFrom: string, replaceTo: string): string {
+	if (!replaceFrom) return url;
+	return url.replace(new RegExp(replaceFrom, 'g'), replaceTo);
+}
+
+/**
+ * Check if URL has a supported file format
+ */
+export function isSupportedImageFormat(url: string, supportedFormats: string[]): boolean {
+	if (!url || !supportedFormats?.length) return false;
+
+	const extension = getFileExtensionFromUrl(url);
+
+	// If we found a file extension, check it against supported formats
+	if (extension) {
+		return supportedFormats.some(format =>
+			format.toLowerCase() === extension.toLowerCase() ||
+			(format === 'jpg' && extension.toLowerCase() === 'jpeg')
+		);
+	}
+
+	// If no extension found, check for common image handler patterns
+	// These are dynamic URLs that serve images but don't have file extensions
+	const imageHandlerPatterns = [
+		/imageviewer/i,
+		/image\.aspx/i,
+		/image\.ashx/i,
+		/viewerhandler/i,
+		/solutionviewer/i,
+		/documentviewer/i,
+		/getimage/i,
+		/showimage/i,
+		/renderimage/i,
+		/thumbnail/i,
+		/preview/i,
+		/download.*image/i,
+		/image.*handler/i,
+		/viewer.*handler/i
+	];
+
+	// Check if URL matches any known image handler patterns
+	const isImageHandler = imageHandlerPatterns.some(pattern => pattern.test(url));
+
+	if (isImageHandler) {
+		// For image handlers, we assume they can serve common formats
+		// Return true if any of the basic image formats are supported
+		const basicFormats = ['jpg', 'png', 'gif', 'pdf'];
+		return basicFormats.some(format => supportedFormats.includes(format));
+	}
+
+	// If no extension and no handler pattern, reject
+	return false;
+}
+
+/**
+ * Extract file extension from URL
+ */
+export function getFileExtensionFromUrl(url: string): string | null {
+	try {
+		const urlObj = new URL(url);
+		const pathname = urlObj.pathname;
+		const lastDot = pathname.lastIndexOf('.');
+
+		if (lastDot === -1) return null;
+
+		const extension = pathname.slice(lastDot + 1);
+		// Remove query parameters and fragments if they exist
+		return extension.split('?')[0].split('#')[0];
+	} catch {
+		// Fallback for malformed URLs
+		const lastDot = url.lastIndexOf('.');
+		if (lastDot === -1) return null;
+
+		const extension = url.slice(lastDot + 1);
+		return extension.split('?')[0].split('#')[0];
+	}
+}

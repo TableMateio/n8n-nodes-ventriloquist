@@ -38,6 +38,19 @@ export interface IExtractionConfig {
   // Additional properties for Text extraction
   cleanText?: boolean;
   convertType?: string;
+  // Additional properties for Image extraction
+  imageOptions?: {
+    extractionMode?: string;
+    sourceAttribute?: string;
+    urlTransformation?: boolean;
+    transformationType?: string;
+    replaceFrom?: string;
+    replaceTo?: string;
+    formatChecking?: boolean;
+    supportedFormats?: string[];
+    downloadTimeout?: number;
+    outputFormat?: string;
+  };
   // Additional properties for Smart extraction
   smartOptions?: {
     extractionFormat?: string;
@@ -637,6 +650,209 @@ export class BasicExtraction implements IExtraction {
           data = inputValues.length === 1 ? inputValues[0] : inputValues;
           break;
 
+        case 'image':
+          // Handle image extraction
+          logger.info(`${logPrefix} Image extraction starting: selector=${this.config.selector}`);
+
+          // Import necessary functions for URL transformation
+          const { transformUrl, isSupportedImageFormat } = await import('../../navigationUtils');
+
+          // Get image options from config
+          const imageOptions = {
+            extractionMode: 'url',
+            sourceAttribute: 'src',
+            urlTransformation: true,
+            transformationType: 'absolute',
+            replaceFrom: '',
+            replaceTo: '',
+            formatChecking: false, // Default to false for better compatibility with dynamic URLs
+            supportedFormats: ['jpg', 'png', 'gif', 'webp'],
+            downloadTimeout: 30000,
+            outputFormat: 'single',
+            ...this.config.imageOptions
+          };
+
+          const imageElements = await this.page.$$(this.config.selector);
+
+          if (imageElements.length === 0) {
+            logger.warn(`${logPrefix} No image elements found matching selector: ${this.config.selector}`);
+            data = imageOptions.outputFormat === 'array' ? [] : null;
+            rawContent = '';
+            break;
+          }
+
+          logger.info(`${logPrefix} Found ${imageElements.length} image elements`);
+
+          // Get current page URL for URL transformation
+          const currentUrl = await this.page.url();
+
+          // Extract image data from each element
+          const imageData = await Promise.all(
+            imageElements.map(async (element) => {
+              try {
+                // Check if this element is an img tag or contains img tags
+                let imageUrl = '';
+                let actualImageElement = element;
+
+                // First, try to get the attribute directly (if it's an img element)
+                imageUrl = await element.evaluate(
+                  (el, attr) => el.getAttribute(attr) || '',
+                  imageOptions.sourceAttribute
+                );
+
+                // If no URL found, check if this is a container with img elements inside
+                if (!imageUrl) {
+                  logger.info(`${logPrefix} No ${imageOptions.sourceAttribute} on selected element, searching for img elements within container`);
+
+                  const imgElements = await element.$$('img');
+                  if (imgElements.length > 0) {
+                    logger.info(`${logPrefix} Found ${imgElements.length} img elements within container`);
+
+                    // Use the first img element found
+                    actualImageElement = imgElements[0];
+                    imageUrl = await actualImageElement.evaluate(
+                      (el, attr) => el.getAttribute(attr) || '',
+                      imageOptions.sourceAttribute
+                    );
+
+                    if (imageUrl) {
+                      logger.info(`${logPrefix} Successfully found image URL in nested img element: ${imageUrl}`);
+                    }
+                  }
+                }
+
+                // If still no URL, try other common image attributes
+                if (!imageUrl && imageOptions.sourceAttribute === 'src') {
+                  const alternativeAttrs = ['data-src', 'data-original', 'data-lazy', 'data-url'];
+                  for (const attr of alternativeAttrs) {
+                    imageUrl = await actualImageElement.evaluate(
+                      (el, attr) => el.getAttribute(attr) || '',
+                      attr
+                    );
+                    if (imageUrl) {
+                      logger.info(`${logPrefix} Found image URL using alternative attribute '${attr}': ${imageUrl}`);
+                      break;
+                    }
+                  }
+                }
+
+                if (!imageUrl) {
+                  logger.warn(`${logPrefix} No image URL found on element or nested img elements`);
+                  return null;
+                }
+
+                // Apply URL transformation if enabled
+                if (imageOptions.urlTransformation) {
+                  imageUrl = transformUrl(
+                    imageUrl,
+                    imageOptions.transformationType,
+                    currentUrl,
+                    {
+                      replaceFrom: imageOptions.replaceFrom,
+                      replaceTo: imageOptions.replaceTo,
+                    }
+                  );
+                }
+
+                // Check if format is supported (if format checking is enabled)
+                if (imageOptions.formatChecking && !isSupportedImageFormat(imageUrl, imageOptions.supportedFormats)) {
+                  logger.info(`${logPrefix} Skipping unsupported image format: ${imageUrl}`);
+                  return null;
+                }
+
+                if (!imageOptions.formatChecking) {
+                  logger.info(`${logPrefix} Format checking disabled, accepting all image URLs`);
+                }
+
+                logger.info(`${logPrefix} Processing image: ${imageUrl}`);
+
+                // Prepare result object
+                const result: any = { url: imageUrl };
+
+                // Download binary data if requested
+                if (imageOptions.extractionMode === 'binary' || imageOptions.extractionMode === 'both') {
+                  try {
+                    logger.info(`${logPrefix} Downloading image binary data from: ${imageUrl}`);
+
+                    // Create a new page for downloading to avoid interfering with the main page
+                    const downloadPage = await this.page.browser().newPage();
+
+                    try {
+                      // Set a reasonable user agent
+                      await downloadPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+
+                      // Navigate to the image URL
+                      const response = await downloadPage.goto(imageUrl, {
+                        waitUntil: 'networkidle0',
+                        timeout: imageOptions.downloadTimeout
+                      });
+
+                      if (response && response.ok()) {
+                        // Get the image as buffer
+                        const buffer = await response.buffer();
+
+                        // Convert to base64
+                        const base64Data = buffer.toString('base64');
+
+                        // Get content type
+                        const contentType = response.headers()['content-type'] || 'image/unknown';
+
+                        logger.info(`${logPrefix} Successfully downloaded image: ${buffer.length} bytes, type: ${contentType}`);
+
+                        if (imageOptions.extractionMode === 'binary') {
+                          result.data = base64Data;
+                          result.contentType = contentType;
+                          result.size = buffer.length;
+                        } else {
+                          result.binaryData = base64Data;
+                          result.contentType = contentType;
+                          result.size = buffer.length;
+                        }
+                      } else {
+                        logger.warn(`${logPrefix} Failed to download image, HTTP status: ${response?.status()}`);
+                        if (imageOptions.extractionMode === 'binary') {
+                          return null;
+                        }
+                      }
+                    } finally {
+                      await downloadPage.close();
+                    }
+                  } catch (downloadError) {
+                    logger.warn(`${logPrefix} Error downloading image: ${(downloadError as Error).message}`);
+                    if (imageOptions.extractionMode === 'binary') {
+                      return null;
+                    }
+                  }
+                }
+
+                return result;
+              } catch (error) {
+                logger.error(`${logPrefix} Error processing image element: ${(error as Error).message}`);
+                return null;
+              }
+            })
+          );
+
+          // Filter out null results
+          const validImageData = imageData.filter(item => item !== null);
+
+          logger.info(`${logPrefix} Successfully processed ${validImageData.length} out of ${imageElements.length} images`);
+
+          // Format output according to outputFormat option
+          if (imageOptions.outputFormat === 'array') {
+            data = validImageData;
+          } else {
+            data = validImageData.length > 0 ? validImageData[0] : null;
+          }
+
+          // Generate raw content for logging
+          rawContent = validImageData.map(item => `URL: ${item.url}${item.size ? `, Size: ${item.size} bytes` : ''}`).join('\n');
+          if (rawContent.length > 200) {
+            rawContent = rawContent.substring(0, 200) + '... [truncated]';
+          }
+
+          break;
+
         case 'multiple':
           // Handle multiple elements extraction
           const extractionProperty = this.config.extractionProperty || 'textContent';
@@ -1074,6 +1290,8 @@ export function createExtraction(page: Page, config: IExtractionConfig, context:
     case 'value':
       return new BasicExtraction(page, config, context);
     case 'html':
+      return new BasicExtraction(page, config, context);
+    case 'image':
       return new BasicExtraction(page, config, context);
     case 'multiple':
       return new MultipleExtraction(page, config, context);

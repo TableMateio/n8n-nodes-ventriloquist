@@ -107,6 +107,11 @@ export const description: INodeProperties[] = [
 								value: "table",
 								description: "Extract data from a table",
 							},
+							{
+								name: "Image",
+								value: "image",
+								description: "Extract images from the page (URL or binary data)",
+							},
 						],
 						default: "text",
 						description: "What type of data to extract from the page",
@@ -814,6 +819,203 @@ export const description: INodeProperties[] = [
 							},
 						],
 					},
+					{
+						displayName: "Image Options",
+						name: "imageOptions",
+						type: "collection",
+						placeholder: "Add Option",
+						default: {},
+						typeOptions: {
+							multipleValues: false,
+						},
+						displayOptions: {
+							show: {
+								extractionType: ["image"],
+							},
+						},
+						options: [
+							{
+								displayName: "Extraction Mode",
+								name: "extractionMode",
+								type: "options",
+								options: [
+									{
+										name: "URL Only",
+										value: "url",
+										description: "Extract only the image URL/source",
+									},
+									{
+										name: "Binary Data",
+										value: "binary",
+										description: "Download and return the image as base64 binary data",
+									},
+									{
+										name: "Both URL and Binary",
+										value: "both",
+										description: "Return both the URL and the binary data",
+									},
+								],
+								default: "url",
+								description: "What to extract from the image element",
+							},
+							{
+								displayName: "Source Attribute",
+								name: "sourceAttribute",
+								type: "string",
+								default: "src",
+								placeholder: "src, data-src, data-original",
+								description: "Attribute name that contains the image URL (e.g., src, data-src for lazy-loaded images)",
+							},
+							{
+								displayName: "URL Transformation",
+								name: "urlTransformation",
+								type: "boolean",
+								default: true,
+								description: "Apply transformation to extracted URLs (useful for relative URLs)",
+							},
+							{
+								displayName: "Transformation Type",
+								name: "transformationType",
+								type: "options",
+								options: [
+									{
+										name: "Convert to Absolute URL",
+										value: "absolute",
+										description: "Convert relative URLs to absolute URLs based on current page",
+									},
+									{
+										name: "Add Base Domain",
+										value: "addDomain",
+										description: "Add domain to URLs that start with '/'",
+									},
+									{
+										name: "Custom Replacement",
+										value: "replace",
+										description: "Replace part of URL with another string",
+									},
+								],
+								default: "absolute",
+								description: "Type of URL transformation to apply",
+								displayOptions: {
+									show: {
+										urlTransformation: [true],
+									},
+								},
+							},
+							{
+								displayName: "Custom Replace From",
+								name: "replaceFrom",
+								type: "string",
+								default: "",
+								placeholder: "string to replace",
+								description: "String to find and replace in URLs",
+								displayOptions: {
+									show: {
+										urlTransformation: [true],
+										transformationType: ["replace"],
+									},
+								},
+							},
+							{
+								displayName: "Custom Replace To",
+								name: "replaceTo",
+								type: "string",
+								default: "",
+								placeholder: "replacement string",
+								description: "String to replace with",
+								displayOptions: {
+									show: {
+										urlTransformation: [true],
+										transformationType: ["replace"],
+									},
+								},
+							},
+							{
+								displayName: "Format Checking",
+								name: "formatChecking",
+								type: "boolean",
+								default: false,
+								description: "Whether to check file formats before extraction (enable for stricter validation of static image files)",
+							},
+							{
+								displayName: "Supported Formats",
+								name: "supportedFormats",
+								type: "multiOptions",
+								options: [
+									{
+										name: "JPEG/JPG",
+										value: "jpg",
+									},
+									{
+										name: "PNG",
+										value: "png",
+									},
+									{
+										name: "GIF",
+										value: "gif",
+									},
+									{
+										name: "WebP",
+										value: "webp",
+									},
+									{
+										name: "SVG",
+										value: "svg",
+									},
+									{
+										name: "PDF",
+										value: "pdf",
+									},
+									{
+										name: "BMP",
+										value: "bmp",
+									},
+									{
+										name: "TIFF",
+										value: "tiff",
+									},
+								],
+								default: ["jpg", "png", "gif", "webp"],
+								description: "File formats to extract (others will be ignored)",
+								displayOptions: {
+									show: {
+										formatChecking: [true],
+									},
+								},
+							},
+							{
+								displayName: "Download Timeout",
+								name: "downloadTimeout",
+								type: "number",
+								default: 30000,
+								description: "Maximum time to wait for image download in milliseconds",
+								displayOptions: {
+									show: {
+										extractionMode: ["binary", "both"],
+									},
+								},
+							},
+							{
+								displayName: "Output Format",
+								name: "outputFormat",
+								type: "options",
+								options: [
+									{
+										name: "Single Item",
+										value: "single",
+										description: "Return only the first matching image",
+									},
+									{
+										name: "Array",
+										value: "array",
+										description: "Return all matching images as an array",
+									},
+								],
+								default: "single",
+								description: "Format of the extracted image data",
+							},
+						],
+					},
 				],
 			},
 		],
@@ -1449,6 +1651,17 @@ export async function execute(
 					separator?: string;
 					outputFormat?: string;
 					cleanText?: boolean;
+				} | undefined,
+				imageOptions: item.imageOptions as {
+					extractionMode?: string;
+					sourceAttribute?: string;
+					urlTransformation?: boolean;
+					transformationType?: string;
+					replaceFrom?: string;
+					replaceTo?: string;
+					supportedFormats?: string[];
+					downloadTimeout?: number;
+					outputFormat?: string;
 				} | undefined,
 				// Add AI formatting options if enabled
 				aiFormatting: schema === "manual" || schema === "auto" ? aiFormatting : undefined,

@@ -98,6 +98,18 @@ export interface IExtractItem {
     cleanText?: boolean;
     limit?: number;
   };
+  imageOptions?: {
+    extractionMode?: string;
+    sourceAttribute?: string;
+    urlTransformation?: boolean;
+    transformationType?: string;
+    replaceFrom?: string;
+    replaceTo?: string;
+    formatChecking?: boolean;
+    supportedFormats?: string[];
+    downloadTimeout?: number;
+    outputFormat?: string;
+  };
   aiFormatting?: {
     enabled: boolean;
     extractionFormat?: string;
@@ -1007,6 +1019,8 @@ export async function processExtractionItems(
           // Add text processing options
           cleanText: extractionItem.textOptions?.cleanText || false,
           convertType: extractionItem.textOptions?.convertType || '',
+          // Add image processing options
+          imageOptions: extractionItem.imageOptions,
         };
 
         // Add API key if available
