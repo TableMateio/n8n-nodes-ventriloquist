@@ -39,7 +39,7 @@ import {
 	IDetectionOptions,
 	IDetectionResult
 } from '../utils/detectionUtils';
-import { elementExists } from '../utils/navigationUtils';
+import { elementExists, transformUrl, isSupportedImageFormat } from '../utils/navigationUtils';
 import { EntityMatcherComparisonMiddleware } from '../utils/middlewares/matching/entityMatcherComparisonMiddleware';
 import {
 	createEntityMatcher,
@@ -349,6 +349,11 @@ export const description: INodeProperties[] = [
 								value: "html",
 								description: "Extract HTML content from the element",
 							},
+							{
+								name: "Image",
+								value: "image",
+								description: "Extract image data (URL and/or binary)",
+							},
 						],
 						default: "text",
 						description: "Type of data to extract",
@@ -365,6 +370,182 @@ export const description: INodeProperties[] = [
 								extractionType: ["attribute"],
 							},
 						},
+					},
+					{
+						displayName: "Image Options",
+						name: "imageOptions",
+						type: "collection",
+						placeholder: "Add Option",
+						default: {},
+						typeOptions: {
+							multipleValues: false,
+						},
+						displayOptions: {
+							show: {
+								extractionType: ["image"],
+							},
+						},
+						options: [
+							{
+								displayName: "Extraction Mode",
+								name: "extractionMode",
+								type: "options",
+								options: [
+									{
+										name: "URL Only",
+										value: "url",
+										description: "Extract only the image URL",
+									},
+									{
+										name: "Binary Data",
+										value: "binary",
+										description: "Download and extract image binary data",
+									},
+									{
+										name: "Both",
+										value: "both",
+										description: "Extract both URL and binary data",
+									},
+								],
+								default: "url",
+								description: "What type of image data to extract",
+							},
+							{
+								displayName: "Source Attribute",
+								name: "sourceAttribute",
+								type: "string",
+								default: "src",
+								placeholder: "src, data-src, data-original",
+								description: "HTML attribute containing the image URL",
+							},
+							{
+								displayName: "URL Transformation",
+								name: "urlTransformation",
+								type: "boolean",
+								default: true,
+								description: "Whether to transform relative URLs to absolute URLs",
+							},
+							{
+								displayName: "Transformation Type",
+								name: "transformationType",
+								type: "options",
+								options: [
+									{
+										name: "Convert to Absolute URL",
+										value: "absolute",
+										description: "Convert relative URLs to absolute URLs using current page",
+									},
+									{
+										name: "Add Base Domain",
+										value: "addDomain",
+										description: "Add the base domain to URLs that start with /",
+									},
+									{
+										name: "Custom String Replacement",
+										value: "custom",
+										description: "Replace part of the URL with custom text",
+									},
+								],
+								default: "absolute",
+								description: "How to transform URLs",
+								displayOptions: {
+									show: {
+										urlTransformation: [true],
+									},
+								},
+							},
+							{
+								displayName: "Replace From",
+								name: "replaceFrom",
+								type: "string",
+								default: "",
+								placeholder: "text to replace",
+								description: "Text to replace in URL (for custom transformation)",
+								displayOptions: {
+									show: {
+										transformationType: ["custom"],
+									},
+								},
+							},
+							{
+								displayName: "Replace To",
+								name: "replaceTo",
+								type: "string",
+								default: "",
+								placeholder: "replacement text",
+								description: "Replacement text (for custom transformation)",
+								displayOptions: {
+									show: {
+										transformationType: ["custom"],
+									},
+								},
+							},
+							{
+								displayName: "Format Checking",
+								name: "formatChecking",
+								type: "boolean",
+								default: false,
+								description: "Whether to check file formats before extraction (enable for stricter validation of static image files)",
+							},
+							{
+								displayName: "Supported Formats",
+								name: "supportedFormats",
+								type: "multiOptions",
+								options: [
+									{
+										name: "JPEG/JPG",
+										value: "jpg",
+									},
+									{
+										name: "PNG",
+										value: "png",
+									},
+									{
+										name: "GIF",
+										value: "gif",
+									},
+									{
+										name: "WebP",
+										value: "webp",
+									},
+									{
+										name: "SVG",
+										value: "svg",
+									},
+									{
+										name: "PDF",
+										value: "pdf",
+									},
+									{
+										name: "BMP",
+										value: "bmp",
+									},
+									{
+										name: "TIFF",
+										value: "tiff",
+									},
+								],
+								default: ["jpg", "png", "gif", "webp"],
+								description: "File formats to extract (others will be ignored)",
+								displayOptions: {
+									show: {
+										formatChecking: [true],
+									},
+								},
+							},
+							{
+								displayName: "Download Timeout",
+								name: "downloadTimeout",
+								type: "number",
+								default: 30000,
+								description: "Maximum time to wait for image download in milliseconds",
+								displayOptions: {
+									show: {
+										extractionMode: ["binary", "both"],
+									},
+								},
+							},
+						],
 					},
 				],
 			},
@@ -1863,9 +2044,124 @@ export async function execute(
 			});
 		}
 
+		// Process binary data for image fields before returning items
+		const globalBinaryData: { [key: string]: any } = {};
+		let hasBinaryData = false;
+
+		// Helper function to get file extension from content type
+		function getFileExtensionFromContentType(contentType: string): string {
+			const typeMap: { [key: string]: string } = {
+				'image/jpeg': 'jpg',
+				'image/jpg': 'jpg',
+				'image/png': 'png',
+				'image/gif': 'gif',
+				'image/webp': 'webp',
+				'image/svg+xml': 'svg',
+				'image/bmp': 'bmp',
+				'image/tiff': 'tiff',
+				'application/pdf': 'pdf'
+			};
+			return typeMap[contentType.toLowerCase()] || 'bin';
+		}
+
+		// Process each collected item for binary downloads
+		for (let itemIndex = 0; itemIndex < collectedItems.length; itemIndex++) {
+			const item = collectedItems[itemIndex];
+
+			// Check each field for binary download needs
+			for (const [fieldName, fieldValue] of Object.entries(item)) {
+				if (fieldValue && typeof fieldValue === 'object' && fieldValue.needsBinaryDownload) {
+					try {
+						this.logger.info(formatOperationLog('Collector', nodeName, nodeId, index,
+							`Downloading binary data for item ${itemIndex}, field "${fieldName}": ${fieldValue.url}`));
+
+						// Create a new page for downloading to avoid interfering with the main page
+						const browser = SessionManager.getSession(sessionId)?.browser;
+						if (browser && browser.isConnected()) {
+							const downloadPage = await browser.newPage();
+
+							try {
+								// Set a reasonable user agent
+								await downloadPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+
+								// Navigate to the image URL
+								const response = await downloadPage.goto(fieldValue.url, {
+									waitUntil: 'networkidle0',
+									timeout: fieldValue.downloadTimeout
+								});
+
+								if (response && response.ok()) {
+									// Get the image as buffer
+									const buffer = await response.buffer();
+
+									// Convert to base64
+									const base64Data = buffer.toString('base64');
+
+									// Get content type
+									const contentType = response.headers()['content-type'] || 'image/unknown';
+
+									// Create unique key for this binary item
+									const binaryKey = `item_${itemIndex}_${fieldName}`;
+									const fileName = `${binaryKey}_${Date.now()}.${getFileExtensionFromContentType(contentType)}`;
+
+									// Add to global binary data
+									globalBinaryData[binaryKey] = {
+										data: base64Data,
+										mimeType: contentType,
+										fileName: fileName,
+										fileSize: buffer.length
+									};
+									hasBinaryData = true;
+
+									this.logger.info(formatOperationLog('Collector', nodeName, nodeId, index,
+										`Successfully downloaded binary data for "${fieldName}": ${fileName} (${contentType}, ${buffer.length} bytes)`));
+
+									// Update the item field to only include metadata (remove binary data)
+									if (fieldValue.extractionMode === 'binary') {
+										// For binary-only mode, replace with metadata object
+										item[fieldName] = {
+											url: fieldValue.url,
+											contentType: contentType,
+											size: buffer.length,
+											binaryKey: binaryKey
+										};
+									} else {
+										// For 'both' mode, update existing object
+										item[fieldName] = {
+											url: fieldValue.url,
+											contentType: contentType,
+											size: buffer.length,
+											binaryKey: binaryKey
+										};
+									}
+								} else {
+									this.logger.warn(formatOperationLog('Collector', nodeName, nodeId, index,
+										`Failed to download image for "${fieldName}", HTTP status: ${response?.status()}`));
+									// Fall back to URL-only mode
+									item[fieldName] = fieldValue.url;
+								}
+							} finally {
+								await downloadPage.close();
+							}
+						} else {
+							this.logger.warn(formatOperationLog('Collector', nodeName, nodeId, index,
+								`Browser session not available for binary download of "${fieldName}"`));
+							// Fall back to URL-only mode
+							item[fieldName] = fieldValue.url;
+						}
+					} catch (downloadError) {
+						this.logger.warn(formatOperationLog('Collector', nodeName, nodeId, index,
+							`Error downloading binary data for "${fieldName}": ${(downloadError as Error).message}`));
+						// Fall back to URL-only mode
+						item[fieldName] = fieldValue.url;
+					}
+				}
+			}
+		}
+
 		// Add individual items without collection debug duplication
 		for (const item of collectedItems) {
-			returnItems.push({
+			const itemData: INodeExecutionData = {
 				json: {
 					...(outputInputData && items[index]?.json ? items[index].json : {}),
 					...item,
@@ -1873,7 +2169,29 @@ export async function execute(
 					// Individual item debug info can go here if needed
 					...(debugMode && item.itemDebug && { itemDebug: item.itemDebug })
 				}
-			});
+			};
+
+			// Add binary data if this item has any
+			if (hasBinaryData) {
+				const itemBinary: { [key: string]: any } = {};
+				const itemIndex = collectedItems.indexOf(item);
+
+				// Find binary data for this specific item
+				for (const [binaryKey, binaryValue] of Object.entries(globalBinaryData)) {
+					if (binaryKey.startsWith(`item_${itemIndex}_`)) {
+						// Extract field name from binary key
+						const fieldName = binaryKey.replace(`item_${itemIndex}_`, '');
+						itemBinary[fieldName] = binaryValue;
+					}
+				}
+
+				// Only add binary if this specific item has binary data
+				if (Object.keys(itemBinary).length > 0) {
+					itemData.binary = itemBinary;
+				}
+			}
+
+			returnItems.push(itemData);
 		}
 
 		// If no items were collected, return collection info and a message item
@@ -2709,6 +3027,83 @@ async function collectItemsFromPage(
 							} else if (extractionType === 'html') {
 								result[fieldName] = fieldElement.innerHTML || '';
 								debugLog(`Item #${idx}: Extracted HTML for "${fieldName}" (${result[fieldName].length} chars)`);
+							} else if (extractionType === 'image') {
+								// Handle image extraction
+								const imageOptions = field.imageOptions as any || {};
+								const extractionMode = imageOptions.extractionMode || 'url';
+								const sourceAttribute = imageOptions.sourceAttribute || 'src';
+								const urlTransformation = imageOptions.urlTransformation !== false;
+								const transformationType = imageOptions.transformationType || 'absolute';
+								const formatChecking = imageOptions.formatChecking === true;
+								const supportedFormats = imageOptions.supportedFormats || ['jpg', 'png', 'gif', 'webp'];
+
+								debugLog(`Item #${idx}: Starting image extraction for "${fieldName}" with mode: ${extractionMode}`);
+
+								// First, try to get the image URL from the current element or find img elements within
+								let imageUrl = '';
+								let actualImageElement = fieldElement;
+
+								// Try to get the attribute directly (if it's an img element)
+								imageUrl = fieldElement.getAttribute(sourceAttribute) || '';
+
+								// If no URL found, check if this is a container with img elements inside
+								if (!imageUrl) {
+									debugLog(`Item #${idx}: No ${sourceAttribute} on selected element, searching for img elements within container`);
+									const imgElements = fieldElement.querySelectorAll('img');
+									if (imgElements.length > 0) {
+										debugLog(`Item #${idx}: Found ${imgElements.length} img elements within container`);
+										actualImageElement = imgElements[0] as Element;
+										imageUrl = actualImageElement.getAttribute(sourceAttribute) || '';
+									}
+								}
+
+								// If still no URL, try alternative attributes
+								if (!imageUrl && sourceAttribute === 'src') {
+									const alternativeAttrs = ['data-src', 'data-original', 'data-lazy', 'data-url'];
+									for (const attr of alternativeAttrs) {
+										imageUrl = actualImageElement.getAttribute(attr) || '';
+										if (imageUrl) {
+											debugLog(`Item #${idx}: Found image URL using alternative attribute '${attr}': ${imageUrl}`);
+											break;
+										}
+									}
+								}
+
+								if (!imageUrl) {
+									debugLog(`Item #${idx}: No image URL found for "${fieldName}"`);
+									result[fieldName] = null;
+								} else {
+									// Apply URL transformation if enabled
+									if (urlTransformation) {
+										imageUrl = transformUrl(imageUrl);
+									}
+
+									// Check if format is supported (if format checking is enabled)
+									if (formatChecking && !isSupportedImageFormat(imageUrl, supportedFormats)) {
+										debugLog(`Item #${idx}: Skipping unsupported image format for "${fieldName}": ${imageUrl}`);
+										result[fieldName] = null;
+									} else {
+										debugLog(`Item #${idx}: Processing image for "${fieldName}": ${imageUrl}`);
+
+										// Prepare result object
+										const imageResult: any = { url: imageUrl };
+
+										// For URL-only mode, just return the URL
+										if (extractionMode === 'url') {
+											result[fieldName] = imageUrl;
+										} else {
+											// For binary or both modes, store the image result object
+											// Note: We'll handle binary download in the post-processing step
+											// to avoid blocking the collector loop
+											imageResult.extractionMode = extractionMode;
+											imageResult.downloadTimeout = imageOptions.downloadTimeout || 30000;
+											imageResult.needsBinaryDownload = (extractionMode === 'binary' || extractionMode === 'both');
+											result[fieldName] = imageResult;
+										}
+
+										debugLog(`Item #${idx}: Image extraction result for "${fieldName}": ${extractionMode === 'url' ? imageUrl : 'object with URL and download info'}`);
+									}
+								}
 							}
 						} catch (error) {
 							debugLog(`Item #${idx}: Error extracting field "${fieldName}": ${error}`);
