@@ -3078,31 +3078,49 @@ async function collectItemsFromPage(
 										imageUrl = transformUrl(imageUrl);
 									}
 
-									// Check if format is supported (if format checking is enabled)
-									if (formatChecking && !isSupportedImageFormat(imageUrl, supportedFormats)) {
+																	// Simple format checking in browser context (if enabled)
+								let skipUnsupportedFormat = false;
+								if (formatChecking && supportedFormats && supportedFormats.length > 0) {
+									// Simple format checking using URL extension
+									const urlLower = imageUrl.toLowerCase();
+									const hasValidExtension = supportedFormats.some((format: string) => {
+										const formatLower = format.toLowerCase();
+										return urlLower.includes(`.${formatLower}`) ||
+											   (formatLower === 'jpg' && urlLower.includes('.jpeg'));
+									});
+
+									// Also check for common dynamic image handlers
+									const isDynamicHandler = /imageviewer|image\.(aspx|ashx)|solutionviewer|documentviewer|getimage|showimage|renderimage|thumbnail|preview/i.test(imageUrl);
+
+									if (!hasValidExtension && !isDynamicHandler) {
 										debugLog(`Item #${idx}: Skipping unsupported image format for "${fieldName}": ${imageUrl}`);
-										result[fieldName] = null;
-									} else {
-										debugLog(`Item #${idx}: Processing image for "${fieldName}": ${imageUrl}`);
-
-										// Prepare result object
-										const imageResult: any = { url: imageUrl };
-
-										// For URL-only mode, just return the URL
-										if (extractionMode === 'url') {
-											result[fieldName] = imageUrl;
-										} else {
-											// For binary or both modes, store the image result object
-											// Note: We'll handle binary download in the post-processing step
-											// to avoid blocking the collector loop
-											imageResult.extractionMode = extractionMode;
-											imageResult.downloadTimeout = imageOptions.downloadTimeout || 30000;
-											imageResult.needsBinaryDownload = (extractionMode === 'binary' || extractionMode === 'both');
-											result[fieldName] = imageResult;
-										}
-
-										debugLog(`Item #${idx}: Image extraction result for "${fieldName}": ${extractionMode === 'url' ? imageUrl : 'object with URL and download info'}`);
+										skipUnsupportedFormat = true;
 									}
+								}
+
+								if (!skipUnsupportedFormat) {
+									debugLog(`Item #${idx}: Processing image for "${fieldName}": ${imageUrl}`);
+
+									// Prepare result object
+									const imageResult: any = { url: imageUrl };
+
+									// For URL-only mode, just return the URL
+									if (extractionMode === 'url') {
+										result[fieldName] = imageUrl;
+									} else {
+										// For binary or both modes, store the image result object
+										// Note: We'll handle binary download in the post-processing step
+										// to avoid blocking the collector loop
+										imageResult.extractionMode = extractionMode;
+										imageResult.downloadTimeout = imageOptions.downloadTimeout || 30000;
+										imageResult.needsBinaryDownload = (extractionMode === 'binary' || extractionMode === 'both');
+										result[fieldName] = imageResult;
+									}
+
+									debugLog(`Item #${idx}: Image extraction result for "${fieldName}": ${extractionMode === 'url' ? imageUrl : 'object with URL and download info'}`);
+								} else {
+									result[fieldName] = null;
+								}
 								}
 							}
 						} catch (error) {
