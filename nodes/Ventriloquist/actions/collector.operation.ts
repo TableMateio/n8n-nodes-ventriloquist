@@ -2071,9 +2071,23 @@ export async function execute(
 			// Check each field for binary download needs
 			for (const [fieldName, fieldValue] of Object.entries(item)) {
 				if (fieldValue && typeof fieldValue === 'object' && fieldValue.needsBinaryDownload) {
+					// Transform relative URL to absolute URL before downloading
+					let downloadUrl = fieldValue.url;
+
 					try {
+						if (downloadUrl && !downloadUrl.startsWith('http')) {
+							// Get current page URL to use as base
+							const currentPageUrl = await page.url();
+							try {
+								downloadUrl = new URL(downloadUrl, currentPageUrl).href;
+							} catch (urlError) {
+								this.logger.warn(formatOperationLog('Collector', nodeName, nodeId, index,
+									`Failed to convert relative URL to absolute: ${downloadUrl}, using relative URL`));
+							}
+						}
+
 						this.logger.info(formatOperationLog('Collector', nodeName, nodeId, index,
-							`Downloading binary data for item ${itemIndex}, field "${fieldName}": ${fieldValue.url}`));
+							`Downloading binary data for item ${itemIndex}, field "${fieldName}": ${downloadUrl}`));
 
 						// Create a new page for downloading to avoid interfering with the main page
 						const browser = SessionManager.getSession(sessionId)?.browser;
@@ -2084,8 +2098,8 @@ export async function execute(
 								// Set a reasonable user agent
 								await downloadPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
 
-								// Navigate to the image URL
-								const response = await downloadPage.goto(fieldValue.url, {
+								// Navigate to the image URL (now absolute)
+								const response = await downloadPage.goto(downloadUrl, {
 									waitUntil: 'networkidle0',
 									timeout: fieldValue.downloadTimeout
 								});
@@ -2120,7 +2134,7 @@ export async function execute(
 									if (fieldValue.extractionMode === 'binary') {
 										// For binary-only mode, replace with metadata object
 										item[fieldName] = {
-											url: fieldValue.url,
+											url: downloadUrl,
 											contentType: contentType,
 											size: buffer.length,
 											binaryKey: binaryKey
@@ -2128,7 +2142,7 @@ export async function execute(
 									} else {
 										// For 'both' mode, update existing object
 										item[fieldName] = {
-											url: fieldValue.url,
+											url: downloadUrl,
 											contentType: contentType,
 											size: buffer.length,
 											binaryKey: binaryKey
@@ -2137,8 +2151,8 @@ export async function execute(
 								} else {
 									this.logger.warn(formatOperationLog('Collector', nodeName, nodeId, index,
 										`Failed to download image for "${fieldName}", HTTP status: ${response?.status()}`));
-									// Fall back to URL-only mode
-									item[fieldName] = fieldValue.url;
+									// Fall back to URL-only mode (use absolute URL)
+									item[fieldName] = downloadUrl;
 								}
 							} finally {
 								await downloadPage.close();
@@ -2146,14 +2160,14 @@ export async function execute(
 						} else {
 							this.logger.warn(formatOperationLog('Collector', nodeName, nodeId, index,
 								`Browser session not available for binary download of "${fieldName}"`));
-							// Fall back to URL-only mode
-							item[fieldName] = fieldValue.url;
+							// Fall back to URL-only mode (use absolute URL)
+							item[fieldName] = downloadUrl;
 						}
 					} catch (downloadError) {
 						this.logger.warn(formatOperationLog('Collector', nodeName, nodeId, index,
 							`Error downloading binary data for "${fieldName}": ${(downloadError as Error).message}`));
-						// Fall back to URL-only mode
-						item[fieldName] = fieldValue.url;
+						// Fall back to URL-only mode (use absolute URL)
+						item[fieldName] = downloadUrl;
 					}
 				}
 			}
