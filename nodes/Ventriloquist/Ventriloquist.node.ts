@@ -14,6 +14,8 @@ import type {
 	ICredentialDataDecryptedObject,
 } from 'n8n-workflow';
 import { BrowserTransportFactory } from './transport/BrowserTransportFactory';
+import { SessionManager } from './utils/sessionManager';
+import { getActivePage } from './utils/sessionUtils';
 
 // Import actions
 import * as formOperation from './actions/form.operation';
@@ -1068,10 +1070,45 @@ export class Ventriloquist implements INodeType {
 			// Record start time for operation execution
 			const startTime = Date.now();
 
-						// Create a cache key based on operation, input data, and parameters
+						// Create a cache key based on operation, input data, parameters, and current browser state
 			const inputDataString = JSON.stringify(items[i]);
 			const operationParams = this.getNodeParameter('operation', i);
-			const cacheKey = `${operation}_${Buffer.from(inputDataString + JSON.stringify(operationParams)).toString('base64').slice(0, 32)}`;
+
+			// For browser-dependent operations like decision, include current URL in cache key
+			// to prevent cached results from wrong page states
+			let browserStateKey = '';
+			if (['decision', 'extract', 'detect'].includes(operation)) {
+				try {
+					// Try to get current URL from session if available
+					const sessionId = this.getNodeParameter('sessionId', i, '') as string;
+					if (sessionId) {
+						const session = SessionManager.getSession(sessionId);
+						if (session && session.browser) {
+							try {
+								const activePage = await getActivePage(session.browser, this.logger);
+								if (activePage) {
+									const currentUrl = await activePage.url();
+									browserStateKey = `_url:${currentUrl}`;
+								} else {
+									browserStateKey = '_url:no-active-page';
+								}
+							} catch (urlError) {
+								// If we can't get URL, don't include it in cache key
+								browserStateKey = '_url:unknown';
+							}
+						} else {
+							browserStateKey = '_url:no-browser';
+						}
+					} else {
+						browserStateKey = '_url:no-session-id';
+					}
+				} catch (sessionError) {
+					// If we can't access session, don't include URL in cache key
+					browserStateKey = '_url:session-error';
+				}
+			}
+
+			const cacheKey = `${operation}_${Buffer.from(inputDataString + JSON.stringify(operationParams) + browserStateKey).toString('base64').slice(0, 32)}`;
 
 			// Check if we have cached results for expensive operations (in manual mode only to avoid production issues)
 			const shouldCache = executionMode === 'manual' && ['extract', 'detect', 'decision', 'form'].includes(operation);
