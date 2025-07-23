@@ -2645,6 +2645,74 @@ export async function execute(
 			);
 		}
 
+		// PROACTIVE DATA CAPTURE: Get initial DOM state BEFORE any actions that might cause navigation
+		if (hasValidSession && puppeteerPage) {
+			try {
+				// Capture initial URL and title
+				resultData.currentUrl = await puppeteerPage.url();
+				resultData.pageTitle = await puppeteerPage.title();
+
+				this.logger.info(
+					formatOperationLog(
+						"Decision",
+						nodeName,
+						nodeId,
+						index,
+						`Initial state captured: URL="${resultData.currentUrl}", Title="${resultData.pageTitle}"`,
+					),
+				);
+
+				// Take initial screenshot if requested
+				if (takeScreenshot) {
+					try {
+						screenshot = (await puppeteerPage.screenshot({
+							encoding: "base64",
+							type: "jpeg",
+							quality: 80,
+						})) as string;
+
+						resultData.screenshot = screenshot;
+						this.logger.debug(
+							formatOperationLog(
+								"Decision",
+								nodeName,
+								nodeId,
+								index,
+								`Initial screenshot captured (${screenshot.length} bytes)`,
+							),
+						);
+					} catch (screenshotError) {
+						this.logger.warn(
+							formatOperationLog(
+								"Decision",
+								nodeName,
+								nodeId,
+								index,
+								`Failed to capture initial screenshot: ${(screenshotError as Error).message}`,
+							),
+						);
+					}
+				}
+			} catch (initialDataError) {
+				this.logger.warn(
+					formatOperationLog(
+						"Decision",
+						nodeName,
+						nodeId,
+						index,
+						`Could not capture initial DOM state: ${(initialDataError as Error).message}`,
+					),
+				);
+				// Use fallback values
+				resultData.currentUrl = currentUrl;
+				resultData.pageTitle = "Unknown";
+			}
+		} else {
+			// No session case
+			resultData.currentUrl = currentUrl;
+			resultData.pageTitle = "no session";
+		}
+
 		// Check each condition group
 		for (const group of conditionGroups) {
 			const groupName = group.name as string;
@@ -3278,12 +3346,10 @@ export async function execute(
 											);
 
 											try {
-												// Update result data
+												// Update result data (URL and title already captured upfront)
 												resultData.success = true;
 												resultData.routeTaken = groupName;
 												resultData.actionPerformed = actionType;
-												resultData.currentUrl = puppeteerPage ? await puppeteerPage.url() : currentUrl;
-												resultData.pageTitle = puppeteerPage ? await puppeteerPage.title() : "no session";
 												resultData.executionDuration = Date.now() - startTime;
 
 												this.logger.info(
@@ -3545,12 +3611,10 @@ export async function execute(
 
 									// No navigation happened, continue with regular flow
 									try {
-										// Update result data
+										// Update result data (URL and title already captured upfront)
 										resultData.success = true;
 										resultData.routeTaken = groupName;
 										resultData.actionPerformed = actionType;
-										resultData.currentUrl = puppeteerPage ? await puppeteerPage.url() : currentUrl;
-										resultData.pageTitle = puppeteerPage ? await puppeteerPage.title() : "no session";
 										resultData.executionDuration = Date.now() - startTime;
 									} catch (pageError) {
 										// Handle late context destruction
@@ -4688,20 +4752,9 @@ export async function execute(
 									resultData.success = true;
 									resultData.routeTaken = groupName;
 									resultData.actionPerformed = actionType;
-									resultData.currentUrl = await puppeteerPage.url();
-									resultData.pageTitle = await puppeteerPage.title();
 									resultData.executionDuration = Date.now() - startTime;
 
-									// Take screenshot if requested
-									if (takeScreenshot) {
-										const screenshotResult = await captureScreenshot(
-											puppeteerPage,
-											this.logger,
-										);
-										if (screenshotResult !== null) {
-											resultData.screenshot = screenshotResult;
-										}
-									}
+									// Screenshot already captured upfront if requested
 
 									// Return the result immediately after successful action
 									const outputData: INodeExecutionData = {
@@ -4738,12 +4791,10 @@ export async function execute(
 									);
 
 									if (continueOnFail) {
-										// If continueOnFail is enabled, update result and move on
+										// If continueOnFail is enabled, update result and move on (URL/title already captured upfront)
 										resultData.success = false;
 										resultData.routeTaken = "none";
 										resultData.actionPerformed = "error";
-										resultData.currentUrl = await puppeteerPage.url();
-										resultData.pageTitle = await puppeteerPage.title();
 										resultData.error = (error as Error).message;
 										resultData.executionDuration = Date.now() - startTime;
 
@@ -4924,20 +4975,9 @@ export async function execute(
 									resultData.success = true;
 									resultData.routeTaken = groupName;
 									resultData.actionPerformed = actionType;
-									resultData.currentUrl = await puppeteerPage.url();
-									resultData.pageTitle = await puppeteerPage.title();
 									resultData.executionDuration = Date.now() - startTime;
 
-									// Take screenshot if requested
-									if (takeScreenshot) {
-										const screenshotResult = await captureScreenshot(
-											puppeteerPage,
-											this.logger,
-										);
-										if (screenshotResult !== null) {
-											resultData.screenshot = screenshotResult;
-										}
-									}
+									// Screenshot already captured upfront if requested
 
 									// Return the result immediately after successful action
 									const outputData: INodeExecutionData = {
@@ -5040,20 +5080,9 @@ export async function execute(
 									resultData.success = true;
 									resultData.routeTaken = groupName;
 									resultData.actionPerformed = actionType;
-									resultData.currentUrl = await puppeteerPage.url();
-									resultData.pageTitle = await puppeteerPage.title();
 									resultData.executionDuration = Date.now() - startTime;
 
-									// Take screenshot if requested
-									if (takeScreenshot) {
-										const screenshotResult = await captureScreenshot(
-											puppeteerPage,
-											this.logger,
-										);
-										if (screenshotResult !== null) {
-											resultData.screenshot = screenshotResult;
-										}
-									}
+									// Screenshot already captured upfront if requested
 
 									// Return the result immediately after successful action
 									const outputData: INodeExecutionData = {
@@ -5209,6 +5238,74 @@ export async function execute(
 				};
 
 				try {
+					// PROACTIVE DATA CAPTURE: Get DOM data BEFORE fallback action (which might cause navigation)
+					if (puppeteerPage) {
+						try {
+							// Capture current URL and title before potential navigation
+							resultData.currentUrl = await puppeteerPage.url();
+							resultData.pageTitle = await puppeteerPage.title();
+
+							this.logger.info(
+								formatOperationLog(
+									"Decision",
+									nodeName,
+									nodeId,
+									index,
+									`Pre-fallback state captured: URL="${resultData.currentUrl}", Title="${resultData.pageTitle}"`,
+								),
+							);
+
+							// Take screenshot BEFORE fallback action if requested
+							if (takeScreenshot) {
+								try {
+									screenshot = (await puppeteerPage.screenshot({
+										encoding: "base64",
+										type: "jpeg",
+										quality: 80,
+									})) as string;
+
+									resultData.screenshot = screenshot;
+									this.logger.debug(
+										formatOperationLog(
+											"Decision",
+											nodeName,
+											nodeId,
+											index,
+											`Pre-fallback screenshot captured (${screenshot.length} bytes)`,
+										),
+									);
+								} catch (screenshotError) {
+									this.logger.warn(
+										formatOperationLog(
+											"Decision",
+											nodeName,
+											nodeId,
+											index,
+											`Failed to capture pre-fallback screenshot: ${(screenshotError as Error).message}`,
+										),
+									);
+								}
+							}
+						} catch (preDataError) {
+							this.logger.warn(
+								formatOperationLog(
+									"Decision",
+									nodeName,
+									nodeId,
+									index,
+									`Could not capture pre-fallback data: ${(preDataError as Error).message}`,
+								),
+							);
+							// Use fallback values
+							resultData.currentUrl = currentUrl;
+							resultData.pageTitle = "Unknown";
+						}
+					} else {
+						// No session case
+						resultData.currentUrl = currentUrl;
+						resultData.pageTitle = "no session";
+					}
+
 					// Execute the fallback using our utility function
 					const fallbackResult = await executeFallback(
 						puppeteerPage!,
@@ -5257,182 +5354,8 @@ export async function execute(
 			}
 		}
 
-		// Take screenshot if requested
-		if (takeScreenshot && puppeteerPage) {
-			try {
-				screenshot = (await puppeteerPage.screenshot({
-					encoding: "base64",
-					type: "jpeg",
-					quality: 80,
-				})) as string;
-
-				resultData.screenshot = screenshot;
-				this.logger.debug(
-					formatOperationLog(
-						"Decision",
-						nodeName,
-						nodeId,
-						index,
-						`Screenshot captured (${screenshot.length} bytes)`,
-					),
-				);
-			} catch (screenshotError) {
-				// Check if this is a context destruction error and try to recover
-				if ((screenshotError as Error).message.includes('context was destroyed') ||
-					(screenshotError as Error).message.includes('Execution context') ||
-					(screenshotError as Error).message.includes('Target closed')) {
-
-					this.logger.info(
-						formatOperationLog(
-							"Decision",
-							nodeName,
-							nodeId,
-							index,
-							`Screenshot failed due to navigation context destruction, attempting recovery`,
-						),
-					);
-
-					// Try to get a fresh page reference for screenshot
-					const session = SessionManager.getSession(sessionId);
-					let freshPage = null;
-					if (session?.browser?.isConnected()) {
-						freshPage = await getActivePage(session.browser, this.logger);
-					}
-
-					if (freshPage) {
-						try {
-							screenshot = (await freshPage.screenshot({
-								encoding: "base64",
-								type: "jpeg",
-								quality: 80,
-							})) as string;
-
-							resultData.screenshot = screenshot;
-							this.logger.debug(
-								formatOperationLog(
-									"Decision",
-									nodeName,
-									nodeId,
-									index,
-									`Screenshot recovered after navigation (${screenshot.length} bytes)`,
-								),
-							);
-						} catch (recoveryError) {
-							this.logger.warn(
-								formatOperationLog(
-									"Decision",
-									nodeName,
-									nodeId,
-									index,
-									`Failed to capture screenshot after recovery: ${(recoveryError as Error).message}`,
-								),
-							);
-						}
-					} else {
-						this.logger.warn(
-							formatOperationLog(
-								"Decision",
-								nodeName,
-								nodeId,
-								index,
-								`Could not get fresh page for screenshot after navigation`,
-							),
-						);
-					}
-				} else {
-					this.logger.warn(
-						formatOperationLog(
-							"Decision",
-							nodeName,
-							nodeId,
-							index,
-							`Failed to capture screenshot: ${(screenshotError as Error).message}`,
-						),
-					);
-				}
-				// Continue execution even if screenshot fails
-			}
-		}
-
-		// Update result data
+		// Update result data (URL, title, and screenshot already captured before fallback action)
 		resultData.executionDuration = Date.now() - startTime;
-
-		// Safely get current URL and page title, handling context destruction from navigation
-		if (puppeteerPage) {
-			try {
-				resultData.currentUrl = await puppeteerPage.url();
-				resultData.pageTitle = await puppeteerPage.title();
-			} catch (contextError) {
-				// Handle context destruction from navigation (especially after fallback actions)
-				if ((contextError as Error).message.includes('context was destroyed') ||
-					(contextError as Error).message.includes('Execution context') ||
-					(contextError as Error).message.includes('Target closed')) {
-
-					this.logger.info(
-						formatOperationLog(
-							"Decision",
-							nodeName,
-							nodeId,
-							index,
-							`Navigation detected - context destroyed after fallback action, this is expected`,
-						),
-					);
-
-					// Try to get a fresh page reference after navigation
-					const session = SessionManager.getSession(sessionId);
-					let freshPage = null;
-					if (session?.browser?.isConnected()) {
-						freshPage = await getActivePage(session.browser, this.logger);
-					}
-
-					if (freshPage) {
-						try {
-							resultData.currentUrl = await freshPage.url();
-							resultData.pageTitle = await freshPage.title();
-							this.logger.info(
-								formatOperationLog(
-									"Decision",
-									nodeName,
-									nodeId,
-									index,
-									`Successfully recovered page state after navigation`,
-								),
-							);
-						} catch (recoveryError) {
-							this.logger.warn(
-								formatOperationLog(
-									"Decision",
-									nodeName,
-									nodeId,
-									index,
-									`Could not recover page state: ${(recoveryError as Error).message}`,
-								),
-							);
-							resultData.currentUrl = "Navigation in progress";
-							resultData.pageTitle = "Context destroyed by navigation";
-						}
-					} else {
-						this.logger.warn(
-							formatOperationLog(
-								"Decision",
-								nodeName,
-								nodeId,
-								index,
-								`Could not get fresh page reference after navigation`,
-							),
-						);
-						resultData.currentUrl = "Navigation in progress";
-						resultData.pageTitle = "Context destroyed by navigation";
-					}
-				} else {
-					// Re-throw unexpected errors
-					throw contextError;
-				}
-			}
-		} else {
-			resultData.currentUrl = currentUrl;
-			resultData.pageTitle = "no session";
-		}
 		resultData.routeTaken = routeTaken;
 		resultData.actionPerformed = actionPerformed;
 
