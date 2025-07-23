@@ -88,6 +88,18 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: "Output Input Data",
+		name: "outputInputData",
+		type: "boolean",
+		default: true,
+		description: "Whether to include input data from previous nodes in the response",
+		displayOptions: {
+			show: {
+				operation: ["close"],
+			},
+		},
+	},
 ];
 
 /**
@@ -127,7 +139,7 @@ export async function execute(
 	const outputInputData = this.getNodeParameter(
 		"outputInputData",
 		index,
-		false,
+		true,
 	) as boolean;
 
 	try {
@@ -187,6 +199,9 @@ export async function execute(
 					if (await SessionManager.isSessionActive(sessionId)) {
 						// Try to close any pages associated with this session first
 						const session = SessionManager.getSession(sessionId);
+						let currentUrl = "unknown";
+						let currentTitle = "unknown";
+
 						if (session?.browser?.isConnected()) {
 							const page = await getActivePage(
 								session.browser as Browser,
@@ -194,6 +209,19 @@ export async function execute(
 							);
 							if (page) {
 								try {
+									// CAPTURE URL AND TITLE BEFORE CLOSING PAGE
+									currentUrl = await page.url();
+									currentTitle = await page.title();
+									this.logger.info(
+										formatOperationLog(
+											"Close",
+											nodeName,
+											nodeId,
+											index,
+											`Captured page state before closing: URL="${currentUrl}", Title="${currentTitle}"`,
+										),
+									);
+
 									await page.close();
 									this.logger.info(
 										formatOperationLog(
@@ -241,6 +269,34 @@ export async function execute(
 								`Session closed successfully: ${sessionId} (${result.closed} of ${result.total})`,
 							),
 						);
+
+						// Log timing information
+						createTimingLog(
+							"Close",
+							startTime,
+							this.logger,
+							nodeName,
+							nodeId,
+							index,
+						);
+
+						// Create success response with captured URL data
+						const successResponse = await createSuccessResponse({
+							operation: "close",
+							sessionId,
+							page: null, // Page is already closed
+							logger: this.logger,
+							startTime,
+							additionalData: {
+								closeMode,
+								url: currentUrl, // Include captured URL
+								title: currentTitle, // Include captured title
+								message: `Browser session ${sessionId} closed successfully`,
+							},
+							inputData: outputInputData ? item.json : undefined,
+						});
+
+						return { json: successResponse };
 					} else {
 						this.logger.warn(
 							formatOperationLog(
@@ -329,6 +385,8 @@ export async function execute(
 				startTime,
 				additionalData: {
 					closeMode,
+					url: "multiple-sessions-closed", // Indicate multiple sessions were closed
+					title: "Close All Sessions",
 					totalSessions: result.total,
 					closedSessions: result.closed,
 					message: `Closed ${result.closed} of ${result.total} browser sessions`,
@@ -461,6 +519,8 @@ export async function execute(
 				startTime,
 				additionalData: {
 					closeMode,
+					url: `multiple-sessions-closed-${closedSessions.length}`, // Indicate multiple sessions
+					title: "Close Multiple Sessions",
 					closedSessions,
 					failedSessions,
 					message: `Closed ${closedSessions.length} of ${sessionIds.length} sessions successfully`,
