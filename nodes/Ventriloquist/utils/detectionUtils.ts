@@ -44,8 +44,12 @@ export function matchStrings(value: string, targetValue: string, matchType: stri
 	switch (matchType) {
 		case 'exact':
 			return compareValue === compareTarget;
+		case 'notEqual':
+			return compareValue !== compareTarget;
 		case 'contains':
 			return compareValue.includes(compareTarget);
+		case 'notContains':
+			return !compareValue.includes(compareTarget);
 		case 'startsWith':
 			return compareValue.startsWith(compareTarget);
 		case 'endsWith':

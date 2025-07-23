@@ -450,6 +450,11 @@ export const description: INodeProperties[] = [
 								description: "Value must contain the specified string",
 							},
 							{
+								name: "Does not contain",
+								value: "notContains",
+								description: "Value must not contain the specified string",
+							},
+							{
 								name: "Ends With",
 								value: "endsWith",
 								description: "Value must end with the specified string",
@@ -458,6 +463,11 @@ export const description: INodeProperties[] = [
 								name: "Exact Match",
 								value: "exact",
 								description: "Value must match exactly",
+							},
+							{
+								name: "Not Equal",
+								value: "notEqual",
+								description: "Value must not match exactly",
 							},
 							{
 								name: "RegEx",
@@ -795,6 +805,11 @@ export const description: INodeProperties[] = [
 												description: "Value must contain the specified string",
 											},
 											{
+												name: "Does not contain",
+												value: "notContains",
+												description: "Value must not contain the specified string",
+											},
+											{
 												name: "Ends With",
 												value: "endsWith",
 												description: "Value must end with the specified string",
@@ -803,6 +818,11 @@ export const description: INodeProperties[] = [
 												name: "Exact Match",
 												value: "exact",
 												description: "Value must match exactly",
+											},
+											{
+												name: "Not Equal",
+												value: "notEqual",
+												description: "Value must not match exactly",
 											},
 											{
 												name: "RegEx",
@@ -2799,10 +2819,19 @@ export async function execute(
 							resultData.executionDuration = Date.now() - startTime;
 
 							// Return early result for no session
-							return [this.helpers.returnJsonArray([{
-								...(outputInputData ? item.json : {}),
-								...resultData
-							}])];
+							const outputData: INodeExecutionData = {
+								json: {
+									...(outputInputData ? item.json : {}),
+									...resultData
+								}
+							};
+
+							// Include binary data if present and outputInputData is enabled
+							if (outputInputData && item.binary) {
+								outputData.binary = item.binary;
+							}
+
+							return [this.helpers.returnJsonArray([outputData])];
 						}
 
 						actionPerformed = actionType;
@@ -3020,13 +3049,20 @@ export async function execute(
 
 											// Place data in correct route despite error
 											if (routeIndex < routeCount) {
-												routes[routeIndex].push({
+												const routeOutputData: INodeExecutionData = {
 													json: {
 														...(outputInputData ? item.json : {}),
 														...resultData
 													},
 													pairedItem: { item: index },
-												});
+												};
+
+												// Include binary data if present and outputInputData is enabled
+												if (outputInputData && item.binary) {
+													routeOutputData.binary = item.binary;
+												}
+
+												routes[routeIndex].push(routeOutputData);
 												this.logger.info(
 													formatOperationLog(
 														"Decision",
@@ -3038,13 +3074,20 @@ export async function execute(
 												);
 											} else {
 												// Fallback to first route if index out of bounds
-												routes[0].push({
+												const fallbackOutputData: INodeExecutionData = {
 													json: {
 														...(outputInputData ? item.json : {}),
 														...resultData
 													},
 													pairedItem: { item: index },
-												});
+												};
+
+												// Include binary data if present and outputInputData is enabled
+												if (outputInputData && item.binary) {
+													fallbackOutputData.binary = item.binary;
+												}
+
+												routes[0].push(fallbackOutputData);
 											}
 
 											// IMMEDIATE RETURN to prevent any other processing
@@ -3111,13 +3154,20 @@ export async function execute(
 
 										// Place data in correct route
 										if (routeIndex < routeCount) {
-											routes[routeIndex].push({
+											const routeOutputData: INodeExecutionData = {
 												json: {
 													...(outputInputData ? item.json : {}),
 													...resultData
 												},
 												pairedItem: { item: index },
-											});
+											};
+
+											// Include binary data if present and outputInputData is enabled
+											if (outputInputData && item.binary) {
+												routeOutputData.binary = item.binary;
+											}
+
+											routes[routeIndex].push(routeOutputData);
 											this.logger.info(
 												formatOperationLog(
 													"Decision",
@@ -3129,13 +3179,20 @@ export async function execute(
 											);
 										} else {
 											// Fallback to first route if index out of bounds
-											routes[0].push({
+											const fallbackOutputData: INodeExecutionData = {
 												json: {
 													...(outputInputData ? item.json : {}),
 													...resultData
 												},
 												pairedItem: { item: index },
-											});
+											};
+
+											// Include binary data if present and outputInputData is enabled
+											if (outputInputData && item.binary) {
+												fallbackOutputData.binary = item.binary;
+											}
+
+											routes[0].push(fallbackOutputData);
 											this.logger.warn(
 												formatOperationLog(
 													"Decision",
@@ -3264,13 +3321,20 @@ export async function execute(
 
 													// Put the item in the correct route
 													if (routeIndex >= 0 && routeIndex < routeCount) {
-														routes[routeIndex].push({
+														const routeOutputData: INodeExecutionData = {
 															json: {
 																...(outputInputData ? item.json : {}),
 																...resultData
 															},
 															pairedItem: { item: index },
-														});
+														};
+
+														// Include binary data if present and outputInputData is enabled
+														if (outputInputData && item.binary) {
+															routeOutputData.binary = item.binary;
+														}
+
+														routes[routeIndex].push(routeOutputData);
 														this.logger.info(
 															formatOperationLog(
 																"Decision",
@@ -3282,13 +3346,20 @@ export async function execute(
 														);
 													} else {
 														// Default to route 0 if routeIndex is out of bounds
-														routes[0].push({
+														const fallbackOutputData: INodeExecutionData = {
 															json: {
 																...(outputInputData ? item.json : {}),
 																...resultData
 															},
 															pairedItem: { item: index },
-														});
+														};
+
+														// Include binary data if present and outputInputData is enabled
+														if (outputInputData && item.binary) {
+															fallbackOutputData.binary = item.binary;
+														}
+
+														routes[0].push(fallbackOutputData);
 														this.logger.warn(
 															formatOperationLog(
 																"Decision",
@@ -3303,10 +3374,19 @@ export async function execute(
 													return routes;
 												}
 
-												return [this.helpers.returnJsonArray([{
-													...(outputInputData ? item.json : {}),
-													...resultData
-												}])];
+												const outputData: INodeExecutionData = {
+													json: {
+														...(outputInputData ? item.json : {}),
+														...resultData
+													}
+												};
+
+												// Include binary data if present and outputInputData is enabled
+												if (outputInputData && item.binary) {
+													outputData.binary = item.binary;
+												}
+
+												return [this.helpers.returnJsonArray([outputData])];
 											} catch (pageError) {
 												// If we still can't access the page, return with limited data
 												this.logger.warn(
@@ -3336,10 +3416,19 @@ export async function execute(
 													),
 												);
 
-												return [this.helpers.returnJsonArray([{
-													...(outputInputData ? item.json : {}),
-													...resultData
-												}])];
+												const outputData: INodeExecutionData = {
+													json: {
+														...(outputInputData ? item.json : {}),
+														...resultData
+													}
+												};
+
+												// Include binary data if present and outputInputData is enabled
+												if (outputInputData && item.binary) {
+													outputData.binary = item.binary;
+												}
+
+												return [this.helpers.returnJsonArray([outputData])];
 											}
 										} else {
 											// If we don't have a page reference but navigation was successful, still return success
@@ -3394,13 +3483,20 @@ export async function execute(
 
 												// Put the item in the correct route
 												if (routeIndex >= 0 && routeIndex < routeCount) {
-													routes[routeIndex].push({
+													const routeOutputData: INodeExecutionData = {
 														json: {
 															...(outputInputData ? item.json : {}),
 															...resultData
 														},
 														pairedItem: { item: index },
-													});
+													};
+
+													// Include binary data if present and outputInputData is enabled
+													if (outputInputData && item.binary) {
+														routeOutputData.binary = item.binary;
+													}
+
+													routes[routeIndex].push(routeOutputData);
 													this.logger.info(
 														formatOperationLog(
 															"Decision",
@@ -3412,13 +3508,20 @@ export async function execute(
 													);
 												} else {
 													// Default to route 0 if routeIndex is out of bounds
-													routes[0].push({
+													const fallbackOutputData: INodeExecutionData = {
 														json: {
 															...(outputInputData ? item.json : {}),
 															...resultData
 														},
 														pairedItem: { item: index },
-													});
+													};
+
+													// Include binary data if present and outputInputData is enabled
+													if (outputInputData && item.binary) {
+														fallbackOutputData.binary = item.binary;
+													}
+
+													routes[0].push(fallbackOutputData);
 													this.logger.warn(
 														formatOperationLog(
 															"Decision",
@@ -3468,10 +3571,19 @@ export async function execute(
 										resultData.executionDuration = Date.now() - startTime;
 									}
 
-									return [this.helpers.returnJsonArray([{
-										...(outputInputData ? item.json : {}),
-										...resultData
-									}])];
+									const outputData: INodeExecutionData = {
+										json: {
+											...(outputInputData ? item.json : {}),
+											...resultData
+										}
+									};
+
+									// Include binary data if present and outputInputData is enabled
+									if (outputInputData && item.binary) {
+										outputData.binary = item.binary;
+									}
+
+									return [this.helpers.returnJsonArray([outputData])];
 								} catch (error) {
 									// Handle expected context destruction errors in a special way
 									if (
@@ -3552,10 +3664,19 @@ export async function execute(
 											resultData.pageTitle = "Navigation in progress";
 										}
 
-										return [this.helpers.returnJsonArray([{
-											...(outputInputData ? item.json : {}),
-											...resultData
-										}])];
+										const outputData: INodeExecutionData = {
+											json: {
+												...(outputInputData ? item.json : {}),
+												...resultData
+											}
+										};
+
+										// Include binary data if present and outputInputData is enabled
+										if (outputInputData && item.binary) {
+											outputData.binary = item.binary;
+										}
+
+										return [this.helpers.returnJsonArray([outputData])];
 									}
 
 									this.logger.error(
@@ -3612,10 +3733,19 @@ export async function execute(
 										resultData.executionDuration = Date.now() - startTime;
 
 										// Exit the decision node with the error result
-										return [this.helpers.returnJsonArray([{
-											...(outputInputData ? item.json : {}),
-											...resultData
-										}])];
+										const outputData: INodeExecutionData = {
+											json: {
+												...(outputInputData ? item.json : {}),
+												...resultData
+											}
+										};
+
+										// Include binary data if present and outputInputData is enabled
+										if (outputInputData && item.binary) {
+											outputData.binary = item.binary;
+										}
+
+										return [this.helpers.returnJsonArray([outputData])];
 									}
 
 									throw error;
@@ -4574,10 +4704,19 @@ export async function execute(
 									}
 
 									// Return the result immediately after successful action
-									return [this.helpers.returnJsonArray([{
-										...(outputInputData ? item.json : {}),
-										...resultData
-									}])];
+									const outputData: INodeExecutionData = {
+										json: {
+											...(outputInputData ? item.json : {}),
+											...resultData
+										}
+									};
+
+									// Include binary data if present and outputInputData is enabled
+									if (outputInputData && item.binary) {
+										outputData.binary = item.binary;
+									}
+
+									return [this.helpers.returnJsonArray([outputData])];
 								} catch (error) {
 									this.logger.error(
 										formatOperationLog(
@@ -4609,10 +4748,19 @@ export async function execute(
 										resultData.executionDuration = Date.now() - startTime;
 
 										// Exit the decision node with the error result
-										return [this.helpers.returnJsonArray([{
-											...(outputInputData ? item.json : {}),
-											...resultData
-										}])];
+										const outputData: INodeExecutionData = {
+											json: {
+												...(outputInputData ? item.json : {}),
+												...resultData
+											}
+										};
+
+										// Include binary data if present and outputInputData is enabled
+										if (outputInputData && item.binary) {
+											outputData.binary = item.binary;
+										}
+
+										return [this.helpers.returnJsonArray([outputData])];
 									}
 
 									// If continueOnFail is not enabled, rethrow the error
@@ -4792,10 +4940,19 @@ export async function execute(
 									}
 
 									// Return the result immediately after successful action
-									return [this.helpers.returnJsonArray([{
-										...(outputInputData ? item.json : {}),
-										...resultData
-									}])];
+									const outputData: INodeExecutionData = {
+										json: {
+											...(outputInputData ? item.json : {}),
+											...resultData
+										}
+									};
+
+									// Include binary data if present and outputInputData is enabled
+									if (outputInputData && item.binary) {
+										outputData.binary = item.binary;
+									}
+
+									return [this.helpers.returnJsonArray([outputData])];
 								} catch (error) {
 									this.logger.error(
 										formatOperationLog(
@@ -4899,10 +5056,19 @@ export async function execute(
 									}
 
 									// Return the result immediately after successful action
-									return [this.helpers.returnJsonArray([{
-										...(outputInputData ? item.json : {}),
-										...resultData
-									}])];
+									const outputData: INodeExecutionData = {
+										json: {
+											...(outputInputData ? item.json : {}),
+											...resultData
+										}
+									};
+
+									// Include binary data if present and outputInputData is enabled
+									if (outputInputData && item.binary) {
+										outputData.binary = item.binary;
+									}
+
+									return [this.helpers.returnJsonArray([outputData])];
 								} catch (error) {
 									this.logger.error(
 										formatOperationLog(
@@ -5519,6 +5685,11 @@ export async function execute(
 				json: errorResponse,
 				pairedItem: { item: index },
 			};
+
+			// Include binary data if present and outputInputData is enabled
+			if (outputInputData && item.binary) {
+				returnItem.binary = item.binary;
+			}
 
 			// Route to the first output or return as single output
 			const enableRouting = this.getNodeParameter(
