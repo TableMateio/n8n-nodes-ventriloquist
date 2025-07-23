@@ -1074,10 +1074,10 @@ export class Ventriloquist implements INodeType {
 			const inputDataString = JSON.stringify(items[i]);
 			const operationParams = this.getNodeParameter('operation', i);
 
-			// For browser-dependent operations like decision, include current URL in cache key
+			// For remaining cacheable browser-dependent operations, include current URL in cache key
 			// to prevent cached results from wrong page states
 			let browserStateKey = '';
-			if (['decision', 'extract', 'detect'].includes(operation)) {
+			if (['extract', 'detect'].includes(operation)) {
 				try {
 					// Try to get current URL from session if available
 					const sessionId = this.getNodeParameter('sessionId', i, '') as string;
@@ -1111,7 +1111,9 @@ export class Ventriloquist implements INodeType {
 			const cacheKey = `${operation}_${Buffer.from(inputDataString + JSON.stringify(operationParams) + browserStateKey).toString('base64').slice(0, 32)}`;
 
 			// Check if we have cached results for expensive operations (in manual mode only to avoid production issues)
-			const shouldCache = executionMode === 'manual' && ['extract', 'detect', 'decision', 'form'].includes(operation);
+			// NOTE: Decision operations are excluded from caching because they check dynamic content that can change
+			// even on the same page (e.g., search results, form states, etc.)
+			const shouldCache = executionMode === 'manual' && ['extract', 'detect', 'form'].includes(operation);
 
 			// Initialize cache as an object if it doesn't exist
 			if (!staticData.cache) {
