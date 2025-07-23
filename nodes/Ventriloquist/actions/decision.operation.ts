@@ -5277,23 +5277,162 @@ export async function execute(
 					),
 				);
 			} catch (screenshotError) {
-				this.logger.warn(
-					formatOperationLog(
-						"Decision",
-						nodeName,
-						nodeId,
-						index,
-						`Failed to capture screenshot: ${(screenshotError as Error).message}`,
-					),
-				);
+				// Check if this is a context destruction error and try to recover
+				if ((screenshotError as Error).message.includes('context was destroyed') ||
+					(screenshotError as Error).message.includes('Execution context') ||
+					(screenshotError as Error).message.includes('Target closed')) {
+
+					this.logger.info(
+						formatOperationLog(
+							"Decision",
+							nodeName,
+							nodeId,
+							index,
+							`Screenshot failed due to navigation context destruction, attempting recovery`,
+						),
+					);
+
+					// Try to get a fresh page reference for screenshot
+					const session = SessionManager.getSession(sessionId);
+					let freshPage = null;
+					if (session?.browser?.isConnected()) {
+						freshPage = await getActivePage(session.browser, this.logger);
+					}
+
+					if (freshPage) {
+						try {
+							screenshot = (await freshPage.screenshot({
+								encoding: "base64",
+								type: "jpeg",
+								quality: 80,
+							})) as string;
+
+							resultData.screenshot = screenshot;
+							this.logger.debug(
+								formatOperationLog(
+									"Decision",
+									nodeName,
+									nodeId,
+									index,
+									`Screenshot recovered after navigation (${screenshot.length} bytes)`,
+								),
+							);
+						} catch (recoveryError) {
+							this.logger.warn(
+								formatOperationLog(
+									"Decision",
+									nodeName,
+									nodeId,
+									index,
+									`Failed to capture screenshot after recovery: ${(recoveryError as Error).message}`,
+								),
+							);
+						}
+					} else {
+						this.logger.warn(
+							formatOperationLog(
+								"Decision",
+								nodeName,
+								nodeId,
+								index,
+								`Could not get fresh page for screenshot after navigation`,
+							),
+						);
+					}
+				} else {
+					this.logger.warn(
+						formatOperationLog(
+							"Decision",
+							nodeName,
+							nodeId,
+							index,
+							`Failed to capture screenshot: ${(screenshotError as Error).message}`,
+						),
+					);
+				}
 				// Continue execution even if screenshot fails
 			}
 		}
 
 		// Update result data
 		resultData.executionDuration = Date.now() - startTime;
-		resultData.currentUrl = puppeteerPage ? await puppeteerPage.url() : currentUrl;
-		resultData.pageTitle = puppeteerPage ? await puppeteerPage.title() : "no session";
+
+		// Safely get current URL and page title, handling context destruction from navigation
+		if (puppeteerPage) {
+			try {
+				resultData.currentUrl = await puppeteerPage.url();
+				resultData.pageTitle = await puppeteerPage.title();
+			} catch (contextError) {
+				// Handle context destruction from navigation (especially after fallback actions)
+				if ((contextError as Error).message.includes('context was destroyed') ||
+					(contextError as Error).message.includes('Execution context') ||
+					(contextError as Error).message.includes('Target closed')) {
+
+					this.logger.info(
+						formatOperationLog(
+							"Decision",
+							nodeName,
+							nodeId,
+							index,
+							`Navigation detected - context destroyed after fallback action, this is expected`,
+						),
+					);
+
+					// Try to get a fresh page reference after navigation
+					const session = SessionManager.getSession(sessionId);
+					let freshPage = null;
+					if (session?.browser?.isConnected()) {
+						freshPage = await getActivePage(session.browser, this.logger);
+					}
+
+					if (freshPage) {
+						try {
+							resultData.currentUrl = await freshPage.url();
+							resultData.pageTitle = await freshPage.title();
+							this.logger.info(
+								formatOperationLog(
+									"Decision",
+									nodeName,
+									nodeId,
+									index,
+									`Successfully recovered page state after navigation`,
+								),
+							);
+						} catch (recoveryError) {
+							this.logger.warn(
+								formatOperationLog(
+									"Decision",
+									nodeName,
+									nodeId,
+									index,
+									`Could not recover page state: ${(recoveryError as Error).message}`,
+								),
+							);
+							resultData.currentUrl = "Navigation in progress";
+							resultData.pageTitle = "Context destroyed by navigation";
+						}
+					} else {
+						this.logger.warn(
+							formatOperationLog(
+								"Decision",
+								nodeName,
+								nodeId,
+								index,
+								`Could not get fresh page reference after navigation`,
+							),
+						);
+						resultData.currentUrl = "Navigation in progress";
+						resultData.pageTitle = "Context destroyed by navigation";
+					}
+				} else {
+					// Re-throw unexpected errors
+					throw contextError;
+				}
+			}
+		} else {
+			resultData.currentUrl = currentUrl;
+			resultData.pageTitle = "no session";
+		}
 		resultData.routeTaken = routeTaken;
 		resultData.actionPerformed = actionPerformed;
 
