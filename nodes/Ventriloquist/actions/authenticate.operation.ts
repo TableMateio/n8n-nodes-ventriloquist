@@ -8,6 +8,7 @@ import * as speakeasy from 'speakeasy';
 import { formatOperationLog, createSuccessResponse, createTimingLog } from '../utils/resultUtils';
 import { createErrorResponse } from '../utils/errorUtils';
 import { SessionManager } from '../utils/sessionManager';
+import { mergeInputWithOutput } from '../../../utils/utilities';
 
 /**
  * Authenticate operation description
@@ -327,11 +328,11 @@ export async function execute(
 			inputData: {},
 		});
 
+		const inputData = outputInputData && item.json ? item.json : {};
+		const responseData = mergeInputWithOutput(inputData, successResponse);
+
 		return {
-			json: {
-				...(outputInputData && item.json ? item.json : {}),
-				...successResponse
-			}
+			json: responseData
 		};
 	} catch (error) {
 		// Use the standardized error response utility
@@ -356,11 +357,11 @@ export async function execute(
 		}
 
 		// Return error as response with continue on fail
+		const errorInputData = outputInputData && item.json ? item.json : {};
+		const errorResponseData = mergeInputWithOutput(errorInputData, errorResponse);
+
 		return {
-			json: {
-				...(outputInputData && item.json ? item.json : {}),
-				...errorResponse
-			}
+			json: errorResponseData
 		};
 	}
 }

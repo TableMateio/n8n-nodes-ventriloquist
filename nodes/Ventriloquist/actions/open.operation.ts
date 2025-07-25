@@ -8,6 +8,7 @@ import type * as puppeteer from "puppeteer-core";
 import { BrowserTransportFactory } from "../transport/BrowserTransportFactory";
 import { SessionManager } from "../utils/sessionManager";
 import { takeScreenshot } from "../utils/navigationUtils";
+import { mergeInputWithOutput } from "../../../utils/utilities";
 
 /**
  * Open operation description
@@ -307,21 +308,23 @@ export async function execute(
 
 				// Prepare response data
 				const item = this.getInputData()[index];
-							const responseData: IDataObject = {
-				...(outputInputData && item.json ? item.json : {}),
-				success: true,
-				operation: "open",
-				...pageInfo,
-				screenshot,
-				incognito,
-				domain,
-				sessionId, // Include session ID in response for other operations to use
-				brightDataSessionId, // Include Bright Data session ID for reference
-				credentialType, // Include the type of credential used
-				timestamp: new Date().toISOString(),
-				executionDuration: Date.now() - startTime,
-				note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations.",
-			};
+				const inputData = outputInputData && item.json ? item.json : {};
+				const outputData = {
+					success: true,
+					operation: "open",
+					...pageInfo,
+					screenshot,
+					incognito,
+					domain,
+					sessionId, // Include session ID in response for other operations to use
+					brightDataSessionId, // Include Bright Data session ID for reference
+					credentialType, // Include the type of credential used
+					timestamp: new Date().toISOString(),
+					executionDuration: Date.now() - startTime,
+					note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations.",
+				};
+
+				const responseData = mergeInputWithOutput(inputData, outputData);
 
 				// Don't close the browser - it will be used by subsequent operations
 				// The session cleanup mechanism will handle closing it after timeout
@@ -370,10 +373,9 @@ export async function execute(
 
 					// Even with context destroyed, we can return success with the session ID
 					// This allows following nodes to use the session
-									const item = this.getInputData()[index];
-				return {
-					json: {
-						...(outputInputData && item.json ? item.json : {}),
+					const item = this.getInputData()[index];
+					const inputData = outputInputData && item.json ? item.json : {};
+					const outputData = {
 						success: true, // Mark as success since the session was created
 						operation: "open",
 						url: url, // Use the original URL since we can't access the current one
@@ -385,8 +387,13 @@ export async function execute(
 						timestamp: new Date().toISOString(),
 						executionDuration: Date.now() - startTime,
 						note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations.",
-					},
-				};
+					};
+
+					const responseData = mergeInputWithOutput(inputData, outputData);
+
+					return {
+						json: responseData,
+					};
 				}
 
 				// For other post-navigation errors, rethrow to be handled by the outer catch block
@@ -458,19 +465,23 @@ export async function execute(
 		if (continueOnFail) {
 			// Return a partial result with error information
 			const item = this.getInputData()[index];
+			const inputData = outputInputData && item.json ? item.json : {};
+			const outputData = {
+				success: false,
+				operation: "open",
+				url,
+				sessionId,
+				brightDataSessionId,
+				error: (error as Error).message,
+				errorDetails: errorData,
+				timestamp: new Date().toISOString(),
+				executionDuration: Date.now() - startTime,
+			};
+
+			const responseData = mergeInputWithOutput(inputData, outputData);
+
 			return {
-				json: {
-					...(outputInputData && item.json ? item.json : {}),
-					success: false,
-					operation: "open",
-					url,
-					sessionId,
-					brightDataSessionId,
-					error: (error as Error).message,
-					errorDetails: errorData,
-					timestamp: new Date().toISOString(),
-					executionDuration: Date.now() - startTime,
-				},
+				json: responseData,
 			};
 		}
 
