@@ -281,11 +281,11 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
       const allText = Object.values(match.fields).join(' ');
       match.informationRichness = calculateInformationRichness(allText);
 
-      // Adjust overall similarity slightly based on information richness
-      // This will help break ties between otherwise identical matches
-      if (match.informationRichness > 0.5) {
-        // Only adjust if there's significant richness
-        const adjustedSimilarity = Math.min(1, match.overallSimilarity + (match.informationRichness * 0.02));
+      // Only use information richness as a very minor tiebreaker for extremely close matches
+      // This ensures actual matching takes precedence over information richness
+      if (match.informationRichness > 0.7) {
+        // Only adjust very slightly and only for very high richness
+        const adjustedSimilarity = Math.min(1, match.overallSimilarity + (match.informationRichness * 0.005));
 
         // Log the adjustment
         if (adjustedSimilarity > match.overallSimilarity) {
@@ -295,14 +295,15 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
       }
     }
 
-    // Sort results if needed
-    if (comparisonConfig.sortResults !== false) {
+    // Sort results if needed - but preserve page order for firstAboveThreshold mode
+    if (comparisonConfig.sortResults !== false && comparisonConfig.matchMode !== 'firstAboveThreshold') {
       matches.sort((a, b) => {
         // First sort by overall similarity
         const similarityDiff = b.overallSimilarity - a.overallSimilarity;
 
-        // If similarities are very close, use information richness as a tiebreaker
-        if (Math.abs(similarityDiff) < 0.02) {
+        // Only use information richness as a tiebreaker when similarities are extremely close
+        // This ensures actual matching takes precedence over information richness
+        if (Math.abs(similarityDiff) < 0.005) {
           const richnessA = a.informationRichness || 0;
           const richnessB = b.informationRichness || 0;
           return richnessB - richnessA;
@@ -311,7 +312,11 @@ export class EntityMatcherComparisonMiddleware implements IMiddleware<IEntityMat
         return similarityDiff;
       });
 
-      logger.debug(`${logPrefix} Sorted matches by similarity score and information richness`);
+      logger.debug(`${logPrefix} Sorted matches by similarity score with information richness as final tiebreaker`);
+    } else if (comparisonConfig.matchMode === 'firstAboveThreshold') {
+      // For firstAboveThreshold mode, preserve original page order (sort by index)
+      matches.sort((a, b) => a.index - b.index);
+      logger.debug(`${logPrefix} Preserved page order for firstAboveThreshold mode`);
     }
 
     // Apply limit if specified
