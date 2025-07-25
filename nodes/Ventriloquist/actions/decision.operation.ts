@@ -5595,6 +5595,20 @@ export async function execute(
 								const waitAfterAction = group.waitAfterAction as string;
 								const waitTime = group.waitTime as number;
 
+								// Validate URL before navigation to prevent "null" or "undefined" URLs
+								if (!url || url === 'null' || url === 'undefined' || url.trim() === '') {
+									this.logger.error(
+										formatOperationLog(
+											"Decision",
+											nodeName,
+											nodeId,
+											index,
+											`Invalid or missing URL for navigation action: "${url}". Skipping navigation.`,
+										),
+									);
+									break;
+								}
+
 								this.logger.info(
 									formatOperationLog(
 										"Decision",
@@ -5800,20 +5814,35 @@ export async function execute(
 					),
 				);
 
+				// Extract fallback parameters with proper validation
+				const fallbackSelector = this.getNodeParameter("fallbackSelector", index, "") as string;
+				const fallbackUrlRaw = this.getNodeParameter("fallbackUrl", index, "") as string;
+
+				// Validate fallback URL to prevent "null" or "undefined" URLs
+				let fallbackUrl = fallbackUrlRaw;
+				let enableFallbackAction = true;
+
+				if (fallbackAction === 'navigate' && (!fallbackUrlRaw || fallbackUrlRaw === 'null' || fallbackUrlRaw === 'undefined' || fallbackUrlRaw.trim() === '')) {
+					this.logger.error(
+						formatOperationLog(
+							"Decision",
+							nodeName,
+							nodeId,
+							index,
+							`Invalid or missing URL for fallback navigation action: "${fallbackUrlRaw}". Disabling fallback.`,
+						),
+					);
+					// Disable fallback to prevent invalid navigation
+					enableFallbackAction = false;
+					fallbackUrl = '';
+				}
+
 				// Create fallback options object
 				const fallbackOptions: IFallbackOptions = {
-					enableFallback: true,
+					enableFallback: enableFallbackAction,
 					fallbackAction,
-					fallbackSelector: this.getNodeParameter(
-						"fallbackSelector",
-						index,
-						"",
-					) as string,
-					fallbackUrl: this.getNodeParameter(
-						"fallbackUrl",
-						index,
-						"",
-					) as string,
+					fallbackSelector,
+					fallbackUrl,
 					fallbackTimeout: this.getNodeParameter(
 						"fallbackWaitTime",
 						index,

@@ -570,6 +570,19 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: "Clear All Fields",
+		name: "clearAllFields",
+		type: "boolean",
+		default: false,
+		description:
+			"Whether to clear all text input fields on the page before filling specified fields (clears text, email, password, search, URL, tel inputs and textareas only - safe mode)",
+		displayOptions: {
+			show: {
+				operation: ["form"],
+			},
+		},
+	},
+	{
 		displayName: "Continue On Fail",
 		name: "continueOnFail",
 		type: "boolean",
@@ -732,6 +745,11 @@ export async function execute(
 		index,
 		10000,
 	) as number;
+	const clearAllFields = this.getNodeParameter(
+		"clearAllFields",
+		index,
+		false,
+	) as boolean;
 	const continueOnFail = this.getNodeParameter(
 		"continueOnFail",
 		index,
@@ -804,6 +822,7 @@ export async function execute(
 			`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Starting form fill operation`,
 		);
 		const results: IDataObject[] = [];
+		let clearAllFieldsResult: IDataObject | null = null;
 
 		// Wait for form elements if enabled, but don't use smart waiting - just check basic page readiness
 		if (waitForSelectors) {
@@ -854,6 +873,84 @@ export async function execute(
 						`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Page load timeout: ${(loadError as Error).message}`,
 					);
 					// Continue anyway - page might be usable
+				}
+			}
+		}
+
+		// Clear all fields if requested
+		if (clearAllFields) {
+			this.logger.info(
+				`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clearing all text input fields on the page (safe mode)`,
+			);
+
+						try {
+				const clearResult = await page.evaluate(() => {
+					// Only target text inputs and textareas (safe, like individual field clearing)
+					const inputFields = document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"], input[type="search"], input[type="url"], input[type="tel"], input:not([type]), textarea');
+					let clearedCount = 0;
+					let errorCount = 0;
+					const errors: string[] = [];
+
+					inputFields.forEach((field: Element, index: number) => {
+						try {
+							const inputElement = field as HTMLInputElement | HTMLTextAreaElement;
+
+							// Simple, safe clearing (no events triggered, just like individual field clearing)
+							inputElement.value = '';
+							clearedCount++;
+						} catch (error) {
+							errorCount++;
+							errors.push(`Field ${index}: ${(error as Error).message}`);
+						}
+					});
+
+					return {
+						success: true,
+						totalFields: inputFields.length,
+						clearedCount,
+						errorCount,
+						errors: errors.slice(0, 5) // Limit to first 5 errors to avoid huge logs
+					};
+				});
+
+				this.logger.info(
+					`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clear all text fields result: ${clearResult.clearedCount}/${clearResult.totalFields} text fields cleared successfully${clearResult.errorCount > 0 ? `, ${clearResult.errorCount} errors` : ''}`,
+				);
+
+				if (clearResult.errors.length > 0) {
+					this.logger.warn(
+						`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Clear all text fields errors: ${clearResult.errors.join('; ')}`,
+					);
+				}
+
+				// Store the clear all fields result
+				clearAllFieldsResult = {
+					fieldType: "clearAllTextFields",
+					success: clearResult.success,
+					details: {
+						totalFields: clearResult.totalFields,
+						clearedCount: clearResult.clearedCount,
+						errorCount: clearResult.errorCount,
+						errors: clearResult.errors
+					}
+				};
+
+				// Add human-like delay after clearing if enabled
+				if (useHumanDelays) {
+					const delay = getHumanDelay();
+					this.logger.info(
+						`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Adding human-like delay of ${delay}ms after clearing all text fields`,
+					);
+					await new Promise((resolve) => setTimeout(resolve, delay));
+				}
+
+						} catch (clearError) {
+				this.logger.error(
+					`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Error clearing all text fields: ${(clearError as Error).message}`,
+				);
+
+				if (!continueOnFail) {
+					throw new Error(`Failed to clear all text fields: ${(clearError as Error).message}`);
 				}
 			}
 		}
@@ -1122,6 +1219,10 @@ export async function execute(
 
 		if (submitFormAfterFill) {
 			resultData.formSubmission = formSubmissionResult;
+		}
+
+		if (clearAllFieldsResult) {
+			resultData.clearAllFields = clearAllFieldsResult;
 		}
 
 		if (screenshot) {
