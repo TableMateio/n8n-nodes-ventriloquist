@@ -1083,6 +1083,18 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: "Output Input Data",
+		name: "outputInputData",
+		type: "boolean",
+		default: true,
+		description: "Whether to include the input data in the output",
+		displayOptions: {
+			show: {
+				operation: ["extract"],
+			},
+		},
+	},
+	{
 		displayName: "Debug Mode",
 		name: "debugMode",
 		type: "boolean",
@@ -1200,6 +1212,7 @@ export async function execute(
 	const useHumanDelays = this.getNodeParameter("useHumanDelays", index, false) as boolean;
 	const takeScreenshotOption = this.getNodeParameter("takeScreenshot", index, false) as boolean;
 	const continueOnFail = this.getNodeParameter("continueOnFail", index, true) as boolean;
+	const outputInputData = this.getNodeParameter("outputInputData", index, true) as boolean;
 	const debugMode = this.getNodeParameter("debugMode", index, false) as boolean;
 	const explicitSessionId = this.getNodeParameter("explicitSessionId", index, "") as string;
 
@@ -2443,18 +2456,33 @@ export async function execute(
 			},
 		});
 
-		// Return with binary data if present
-		if (hasBinaryData) {
-			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
-				`Returning ${Object.keys(binaryData).length} binary files alongside JSON data`));
+		// Prepare final output with optional input data
+		const outputData: any = {
+			json: {
+				...(outputInputData ? items[index].json : {}),
+				...finalSuccessResponse
+			}
+		};
 
-			return {
-				json: finalSuccessResponse,
-				binary: binaryData
+		// Include binary data if present and outputInputData is enabled
+		if (outputInputData && items[index].binary) {
+			outputData.binary = {
+				...items[index].binary,
+				...binaryData
 			};
+		} else if (hasBinaryData) {
+			outputData.binary = binaryData;
 		}
 
-		return { json: finalSuccessResponse };
+		// Return with appropriate data structure
+		if (hasBinaryData || (outputInputData && items[index].binary)) {
+			this.logger.info(formatOperationLog('Extract', nodeName, nodeId, index,
+				`Returning ${Object.keys(outputData.binary || {}).length} binary files alongside JSON data`));
+
+			return outputData;
+		}
+
+		return outputData;
 	} catch (error) {
 		// Use the standardized error response utility
 		const errorResponse = await createErrorResponse({
@@ -2468,7 +2496,9 @@ export async function execute(
 			logger: this.logger,
 			takeScreenshot: takeScreenshotOption,
 			startTime,
-			// Do not include input data to avoid exposing previous node data
+			additionalData: {
+				...(outputInputData ? items[index].json : {}),
+			},
 		});
 
 		if (!continueOnFail) {
@@ -2482,10 +2512,21 @@ export async function execute(
 			throw error;
 		}
 
-		// Return error as response with continue on fail
-		return {
-			json: errorResponse,
+		// Prepare error output with optional input data
+		const errorOutputData: any = {
+			json: {
+				...(outputInputData ? items[index].json : {}),
+				...errorResponse
+			}
 		};
+
+		// Include binary data if present and outputInputData is enabled
+		if (outputInputData && items[index].binary) {
+			errorOutputData.binary = items[index].binary;
+		}
+
+		// Return error as response with continue on fail
+		return errorOutputData;
 	}
 }
 
