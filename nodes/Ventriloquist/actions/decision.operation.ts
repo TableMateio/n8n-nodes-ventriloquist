@@ -880,6 +880,11 @@ export const description: INodeProperties[] = [
 								description: "Click on one or more elements. Use comma-separated selectors to try each in order.",
 							},
 							{
+								name: "Multi-Click",
+								value: "multiclick",
+								description: "Click multiple elements in sequence with customizable wait options",
+							},
+							{
 								name: "Extract Data",
 								value: "extract",
 								description: "Extract data from an element on the page",
@@ -916,6 +921,131 @@ export const description: INodeProperties[] = [
 								actionType: ["click", "extract"],
 							},
 						},
+					},
+					{
+						displayName: "Click Sequence",
+						name: "clickSequence",
+						placeholder: "Add Click",
+						type: "fixedCollection",
+						typeOptions: {
+							multipleValues: true,
+							sortable: true,
+							multipleValueButtonText: "Add Click",
+						},
+						displayOptions: {
+							show: {
+								actionType: ["multiclick"],
+							},
+						},
+						description: "Define a sequence of clicks to perform",
+						default: {
+							clicks: [
+								{
+									selector: "",
+									waitAfterClick: "noWait",
+									waitTime: 1000,
+								},
+							],
+						},
+						options: [
+							{
+								name: "clicks",
+								displayName: "Click",
+								values: [
+									{
+										displayName: "Selector",
+										name: "selector",
+										type: "string",
+										default: "",
+										placeholder: 'button.submit, #next-btn, .continue',
+										description: "CSS selector for the element to click (leave empty to skip this click)",
+										required: false,
+									},
+									{
+										displayName: "Wait After Click",
+										name: "waitAfterClick",
+										type: "options",
+										options: [
+											{
+												name: "No Wait",
+												value: "noWait",
+												description: "Continue immediately to next click",
+											},
+											{
+												name: "Fixed Time",
+												value: "fixedTime",
+												description: "Wait for a specific amount of time",
+											},
+											{
+												name: "Wait for Element",
+												value: "waitForElement",
+												description: "Wait for a specific element to appear",
+											},
+											{
+												name: "URL Changed",
+												value: "urlChanged",
+												description: "Wait for the URL to change (navigation)",
+											},
+											{
+												name: "Any URL Change",
+												value: "anyUrlChange",
+												description: "Detect any URL change (hard navigation or SPA routing)",
+											},
+											{
+												name: "Navigation Complete",
+												value: "navigationComplete",
+												description: "Wait for navigation to complete fully",
+											},
+										],
+										default: "noWait",
+										description: "What to wait for after clicking this element",
+									},
+									{
+										displayName: "Wait Time (MS)",
+										name: "waitTime",
+										type: "number",
+										default: 1000,
+										description: "Time to wait in milliseconds",
+										displayOptions: {
+											show: {
+												waitAfterClick: ["fixedTime"],
+											},
+										},
+										typeOptions: {
+											minValue: 0,
+										},
+									},
+									{
+										displayName: "Wait Selector",
+										name: "waitSelector",
+										type: "string",
+										default: "",
+										placeholder: "#loading-complete, .content-loaded",
+										description: "CSS selector of element to wait for",
+										displayOptions: {
+											show: {
+												waitAfterClick: ["waitForElement"],
+											},
+										},
+									},
+									{
+										displayName: "Navigation Timeout (MS)",
+										name: "navigationTimeout",
+										type: "number",
+										default: 30000,
+										description: "Maximum time to wait for navigation/URL changes",
+										displayOptions: {
+											show: {
+												waitAfterClick: ["urlChanged", "anyUrlChange", "navigationComplete"],
+											},
+										},
+										typeOptions: {
+											minValue: 1000,
+										},
+									},
+								],
+							},
+						],
 					},
 					// Add Extraction Type for Extract action
 					{
@@ -3813,6 +3943,464 @@ export async function execute(
 									}
 
 									throw error;
+								}
+							}
+							case "multiclick": {
+								const clickSequence = group.clickSequence as IDataObject;
+								const clicks = (clickSequence?.clicks as IDataObject[]) || [];
+
+								this.logger.info(
+									formatOperationLog(
+										"Decision",
+										nodeName,
+										nodeId,
+										index,
+										`Executing multi-click sequence with ${clicks.length} clicks`,
+									),
+								);
+
+								try {
+									let clickResults: IDataObject[] = [];
+									let sequenceSuccess = true;
+									let lastError: string | undefined;
+
+									// Execute each click in sequence
+									for (let i = 0; i < clicks.length; i++) {
+										const clickConfig = clicks[i];
+										const selector = clickConfig.selector as string;
+										const waitAfterClick = (clickConfig.waitAfterClick as string) || "noWait";
+										const waitTime = (clickConfig.waitTime as number) || 1000;
+										const waitSelector = clickConfig.waitSelector as string;
+										const navigationTimeout = (clickConfig.navigationTimeout as number) || 30000;
+
+										// Skip empty selectors
+										if (!selector || selector.trim() === "") {
+											this.logger.info(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`Skipping click ${i + 1} - empty selector`,
+												),
+											);
+											clickResults.push({
+												clickIndex: i + 1,
+												selector: "",
+												skipped: true,
+												reason: "Empty selector",
+											});
+											continue;
+										}
+
+										this.logger.info(
+											formatOperationLog(
+												"Decision",
+												nodeName,
+												nodeId,
+												index,
+												`Executing click ${i + 1}/${clicks.length}: "${selector}" with wait: ${waitAfterClick}`,
+											),
+										);
+
+										try {
+											// Create options for the action
+											const actionOptions: IActionOptions = {
+												sessionId,
+												waitForSelector: waitForSelectors,
+												selectorTimeout,
+												detectionMethod,
+												earlyExitDelay,
+												nodeName,
+												nodeId,
+												index,
+												useHumanDelays,
+											};
+
+											// Map waitAfterClick to the action utility format
+											let actionWaitAfterAction = waitAfterClick;
+											let actionWaitTime = waitAfterClick === "fixedTime" ? waitTime : navigationTimeout;
+
+											// For waitForElement, use the click utility directly with selector wait
+											if (waitAfterClick === "waitForElement") {
+												actionWaitAfterAction = "noWait"; // Don't wait in action utility
+											}
+
+											// Execute the click action using the utility
+											const actionResult = await executeAction(
+												sessionId,
+												"click" as ActionType,
+												{
+													selector,
+													waitAfterAction: actionWaitAfterAction,
+													waitTime: actionWaitTime,
+													waitSelector: actionWaitAfterAction === "noWait" ? waitSelector : undefined,
+												},
+												actionOptions,
+												this.logger,
+											);
+
+											// Handle page reconnection
+											if (
+												actionResult.details.pageReconnected === true &&
+												actionResult.details.reconnectedPage
+											) {
+												this.logger.info(
+													formatOperationLog(
+														"Decision",
+														nodeName,
+														nodeId,
+														index,
+														`Using reconnected page after click ${i + 1}`,
+													),
+												);
+												puppeteerPage = actionResult.details.reconnectedPage as puppeteer.Page;
+											}
+
+											if (!actionResult.success) {
+												sequenceSuccess = false;
+												lastError = `Click ${i + 1} failed: ${actionResult.error}`;
+												this.logger.warn(
+													formatOperationLog(
+														"Decision",
+														nodeName,
+														nodeId,
+														index,
+														lastError,
+													),
+												);
+
+												clickResults.push({
+													clickIndex: i + 1,
+													selector,
+													success: false,
+													error: actionResult.error,
+													waitAfterClick,
+												});
+
+												// If continueOnFail is false, break out of the loop
+												if (!continueOnFail) {
+													break;
+												}
+											} else {
+												// Handle post-click waiting for waitForElement case
+												if (waitAfterClick === "waitForElement" && waitSelector) {
+													this.logger.info(
+														formatOperationLog(
+															"Decision",
+															nodeName,
+															nodeId,
+															index,
+															`Waiting for element after click ${i + 1}: "${waitSelector}"`,
+														),
+													);
+
+													try {
+														await puppeteerPage.waitForSelector(waitSelector, {
+															timeout: navigationTimeout,
+														});
+														this.logger.info(
+															formatOperationLog(
+																"Decision",
+																nodeName,
+																nodeId,
+																index,
+																`Element appeared after click ${i + 1}`,
+															),
+														);
+													} catch (waitError) {
+														this.logger.warn(
+															formatOperationLog(
+																"Decision",
+																nodeName,
+																nodeId,
+																index,
+																`Element wait failed after click ${i + 1}: ${(waitError as Error).message}`,
+															),
+														);
+														if (!continueOnFail) {
+															sequenceSuccess = false;
+															lastError = `Wait for element failed after click ${i + 1}: ${(waitError as Error).message}`;
+															break;
+														}
+													}
+												}
+
+												this.logger.info(
+													formatOperationLog(
+														"Decision",
+														nodeName,
+														nodeId,
+														index,
+														`Click ${i + 1} completed successfully`,
+													),
+												);
+
+												clickResults.push({
+													clickIndex: i + 1,
+													selector,
+													success: true,
+													waitAfterClick,
+													details: actionResult.details,
+												});
+											}
+
+											// Add human-like delay between clicks if enabled
+											if (useHumanDelays && i < clicks.length - 1) {
+												await new Promise((resolve) =>
+													setTimeout(resolve, getHumanDelay()),
+												);
+											}
+										} catch (clickError) {
+											sequenceSuccess = false;
+											lastError = `Click ${i + 1} error: ${(clickError as Error).message}`;
+											this.logger.error(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													lastError,
+												),
+											);
+
+											clickResults.push({
+												clickIndex: i + 1,
+												selector,
+												success: false,
+												error: (clickError as Error).message,
+												waitAfterClick,
+											});
+
+											if (!continueOnFail) {
+												break;
+											}
+										}
+									}
+
+									// Store multi-click results
+									resultData.multiClickResults = {
+										totalClicks: clicks.length,
+										successfulClicks: clickResults.filter(r => r.success === true).length,
+										skippedClicks: clickResults.filter(r => r.skipped === true).length,
+										success: sequenceSuccess,
+										details: clickResults,
+									};
+
+									if (!sequenceSuccess && !continueOnFail) {
+										throw new Error(`Multi-click sequence failed: ${lastError}`);
+									}
+
+									this.logger.info(
+										formatOperationLog(
+											"Decision",
+											nodeName,
+											nodeId,
+											index,
+											`Multi-click sequence completed - Success: ${sequenceSuccess}, Total: ${clicks.length}, Successful: ${clickResults.filter(r => r.success === true).length}`,
+										),
+									);
+
+									// CRITICAL: Handle routing for multi-click just like single click
+									if (enableRouting && routeIndex >= 0) {
+										this.logger.info(
+											formatOperationLog(
+												"Decision",
+												nodeName,
+												nodeId,
+												index,
+												`Multi-click routing to route ${routeIndex + 1}`,
+											),
+										);
+
+										// Create output structure
+										const routeCount = this.getNodeParameter(
+											"routeCount",
+											index,
+											2,
+										) as number;
+
+										// Prepare routes array
+										const routes: INodeExecutionData[][] = Array(routeCount)
+											.fill(null)
+											.map(() => []);
+
+										// Add actionDetails to resultData
+										resultData.actionDetails = {
+											selectorFound: true,
+											actionType: actionPerformed,
+											actionSuccess: sequenceSuccess,
+											multiClickDetails: resultData.multiClickResults,
+										} as IDataObject;
+
+										// Place data in correct route
+										if (routeIndex < routeCount) {
+											const routeOutputData: INodeExecutionData = {
+												json: {
+													...(outputInputData ? item.json : {}),
+													...resultData
+												},
+												pairedItem: { item: index },
+											};
+
+											// Include binary data if present and outputInputData is enabled
+											if (outputInputData && item.binary) {
+												routeOutputData.binary = item.binary;
+											}
+
+											routes[routeIndex].push(routeOutputData);
+											this.logger.info(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`Sending multi-click result to route ${routeIndex + 1}`,
+												),
+											);
+										} else {
+											// Fallback to first route if index out of bounds
+											const fallbackOutputData: INodeExecutionData = {
+												json: {
+													...(outputInputData ? item.json : {}),
+													...resultData
+												},
+												pairedItem: { item: index },
+											};
+
+											// Include binary data if present and outputInputData is enabled
+											if (outputInputData && item.binary) {
+												fallbackOutputData.binary = item.binary;
+											}
+
+											routes[0].push(fallbackOutputData);
+										}
+
+										// IMMEDIATE RETURN to prevent any further processing
+										return routes;
+									}
+
+									// Update result data for non-routing case
+									resultData.success = sequenceSuccess;
+									resultData.routeTaken = groupName;
+									resultData.actionPerformed = actionType;
+									resultData.executionDuration = Date.now() - startTime;
+
+									// Return result for non-routing
+									const outputData: INodeExecutionData = {
+										json: {
+											...(outputInputData ? item.json : {}),
+											...resultData
+										}
+									};
+
+									// Include binary data if present and outputInputData is enabled
+									if (outputInputData && item.binary) {
+										outputData.binary = item.binary;
+									}
+
+									return [this.helpers.returnJsonArray([outputData])];
+								} catch (error) {
+									this.logger.error(
+										formatOperationLog(
+											"Decision",
+											nodeName,
+											nodeId,
+											index,
+											`Error during multi-click action: ${(error as Error).message}`,
+										),
+									);
+
+									// Handle failures similarly to single click
+									if (continueOnFail && enableRouting) {
+										this.logger.info(
+											formatOperationLog(
+												"Decision",
+												nodeName,
+												nodeId,
+												index,
+												`Multi-click failed but forcing route ${routeIndex + 1} (continueOnFail=true)`,
+											),
+										);
+
+										// Create output structure
+										const routeCount = this.getNodeParameter(
+											"routeCount",
+											index,
+											2,
+										) as number;
+
+										// Prepare routes array
+										const routes: INodeExecutionData[][] = Array(routeCount)
+											.fill(null)
+											.map(() => []);
+
+										// Update result data with error
+										resultData.success = false;
+										resultData.error = `Multi-click error: ${(error as Error).message}`;
+										resultData.actionError = true;
+
+										// Add actionDetails to resultData
+										resultData.actionDetails = {
+											selectorFound: true,
+											actionType: actionPerformed,
+											actionSuccess: false,
+											actionError: (error as Error).message,
+										} as IDataObject;
+
+										// Place data in correct route despite error
+										if (routeIndex < routeCount) {
+											const routeOutputData: INodeExecutionData = {
+												json: {
+													...(outputInputData ? item.json : {}),
+													...resultData
+												},
+												pairedItem: { item: index },
+											};
+
+											// Include binary data if present and outputInputData is enabled
+											if (outputInputData && item.binary) {
+												routeOutputData.binary = item.binary;
+											}
+
+											routes[routeIndex].push(routeOutputData);
+										} else {
+											// Fallback to first route if index out of bounds
+											const fallbackOutputData: INodeExecutionData = {
+												json: {
+													...(outputInputData ? item.json : {}),
+													...resultData
+												},
+												pairedItem: { item: index },
+											};
+
+											// Include binary data if present and outputInputData is enabled
+											if (outputInputData && item.binary) {
+												fallbackOutputData.binary = item.binary;
+											}
+
+											routes[0].push(fallbackOutputData);
+										}
+
+										// IMMEDIATE RETURN to prevent any other processing
+										return routes;
+									} else if (continueOnFail) {
+										// continueOnFail=true but routing disabled
+										this.logger.info(
+											formatOperationLog(
+												"Decision",
+												nodeName,
+												nodeId,
+												index,
+												`Continuing despite multi-click error (continueOnFail=true)`,
+											),
+										);
+										break;
+									} else {
+										throw new Error(
+											`Multi-click action failed: ${(error as Error).message}`,
+										);
+									}
 								}
 							}
 							case "fill": {
