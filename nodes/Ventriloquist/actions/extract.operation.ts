@@ -17,6 +17,7 @@ import { processExtractionItems, type IExtractItem } from "../utils/extractNodeU
 import { logPageDebugInfo } from "../utils/debugUtils";
 import { v4 as uuidv4 } from 'uuid';
 import { logWithDebug } from '../utils/loggingUtils';
+import { mergeInputWithOutput } from '../../../utils/utilities';
 
 /**
  * Extract operation description
@@ -2456,12 +2457,10 @@ export async function execute(
 			},
 		});
 
-		// Prepare final output with optional input data
+		// Prepare final output with optional input data using deep merge
+		const inputData = outputInputData ? items[index].json : {};
 		const outputData: any = {
-			json: {
-				...(outputInputData ? items[index].json : {}),
-				...finalSuccessResponse
-			}
+			json: mergeInputWithOutput(inputData, finalSuccessResponse)
 		};
 
 		// Include binary data if present and outputInputData is enabled
@@ -2496,9 +2495,7 @@ export async function execute(
 			logger: this.logger,
 			takeScreenshot: takeScreenshotOption,
 			startTime,
-			additionalData: {
-				...(outputInputData ? items[index].json : {}),
-			},
+			// Don't include additionalData here as we'll handle the merge manually
 		});
 
 		if (!continueOnFail) {
@@ -2512,12 +2509,10 @@ export async function execute(
 			throw error;
 		}
 
-		// Prepare error output with optional input data
+		// Prepare error output with optional input data using deep merge
+		const errorInputData = outputInputData ? items[index].json : {};
 		const errorOutputData: any = {
-			json: {
-				...(outputInputData ? items[index].json : {}),
-				...errorResponse
-			}
+			json: mergeInputWithOutput(errorInputData, errorResponse)
 		};
 
 		// Include binary data if present and outputInputData is enabled

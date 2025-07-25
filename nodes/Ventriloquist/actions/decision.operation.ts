@@ -32,6 +32,7 @@ import { formatExtractedDataForLog } from "../utils/extractionUtils";
 import { waitForUrlChange } from "../utils/navigationUtils";
 import { enhancedNavigationWait } from "../utils/navigationUtils";
 import { getActivePage } from "../utils/sessionUtils";
+import { mergeInputWithOutput } from "../../../utils/utilities";
 
 /**
  * Decision operation description
@@ -2373,6 +2374,22 @@ export async function execute(
 		index,
 		true,
 	) as boolean;
+
+	// Helper function to merge input data with output data
+	const createOutputData = (outputJson: IDataObject): INodeExecutionData => {
+		const inputData = outputInputData ? item.json : {};
+		const result: INodeExecutionData = {
+			json: mergeInputWithOutput(inputData, outputJson),
+			pairedItem: { item: index },
+		};
+
+		// Include binary data if present and outputInputData is enabled
+		if (outputInputData && item.binary) {
+			result.binary = item.binary;
+		}
+
+		return result;
+	};
 	let screenshot: string | undefined;
 
 	// Added for better logging
@@ -3017,17 +3034,7 @@ export async function execute(
 							resultData.executionDuration = Date.now() - startTime;
 
 							// Return early result for no session
-							const outputData: INodeExecutionData = {
-								json: {
-									...(outputInputData ? item.json : {}),
-									...resultData
-								}
-							};
-
-							// Include binary data if present and outputInputData is enabled
-							if (outputInputData && item.binary) {
-								outputData.binary = item.binary;
-							}
+							const outputData = createOutputData(resultData);
 
 							return [this.helpers.returnJsonArray([outputData])];
 						}
@@ -3352,18 +3359,7 @@ export async function execute(
 
 										// Place data in correct route
 										if (routeIndex < routeCount) {
-											const routeOutputData: INodeExecutionData = {
-												json: {
-													...(outputInputData ? item.json : {}),
-													...resultData
-												},
-												pairedItem: { item: index },
-											};
-
-											// Include binary data if present and outputInputData is enabled
-											if (outputInputData && item.binary) {
-												routeOutputData.binary = item.binary;
-											}
+											const routeOutputData = createOutputData(resultData);
 
 											routes[routeIndex].push(routeOutputData);
 											this.logger.info(
