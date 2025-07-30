@@ -225,7 +225,7 @@ export class BasicExtraction implements IExtraction {
             const textContent = await this.page.evaluate((selector: string, excludeHidden: boolean) => {
               // Get all elements matching the selector
               const elements = Array.from(document.querySelectorAll(selector));
-              
+
               if (elements.length === 0) {
                 return { innerText: '', outerHTML: '' };
               }
@@ -241,7 +241,7 @@ export class BasicExtraction implements IExtraction {
 
               // Handle pseudo-selectors manually for filtered elements
               let finalElement: Element | null = null;
-              
+
               if (selector.includes(':last-of-type') && excludeHidden) {
                 // Group by tag name and get last of each type from visible elements
                 const byTagName = new Map<string, Element[]>();
@@ -252,7 +252,7 @@ export class BasicExtraction implements IExtraction {
                   }
                   byTagName.get(tagName)!.push(el);
                 });
-                
+
                 // Get the last element of the first tag type found
                 for (const [_, elementsOfType] of byTagName) {
                   if (elementsOfType.length > 0) {
@@ -269,7 +269,7 @@ export class BasicExtraction implements IExtraction {
                     byTagName.set(tagName, el);
                   }
                 });
-                
+
                 // Get the first element found
                 for (const [_, element] of byTagName) {
                   finalElement = element;
@@ -449,7 +449,7 @@ export class BasicExtraction implements IExtraction {
             const attributeValues = await this.page.evaluate((selector: string, attributeName: string, excludeHidden: boolean) => {
               // Get all elements matching the selector
               let elements = Array.from(document.querySelectorAll(selector));
-              
+
               if (elements.length === 0) {
                 return [];
               }
@@ -464,7 +464,7 @@ export class BasicExtraction implements IExtraction {
 
               // Handle pseudo-selectors manually for filtered elements
               let targetElements = elements;
-              
+
               if (selector.includes(':last-of-type') && excludeHidden) {
                 // Group by tag name and get last of each type from visible elements
                 const byTagName = new Map<string, Element[]>();
@@ -475,7 +475,7 @@ export class BasicExtraction implements IExtraction {
                   }
                   byTagName.get(tagName)!.push(el);
                 });
-                
+
                 targetElements = [];
                 byTagName.forEach(elementsOfType => {
                   if (elementsOfType.length > 0) {
@@ -491,7 +491,7 @@ export class BasicExtraction implements IExtraction {
                     byTagName.set(tagName, el);
                   }
                 });
-                
+
                 targetElements = Array.from(byTagName.values());
               }
 
@@ -521,11 +521,11 @@ export class BasicExtraction implements IExtraction {
 
         case 'html':
           logger.info(`${logPrefix} Extracting HTML content from selector: ${this.config.selector}${this.config.excludeHidden ? ' (excluding hidden elements)' : ''}`);
-          
+
           const htmlContents = await this.page.evaluate((selector: string, excludeHidden: boolean) => {
             // Get all elements matching the selector
             let elements = Array.from(document.querySelectorAll(selector));
-            
+
             if (elements.length === 0) {
               return [];
             }
@@ -540,7 +540,7 @@ export class BasicExtraction implements IExtraction {
 
             // Handle pseudo-selectors manually for filtered elements
             let targetElements = elements;
-            
+
             if (selector.includes(':last-of-type') && excludeHidden) {
               // Group by tag name and get last of each type from visible elements
               const byTagName = new Map<string, Element[]>();
@@ -551,7 +551,7 @@ export class BasicExtraction implements IExtraction {
                 }
                 byTagName.get(tagName)!.push(el);
               });
-              
+
               targetElements = [];
               byTagName.forEach(elementsOfType => {
                 if (elementsOfType.length > 0) {
@@ -567,7 +567,7 @@ export class BasicExtraction implements IExtraction {
                   byTagName.set(tagName, el);
                 }
               });
-              
+
               targetElements = Array.from(byTagName.values());
             }
 
@@ -585,11 +585,11 @@ export class BasicExtraction implements IExtraction {
 
         case 'outerHtml':
           logger.info(`${logPrefix} Extracting outer HTML content from selector: ${this.config.selector}${this.config.excludeHidden ? ' (excluding hidden elements)' : ''}`);
-          
+
           const outerHtmlContents = await this.page.evaluate((selector: string, excludeHidden: boolean) => {
             // Get all elements matching the selector
             let elements = Array.from(document.querySelectorAll(selector));
-            
+
             if (elements.length === 0) {
               return [];
             }
@@ -604,7 +604,7 @@ export class BasicExtraction implements IExtraction {
 
             // Handle pseudo-selectors manually for filtered elements
             let targetElements = elements;
-            
+
             if (selector.includes(':last-of-type') && excludeHidden) {
               // Group by tag name and get last of each type from visible elements
               const byTagName = new Map<string, Element[]>();
@@ -615,7 +615,7 @@ export class BasicExtraction implements IExtraction {
                 }
                 byTagName.get(tagName)!.push(el);
               });
-              
+
               targetElements = [];
               byTagName.forEach(elementsOfType => {
                 if (elementsOfType.length > 0) {
@@ -631,7 +631,7 @@ export class BasicExtraction implements IExtraction {
                   byTagName.set(tagName, el);
                 }
               });
-              
+
               targetElements = Array.from(byTagName.values());
             }
 
@@ -842,11 +842,11 @@ export class BasicExtraction implements IExtraction {
         case 'value':
           // Handle input value extraction
           logger.info(`${logPrefix} Extracting input values from selector: ${this.config.selector}${this.config.excludeHidden ? ' (excluding hidden elements)' : ''}`);
-          
+
           const inputValues = await this.page.evaluate((selector: string, excludeHidden: boolean) => {
             // Get all elements matching the selector
             let elements = Array.from(document.querySelectorAll(selector));
-            
+
             if (elements.length === 0) {
               return [];
             }
@@ -861,7 +861,7 @@ export class BasicExtraction implements IExtraction {
 
             // Handle pseudo-selectors manually for filtered elements
             let targetElements = elements;
-            
+
             if (selector.includes(':last-of-type') && excludeHidden) {
               // Group by tag name and get last of each type from visible elements
               const byTagName = new Map<string, Element[]>();
@@ -872,7 +872,7 @@ export class BasicExtraction implements IExtraction {
                 }
                 byTagName.get(tagName)!.push(el);
               });
-              
+
               targetElements = [];
               byTagName.forEach(elementsOfType => {
                 if (elementsOfType.length > 0) {
@@ -888,7 +888,7 @@ export class BasicExtraction implements IExtraction {
                   byTagName.set(tagName, el);
                 }
               });
-              
+
               targetElements = Array.from(byTagName.values());
             }
 

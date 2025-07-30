@@ -135,13 +135,6 @@ export const description: INodeProperties[] = [
 						description: "Whether to continue with other extractions if this selector isn't found on the page",
 					},
 					{
-						displayName: "Exclude Hidden Elements",
-						name: "excludeHidden",
-						type: "boolean",
-						default: false,
-						description: "Whether to exclude elements with display:none before applying the selector. Useful for selectors like :last-of-type to get the last visible element instead of the last DOM element.",
-					},
-					{
 						displayName: "Options",
 						name: "extractionOptions",
 						type: "collection",
@@ -193,6 +186,13 @@ export const description: INodeProperties[] = [
 										'/extractionType': ["text"],
 									},
 								},
+							},
+							{
+								displayName: "Exclude Hidden Elements",
+								name: "excludeHidden",
+								type: "boolean",
+								default: false,
+								description: "Whether to exclude elements with display:none before applying the selector. Useful for selectors like :last-of-type to get the last visible element instead of the last DOM element.",
 							},
 						],
 					},
@@ -1647,12 +1647,13 @@ export async function execute(
 				extractionType: item.extractionType as string,
 				selector: item.selector as string,
 				continueIfNotFound: item.continueIfNotFound as boolean | undefined,
-				excludeHidden: item.excludeHidden as boolean | undefined,
+				excludeHidden: (item.extractionOptions as any)?.excludeHidden as boolean | undefined,
 				attribute: item.attributeName as string | undefined,
 				extractionOptions: item.extractionOptions as {
 					includeField?: boolean;
 					cleanText?: boolean;
 					convertType?: string;
+					excludeHidden?: boolean;
 				} | undefined,
 				htmlOptions: item.htmlOptions as {
 					outputFormat?: string;

@@ -73,6 +73,7 @@ export interface IExtractItem {
     includeField?: boolean;
     cleanText?: boolean;
     convertType?: string;
+    excludeHidden?: boolean;
   };
   textOptions?: {
     cleanText?: boolean;
