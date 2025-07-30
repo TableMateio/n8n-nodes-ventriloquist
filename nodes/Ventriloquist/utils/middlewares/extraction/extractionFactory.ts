@@ -23,6 +23,7 @@ export interface IExtractionConfig {
   selectorTimeout?: number;
   debugMode?: boolean;
   preserveFieldStructure?: boolean;
+  excludeHidden?: boolean;
   // Additional properties needed for table extraction
   includeHeaders?: boolean;
   rowSelector?: string;
@@ -112,6 +113,28 @@ export interface IExtraction {
 }
 
 /**
+ * Helper function to create a custom selector that respects excludeHidden option
+ * Returns a modified selector string that excludes elements with display:none
+ */
+function createVisibilityAwareSelector(selector: string, excludeHidden: boolean = false): string {
+  if (!excludeHidden) {
+    return selector;
+  }
+
+  // For simple selectors without pseudo-selectors, we can append :not() to exclude hidden elements
+  const pseudoSelectors = [':first-child', ':last-child', ':first-of-type', ':last-of-type', ':nth-child', ':nth-of-type'];
+  const hasPseudoSelector = pseudoSelectors.some(pseudo => selector.includes(pseudo));
+
+  if (!hasPseudoSelector) {
+    // For simple selectors, we'll handle the filtering in the page.evaluate calls
+    return selector;
+  }
+
+  // For complex selectors with pseudo-selectors, we'll need custom handling
+  return selector;
+}
+
+/**
  * Extract numeric values from currency/price strings
  * Examples: "$21,000.00 –" -> "21000.00", "€1,234.56" -> "1234.56", "Price: $99.99" -> "99.99"
  */
@@ -196,21 +219,82 @@ export class BasicExtraction implements IExtraction {
       switch (this.config.extractionType) {
         case 'text':
           // Extract text content with improved HTML handling and whitespace normalization
-          logger.info(`${logPrefix} Extracting text content from selector: ${this.config.selector}`);
+          logger.info(`${logPrefix} Extracting text content from selector: ${this.config.selector}${this.config.excludeHidden ? ' (excluding hidden elements)' : ''}`);
 
           try {
-            const textContent = await this.page.$eval(this.config.selector, (el) => {
+            const textContent = await this.page.evaluate((selector: string, excludeHidden: boolean) => {
+              // Get all elements matching the selector
+              const elements = Array.from(document.querySelectorAll(selector));
+              
+              if (elements.length === 0) {
+                return { innerText: '', outerHTML: '' };
+              }
+
+              // Filter out hidden elements if requested
+              let targetElements = elements;
+              if (excludeHidden) {
+                targetElements = elements.filter(el => {
+                  const style = window.getComputedStyle(el);
+                  return style.display !== 'none';
+                });
+              }
+
+              // Handle pseudo-selectors manually for filtered elements
+              let finalElement: Element | null = null;
+              
+              if (selector.includes(':last-of-type') && excludeHidden) {
+                // Group by tag name and get last of each type from visible elements
+                const byTagName = new Map<string, Element[]>();
+                targetElements.forEach(el => {
+                  const tagName = el.tagName.toLowerCase();
+                  if (!byTagName.has(tagName)) {
+                    byTagName.set(tagName, []);
+                  }
+                  byTagName.get(tagName)!.push(el);
+                });
+                
+                // Get the last element of the first tag type found
+                for (const [_, elementsOfType] of byTagName) {
+                  if (elementsOfType.length > 0) {
+                    finalElement = elementsOfType[elementsOfType.length - 1];
+                    break;
+                  }
+                }
+              } else if (selector.includes(':first-of-type') && excludeHidden) {
+                // Similar logic for first-of-type
+                const byTagName = new Map<string, Element>();
+                targetElements.forEach(el => {
+                  const tagName = el.tagName.toLowerCase();
+                  if (!byTagName.has(tagName)) {
+                    byTagName.set(tagName, el);
+                  }
+                });
+                
+                // Get the first element found
+                for (const [_, element] of byTagName) {
+                  finalElement = element;
+                  break;
+                }
+              } else {
+                // For non-pseudo selectors or when not filtering, use the first element
+                finalElement = targetElements[0];
+              }
+
+              if (!finalElement) {
+                return { innerText: '', outerHTML: '' };
+              }
+
               // Try to get innerText first, which has better handling of visibility
-              const innerText = (el as HTMLElement).innerText || '';
+              const innerText = (finalElement as HTMLElement).innerText || '';
 
               // Get outerHTML as fallback, especially useful for debugging
-              const outerHTML = el.outerHTML || '';
+              const outerHTML = finalElement.outerHTML || '';
 
               return {
                 innerText,
                 outerHTML
               };
-            });
+            }, this.config.selector, this.config.excludeHidden || false);
 
             // Strongly prefer innerText, as it already handles browser-level rendering
             let processedText = textContent.innerText && textContent.innerText.trim().length > 0
@@ -351,51 +435,76 @@ export class BasicExtraction implements IExtraction {
           }
 
           try {
-            // More targeted extraction when selector is for an anchor and attribute is href
-            // This is a special case optimization for the common use case
-            if (this.config.attributeName === 'href' &&
-                (this.config.selector.toLowerCase().includes('a[') ||
-                 this.config.selector.toLowerCase().includes('a.') ||
-                 this.config.selector.toLowerCase() === 'a')) {
+            logger.info(
+              formatOperationLog(
+                'extraction',
+                nodeName,
+                nodeId,
+                0,
+                `Extracting attribute "${this.config.attributeName}" from selector: ${this.config.selector}${this.config.excludeHidden ? ' (excluding hidden elements)' : ''}`
+              )
+            );
 
-              logger.info(
-                formatOperationLog(
-                  'extraction',
-                  nodeName,
-                  nodeId,
-                  0,
-                  `Special handling for href attribute on anchor element using selector: ${this.config.selector}`
-                )
-              );
+            // Use a unified approach that handles hidden element filtering
+            const attributeValues = await this.page.evaluate((selector: string, attributeName: string, excludeHidden: boolean) => {
+              // Get all elements matching the selector
+              let elements = Array.from(document.querySelectorAll(selector));
+              
+              if (elements.length === 0) {
+                return [];
+              }
 
-              // Try to get direct href from anchor elements
-              const hrefValues = await this.page.$$eval(
-                this.config.selector,
-                (els) => els.map(el => el.getAttribute('href') || '')
-              );
+              // Filter out hidden elements if requested
+              if (excludeHidden) {
+                elements = elements.filter(el => {
+                  const style = window.getComputedStyle(el);
+                  return style.display !== 'none';
+                });
+              }
 
-              // Store full data
-              data = hrefValues.length === 1 ? hrefValues[0] : hrefValues;
+              // Handle pseudo-selectors manually for filtered elements
+              let targetElements = elements;
+              
+              if (selector.includes(':last-of-type') && excludeHidden) {
+                // Group by tag name and get last of each type from visible elements
+                const byTagName = new Map<string, Element[]>();
+                elements.forEach(el => {
+                  const tagName = el.tagName.toLowerCase();
+                  if (!byTagName.has(tagName)) {
+                    byTagName.set(tagName, []);
+                  }
+                  byTagName.get(tagName)!.push(el);
+                });
+                
+                targetElements = [];
+                byTagName.forEach(elementsOfType => {
+                  if (elementsOfType.length > 0) {
+                    targetElements.push(elementsOfType[elementsOfType.length - 1]);
+                  }
+                });
+              } else if (selector.includes(':first-of-type') && excludeHidden) {
+                // Similar logic for first-of-type
+                const byTagName = new Map<string, Element>();
+                elements.forEach(el => {
+                  const tagName = el.tagName.toLowerCase();
+                  if (!byTagName.has(tagName)) {
+                    byTagName.set(tagName, el);
+                  }
+                });
+                
+                targetElements = Array.from(byTagName.values());
+              }
 
-              // Only truncate for logging purposes
-              rawContent = hrefValues.join('\n');
-              if (rawContent.length > 800) rawContent = rawContent.substring(0, 800) + '... [truncated]';
-            } else {
-              // Standard attribute extraction for other cases
-              // Changed from $eval to $$eval to get all matching elements
-              const attributeValues = await this.page.$$eval(
-                this.config.selector,
-                (els, attr) => els.map(el => el.getAttribute(attr) || ''),
-                this.config.attributeName
-              );
+              // Extract attribute values from target elements
+              return targetElements.map(el => el.getAttribute(attributeName) || '');
+            }, this.config.selector, this.config.attributeName, this.config.excludeHidden || false);
 
-              // Store full data
-              data = attributeValues.length === 1 ? attributeValues[0] : attributeValues;
+            // Store full data
+            data = attributeValues.length === 1 ? attributeValues[0] : attributeValues;
 
-              // Only truncate for logging purposes
-              rawContent = attributeValues.join('\n');
-              if (rawContent.length > 800) rawContent = rawContent.substring(0, 800) + '... [truncated]';
-            }
+            // Only truncate for logging purposes
+            rawContent = attributeValues.join('\n');
+            if (rawContent.length > 800) rawContent = rawContent.substring(0, 800) + '... [truncated]';
           } catch (error) {
             logger.error(
               formatOperationLog(
@@ -411,10 +520,60 @@ export class BasicExtraction implements IExtraction {
           break;
 
         case 'html':
-          // Changed from $eval to $$eval to get all matching elements
-          const htmlContents = await this.page.$$eval(this.config.selector, (els) =>
-            els.map(el => el.innerHTML)
-          );
+          logger.info(`${logPrefix} Extracting HTML content from selector: ${this.config.selector}${this.config.excludeHidden ? ' (excluding hidden elements)' : ''}`);
+          
+          const htmlContents = await this.page.evaluate((selector: string, excludeHidden: boolean) => {
+            // Get all elements matching the selector
+            let elements = Array.from(document.querySelectorAll(selector));
+            
+            if (elements.length === 0) {
+              return [];
+            }
+
+            // Filter out hidden elements if requested
+            if (excludeHidden) {
+              elements = elements.filter(el => {
+                const style = window.getComputedStyle(el);
+                return style.display !== 'none';
+              });
+            }
+
+            // Handle pseudo-selectors manually for filtered elements
+            let targetElements = elements;
+            
+            if (selector.includes(':last-of-type') && excludeHidden) {
+              // Group by tag name and get last of each type from visible elements
+              const byTagName = new Map<string, Element[]>();
+              elements.forEach(el => {
+                const tagName = el.tagName.toLowerCase();
+                if (!byTagName.has(tagName)) {
+                  byTagName.set(tagName, []);
+                }
+                byTagName.get(tagName)!.push(el);
+              });
+              
+              targetElements = [];
+              byTagName.forEach(elementsOfType => {
+                if (elementsOfType.length > 0) {
+                  targetElements.push(elementsOfType[elementsOfType.length - 1]);
+                }
+              });
+            } else if (selector.includes(':first-of-type') && excludeHidden) {
+              // Similar logic for first-of-type
+              const byTagName = new Map<string, Element>();
+              elements.forEach(el => {
+                const tagName = el.tagName.toLowerCase();
+                if (!byTagName.has(tagName)) {
+                  byTagName.set(tagName, el);
+                }
+              });
+              
+              targetElements = Array.from(byTagName.values());
+            }
+
+            // Extract innerHTML from target elements
+            return targetElements.map(el => el.innerHTML);
+          }, this.config.selector, this.config.excludeHidden || false);
 
           // Store full data
           data = htmlContents.length === 1 ? htmlContents[0] : htmlContents;
@@ -425,10 +584,60 @@ export class BasicExtraction implements IExtraction {
           break;
 
         case 'outerHtml':
-          // Changed from $eval to $$eval to get all matching elements
-          const outerHtmlContents = await this.page.$$eval(this.config.selector, (els) =>
-            els.map(el => el.outerHTML)
-          );
+          logger.info(`${logPrefix} Extracting outer HTML content from selector: ${this.config.selector}${this.config.excludeHidden ? ' (excluding hidden elements)' : ''}`);
+          
+          const outerHtmlContents = await this.page.evaluate((selector: string, excludeHidden: boolean) => {
+            // Get all elements matching the selector
+            let elements = Array.from(document.querySelectorAll(selector));
+            
+            if (elements.length === 0) {
+              return [];
+            }
+
+            // Filter out hidden elements if requested
+            if (excludeHidden) {
+              elements = elements.filter(el => {
+                const style = window.getComputedStyle(el);
+                return style.display !== 'none';
+              });
+            }
+
+            // Handle pseudo-selectors manually for filtered elements
+            let targetElements = elements;
+            
+            if (selector.includes(':last-of-type') && excludeHidden) {
+              // Group by tag name and get last of each type from visible elements
+              const byTagName = new Map<string, Element[]>();
+              elements.forEach(el => {
+                const tagName = el.tagName.toLowerCase();
+                if (!byTagName.has(tagName)) {
+                  byTagName.set(tagName, []);
+                }
+                byTagName.get(tagName)!.push(el);
+              });
+              
+              targetElements = [];
+              byTagName.forEach(elementsOfType => {
+                if (elementsOfType.length > 0) {
+                  targetElements.push(elementsOfType[elementsOfType.length - 1]);
+                }
+              });
+            } else if (selector.includes(':first-of-type') && excludeHidden) {
+              // Similar logic for first-of-type
+              const byTagName = new Map<string, Element>();
+              elements.forEach(el => {
+                const tagName = el.tagName.toLowerCase();
+                if (!byTagName.has(tagName)) {
+                  byTagName.set(tagName, el);
+                }
+              });
+              
+              targetElements = Array.from(byTagName.values());
+            }
+
+            // Extract outerHTML from target elements
+            return targetElements.map(el => el.outerHTML);
+          }, this.config.selector, this.config.excludeHidden || false);
 
           // Store full data
           data = outerHtmlContents.length === 1 ? outerHtmlContents[0] : outerHtmlContents;
@@ -632,14 +841,65 @@ export class BasicExtraction implements IExtraction {
 
         case 'value':
           // Handle input value extraction
-          const inputValues = await this.page.$$eval(this.config.selector, (els) => {
-            return els.map(el => {
+          logger.info(`${logPrefix} Extracting input values from selector: ${this.config.selector}${this.config.excludeHidden ? ' (excluding hidden elements)' : ''}`);
+          
+          const inputValues = await this.page.evaluate((selector: string, excludeHidden: boolean) => {
+            // Get all elements matching the selector
+            let elements = Array.from(document.querySelectorAll(selector));
+            
+            if (elements.length === 0) {
+              return [];
+            }
+
+            // Filter out hidden elements if requested
+            if (excludeHidden) {
+              elements = elements.filter(el => {
+                const style = window.getComputedStyle(el);
+                return style.display !== 'none';
+              });
+            }
+
+            // Handle pseudo-selectors manually for filtered elements
+            let targetElements = elements;
+            
+            if (selector.includes(':last-of-type') && excludeHidden) {
+              // Group by tag name and get last of each type from visible elements
+              const byTagName = new Map<string, Element[]>();
+              elements.forEach(el => {
+                const tagName = el.tagName.toLowerCase();
+                if (!byTagName.has(tagName)) {
+                  byTagName.set(tagName, []);
+                }
+                byTagName.get(tagName)!.push(el);
+              });
+              
+              targetElements = [];
+              byTagName.forEach(elementsOfType => {
+                if (elementsOfType.length > 0) {
+                  targetElements.push(elementsOfType[elementsOfType.length - 1]);
+                }
+              });
+            } else if (selector.includes(':first-of-type') && excludeHidden) {
+              // Similar logic for first-of-type
+              const byTagName = new Map<string, Element>();
+              elements.forEach(el => {
+                const tagName = el.tagName.toLowerCase();
+                if (!byTagName.has(tagName)) {
+                  byTagName.set(tagName, el);
+                }
+              });
+              
+              targetElements = Array.from(byTagName.values());
+            }
+
+            // Extract values from target elements
+            return targetElements.map(el => {
               if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
                 return el.value;
               }
               return '';
             });
-          });
+          }, this.config.selector, this.config.excludeHidden || false);
 
           // Store all raw content joined together for compatibility
           rawContent = inputValues.join('\n');

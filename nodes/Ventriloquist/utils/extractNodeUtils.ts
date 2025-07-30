@@ -67,6 +67,7 @@ export interface IExtractItem {
   openAiApiKey?: string;
   hasOpenAiApiKey?: boolean;
   continueIfNotFound?: boolean;
+  excludeHidden?: boolean;
   preserveFieldStructure?: boolean;
   extractionOptions?: {
     includeField?: boolean;
@@ -1015,6 +1016,7 @@ export async function processExtractionItems(
           selectorTimeout: extractionNodeOptions.timeout,
           debugMode: isDebugMode,
           preserveFieldStructure: extractionItem.preserveFieldStructure || false,
+          excludeHidden: extractionItem.excludeHidden || false,
           smartOptions: smartOptsForConfig, // Assign the carefully constructed object
           // Add text processing options
           cleanText: extractionItem.textOptions?.cleanText || false,
