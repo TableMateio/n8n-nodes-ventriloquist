@@ -2478,7 +2478,7 @@ async function collectItemsFromPage(
 						className: el.className || null,
 						id: el.id || null,
 						outerHTML: el.outerHTML.length > 2000 ? el.outerHTML.substring(0, 2000) + '...[truncated]' : el.outerHTML,
-						textContent: el.textContent ? el.textContent.substring(0, 200) + (el.textContent.length > 200 ? '...[truncated]' : '') : null,
+						            textContent: el.textContent ? el.textContent.substring(0, 800) + (el.textContent.length > 800 ? '...[truncated]' : '') : null,
 						childElementCount: el.children.length,
 						hasLinks: el.querySelectorAll('a').length > 0,
 						linkCount: el.querySelectorAll('a').length

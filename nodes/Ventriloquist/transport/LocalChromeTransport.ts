@@ -259,10 +259,25 @@ export class LocalChromeTransport implements BrowserTransport {
 
       // Override navigator.webdriver property and other browser fingerprinting
       await page.evaluateOnNewDocument(() => {
-        // Delete the webdriver property
-        Object.defineProperty(navigator, 'webdriver', {
-          get: () => false,
-        });
+        // Safely handle webdriver property - check if it can be redefined
+        try {
+          if ('webdriver' in navigator) {
+            // Try to delete first, then redefine
+            delete (navigator as any).webdriver;
+          }
+          Object.defineProperty(navigator, 'webdriver', {
+            get: () => false,
+            configurable: true,
+          });
+        } catch (e) {
+          // If we can't redefine it, try to just set it directly
+          try {
+            (navigator as any).webdriver = false;
+          } catch (e2) {
+            // Ignore if we can't override at all - some sites lock this down
+            console.log('Could not override webdriver property');
+          }
+        }
 
         // Modify plugins array
         Object.defineProperty(navigator, 'plugins', {

@@ -387,6 +387,7 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ["form"],
 				submitForm: [true],
+				useEnterToSubmit: [false],
 			},
 		},
 	},
@@ -411,7 +412,7 @@ export const description: INodeProperties[] = [
 				name: "No Wait",
 				value: "noWait",
 				description:
-					"Immediate: Do not wait at all after clicking submit (may cause issues if next steps need the new page)",
+					"Immediate: Do not wait at all after submitting form (may cause issues if next steps need the new page)",
 			},
 			{
 				name: "Page Resources Loaded",
@@ -494,6 +495,20 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: "Use Enter to Submit",
+		name: "useEnterToSubmit",
+		type: "boolean",
+		default: false,
+		description:
+			"Press Enter key to submit the form instead of clicking a submit button. This will press Enter on the last filled form field.",
+		displayOptions: {
+			show: {
+				operation: ["form"],
+				submitForm: [true],
+			},
+		},
+	},
+	{
 		displayName: "Advanced Button Options",
 		name: "advancedButtonOptions",
 		type: "boolean",
@@ -504,6 +519,7 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ["form"],
 				submitForm: [true],
+				useEnterToSubmit: [false],
 			},
 		},
 	},
@@ -569,6 +585,7 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+
 	{
 		displayName: "Clear All Fields",
 		name: "clearAllFields",
@@ -771,6 +788,11 @@ export async function execute(
 	const waitDuration = this.getNodeParameter("waitDuration", index, 1000) as number;
 	const outputInputData = this.getNodeParameter(
 		"outputInputData",
+		index,
+		false,
+	) as boolean;
+	const useEnterToSubmit = this.getNodeParameter(
+		"useEnterToSubmit",
 		index,
 		false,
 	) as boolean;
@@ -1042,15 +1064,140 @@ export async function execute(
 		// Submit the form if requested
 		let formSubmissionResult: IDataObject = {};
 
-		if (submitFormAfterFill && submitSelector) {
-			this.logger.info(
-				`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Submitting form using selector: ${submitSelector}`,
-			);
+		if (submitFormAfterFill) {
+			// Check if we should use Enter key submission
+			if (useEnterToSubmit) {
+				this.logger.info(
+					`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Submitting form using Enter key on last filled field`,
+				);
 
-			// Use the executeAction utility with "click" type to handle form submission
-			// This provides better consistency with other operations like Decision
+				// Find the last successfully filled form field to press Enter on
+				const lastSuccessfulField = results.slice().reverse().find(r => r.success);
 
-			// Set up action options
+				if (lastSuccessfulField) {
+					try {
+						// Press Enter on the last filled field
+						const targetSelector = lastSuccessfulField.selector as string;
+
+						// First, focus the element to ensure it's active
+						const focusResult = await page.evaluate((selector) => {
+							const element = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement;
+							if (element) {
+								// Focus the element
+								element.focus();
+								// Make sure it's actually focused
+								return {
+									success: true,
+									focused: document.activeElement === element,
+									selector,
+									elementType: element.tagName.toLowerCase()
+								};
+							}
+							return { success: false, error: 'Element not found', selector };
+						}, targetSelector);
+
+						if (!focusResult.success) {
+							throw new Error(`Could not focus element: ${focusResult.error}`);
+						}
+
+						this.logger.info(
+							`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Focused element ${targetSelector} (${focusResult.elementType}), focused: ${focusResult.focused}`,
+						);
+
+						// Now press Enter using Puppeteer's built-in method (more reliable)
+						await page.keyboard.press('Enter');
+
+						const enterResult = {
+							success: true,
+							selector: targetSelector,
+							method: 'puppeteer_keyboard',
+							focused: focusResult.focused
+						};
+
+						this.logger.info(
+							`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Enter key pressed on ${targetSelector}`,
+						);
+
+						formSubmissionResult = {
+							success: enterResult.success,
+							method: enterResult.method,
+							targetSelector: targetSelector,
+							details: enterResult,
+						};
+
+						// Wait after submission based on the waitAfterSubmit setting
+						if (waitAfterSubmit !== 'noWait') {
+							this.logger.info(
+								`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting after Enter submission: ${waitAfterSubmit}`,
+							);
+
+							const effectiveWaitTime = Math.max(
+								waitTime,
+								waitAfterSubmit === "navigationComplete" ? 30000 : 20000
+							);
+
+							switch (waitAfterSubmit) {
+								case 'urlChanged':
+									// Simple wait since URL changes are hard to detect with Enter
+									await waitForDuration(page, Math.min(effectiveWaitTime, 5000));
+									break;
+								case 'domContentLoaded':
+									await waitForDuration(page, effectiveWaitTime);
+									break;
+								case 'navigationComplete':
+									await waitForDuration(page, effectiveWaitTime);
+									break;
+								case 'fixedTime':
+									await waitForDuration(page, waitTime);
+									break;
+							}
+						}
+
+						// Add to results array
+						results.push({
+							fieldType: "formSubmission",
+							success: enterResult.success,
+							details: enterResult,
+						});
+
+					} catch (enterError) {
+						this.logger.warn(
+							`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Enter key submission failed: ${(enterError as Error).message}`,
+						);
+
+						formSubmissionResult = {
+							success: false,
+							method: 'enter_key',
+							error: (enterError as Error).message,
+						};
+
+						// Add failed result
+						results.push({
+							fieldType: "formSubmission",
+							success: false,
+							details: { method: 'enter_key', error: (enterError as Error).message },
+						});
+					}
+				} else {
+					this.logger.warn(
+						`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] No successfully filled fields found for Enter key submission`,
+					);
+
+					formSubmissionResult = {
+						success: false,
+						method: 'enter_key',
+						error: 'No successfully filled fields found',
+					};
+				}
+			} else if (submitSelector) {
+				this.logger.info(
+					`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Submitting form using selector: ${submitSelector}`,
+				);
+
+				// Use the executeAction utility with "click" type to handle form submission
+				// This provides better consistency with other operations like Decision
+
+				// Set up action options
 			const actionOptions: IActionOptions = {
 				sessionId,
 				waitForSelector: waitForSelectors,
@@ -1162,6 +1309,25 @@ export async function execute(
 						`[Form][Submit] Form submission had issues: ${clickResult.error || 'Unknown issue'}`
 					)
 				);
+			}
+			} else {
+				// No submission method configured
+				this.logger.warn(
+					`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Form submission requested but no method configured (useEnterToSubmit=false, submitSelector empty)`,
+				);
+
+				formSubmissionResult = {
+					success: false,
+					method: 'none',
+					error: 'No submission method configured - either enable Enter submission or provide a submit button selector',
+				};
+
+				// Add failed result
+				results.push({
+					fieldType: "formSubmission",
+					success: false,
+					details: { method: 'none', error: 'No submission method configured' },
+				});
 			}
 		}
 

@@ -586,7 +586,7 @@ export class MultipleExtraction implements IExtraction {
         return {
           success: true,
           data: processedResults,
-          rawContent: JSON.stringify(values).substring(0, 200) + '...',
+                      rawContent: JSON.stringify(values).substring(0, 800) + '...',
         };
       }
 
@@ -594,7 +594,7 @@ export class MultipleExtraction implements IExtraction {
       return {
         success: true,
         data: values,
-        rawContent: JSON.stringify(values).substring(0, 200) + '...',
+                    rawContent: JSON.stringify(values).substring(0, 800) + '...',
       };
     } catch (error) {
       logger.error(

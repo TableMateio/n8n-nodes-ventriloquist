@@ -334,8 +334,8 @@ export class BasicExtraction implements IExtraction {
             data = processedText;
 
             // Only truncate for logging purposes
-            if (processedText.length > 200) {
-              rawContent = processedText.substring(0, 200) + '... [truncated]';
+            if (processedText.length > 800) {
+              rawContent = processedText.substring(0, 800) + '... [truncated]';
             } else {
               rawContent = processedText;
             }
@@ -379,7 +379,7 @@ export class BasicExtraction implements IExtraction {
 
               // Only truncate for logging purposes
               rawContent = hrefValues.join('\n');
-              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+              if (rawContent.length > 800) rawContent = rawContent.substring(0, 800) + '... [truncated]';
             } else {
               // Standard attribute extraction for other cases
               // Changed from $eval to $$eval to get all matching elements
@@ -394,7 +394,7 @@ export class BasicExtraction implements IExtraction {
 
               // Only truncate for logging purposes
               rawContent = attributeValues.join('\n');
-              if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+              if (rawContent.length > 800) rawContent = rawContent.substring(0, 800) + '... [truncated]';
             }
           } catch (error) {
             logger.error(
@@ -421,7 +421,7 @@ export class BasicExtraction implements IExtraction {
 
           // Only truncate for logging purposes
           rawContent = htmlContents.join('\n');
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+          if (rawContent.length > 800) rawContent = rawContent.substring(0, 800) + '... [truncated]';
           break;
 
         case 'outerHtml':
@@ -435,7 +435,7 @@ export class BasicExtraction implements IExtraction {
 
           // Only truncate for logging purposes
           rawContent = outerHtmlContents.join('\n');
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+          if (rawContent.length > 800) rawContent = rawContent.substring(0, 800) + '... [truncated]';
           break;
 
         case 'smart':
@@ -456,8 +456,8 @@ export class BasicExtraction implements IExtraction {
             const fullContent = await this.page.$eval(this.config.selector, (el) => el.textContent?.trim() || '');
 
             // Store the full content, only truncate for logging
-            if (fullContent.length > 200) {
-              rawContent = fullContent.substring(0, 200) + '... [truncated]';
+            if (fullContent.length > 800) {
+              rawContent = fullContent.substring(0, 800) + '... [truncated]';
             } else {
               rawContent = fullContent;
             }
@@ -538,8 +538,8 @@ export class BasicExtraction implements IExtraction {
               data = fullHtml;
 
               // Only truncate for logging purposes
-              if (fullHtml.length > 200) {
-                rawContent = fullHtml.substring(0, 200) + '... [truncated]';
+              if (fullHtml.length > 800) {
+                rawContent = fullHtml.substring(0, 800) + '... [truncated]';
               } else {
                 rawContent = fullHtml;
               }
@@ -618,8 +618,8 @@ export class BasicExtraction implements IExtraction {
               }
 
               // Only truncate for logging purposes
-              if (tableString.length > 200) {
-                rawContent = tableString.substring(0, 200) + '... [truncated]';
+              if (tableString.length > 800) {
+                rawContent = tableString.substring(0, 800) + '... [truncated]';
               } else {
                 rawContent = tableString;
               }
@@ -643,7 +643,7 @@ export class BasicExtraction implements IExtraction {
 
           // Store all raw content joined together for compatibility
           rawContent = inputValues.join('\n');
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+          if (rawContent.length > 800) rawContent = rawContent.substring(0, 800) + '... [truncated]';
 
           // If only one result was found, keep backwards compatibility by returning a string
           // Otherwise, return an array of results
@@ -847,8 +847,8 @@ export class BasicExtraction implements IExtraction {
 
           // Generate raw content for logging
           rawContent = validImageData.map(item => `URL: ${item.url}${item.size ? `, Size: ${item.size} bytes` : ''}`).join('\n');
-          if (rawContent.length > 200) {
-            rawContent = rawContent.substring(0, 200) + '... [truncated]';
+          if (rawContent.length > 800) {
+            rawContent = rawContent.substring(0, 800) + '... [truncated]';
           }
 
           break;
@@ -878,7 +878,7 @@ export class BasicExtraction implements IExtraction {
             const elements = document.querySelectorAll(selector);
             return Array.from(elements).map(el => el.outerHTML).join('\n');
           }, this.config.selector);
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+          if (rawContent.length > 800) rawContent = rawContent.substring(0, 800) + '... [truncated]';
 
           // Limit the number of elements if requested
           const limitedElements = limit > 0 ? elements.slice(0, limit) : elements;

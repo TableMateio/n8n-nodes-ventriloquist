@@ -267,8 +267,8 @@ export class BasicExtraction implements IExtraction {
             }
 
             // Only truncate for logging purposes
-            if (fullContent.length > 200) {
-              rawContent = fullContent.substring(0, 200) + '... [truncated]';
+            if (fullContent.length > 800) {
+              rawContent = fullContent.substring(0, 800) + '... [truncated]';
             } else {
               rawContent = fullContent;
             }
@@ -348,8 +348,8 @@ export class BasicExtraction implements IExtraction {
 
             // Store full content for processing
             // Only truncate for logging purposes
-            if (content.length > 200) {
-              rawContent = content.substring(0, 200) + '... [truncated]';
+            if (content.length > 800) {
+              rawContent = content.substring(0, 800) + '... [truncated]';
             } else {
               rawContent = content;
             }
@@ -438,8 +438,8 @@ export class BasicExtraction implements IExtraction {
               data = fullHtmlContent;
 
               // Only truncate for logging purposes
-              if (fullHtmlContent.length > 200) {
-                rawContent = fullHtmlContent.substring(0, 200) + '... [truncated]';
+              if (fullHtmlContent.length > 800) {
+                rawContent = fullHtmlContent.substring(0, 800) + '... [truncated]';
               } else {
                 rawContent = fullHtmlContent;
               }
@@ -683,7 +683,7 @@ export class BasicExtraction implements IExtraction {
 
           // Store all raw content joined together for compatibility
           rawContent = inputValues.join('\n');
-          if (rawContent.length > 200) rawContent = rawContent.substring(0, 200) + '... [truncated]';
+          if (rawContent.length > 800) rawContent = rawContent.substring(0, 800) + '... [truncated]';
 
           // If only one result was found, keep backwards compatibility by returning a string
           // Otherwise, return an array of results
@@ -717,8 +717,8 @@ export class BasicExtraction implements IExtraction {
           }, this.config.selector);
 
           // Store the full content for processing, only truncate for logging
-          if (fullMultipleContent.length > 200) {
-            rawContent = fullMultipleContent.substring(0, 200) + '... [truncated]';
+          if (fullMultipleContent.length > 800) {
+            rawContent = fullMultipleContent.substring(0, 800) + '... [truncated]';
           } else {
             rawContent = fullMultipleContent;
           }
