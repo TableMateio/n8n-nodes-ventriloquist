@@ -1,5 +1,5 @@
 import set from 'lodash/set';
-import { ApplicationError, type IDataObject, type NodeApiError, type IExecuteFunctions } from 'n8n-workflow';
+import { ApplicationError, type IDataObject, type NodeApiError, type IExecuteFunctions, type IBinaryKeyData } from 'n8n-workflow';
 
 import type { UpdateRecord } from './interfaces';
 import { getTableSchema } from './linkedRecordUtils';

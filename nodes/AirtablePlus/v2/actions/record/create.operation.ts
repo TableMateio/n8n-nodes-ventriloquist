@@ -69,22 +69,24 @@ export async function execute(
 				typecast: options.typecast ? true : false,
 			};
 
-			if (dataMode === 'autoMapInputData') {
-				body.fields = removeIgnored(items[i].json, options.ignoreFields as string);
-			}
+					let fields: IDataObject = {};
 
-			if (dataMode === 'defineBelow') {
-				const fields = this.getNodeParameter('columns.value', i, []) as IDataObject;
+		if (dataMode === 'autoMapInputData') {
+			fields = removeIgnored(items[i].json, options.ignoreFields as string);
+		}
 
-				body.fields = fields;
-			}
+		if (dataMode === 'defineBelow') {
+			fields = this.getNodeParameter('columns.value', i, []) as IDataObject;
+		}
 
-			// Remove empty/null fields if requested
-			if (options.skipEmptyFields) {
-				body.fields = removeEmptyFields(body.fields as IDataObject);
-			}
+		// Remove empty/null fields if requested
+		if (options.skipEmptyFields) {
+			fields = removeEmptyFields(fields as IDataObject);
+		}
 
-						const responseData = await apiRequest.call(this, 'POST', endpoint, body);
+		body.fields = fields;
+
+		const responseData = await apiRequest.call(this, 'POST', endpoint, body);
 
 			let dataToWrap: IDataObject;
 

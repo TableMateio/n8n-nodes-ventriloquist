@@ -313,12 +313,12 @@ export async function execute(
 
 			// Remove empty/null fields if requested
 			if (options.skipEmptyFields) {
-				records.forEach(record => {
+				records.forEach((record) => {
 					record.fields = removeEmptyFields(record.fields);
 				});
 			}
 
-						const responseData = await batchUpdate.call(this, endpoint, body, records);
+			const responseData = await batchUpdate.call(this, endpoint, body, records);
 
 			let dataToWrap = responseData.records as IDataObject[];
 

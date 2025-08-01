@@ -695,6 +695,19 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: "Debug Mode",
+		name: "debugMode",
+		type: "boolean",
+		default: false,
+		description:
+			"Whether to include detailed debugging information in the output, including element detection results, filled values verification, and technical details about form interactions",
+		displayOptions: {
+			show: {
+				operation: ["form"],
+			},
+		},
+	},
+	{
 		displayName: "Output Input Data",
 		name: "outputInputData",
 		type: "boolean",
@@ -786,6 +799,11 @@ export async function execute(
 	) as string;
 	const waitSelector = this.getNodeParameter("waitSelector", index, "") as string;
 	const waitDuration = this.getNodeParameter("waitDuration", index, 1000) as number;
+	const debugMode = this.getNodeParameter(
+		"debugMode",
+		index,
+		false,
+	) as boolean;
 	const outputInputData = this.getNodeParameter(
 		"outputInputData",
 		index,
@@ -795,6 +813,12 @@ export async function execute(
 		"useEnterToSubmit",
 		index,
 		false,
+	) as boolean;
+	// Get the main screenshot toggle from node level
+	const captureScreenshot = this.getNodeParameter(
+		"captureScreenshot",
+		index,
+		true,
 	) as boolean;
 
 	// Added for better logging
@@ -986,26 +1010,86 @@ export async function execute(
 				`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Processing ${fieldType} field with selector: ${selector}`,
 			);
 
-			// Wait for the element to be available
+			// Enhanced element detection with debug info
+			let elementFound = false;
+			let elementInfo: IDataObject = {};
+
 			if (waitForSelectors) {
 				this.logger.info(
 					`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Waiting for selector: ${selector} (timeout: ${selectorTimeout}ms)`,
 				);
 				await page
 					.waitForSelector(selector, { timeout: selectorTimeout })
+					.then(() => {
+						elementFound = true;
+						if (debugMode) {
+							this.logger.info(
+								`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] DEBUG: Element found after waiting - ${selector}`,
+							);
+						}
+					})
 					.catch((error) => {
+						elementFound = false;
 						this.logger.warn(
 							`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Selector not found: ${selector}, but will try to interact anyway`,
 						);
 					});
 			} else {
 				// Check if the element exists first
-				const elementExists = await page.evaluate((sel) => {
+				elementFound = await page.evaluate((sel) => {
 					return document.querySelector(sel) !== null;
 				}, selector);
 
-				if (!elementExists) {
+				if (!elementFound) {
 					this.logger.warn(`Element not found without waiting: ${selector}`);
+				} else if (debugMode) {
+					this.logger.info(
+						`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] DEBUG: Element found immediately - ${selector}`,
+					);
+				}
+			}
+
+			// Get detailed element information for debug mode
+			if (debugMode) {
+				try {
+					elementInfo = await page.evaluate((sel) => {
+						const element = document.querySelector(sel) as HTMLElement;
+						if (!element) {
+							return {
+								found: false,
+								error: "Element not found in DOM",
+								totalElementsOnPage: document.querySelectorAll('*').length
+							};
+						}
+
+						const computedStyle = window.getComputedStyle(element);
+						const rect = element.getBoundingClientRect();
+
+						return {
+							found: true,
+							tagName: element.tagName.toLowerCase(),
+							type: (element as HTMLInputElement).type || null,
+							id: element.id || null,
+							className: element.className || null,
+							name: (element as HTMLInputElement).name || null,
+							value: (element as HTMLInputElement).value || (element as HTMLTextAreaElement).value || null,
+							placeholder: (element as HTMLInputElement).placeholder || null,
+							visible: computedStyle.display !== 'none' && computedStyle.visibility !== 'hidden',
+							inViewport: rect.top >= 0 && rect.left >= 0 && rect.bottom <= window.innerHeight && rect.right <= window.innerWidth,
+							coordinates: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+							disabled: (element as HTMLInputElement).disabled || false,
+							readOnly: (element as HTMLInputElement).readOnly || false,
+						};
+					}, selector);
+
+					this.logger.info(
+						`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] DEBUG: Element details for ${selector}: ${JSON.stringify(elementInfo)}`,
+					);
+				} catch (debugError) {
+					elementInfo = {
+						found: false,
+						error: `Debug info extraction failed: ${(debugError as Error).message}`,
+					};
 				}
 			}
 
@@ -1045,13 +1129,64 @@ export async function execute(
 				this.logger,
 			);
 
-			// Add the field result to our results collection
-			results.push({
+			// Post-fill verification for debug mode
+			let postFillVerification: IDataObject = {};
+			if (debugMode && actionResult.success) {
+				try {
+					postFillVerification = await page.evaluate((sel, expectedValue) => {
+						const element = document.querySelector(sel) as HTMLInputElement | HTMLTextAreaElement;
+						if (!element) {
+							return { verified: false, error: "Element not found for verification" };
+						}
+
+						const currentValue = element.value;
+						const matches = currentValue === expectedValue;
+
+						return {
+							verified: true,
+							currentValue,
+							expectedValue,
+							matches,
+							valueLength: currentValue.length,
+							elementType: element.type || element.tagName.toLowerCase(),
+						};
+					}, selector, field.value || field.checked || "");
+
+					if (debugMode) {
+						this.logger.info(
+							`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] DEBUG: Post-fill verification for ${selector}: ${JSON.stringify(postFillVerification)}`,
+						);
+					}
+				} catch (verificationError) {
+					postFillVerification = {
+						verified: false,
+						error: `Verification failed: ${(verificationError as Error).message}`,
+					};
+				}
+			}
+
+			// Add the field result to our results collection with enhanced debug info
+			const fieldResult: IDataObject = {
 				fieldType,
 				selector,
 				success: actionResult.success,
 				details: actionResult.details,
-			});
+			};
+
+			// Include debug information if debug mode is enabled
+			if (debugMode) {
+				fieldResult.debug = {
+					elementDetection: {
+						found: elementFound,
+						elementInfo,
+					},
+					...(postFillVerification.verified !== undefined && { postFillVerification }),
+					actionExecuted: actionResult.success,
+					actionError: actionResult.error || null,
+				};
+			}
+
+			results.push(fieldResult);
 
 			// If the field failed and we're not continuing on failure, throw an error
 			if (!actionResult.success && !continueOnFail) {
@@ -1331,11 +1466,14 @@ export async function execute(
 			}
 		}
 
-		// Take a screenshot if requested
+		// Take a screenshot if requested (respects both main toggle and after-submission toggle)
 		let screenshot: string | null = null;
-		if (takeScreenshotAfterSubmit) {
+		const shouldTakeScreenshot = captureScreenshot && (submitFormAfterFill ? takeScreenshotAfterSubmit : true);
+
+		if (shouldTakeScreenshot) {
+			const screenshotContext = submitFormAfterFill ? "after submission" : "after form fill";
 			this.logger.info(
-				`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Attempting to take screenshot after submission.`,
+				`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Attempting to take screenshot ${screenshotContext}.`,
 			);
 			const currentSession = SessionManager.getSession(sessionId);
 			let pageForScreenshot: Page | null = null;
@@ -1355,7 +1493,7 @@ export async function execute(
 				screenshot = await takeScreenshot(pageForScreenshot, this.logger);
 				if (screenshot) {
 					this.logger.info(
-						`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Screenshot captured successfully.`,
+						`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Screenshot captured successfully ${screenshotContext}.`,
 					);
 				} else {
 					this.logger.warn(
@@ -1367,21 +1505,36 @@ export async function execute(
 					`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Could not get active page for screenshot.`,
 				);
 			}
+		} else if (debugMode) {
+			this.logger.info(
+				`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Screenshot skipped - captureScreenshot: ${captureScreenshot}, submitForm: ${submitFormAfterFill}, takeScreenshotAfterSubmit: ${takeScreenshotAfterSubmit}`,
+			);
 		}
 
 		// Return the result data
 		const item = this.getInputData()[index];
-			const resultData: IDataObject = {
-		...(outputInputData && item.json ? item.json : {}),
-		success: true,
-		operation: "form",
-		sessionId,
-		formFields: results,
-		currentUrl: page ? await page.url() : "Page unavailable",
-		pageTitle: page ? await page.title() : "Page unavailable",
-		timestamp: new Date().toISOString(),
-		executionDuration: Date.now() - startTime,
-	};
+		const resultData: IDataObject = {
+			...(outputInputData && item.json ? item.json : {}),
+			success: true,
+			operation: "form",
+			sessionId,
+			formFields: results,
+			currentUrl: page ? await page.url() : "Page unavailable",
+			pageTitle: page ? await page.title() : "Page unavailable",
+			timestamp: new Date().toISOString(),
+			executionDuration: Date.now() - startTime,
+			// Add cache explanation
+			note: "IMPORTANT: Copy this sessionId value to the 'Session ID' field in your Decision, Form or other subsequent operations.",
+			...(debugMode && {
+				debug: {
+					cacheInfo: "Results may be cached in manual mode. If you see 'fromCache: true', the result came from cache instead of fresh execution.",
+					screenshotInfo: `Screenshot captured: ${!!screenshot}, captureScreenshot setting: ${captureScreenshot}, takeScreenshotAfterSubmit: ${takeScreenshotAfterSubmit}`,
+					debugModeEnabled: true,
+					formFieldsProcessed: formFields.length,
+					allFieldsSucceeded: results.every(r => r.success),
+				}
+			}),
+		};
 
 		if (submitFormAfterFill) {
 			resultData.formSubmission = formSubmissionResult;
@@ -1553,15 +1706,24 @@ export async function execute(
 			`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Error: ${(error as Error).message}`,
 		);
 
-		// Take a screenshot for diagnostics if possible
+		// Take a screenshot for diagnostics if possible (respecting user's screenshot settings)
 		let errorScreenshot: string | null = null;
-		try {
-			if (page) {
-				errorScreenshot = await takeScreenshot(page, this.logger);
+		if (captureScreenshot) {
+			try {
+				if (page) {
+					errorScreenshot = await takeScreenshot(page, this.logger);
+					this.logger.info(
+						`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Error screenshot captured for diagnostics`,
+					);
+				}
+			} catch (screenshotError) {
+				this.logger.warn(
+					`Failed to take error screenshot: ${(screenshotError as Error).message}`,
+				);
 			}
-		} catch (screenshotError) {
-			this.logger.warn(
-				`Failed to take error screenshot: ${(screenshotError as Error).message}`,
+		} else if (debugMode) {
+			this.logger.info(
+				`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Error screenshot skipped - captureScreenshot setting is disabled`,
 			);
 		}
 

@@ -1,6 +1,7 @@
 import * as puppeteer from 'puppeteer-core';
 import * as os from 'os';
 import * as path from 'path';
+import * as fs from 'fs';
 import { BrowserTransport } from './BrowserTransport';
 import { findChrome } from '../utils/chromeFinder';
 
@@ -48,6 +49,47 @@ export class LocalChromeTransport implements BrowserTransport {
     } catch (error) {
       // Fall back to default values if calculation fails
       this.logger.warn(`Failed to calculate centered window position: ${(error as Error).message}`);
+    }
+  }
+
+    /**
+   * Set up Chrome Preferences to disable password breach detection BEFORE Chrome launches
+   * Based on expert advice: policies don't work in unmanaged Puppeteer environment
+   */
+  private setupChromePreferences(userDataDir: string): void {
+    try {
+      this.logger.info('Setting up Chrome preferences to disable password breach detection...');
+
+      // Create the Default directory if it doesn't exist
+      const defaultDir = path.join(userDataDir, 'Default');
+      fs.mkdirSync(defaultDir, { recursive: true });
+
+      const prefsPath = path.join(defaultDir, 'Preferences');
+
+      // The EXACT structure recommended by the Chrome expert
+      const preferencesContent = {
+        "profile": {
+          "password_manager_leak_detection": false
+        },
+        "credentials_enable_service": false
+      };
+
+      // Write preferences BEFORE Chrome launches (critical timing)
+      fs.writeFileSync(prefsPath, JSON.stringify(preferencesContent, null, 2));
+      this.logger.info(`Created Chrome preferences file: ${prefsPath}`);
+      this.logger.info(`Preferences content: ${JSON.stringify(preferencesContent)}`);
+
+      // Verify the file was created correctly
+      if (fs.existsSync(prefsPath)) {
+        const verification = fs.readFileSync(prefsPath, 'utf-8');
+        this.logger.info('Preferences file verified and ready for Chrome launch');
+      } else {
+        this.logger.error('Failed to create preferences file');
+      }
+
+    } catch (error) {
+      this.logger.warn(`Failed to create Chrome preferences: ${(error as Error).message}`);
+      // Continue anyway - the flags should still help
     }
   }
 
@@ -116,7 +158,31 @@ export class LocalChromeTransport implements BrowserTransport {
         );
       }
 
+            // Add the SPECIFIC flags recommended by Chrome expert
+      puppeteerArgs.push(
+        // THE KEY FLAG - disables password leak detection UI specifically
+        '--enable-features=WebUIDisableLeakDetection',
+
+        // Supporting flags to disable related features
+        '--disable-features=PasswordLeakDetection',
+        '--disable-features=AutofillServerCommunication',
+        '--disable-features=AutofillEnableSaveCard',
+
+        // Keep some existing useful flags
+        '--disable-password-generation',
+        '--disable-password-manager-reauthentication',
+        '--disable-default-browser-check',
+        '--disable-first-run-ui'
+      );
+
+      // Set up Chrome preferences to disable password breach detection BEFORE launch
+      const effectiveUserDataDir = this.userDataDir || this.tempUserDataDir;
+      if (effectiveUserDataDir) {
+        this.setupChromePreferences(effectiveUserDataDir);
+      }
+
       this.logger.info(`Launching Chrome with args: ${puppeteerArgs.join(' ')}`);
+      this.logger.info(`Key flags for password prevention: ${puppeteerArgs.filter(arg => arg.includes('WebUIDisableLeakDetection') || arg.includes('PasswordLeakDetection')).join(', ')}`);
 
       // Launch the browser
       const browser = await puppeteer.launch({

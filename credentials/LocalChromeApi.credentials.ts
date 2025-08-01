@@ -41,7 +41,7 @@ export class LocalChromeApi implements ICredentialType {
 			displayName: 'Launch Arguments',
 			name: 'launchArgs',
 			type: 'string',
-			default: '--no-sandbox,--disable-setuid-sandbox',
+			default: '--no-sandbox,--disable-setuid-sandbox,--disable-features=PasswordManager,--disable-password-manager-reauthentication,--disable-save-password-bubble,--disable-password-generation,--disable-features=SafeBrowsing,--disable-web-security,--disable-features=VizDisplayCompositor,--disable-password-breach-detection,--disable-component-update,--disable-background-networking,--disable-sync,--disable-default-apps,--disable-extensions,--no-default-browser-check,--no-first-run,--disable-popup-blocking,--disable-notifications,--disable-infobars,--disable-translate,--disable-ipc-flooding-protection,--disable-renderer-backgrounding,--disable-backgrounding-occluded-windows,--disable-features=TranslateUI,--disable-features=Translate,--disable-domain-reliability,--disable-client-side-phishing-detection,--disable-background-timer-throttling,--disable-features=PasswordProtection',
 			placeholder: '--window-size=1920,1080,--disable-gpu',
 			description: 'Comma-separated Chrome launch arguments',
 			required: false,

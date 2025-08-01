@@ -10,6 +10,102 @@ import { SessionManager } from "../utils/sessionManager";
 import { takeScreenshot } from "../utils/navigationUtils";
 import { mergeInputWithOutput } from "../../../utils/utilities";
 
+// NOTE: Chrome policies are now used instead of trying to manipulate chrome://settings
+// This is handled in LocalChromeTransport.setupChromePolicies()
+
+/**
+ * Automatically dismiss Chrome password breach detection popups
+ */
+async function dismissPasswordBreachPopup(page: puppeteer.Page, logger: any): Promise<void> {
+	try {
+		// Wait a bit for popup to appear
+		await new Promise(resolve => setTimeout(resolve, 500));
+
+		// Try multiple approaches to dismiss the popup
+		const dismissed = await page.evaluate(() => {
+			// First, look specifically for password breach dialogs based on content
+			const allElements = Array.from(document.querySelectorAll('*'));
+			let foundPasswordDialog = false;
+
+			for (const element of allElements) {
+				const text = element.textContent?.toLowerCase() || '';
+
+				// Look for the specific text from the user's popup
+				if (text.includes('change your password') && text.includes('data breach')) {
+					foundPasswordDialog = true;
+
+					// Look for buttons within this element or its container
+					const container = element.closest('[role="dialog"], [role="alertdialog"], .modal') || element;
+					const buttons = Array.from(container.querySelectorAll('button, [role="button"], input[type="button"]'));
+
+					for (const button of buttons) {
+						const buttonText = button.textContent?.toLowerCase().trim() || '';
+						const buttonValue = button.getAttribute('value')?.toLowerCase() || '';
+						const ariaLabel = button.getAttribute('aria-label')?.toLowerCase() || '';
+
+						// Look for OK button specifically
+						if (buttonText === 'ok' || buttonValue === 'ok' || ariaLabel.includes('ok')) {
+							(button as HTMLElement).click();
+							return `Found and clicked OK button in password breach dialog: "${buttonText || buttonValue || ariaLabel}"`;
+						}
+					}
+				}
+			}
+
+			if (foundPasswordDialog) {
+				// If we found the dialog but couldn't click a button, try more generic approach
+				const allButtons = Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]'));
+				for (const button of allButtons) {
+					const text = button.textContent?.toLowerCase().trim() || '';
+					const value = button.getAttribute('value')?.toLowerCase() || '';
+					const ariaLabel = button.getAttribute('aria-label')?.toLowerCase() || '';
+
+					if (text === 'ok' || value === 'ok' || ariaLabel.includes('ok') ||
+						text === 'got it' || ariaLabel.includes('got it') ||
+						text === 'dismiss' || ariaLabel.includes('dismiss') ||
+						text === 'change' || ariaLabel.includes('change')) {
+						(button as HTMLElement).click();
+						return `Clicked button: "${text || value || ariaLabel}"`;
+					}
+				}
+			}
+
+			// Fallback: Try common selectors
+			const selectors = [
+				'button[aria-label="OK"]',
+				'button[aria-label="Change your password"]',
+				'[role="dialog"] button',
+				'[role="alertdialog"] button'
+			];
+
+			for (const selector of selectors) {
+				try {
+					let element = document.querySelector(selector);
+					if (element && (element as HTMLElement).click) {
+						(element as HTMLElement).click();
+						return `Clicked element with selector: ${selector}`;
+					}
+				} catch (e) {
+					// Continue to next selector
+				}
+			}
+
+			// Nuclear option: Multiple escape keys
+			for (let i = 0; i < 5; i++) {
+				document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+			}
+
+			return foundPasswordDialog ? 'Found password dialog but could not dismiss, sent escape keys' : 'No password dialog found';
+		});
+
+		logger.info(`Password breach popup dismissal result: ${dismissed}`);
+	} catch (error) {
+		// Log that no popup was found - this is actually good news!
+		logger.info(`Password breach popup dismissal - no popup found or error occurred: ${error.message}`);
+	}
+}
+
 /**
  * Open operation description
  */
@@ -265,6 +361,10 @@ export async function execute(
 				}
 			}
 
+									// NOTE: Password breach detection is disabled via Chrome preferences file + specific flags
+			// Based on expert advice: Chrome policies don't work in unmanaged Puppeteer environments
+			this.logger.info('Password breach prevention via Preferences file + WebUIDisableLeakDetection flag');
+
 			// Navigate to the URL
 			this.logger.info(
 				`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigating to URL: ${url}`,
@@ -284,6 +384,15 @@ export async function execute(
 			// This ensures that if the execution context is destroyed during navigation,
 			// we can still return a useful response with the session ID
 			try {
+				// Aggressively dismiss any Chrome password breach popups - try multiple times
+				this.logger.info('Starting password breach popup dismissal attempts...');
+				await dismissPasswordBreachPopup(page, this.logger);
+				await new Promise(resolve => setTimeout(resolve, 500));
+				await dismissPasswordBreachPopup(page, this.logger);
+				await new Promise(resolve => setTimeout(resolve, 500));
+				await dismissPasswordBreachPopup(page, this.logger);
+				this.logger.info('Completed password breach popup dismissal attempts');
+
 				// Get page information
 				const pageInfo = await browserTransport.getPageInfo(page, response);
 

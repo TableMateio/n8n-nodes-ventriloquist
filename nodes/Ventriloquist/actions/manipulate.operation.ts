@@ -15,6 +15,78 @@ import { createErrorResponse } from "../utils/errorUtils";
 import { getActivePage } from "../utils/sessionUtils";
 import { detectElement, smartWaitForSelector, type IDetectionOptions } from "../utils/detectionUtils";
 
+// NOTE: Chrome policies are now used instead of trying to manipulate chrome://settings
+// This is handled in LocalChromeTransport.setupChromePolicies()
+
+/**
+ * Automatically dismiss Chrome password breach detection popups
+ */
+async function dismissPasswordBreachPopup(page: Page, logger: any): Promise<void> {
+	try {
+		// Wait a bit for popup to appear
+		await new Promise(resolve => setTimeout(resolve, 500));
+
+		// Try multiple approaches to dismiss the popup
+		const dismissed = await page.evaluate(() => {
+			// Look for Chrome's password breach popup elements
+			const selectors = [
+				// Common button selectors for Chrome native popups
+				'button[aria-label="OK"]',
+				'button[aria-label="Change your password"]',
+				'button:contains("OK")',
+				'button:contains("Change")',
+				'button:contains("Got it")',
+				'button:contains("Dismiss")',
+				'[role="button"]:contains("OK")',
+				'[role="button"]:contains("Change")',
+				// General dialog dismissal
+				'[role="dialog"] button',
+				'[data-testid*="ok"]',
+				'[data-testid*="dismiss"]',
+				'[data-testid*="close"]'
+			];
+
+			for (const selector of selectors) {
+				try {
+					// Try querySelector first
+					let element = document.querySelector(selector);
+					if (element && (element as HTMLElement).click) {
+						(element as HTMLElement).click();
+						return true;
+					}
+
+					// Try finding by text content
+					const allButtons = Array.from(document.querySelectorAll('button, [role="button"]'));
+					for (const button of allButtons) {
+						const text = button.textContent?.toLowerCase() || '';
+						const ariaLabel = button.getAttribute('aria-label')?.toLowerCase() || '';
+
+						if (text.includes('ok') || text.includes('change') || text.includes('got it') ||
+							text.includes('dismiss') || ariaLabel.includes('ok') ||
+							ariaLabel.includes('change') || ariaLabel.includes('dismiss')) {
+							(button as HTMLElement).click();
+							return true;
+						}
+					}
+				} catch (e) {
+					// Continue to next selector
+				}
+			}
+
+			// Try pressing Escape key as last resort
+			document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27 }));
+			return false;
+		});
+
+		if (dismissed) {
+			logger.info('Successfully dismissed password breach popup');
+		}
+	} catch (error) {
+		// Silent fail - popup might not be present
+		logger.debug('No password breach popup found to dismiss');
+	}
+}
+
 /**
  * Manipulate operation description
  */
@@ -1277,6 +1349,9 @@ export async function execute(
 				`Got active page for session: ${sessionId}`,
 			),
 		);
+
+								// NOTE: Password breach detection is disabled via Chrome preferences + WebUIDisableLeakDetection flag
+		// Since this manipulate operation isn't used in current workflow, no additional popup handling needed here
 
 		// Filter out future actions that aren't implemented yet
 		const implementedActions = actions.filter(action =>
