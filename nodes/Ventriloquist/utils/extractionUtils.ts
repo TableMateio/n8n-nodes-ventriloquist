@@ -372,8 +372,18 @@ export async function extractTableData(
 							// Otherwise just return the single attribute value
 							return cell.getAttribute(attributeName) || '';
 						}
-						// Otherwise get the text content
-						return cell.textContent?.trim() || '';
+						// Otherwise get the text content, with better handling of HTML entities
+						let cellText = cell.textContent?.trim() || '';
+
+						// If textContent is empty but cell has innerHTML, try to extract text properly
+						if (!cellText && cell.innerHTML) {
+							// Create a temporary element to decode HTML entities
+							const tempDiv = document.createElement('div');
+							tempDiv.innerHTML = cell.innerHTML;
+							cellText = (tempDiv.textContent || tempDiv.innerText || '').trim();
+						}
+
+						return cellText;
 					});
 				});
 			},

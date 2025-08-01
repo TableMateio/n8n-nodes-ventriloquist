@@ -37,7 +37,7 @@ export interface IExtractionNodeOptions {
       instructions: string;
     }>;
   };
-  waitForSelector?: boolean;
+  waitStrategy?: string;
   timeout?: number;
   useHumanDelays?: boolean;
   continueOnFail?: boolean;
@@ -276,7 +276,7 @@ export async function processExtractionItems(
       'extractNodeUtils',
       'processExtractionItems',
       `Processing ${extractionItems.length} extraction items with options: ${JSON.stringify({
-        waitForSelector: extractionNodeOptions.waitForSelector,
+        waitStrategy: extractionNodeOptions.waitStrategy,
         timeout: extractionNodeOptions.timeout,
         useHumanDelays: extractionNodeOptions.useHumanDelays,
         continueOnFail: extractionNodeOptions.continueOnFail,
@@ -1013,8 +1013,11 @@ export async function processExtractionItems(
           extractionType: extractionItem.extractionType,
           selector: extractionItem.selector || '',
           attributeName: extractionItem.attribute,
-          waitForSelector: extractionNodeOptions.waitForSelector,
+          waitForSelector: extractionNodeOptions.waitStrategy !== 'none',
           selectorTimeout: extractionNodeOptions.timeout,
+          contentLoadingStrategy: extractionNodeOptions.waitStrategy,
+          contentLoadingDelay: extractionNodeOptions.timeout, // Use same timeout as delay amount for fixed delay
+          contentValidationTimeout: extractionNodeOptions.timeout, // Use same timeout for content validation
           debugMode: isDebugMode,
           preserveFieldStructure: extractionItem.preserveFieldStructure || false,
           excludeHidden: extractionItem.excludeHidden || false,

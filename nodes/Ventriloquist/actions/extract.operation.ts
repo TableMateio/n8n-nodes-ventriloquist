@@ -1030,11 +1030,33 @@ export const description: INodeProperties[] = [
 	},
 	// --- Common fields for both modes ---
 	{
-		displayName: "Wait For Selector",
+		displayName: "Wait Strategy",
 		name: "waitForSelector",
-		type: "boolean",
-		default: true,
-		description: "Whether to wait for the selector to appear in page",
+		type: "options",
+		options: [
+			{
+				name: "Wait for Element",
+				value: "element",
+				description: "Wait for element to appear in DOM (default, fastest)"
+			},
+			{
+				name: "Wait for Content",
+				value: "content",
+				description: "Wait for element to contain actual data (recommended for dynamic content)"
+			},
+			{
+				name: "Fixed Delay",
+				value: "delay",
+				description: "Wait a fixed time after element appears"
+			},
+			{
+				name: "No Waiting",
+				value: "none",
+				description: "Don't wait, extract immediately"
+			}
+		],
+		default: "element",
+		description: "Strategy for waiting before extraction",
 		displayOptions: {
 			show: {
 				operation: ["extract"],
@@ -1046,14 +1068,28 @@ export const description: INodeProperties[] = [
 		name: "timeout",
 		type: "number",
 		default: 30000,
-		description: "Maximum time to wait for the selector in milliseconds",
+		description: "Maximum time to wait for element/content in milliseconds",
 		displayOptions: {
 			show: {
 				operation: ["extract"],
-				waitForSelector: [true],
+				waitForSelector: ["element", "content"],
 			},
 		},
 	},
+	{
+		displayName: "Delay Amount",
+		name: "timeout",
+		type: "number",
+		default: 2000,
+		description: "Fixed delay in milliseconds to wait after element appears",
+		displayOptions: {
+			show: {
+				operation: ["extract"],
+				waitForSelector: ["delay"],
+			},
+		},
+	},
+
 	{
 		displayName: "Use Human-Like Delays",
 		name: "useHumanDelays",
@@ -1215,8 +1251,8 @@ export async function execute(
 	);
 
 	// Get common parameters
-	const waitForSelector = this.getNodeParameter("waitForSelector", index, true) as boolean;
-	const timeout = this.getNodeParameter("timeout", index, 30000) as number;
+	const waitStrategy = this.getNodeParameter("waitForSelector", index, "element") as string;
+	const timeout = this.getNodeParameter("timeout", index, waitStrategy === "delay" ? 2000 : 30000) as number;
 	const useHumanDelays = this.getNodeParameter("useHumanDelays", index, false) as boolean;
 	const takeScreenshotOption = this.getNodeParameter("takeScreenshot", index, false) as boolean;
 	const continueOnFail = this.getNodeParameter("continueOnFail", index, true) as boolean;
@@ -1230,7 +1266,7 @@ export async function execute(
 			nodeName,
 			nodeId,
 			index,
-			`Parameters: waitForSelector=${waitForSelector}, timeout=${timeout}ms`,
+			`Parameters: waitStrategy=${waitStrategy}, timeout=${timeout}ms`,
 		),
 	);
 
@@ -1789,7 +1825,7 @@ export async function execute(
 		const extractionResults: IExtractItem[] = await processExtractionItems(
 			filteredExtractionItems,
 			{
-				waitForSelector,
+				waitStrategy,
 				timeout,
 				useHumanDelays,
 				continueOnFail,

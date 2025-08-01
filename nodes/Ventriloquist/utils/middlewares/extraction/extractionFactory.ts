@@ -21,6 +21,9 @@ export interface IExtractionConfig {
   attributeName?: string;
   waitForSelector?: boolean;
   selectorTimeout?: number;
+  contentLoadingStrategy?: string;
+  contentLoadingDelay?: number;
+  contentValidationTimeout?: number;
   debugMode?: boolean;
   preserveFieldStructure?: boolean;
   excludeHidden?: boolean;
@@ -210,6 +213,54 @@ export class BasicExtraction implements IExtraction {
             },
           };
         }
+
+        // Apply content loading strategy after selector is found
+        const contentLoadingStrategy = this.config.contentLoadingStrategy || 'element';
+
+        if (contentLoadingStrategy === 'delay') {
+          const delay = this.config.contentLoadingDelay || 2000;
+          logger.info(`${logPrefix} Applying fixed delay of ${delay}ms for content loading`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else if (contentLoadingStrategy === 'content') {
+          const validationTimeout = this.config.contentValidationTimeout || 10000;
+          logger.info(`${logPrefix} Waiting for content to populate (timeout: ${validationTimeout}ms)`);
+
+          try {
+            await this.page.waitForFunction((selector) => {
+              const elements = document.querySelectorAll(selector);
+              if (elements.length === 0) return false;
+
+              // Check if at least one element has meaningful content
+              for (const element of Array.from(elements)) {
+                const text = element.textContent?.trim() || '';
+                const innerHTML = element.innerHTML?.trim() || '';
+
+                // Consider content meaningful if:
+                // 1. Text content exists and is not just whitespace/entities
+                // 2. Or HTML content exists and contains more than just &nbsp; type entities
+                if (text && text !== '' && !text.match(/^[\s\u00A0]*$/)) {
+                  return true;
+                }
+                if (innerHTML && innerHTML !== '' && !innerHTML.match(/^(\s|&nbsp;|&amp;)*$/i)) {
+                  // Check if innerHTML contains actual content beyond just entities
+                  const tempDiv = document.createElement('div');
+                  tempDiv.innerHTML = innerHTML;
+                  const extractedText = tempDiv.textContent || tempDiv.innerText || '';
+                  if (extractedText.trim() && !extractedText.match(/^[\s\u00A0]*$/)) {
+                    return true;
+                  }
+                }
+              }
+              return false;
+            }, { timeout: validationTimeout }, this.config.selector);
+
+            logger.info(`${logPrefix} Content validation successful - meaningful content detected`);
+          } catch (error) {
+            logger.warn(`${logPrefix} Content validation timeout - proceeding with extraction anyway`);
+            // Don't fail the extraction, just proceed - the content might be there but not detected
+          }
+        }
+        // For 'element' strategy, no additional waiting is needed
       }
 
       // Extract data based on extraction type
@@ -227,7 +278,7 @@ export class BasicExtraction implements IExtraction {
               const elements = Array.from(document.querySelectorAll(selector));
 
               if (elements.length === 0) {
-                return { innerText: '', outerHTML: '' };
+                return { innerText: '', outerHTML: '', extractedText: '' };
               }
 
               // Filter out hidden elements if requested
@@ -281,7 +332,7 @@ export class BasicExtraction implements IExtraction {
               }
 
               if (!finalElement) {
-                return { innerText: '', outerHTML: '' };
+                return { innerText: '', outerHTML: '', extractedText: '' };
               }
 
               // Try to get innerText first, which has better handling of visibility
@@ -290,16 +341,26 @@ export class BasicExtraction implements IExtraction {
               // Get outerHTML as fallback, especially useful for debugging
               const outerHTML = finalElement.outerHTML || '';
 
+              // If innerText is empty, try to extract meaningful text from HTML
+              let extractedText = '';
+              if (!innerText.trim()) {
+                // Create a temporary element to decode HTML entities
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = outerHTML;
+                extractedText = tempDiv.textContent || tempDiv.innerText || '';
+              }
+
               return {
                 innerText,
-                outerHTML
+                outerHTML,
+                extractedText
               };
             }, this.config.selector, this.config.excludeHidden || false);
 
             // Strongly prefer innerText, as it already handles browser-level rendering
             let processedText = textContent.innerText && textContent.innerText.trim().length > 0
               ? textContent.innerText
-              : textContent.outerHTML;
+              : textContent.extractedText || textContent.outerHTML;
 
             // Store raw content before any cleaning
             rawContent = processedText;
