@@ -16,11 +16,11 @@ import { SessionManager } from "../utils/sessionManager";
 import { getActivePage } from "../utils/sessionUtils";
 
 /**
- * Helper function to wait for a specified time using page.evaluate
- * This replaces puppeteer's built-in waitForTimeout which may not be available in all versions
+ * Helper function to wait for a specified time in Node.js context
+ * This is more reliable than running setTimeout in the browser context
  */
 async function waitForDuration(page: Page, duration: number): Promise<void> {
-	await page.evaluate((ms) => new Promise(resolve => setTimeout(resolve, ms)), duration);
+	await new Promise(resolve => setTimeout(resolve, duration));
 }
 
 // Define the properties for the click operation
