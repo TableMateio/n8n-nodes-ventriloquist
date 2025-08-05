@@ -14,6 +14,7 @@ export interface SuccessResponseOptions {
   logger: ILogger;
   startTime: number;
   takeScreenshot?: boolean;
+  screenshotName?: string;
   additionalData?: IDataObject;
   selector?: string;
   inputData?: IDataObject;
@@ -31,6 +32,7 @@ export async function createSuccessResponse(options: SuccessResponseOptions): Pr
     logger,
     startTime,
     takeScreenshot = false,
+    screenshotName = 'screenshot',
     additionalData = {},
     selector = '',
     inputData = {},
@@ -74,7 +76,7 @@ export async function createSuccessResponse(options: SuccessResponseOptions): Pr
   if (takeScreenshot && page) {
     const screenshot = await safeTakeScreenshot(page, logger);
     if (screenshot) {
-      successResponse.screenshot = screenshot;
+      successResponse[screenshotName] = screenshot;
     }
   }
 

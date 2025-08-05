@@ -18,6 +18,7 @@ export interface ErrorResponseOptions {
   page?: Page | null;
   logger?: ILogger;
   takeScreenshot?: boolean;
+  screenshotName?: string;
   startTime?: number;
   continueOnFail?: boolean;
   additionalData?: IDataObject;
@@ -40,6 +41,7 @@ export async function createErrorResponse(options: ErrorResponseOptions): Promis
     page = null,
     logger,
     takeScreenshot = true,
+    screenshotName = 'screenshot',
     startTime,
     additionalData = {},
   } = options;
@@ -74,7 +76,7 @@ export async function createErrorResponse(options: ErrorResponseOptions): Promis
     try {
       const screenshot = await screenshotUtil(page, logger);
       if (screenshot) {
-        errorResponse.screenshot = screenshot;
+        errorResponse[screenshotName] = screenshot;
       }
     } catch (screenshotError) {
       if (logger) {

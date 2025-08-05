@@ -1127,6 +1127,20 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: "Screenshot Name",
+		name: "screenshotName",
+		type: "string",
+		default: "screenshot",
+		placeholder: "screenshot",
+		description: "Name to use for the screenshot field in the output (e.g., 'Tax Screenshot', 'page_capture')",
+		displayOptions: {
+			show: {
+				operation: ["extract"],
+				takeScreenshot: [true],
+			},
+		},
+	},
+	{
 		displayName: "Output Input Data",
 		name: "outputInputData",
 		type: "boolean",
@@ -1255,6 +1269,7 @@ export async function execute(
 	const timeout = this.getNodeParameter("timeout", index, waitStrategy === "delay" ? 2000 : 30000) as number;
 	const useHumanDelays = this.getNodeParameter("useHumanDelays", index, false) as boolean;
 	const takeScreenshotOption = this.getNodeParameter("takeScreenshot", index, false) as boolean;
+	const screenshotName = this.getNodeParameter("screenshotName", index, "screenshot") as string;
 	const continueOnFail = this.getNodeParameter("continueOnFail", index, true) as boolean;
 	const outputInputData = this.getNodeParameter("outputInputData", index, true) as boolean;
 	const debugMode = this.getNodeParameter("debugMode", index, false) as boolean;
@@ -2262,6 +2277,7 @@ export async function execute(
 			logger: this.logger,
 			startTime,
 			takeScreenshot: takeScreenshotOption,
+			screenshotName: screenshotName,
 			additionalData: {
 				...extractionResultsData,
 			},
@@ -2497,6 +2513,7 @@ export async function execute(
 			logger: this.logger,
 			startTime,
 			takeScreenshot: takeScreenshotOption,
+			screenshotName: screenshotName,
 			additionalData: {
 				...finalExtractionResultsData,
 			},
@@ -2539,6 +2556,7 @@ export async function execute(
 			page,
 			logger: this.logger,
 			takeScreenshot: takeScreenshotOption,
+			screenshotName: screenshotName,
 			startTime,
 			// Don't include additionalData here as we'll handle the merge manually
 		});
