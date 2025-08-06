@@ -30,6 +30,8 @@ import * as matcherOperation from './actions/matcher.operation';
 import * as collectorOperation from './actions/collector.operation';
 import * as checkOperation from './actions/check.operation';
 import * as manipulateOperation from './actions/manipulate.operation';
+import * as searchOperation from './actions/search.operation';
+import * as agentOperation from './actions/agent.operation';
 
 /**
  * Configure outputs for decision and check operations based on operation type and routing parameters
@@ -476,7 +478,7 @@ export class Ventriloquist implements INodeType {
 				required: false,
 				displayOptions: {
 					show: {
-						operation: ['extract'],
+						operation: ['extract', 'search', 'agent'],
 					},
 				},
 			},
@@ -642,6 +644,18 @@ export class Ventriloquist implements INodeType {
 						value: 'matcher',
 						description: 'Match entities across data sources',
 						action: 'Match',
+					},
+					{
+						name: 'Search',
+						value: 'search',
+						description: 'Search the web using OpenAI ChatGPT Agent capabilities',
+						action: 'Search',
+					},
+					{
+						name: 'Agent',
+						value: 'agent',
+						description: 'Visual browser automation using OpenAI computer use capabilities',
+						action: 'Agent',
 					},
 				],
 				default: 'extract',
@@ -860,6 +874,32 @@ export class Ventriloquist implements INodeType {
 				},
 			})),
 
+			// Properties for 'search' operation
+			...searchOperation.description.map(property => ({
+				...property,
+				displayOptions: {
+					...(property.displayOptions || {}),
+					show: {
+						...(property.displayOptions?.show || {}),
+						resource: ['dataOperations'],
+						operation: ['search'],
+					},
+				},
+			})),
+
+			// Properties for 'agent' operation
+			...agentOperation.description.map(property => ({
+				...property,
+				displayOptions: {
+					...(property.displayOptions || {}),
+					show: {
+						...(property.displayOptions?.show || {}),
+						resource: ['dataOperations'],
+						operation: ['agent'],
+					},
+				},
+			})),
+
 			// Properties for 'authenticate' operation
 			...authenticateOperation.description.map(property => ({
 				...property,
@@ -964,7 +1004,7 @@ export class Ventriloquist implements INodeType {
 			// Try to get the operation parameter even without input items
 			try {
 				const operation = this.getNodeParameter('operation', 0) as string;
-				const operationsRequiringInput = ['extract', 'click', 'form', 'detect', 'authenticate', 'decision', 'manipulate'];
+				const operationsRequiringInput = ['extract', 'click', 'form', 'detect', 'authenticate', 'decision', 'manipulate', 'search', 'agent'];
 
 				if (operationsRequiringInput.includes(operation)) {
 					this.logger.info(`No input data received for operation '${operation}' - this might indicate unnecessary re-execution`);
@@ -1032,18 +1072,28 @@ export class Ventriloquist implements INodeType {
 		let openAiApiKey = "";
 		const operation = this.getNodeParameter('operation', 0) as string;
 
-		// Only get OpenAI credentials if we're doing an extract operation
-		if (operation === 'extract') {
-			// Get the extraction items to check if any use AI formatting
-			const extractionItems = this.getNodeParameter('extractionItems.items', 0, []) as IDataObject[];
+								// Only get OpenAI credentials if we're doing an extract, search, or agent operation
+		if (operation === 'extract' || operation === 'search' || operation === 'agent') {
+			let needsOpenAI = false;
 
-			// Check if any extraction item has schema set to 'manual' or 'auto' which indicates AI is needed
-			const needsOpenAI = extractionItems.some(item => {
-				const schema = item.schema as string;
-				return schema === 'manual' || schema === 'auto';
-			});
+			if (operation === 'search') {
+				// Search operation always needs OpenAI
+				needsOpenAI = true;
+			} else if (operation === 'agent') {
+				// Agent operation always needs OpenAI
+				needsOpenAI = true;
+			} else if (operation === 'extract') {
+				// Get the extraction items to check if any use AI formatting
+				const extractionItems = this.getNodeParameter('extractionItems.items', 0, []) as IDataObject[];
 
-			this.logger.info(`Checking if OpenAI is needed for extraction: ${needsOpenAI}`);
+				// Check if any extraction item has schema set to 'manual' or 'auto' which indicates AI is needed
+				needsOpenAI = extractionItems.some(item => {
+					const schema = item.schema as string;
+					return schema === 'manual' || schema === 'auto';
+				});
+
+				this.logger.info(`Checking if OpenAI is needed for extraction: ${needsOpenAI}`);
+			}
 
 			if (needsOpenAI) {
 				try {
@@ -1053,7 +1103,7 @@ export class Ventriloquist implements INodeType {
 						openAiApiKey = openAiCredentials.apiKey as string;
 						this.logger.info(`OpenAI credentials loaded successfully (key length: ${openAiApiKey.length})`);
 					} else {
-						this.logger.warn('AI formatting is being used, but OpenAI API key was not found in credentials');
+						this.logger.warn('AI functionality is being used, but OpenAI API key was not found in credentials');
 					}
 				} catch (error) {
 					// Don't fail the node if credentials aren't found - we'll handle this in the extract operation
@@ -1295,6 +1345,44 @@ export class Ventriloquist implements INodeType {
 						websocketEndpoint,
 						workflowId,
 						openAiApiKey // Ensure this is being passed correctly
+					);
+
+					returnData[0].push(result);
+					continue;
+				} else if (operation === 'search') {
+					// Log that we're going to use the OpenAI API key (if available)
+					if (openAiApiKey) {
+						this.logger.info(`OpenAI API key is available for search operation (key length: ${openAiApiKey.length})`);
+					} else {
+						this.logger.warn(`No OpenAI API key available for search operation`);
+					}
+
+					// Execute search operation
+					const result = await searchOperation.execute.call(
+						this,
+						i,
+						websocketEndpoint,
+						workflowId,
+						openAiApiKey
+					);
+
+					returnData[0].push(result);
+					continue;
+				} else if (operation === 'agent') {
+					// Log that we're going to use the OpenAI API key (if available)
+					if (openAiApiKey) {
+						this.logger.info(`OpenAI API key is available for agent operation (key length: ${openAiApiKey.length})`);
+					} else {
+						this.logger.warn(`No OpenAI API key available for agent operation`);
+					}
+
+					// Execute agent operation
+					const result = await agentOperation.execute.call(
+						this,
+						i,
+						websocketEndpoint,
+						workflowId,
+						openAiApiKey
 					);
 
 					returnData[0].push(result);
