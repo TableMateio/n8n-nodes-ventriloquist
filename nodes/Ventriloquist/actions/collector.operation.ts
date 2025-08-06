@@ -2417,7 +2417,7 @@ async function collectItemsFromPage(
 	}
 
 	// Get link extraction configuration
-	const linkSelector = linkConfig.linkSelector as string || 'a';
+	const linkSelector = linkConfig.linkSelector as string || '';
 	const linkAttribute = linkConfig.linkAttribute as string || 'href';
 	const urlTransformation = linkConfig.urlTransformation as boolean || false;
 	const transformationType = linkConfig.transformationType as string || 'absolute';
@@ -2488,7 +2488,10 @@ async function collectItemsFromPage(
 								// Check link selector within first item (if items exist)
 				if (itemElements.length > 0) {
 					const firstItem = itemElements[0];
-					const linkElements = firstItem.querySelectorAll(selectors.linkSelector);
+					// Only query if linkSelector is not empty
+					const linkElements = selectors.linkSelector && selectors.linkSelector.trim() !== ''
+						? firstItem.querySelectorAll(selectors.linkSelector)
+						: [];
 					const anyLinks = firstItem.querySelectorAll('a');
 
 					results.links = {
@@ -2541,7 +2544,7 @@ async function collectItemsFromPage(
 					const firstItem = itemElements[0];
 					for (const field of selectors.additionalFields) {
 						const fieldSelector = field.selector as string;
-						if (fieldSelector) {
+						if (fieldSelector && fieldSelector.trim() !== '') {
 							const fieldElements = firstItem.querySelectorAll(fieldSelector);
 							results.additionalFields.push({
 								name: field.name,
@@ -2561,7 +2564,7 @@ async function collectItemsFromPage(
 					const firstItem = itemElements[0];
 					for (const criterion of selectors.filterCriteria) {
 						const filterSelector = criterion.selector as string;
-						if (filterSelector) {
+						if (filterSelector && filterSelector.trim() !== '') {
 							const filterElements = firstItem.querySelectorAll(filterSelector);
 							results.filterSelectors.push({
 								fieldName: criterion.fieldName || criterion.name,
@@ -2837,21 +2840,60 @@ async function collectItemsFromPage(
 				let url = '';
 
 				try {
-					// First try the specified linkSelector
-					const linkElements = element.querySelectorAll(linkSelector);
-					debugLog(`Item #${idx}: Found ${linkElements.length} potential link elements matching "${linkSelector}"`);
+					// Check if linkSelector is empty/blank (meaning extract from the element itself)
+					const isLinkSelectorEmpty = !linkSelector || linkSelector.trim() === '';
 
-					if (linkElements.length > 0) {
-						// Get the first matching link element
-						const linkElement = linkElements[0];
-						url = linkElement.getAttribute(linkAttribute) || '';
-						debugLog(`Item #${idx}: Raw URL from ${linkAttribute}: "${url}"`);
+					if (isLinkSelectorEmpty) {
+						// Extract from the element itself
+						debugLog(`Item #${idx}: Link selector is empty, extracting from element itself`);
+
+						// Try to get the specified attribute from the element itself
+						url = element.getAttribute(linkAttribute) || '';
+						debugLog(`Item #${idx}: Raw URL from element's ${linkAttribute}: "${url}"`);
+
+						// If no URL found with the specified attribute, try common URL attributes
+						if (!url) {
+							const commonUrlAttributes = ['href', 'value', 'data-url', 'data-href', 'data-value'];
+							for (const attr of commonUrlAttributes) {
+								url = element.getAttribute(attr) || '';
+								if (url) {
+									debugLog(`Item #${idx}: Found URL using fallback attribute "${attr}": "${url}"`);
+									break;
+								}
+							}
+						}
+
+						// If still no URL, check if this element is a link itself or contains links
+						if (!url) {
+							if (element.tagName.toLowerCase() === 'a') {
+								url = element.getAttribute('href') || '';
+								debugLog(`Item #${idx}: Element is an anchor tag, using href: "${url}"`);
+							} else {
+								// Try to find any anchor tags within this element
+								const anyLinks = element.querySelectorAll('a');
+								if (anyLinks.length > 0) {
+									url = anyLinks[0].getAttribute('href') || '';
+									debugLog(`Item #${idx}: Fallback - found ${anyLinks.length} generic links, using first href: "${url}"`);
+								}
+							}
+						}
 					} else {
-						// If no links found with the specific selector, try any anchor tags
-						const anyLinks = element.querySelectorAll('a');
-						if (anyLinks.length > 0) {
-							url = anyLinks[0].getAttribute('href') || '';
-							debugLog(`Item #${idx}: Fallback - found ${anyLinks.length} generic links, using first href: "${url}"`);
+						// Use the specified linkSelector
+						const linkElements = element.querySelectorAll(linkSelector);
+						debugLog(`Item #${idx}: Found ${linkElements.length} potential link elements matching "${linkSelector}"`);
+
+						if (linkElements.length > 0) {
+							// Get the first matching link element
+							const linkElement = linkElements[0];
+							url = linkElement.getAttribute(linkAttribute) || '';
+							debugLog(`Item #${idx}: Raw URL from ${linkAttribute}: "${url}"`);
+						} else {
+							// If no links found with the specific selector, try any anchor tags
+							const anyLinks = element.querySelectorAll('a');
+							if (anyLinks.length > 0) {
+								url = anyLinks[0].getAttribute('href') || '';
+								debugLog(`Item #${idx}: Fallback - found ${anyLinks.length} generic links, using first href: "${url}"`);
+							}
 						}
 					}
 
@@ -2864,9 +2906,18 @@ async function collectItemsFromPage(
 					debugLog(`Item #${idx}: Error extracting URL: ${error}`);
 				}
 
+				// Extract text content when link selector is empty (meaning we want the item itself)
+				let textContent = '';
+				const isLinkSelectorEmpty = !linkSelector || linkSelector.trim() === '';
+				if (isLinkSelectorEmpty) {
+					textContent = element.textContent?.trim() || '';
+					debugLog(`Item #${idx}: Extracted text content from element itself: "${textContent}"`);
+				}
+
 				// Extract additional fields
 				const result: any = {
 					url,
+					...(textContent && { text: textContent }), // Add text field only if we have content
 					itemIndex: idx,
 					pageNumber,
 				};
@@ -2893,8 +2944,8 @@ async function collectItemsFromPage(
 						const extractionType = field.extractionType as string || 'text';
 						const attributeName = field.attributeName as string;
 
-						if (!fieldName || !fieldSelector) {
-							debugLog(`Item #${idx}: Skipping field with missing name or selector`);
+						if (!fieldName || !fieldSelector || fieldSelector.trim() === '') {
+							debugLog(`Item #${idx}: Skipping field with missing name or empty selector`);
 							continue;
 						}
 
@@ -3175,7 +3226,7 @@ async function collectItemsFromPage(
 							debugLog(`Item #${idx}: Using field "${fieldName}" value: "${itemValue}"`);
 						}
 						// Otherwise use CSS selector to extract value from DOM
-						else if (selector) {
+						else if (selector && selector.trim() !== '') {
 							try {
 								if (extractionType === 'exists') {
 									// For exists check, just see if element exists
