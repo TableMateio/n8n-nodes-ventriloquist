@@ -12,6 +12,7 @@ import {
 	createSuccessResponse,
 	createTimingLog,
 } from "../utils/resultUtils";
+import { takeScreenshot } from "../utils/navigationUtils";
 import { createErrorResponse } from "../utils/errorUtils";
 import { processExtractionItems, type IExtractItem } from "../utils/extractNodeUtils";
 import { logPageDebugInfo } from "../utils/debugUtils";
@@ -1837,6 +1838,29 @@ export async function execute(
 			this.logger.info(`Filtered extractions: ${typedExtractionItems.length} → ${filteredExtractionItems.length} extractions (${typedExtractionItems.length - filteredExtractionItems.length} excluded)`);
 		}
 
+		// Take screenshot BEFORE extraction work begins, but after wait strategy
+		let screenshotData: IDataObject = {};
+		if (takeScreenshotOption && page) {
+			this.logger.info(`[Extract] Taking screenshot BEFORE extraction work begins`);
+			
+			// Use the first extraction item's selector for wait strategy if available
+			const firstSelector = filteredExtractionItems.length > 0 ? filteredExtractionItems[0].selector : undefined;
+			
+			try {
+				const screenshot = await takeScreenshot(page, this.logger, waitStrategy, timeout, firstSelector);
+				if (screenshot) {
+					screenshotData[screenshotName] = screenshot;
+					this.logger.info(`[Extract] Screenshot captured successfully before extraction`);
+				} else {
+					screenshotData[screenshotName] = 'Screenshot capture failed - may be due to page loading state or anti-scraping protection on this page';
+					this.logger.warn(`[Extract] Screenshot capture failed before extraction`);
+				}
+			} catch (screenshotError) {
+				this.logger.error(`[Extract] Error taking screenshot before extraction: ${(screenshotError as Error).message}`);
+				screenshotData[screenshotName] = 'Screenshot capture failed due to error';
+			}
+		}
+
 		// Process all extraction items
 		const extractionResults: IExtractItem[] = await processExtractionItems(
 			filteredExtractionItems,
@@ -2270,17 +2294,18 @@ export async function execute(
 			);
 		}
 
-				// We'll let createSuccessResponse handle the screenshot
+				// Create success response without screenshot (we handled it manually before extraction)
 		const successResponse = await createSuccessResponse({
 			operation: "extract",
 			sessionId,
 			page: pageForResponse || page, // Use updated page, fallback to original if needed
 			logger: this.logger,
 			startTime,
-			takeScreenshot: takeScreenshotOption,
+			takeScreenshot: false, // Screenshot already taken manually
 			screenshotName: screenshotName,
 			additionalData: {
 				...extractionResultsData,
+				...screenshotData, // Include the screenshot we took before extraction
 			},
 			// Do not include input data to avoid exposing previous node data
 		});
@@ -2513,10 +2538,11 @@ export async function execute(
 			page: pageForResponse || page,
 			logger: this.logger,
 			startTime,
-			takeScreenshot: takeScreenshotOption,
+			takeScreenshot: false, // Screenshot already taken manually before extraction
 			screenshotName: screenshotName,
 			additionalData: {
 				...finalExtractionResultsData,
+				...screenshotData, // Include the screenshot we took before extraction
 			},
 		});
 
@@ -2558,6 +2584,8 @@ export async function execute(
 			logger: this.logger,
 			takeScreenshot: takeScreenshotOption,
 			screenshotName: screenshotName,
+			waitStrategy: waitStrategy,
+			waitTimeout: timeout,
 			startTime,
 			// Don't include additionalData here as we'll handle the merge manually
 		});

@@ -19,6 +19,9 @@ export interface ErrorResponseOptions {
   logger?: ILogger;
   takeScreenshot?: boolean;
   screenshotName?: string;
+  waitStrategy?: string;
+  waitTimeout?: number;
+  waitSelector?: string;
   startTime?: number;
   continueOnFail?: boolean;
   additionalData?: IDataObject;
@@ -42,6 +45,9 @@ export async function createErrorResponse(options: ErrorResponseOptions): Promis
     logger,
     takeScreenshot = true,
     screenshotName = 'screenshot',
+    waitStrategy = 'none',
+    waitTimeout = 5000,
+    waitSelector,
     startTime,
     additionalData = {},
   } = options;
@@ -74,11 +80,11 @@ export async function createErrorResponse(options: ErrorResponseOptions): Promis
   // Take a screenshot if requested and page is available
   if (takeScreenshot && page && logger) {
     try {
-      const screenshot = await screenshotUtil(page, logger);
+      const screenshot = await screenshotUtil(page, logger, waitStrategy, waitTimeout, waitSelector);
       if (screenshot) {
         errorResponse[screenshotName] = screenshot;
       } else {
-        errorResponse[screenshotName] = 'Screenshot capture failed - may be due to anti-scraping protection on this page';
+        errorResponse[screenshotName] = 'Screenshot capture failed - may be due to page loading state or anti-scraping protection on this page';
       }
     } catch (screenshotError) {
       if (logger) {
@@ -136,7 +142,10 @@ export async function safeExecute<T>(
  */
 export async function safeTakeScreenshot(
   page: Page | null,
-  logger: ILogger
+  logger: ILogger,
+  waitStrategy: string = 'none',
+  timeout: number = 5000,
+  selector?: string
 ): Promise<string | null> {
   if (!page) {
     logger.warn(`[safeTakeScreenshot] Page is null, cannot capture screenshot`);
@@ -144,7 +153,7 @@ export async function safeTakeScreenshot(
   }
 
   try {
-    const result = await screenshotUtil(page, logger);
+    const result = await screenshotUtil(page, logger, waitStrategy, timeout, selector);
     return result;
   } catch (error) {
     logger.error(`[safeTakeScreenshot] Failed to take screenshot: ${(error as Error).message}`);

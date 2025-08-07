@@ -15,6 +15,9 @@ export interface SuccessResponseOptions {
   startTime: number;
   takeScreenshot?: boolean;
   screenshotName?: string;
+  waitStrategy?: string;
+  waitTimeout?: number;
+  waitSelector?: string;
   additionalData?: IDataObject;
   selector?: string;
   inputData?: IDataObject;
@@ -33,6 +36,9 @@ export async function createSuccessResponse(options: SuccessResponseOptions): Pr
     startTime,
     takeScreenshot = false,
     screenshotName = 'screenshot',
+    waitStrategy = 'none',
+    waitTimeout = 5000,
+    waitSelector,
     additionalData = {},
     selector = '',
     inputData = {},
@@ -76,15 +82,15 @@ export async function createSuccessResponse(options: SuccessResponseOptions): Pr
 
     // Take a screenshot if requested and page is available
   if (takeScreenshot && page) {
-    logger.info(`[Screenshot] Taking screenshot for ${operation} operation`);
-    const screenshot = await safeTakeScreenshot(page, logger);
+    logger.info(`[Screenshot] Taking screenshot for ${operation} operation with wait strategy: ${waitStrategy}`);
+    const screenshot = await safeTakeScreenshot(page, logger, waitStrategy, waitTimeout, waitSelector);
 
     if (screenshot) {
       logger.info(`[Screenshot] Screenshot captured successfully (${screenshot.length} chars)`);
       successResponse[screenshotName] = screenshot;
     } else {
-      logger.info(`[Screenshot] Screenshot capture failed - may be due to anti-scraping protection`);
-      successResponse[screenshotName] = 'Screenshot capture failed - may be due to anti-scraping protection on this page';
+      logger.info(`[Screenshot] Screenshot capture failed - may be due to page loading state or anti-scraping protection`);
+      successResponse[screenshotName] = 'Screenshot capture failed - may be due to page loading state or anti-scraping protection on this page';
     }
   }
 

@@ -16,6 +16,7 @@ import {
 	createSuccessResponse,
 	createTimingLog,
 } from "../utils/resultUtils";
+import { takeScreenshot } from "../utils/navigationUtils";
 import { createErrorResponse } from "../utils/errorUtils";
 import { logPageDebugInfo } from "../utils/debugUtils";
 import { EntityMatcherFactory } from "../utils/middlewares/matching/entityMatcherFactory";
@@ -986,6 +987,27 @@ export async function execute(
 			this.logger.info('[Matcher][DEBUG] Reference values from matchCriteria: ' + JSON.stringify(matchCriteria, null, 2));
 		}
 
+		// Take screenshot BEFORE matching work begins
+		let screenshotData: IDataObject = {};
+		if (takeScreenshotOption && page) {
+			this.logger.info(`[Matcher] Taking screenshot BEFORE matching work begins`);
+			
+			try {
+				// For matcher, use the item selector as wait selector
+				const screenshot = await takeScreenshot(page, this.logger, 'element', 5000, actualItemSelector);
+				if (screenshot) {
+					screenshotData[screenshotName] = screenshot;
+					this.logger.info(`[Matcher] Screenshot captured successfully before matching`);
+				} else {
+					screenshotData[screenshotName] = 'Screenshot capture failed - may be due to page loading state or anti-scraping protection on this page';
+					this.logger.warn(`[Matcher] Screenshot capture failed before matching`);
+				}
+			} catch (screenshotError) {
+				this.logger.error(`[Matcher] Error taking screenshot before matching: ${(screenshotError as Error).message}`);
+				screenshotData[screenshotName] = 'Screenshot capture failed due to error';
+			}
+		}
+
 		// Create and execute entity matcher
 		const entityMatcher = createEntityMatcher(
 			page,
@@ -1062,28 +1084,7 @@ export async function execute(
 			this.logger.info(`[Matcher] Filtered matches to only include the selected match in "${matchMode}" match mode`);
 		}
 
-				// Capture screenshot if requested
-		let screenshotData: IDataObject = {};
-		if (takeScreenshotOption && page) {
-			this.logger.info(`[Matcher] Taking screenshot`);
-			
-			// Use createSuccessResponse to capture screenshot consistently
-			const successResponse = await createSuccessResponse({
-				operation: "matcher",
-				sessionId,
-				page,
-				logger: this.logger,
-				startTime,
-				takeScreenshot: takeScreenshotOption,
-				screenshotName: screenshotName,
-				additionalData: {},
-			});
-			
-			// Extract only the screenshot from the success response
-			if (successResponse[screenshotName]) {
-				screenshotData[screenshotName] = successResponse[screenshotName];
-			}
-		}
+						// Screenshot was already captured before matching work began
 
 		const resultData = {
 			...matchResult,
@@ -1125,7 +1126,7 @@ export async function execute(
 			// Include the sessionId in the output
 			sessionId,
 			duration: Date.now() - startTime,
-			// Include screenshot data if captured
+			// Include screenshot data captured before matching
 			...screenshotData,
 		};
 
@@ -1153,6 +1154,8 @@ export async function execute(
 			page,
 			takeScreenshot: takeScreenshotOption,
 			screenshotName: screenshotName,
+			waitStrategy: 'navigation',
+			waitTimeout: 5000,
 		});
 
 		return {

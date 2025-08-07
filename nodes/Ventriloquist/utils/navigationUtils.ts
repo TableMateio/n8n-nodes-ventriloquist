@@ -477,13 +477,102 @@ export async function waitForUrlChange(
 }
 
 /**
+ * Wait using the same strategy as the Extract/Match nodes
+ * @param page - Puppeteer Page
+ * @param logger - Logger instance
+ * @param waitStrategy - Wait strategy ('element', 'content', 'delay', 'none')
+ * @param timeout - Timeout in milliseconds
+ * @param selector - Selector to wait for (if applicable)
+ */
+export async function waitUsingNodeStrategy(
+	page: Page | null,
+	logger: ILogger,
+	waitStrategy: string = 'element',
+	timeout: number = 30000,
+	selector?: string,
+): Promise<boolean> {
+	if (!page) return false;
+
+	try {
+		logger.info(`[waitUsingNodeStrategy] Using wait strategy: ${waitStrategy}, timeout: ${timeout}ms, selector: ${selector || 'none'}`);
+
+		switch (waitStrategy) {
+			case 'element':
+				if (selector) {
+					logger.info(`[waitUsingNodeStrategy] Waiting for element: ${selector}`);
+					await page.waitForSelector(selector, { timeout });
+					logger.info(`[waitUsingNodeStrategy] Element found: ${selector}`);
+				} else {
+					// Fallback to DOM ready if no selector
+					await page.waitForFunction(() => document.readyState === 'complete', { timeout: Math.min(timeout, 5000) });
+					logger.info(`[waitUsingNodeStrategy] DOM ready (no selector provided)`);
+				}
+				break;
+
+			case 'content':
+				if (selector) {
+					logger.info(`[waitUsingNodeStrategy] Waiting for content in: ${selector}`);
+					// Wait for element to exist and have content
+					await page.waitForFunction((sel) => {
+						const element = document.querySelector(sel);
+						return element && element.textContent && element.textContent.trim().length > 0;
+					}, { timeout }, selector);
+					logger.info(`[waitUsingNodeStrategy] Content found in: ${selector}`);
+				} else {
+					// Fallback to body having content
+					await page.waitForFunction(() => {
+						return document.body && document.body.innerText.trim().length > 100;
+					}, { timeout });
+					logger.info(`[waitUsingNodeStrategy] Page content loaded (no selector provided)`);
+				}
+				break;
+
+			case 'delay':
+				logger.info(`[waitUsingNodeStrategy] Fixed delay: ${timeout}ms`);
+				await new Promise(resolve => setTimeout(resolve, timeout));
+				logger.info(`[waitUsingNodeStrategy] Fixed delay completed`);
+				break;
+
+			case 'navigation':
+				logger.info(`[waitUsingNodeStrategy] Waiting for navigation to complete`);
+				try {
+					await page.waitForNavigation({ waitUntil: 'networkidle2', timeout });
+					logger.info(`[waitUsingNodeStrategy] Navigation completed`);
+				} catch (navError) {
+					logger.warn(`[waitUsingNodeStrategy] Navigation wait failed: ${(navError as Error).message}`);
+					// Fallback to DOM ready
+					await page.waitForFunction(() => document.readyState === 'complete', { timeout: 3000 });
+				}
+				break;
+
+			case 'none':
+			default:
+				logger.info(`[waitUsingNodeStrategy] No waiting (strategy: ${waitStrategy})`);
+				break;
+		}
+
+		return true;
+
+	} catch (error) {
+		logger.warn(`[waitUsingNodeStrategy] Wait strategy '${waitStrategy}' failed: ${(error as Error).message}`);
+		return false;
+	}
+}
+
+/**
  * Take a screenshot of the page
  * @param page - Puppeteer Page
  * @param logger - Logger instance
+ * @param waitStrategy - Wait strategy to use before screenshot ('element', 'content', 'delay', 'navigation', 'none')
+ * @param timeout - Timeout for wait strategy
+ * @param selector - Selector to wait for (if applicable)
  */
 export async function takeScreenshot(
 	page: Page | null,
 	logger: ILogger,
+	waitStrategy: string = 'none',
+	timeout: number = 5000,
+	selector?: string,
 ): Promise<string | null> {
 	if (!page) {
 		logger.warn("[takeScreenshot] Cannot take screenshot: page is null");
@@ -493,6 +582,40 @@ export async function takeScreenshot(
 	try {
 		const pageUrl = await page.url();
 		logger.info(`[takeScreenshot] Attempting to capture screenshot of page: ${pageUrl}`);
+
+		// Wait using the same strategy as the node if specified
+		if (waitStrategy !== 'none') {
+			const waitSuccess = await waitUsingNodeStrategy(page, logger, waitStrategy, timeout, selector);
+			if (!waitSuccess) {
+				logger.warn(`[takeScreenshot] Wait strategy '${waitStrategy}' failed, proceeding anyway`);
+			}
+		}
+
+		// Check page loading state before taking screenshot
+		const pageState = await page.evaluate(() => ({
+			readyState: document.readyState,
+			url: window.location.href,
+			hasBody: !!document.body,
+			bodyVisible: document.body ? document.body.offsetHeight > 0 : false,
+			loadingElements: document.querySelectorAll('[class*="loading"], [class*="spinner"], [id*="loading"]').length,
+			visibleContent: document.body ? document.body.innerText.trim().length : 0,
+			title: document.title,
+		}));
+
+		logger.info(`[takeScreenshot] Page state: ${JSON.stringify(pageState)}`);
+
+		// Check if page appears to still be loading
+		if (pageState.readyState !== 'complete') {
+			logger.warn(`[takeScreenshot] Page readyState is '${pageState.readyState}', not 'complete'`);
+		}
+
+		if (pageState.loadingElements > 0) {
+			logger.warn(`[takeScreenshot] Found ${pageState.loadingElements} loading indicators on page`);
+		}
+
+		if (pageState.visibleContent < 100) {
+			logger.warn(`[takeScreenshot] Page has very little visible content (${pageState.visibleContent} chars)`);
+		}
 
 		const screenshot = await page.screenshot({
 			encoding: "base64",
@@ -506,7 +629,7 @@ export async function takeScreenshot(
 			logger.info(`[takeScreenshot] Screenshot captured successfully (${result.length} chars)`);
 			return result;
 		} else {
-			logger.warn(`[takeScreenshot] Screenshot capture failed - this may be due to anti-scraping protection on ${pageUrl}`);
+			logger.warn(`[takeScreenshot] Screenshot capture failed - may be due to page loading state or anti-scraping protection on ${pageUrl}`);
 			return null;
 		}
 	} catch (error) {
