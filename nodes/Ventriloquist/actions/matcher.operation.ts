@@ -672,6 +672,33 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
+	{
+		displayName: "Take Screenshot",
+		name: "takeScreenshot",
+		type: "boolean",
+		default: false,
+		description: "Capture a screenshot of the page after matching",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "Screenshot Name",
+		name: "screenshotName",
+		type: "string",
+		default: "screenshot",
+		placeholder: "screenshot",
+		description: "Name to use for the screenshot field in the output (e.g., 'Match Screenshot', 'page_capture')",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				takeScreenshot: [true],
+			},
+		},
+	},
+
 ];
 
 /**
@@ -696,6 +723,10 @@ export async function execute(
 	// Get input data and output settings
 	const item = this.getInputData()[index];
 	const outputInputData = this.getNodeParameter('outputInputData', index, true) as boolean;
+
+	// Get screenshot parameters
+	const takeScreenshotOption = this.getNodeParameter("takeScreenshot", index, false) as boolean;
+	const screenshotName = this.getNodeParameter("screenshotName", index, "screenshot") as string;
 
 	this.logger.info(`[Matcher][${nodeId}] Starting matcher operation`);
 
@@ -1031,6 +1062,29 @@ export async function execute(
 			this.logger.info(`[Matcher] Filtered matches to only include the selected match in "${matchMode}" match mode`);
 		}
 
+				// Capture screenshot if requested
+		let screenshotData: IDataObject = {};
+		if (takeScreenshotOption && page) {
+			this.logger.info(`[Matcher] Taking screenshot`);
+			
+			// Use createSuccessResponse to capture screenshot consistently
+			const successResponse = await createSuccessResponse({
+				operation: "matcher",
+				sessionId,
+				page,
+				logger: this.logger,
+				startTime,
+				takeScreenshot: takeScreenshotOption,
+				screenshotName: screenshotName,
+				additionalData: {},
+			});
+			
+			// Extract only the screenshot from the success response
+			if (successResponse[screenshotName]) {
+				screenshotData[screenshotName] = successResponse[screenshotName];
+			}
+		}
+
 		const resultData = {
 			...matchResult,
 			// For backward compatibility, keep the matches array, but filtered for best match mode
@@ -1071,6 +1125,8 @@ export async function execute(
 			// Include the sessionId in the output
 			sessionId,
 			duration: Date.now() - startTime,
+			// Include screenshot data if captured
+			...screenshotData,
 		};
 
 		return {
@@ -1094,7 +1150,9 @@ export async function execute(
 			nodeName,
 			startTime,
 			logger: this.logger,
-			page
+			page,
+			takeScreenshot: takeScreenshotOption,
+			screenshotName: screenshotName,
 		});
 
 		return {

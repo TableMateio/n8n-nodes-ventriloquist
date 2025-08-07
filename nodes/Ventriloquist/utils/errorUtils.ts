@@ -19,7 +19,6 @@ export interface ErrorResponseOptions {
   logger?: ILogger;
   takeScreenshot?: boolean;
   screenshotName?: string;
-  screenshotDelay?: number;
   startTime?: number;
   continueOnFail?: boolean;
   additionalData?: IDataObject;
@@ -43,7 +42,6 @@ export async function createErrorResponse(options: ErrorResponseOptions): Promis
     logger,
     takeScreenshot = true,
     screenshotName = 'screenshot',
-    screenshotDelay = 1000,
     startTime,
     additionalData = {},
   } = options;
@@ -76,12 +74,6 @@ export async function createErrorResponse(options: ErrorResponseOptions): Promis
   // Take a screenshot if requested and page is available
   if (takeScreenshot && page && logger) {
     try {
-      // Add delay before screenshot to ensure page stability
-      if (screenshotDelay > 0) {
-        logger.debug(`Adding ${screenshotDelay}ms delay before error screenshot for page stability`);
-        await new Promise(resolve => setTimeout(resolve, screenshotDelay));
-      }
-
       const screenshot = await screenshotUtil(page, logger);
       if (screenshot) {
         errorResponse[screenshotName] = screenshot;
