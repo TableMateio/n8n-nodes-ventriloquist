@@ -15,6 +15,7 @@ export interface SuccessResponseOptions {
   startTime: number;
   takeScreenshot?: boolean;
   screenshotName?: string;
+  screenshotDelay?: number;
   additionalData?: IDataObject;
   selector?: string;
   inputData?: IDataObject;
@@ -33,10 +34,13 @@ export async function createSuccessResponse(options: SuccessResponseOptions): Pr
     startTime,
     takeScreenshot = false,
     screenshotName = 'screenshot',
+    screenshotDelay = 1000,
     additionalData = {},
     selector = '',
     inputData = {},
   } = options;
+
+
 
   // Calculate duration
   const executionDuration = Date.now() - startTime;
@@ -72,11 +76,32 @@ export async function createSuccessResponse(options: SuccessResponseOptions): Pr
     successResponse.selector = selector;
   }
 
-  // Take a screenshot if requested and page is available
+    // Take a screenshot if requested and page is available
   if (takeScreenshot && page) {
+    logger.info(`[Screenshot] Taking screenshot for ${operation} operation with delay: ${screenshotDelay}ms`);
+
+    // Add delay before screenshot to ensure page stability
+    if (screenshotDelay > 0) {
+      logger.info(`[Screenshot] Adding ${screenshotDelay}ms delay before screenshot for page stability`);
+      await new Promise(resolve => setTimeout(resolve, screenshotDelay));
+    }
+
+    logger.info(`[Screenshot] Attempting to capture screenshot after delay`);
     const screenshot = await safeTakeScreenshot(page, logger);
+
     if (screenshot) {
+      const dataLength = screenshot.length;
+      logger.info(`[Screenshot] Screenshot captured successfully (${dataLength} chars)`);
       successResponse[screenshotName] = screenshot;
+    } else {
+      logger.info(`[Screenshot] Screenshot capture failed - may be due to anti-scraping protection`);
+      successResponse[screenshotName] = 'Screenshot capture failed - may be due to anti-scraping protection on this page';
+    }
+  } else {
+    if (!takeScreenshot) {
+      logger.debug(`[Screenshot] Screenshot not requested (takeScreenshot=${takeScreenshot})`);
+    } else if (!page) {
+      logger.warn(`[Screenshot] Page is null, cannot capture screenshot`);
     }
   }
 

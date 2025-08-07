@@ -1141,6 +1141,19 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		displayName: "Screenshot Delay",
+		name: "screenshotDelay",
+		type: "number",
+		default: 1000,
+		description: "Additional delay in milliseconds before taking screenshot to ensure page stability (default: 1000ms)",
+		displayOptions: {
+			show: {
+				operation: ["extract"],
+				takeScreenshot: [true],
+			},
+		},
+	},
+	{
 		displayName: "Output Input Data",
 		name: "outputInputData",
 		type: "boolean",
@@ -1270,6 +1283,7 @@ export async function execute(
 	const useHumanDelays = this.getNodeParameter("useHumanDelays", index, false) as boolean;
 	const takeScreenshotOption = this.getNodeParameter("takeScreenshot", index, false) as boolean;
 	const screenshotName = this.getNodeParameter("screenshotName", index, "screenshot") as string;
+	const screenshotDelay = this.getNodeParameter("screenshotDelay", index, 1000) as number;
 	const continueOnFail = this.getNodeParameter("continueOnFail", index, true) as boolean;
 	const outputInputData = this.getNodeParameter("outputInputData", index, true) as boolean;
 	const debugMode = this.getNodeParameter("debugMode", index, false) as boolean;
@@ -1281,7 +1295,7 @@ export async function execute(
 			nodeName,
 			nodeId,
 			index,
-			`Parameters: waitStrategy=${waitStrategy}, timeout=${timeout}ms`,
+			`Parameters: waitStrategy=${waitStrategy}, timeout=${timeout}ms, takeScreenshot=${takeScreenshotOption}, screenshotDelay=${screenshotDelay}`,
 		),
 	);
 
@@ -2269,7 +2283,7 @@ export async function execute(
 			);
 		}
 
-		// We'll let createSuccessResponse handle the screenshot
+				// We'll let createSuccessResponse handle the screenshot
 		const successResponse = await createSuccessResponse({
 			operation: "extract",
 			sessionId,
@@ -2278,6 +2292,7 @@ export async function execute(
 			startTime,
 			takeScreenshot: takeScreenshotOption,
 			screenshotName: screenshotName,
+			screenshotDelay: screenshotDelay,
 			additionalData: {
 				...extractionResultsData,
 			},
@@ -2505,7 +2520,7 @@ export async function execute(
 			data: processedExtractionData,
 		};
 
-		// Create the success response
+				// Create the success response
 		const finalSuccessResponse = await createSuccessResponse({
 			operation: "extract",
 			sessionId,
@@ -2514,6 +2529,7 @@ export async function execute(
 			startTime,
 			takeScreenshot: takeScreenshotOption,
 			screenshotName: screenshotName,
+			screenshotDelay: screenshotDelay,
 			additionalData: {
 				...finalExtractionResultsData,
 			},
@@ -2557,6 +2573,7 @@ export async function execute(
 			logger: this.logger,
 			takeScreenshot: takeScreenshotOption,
 			screenshotName: screenshotName,
+			screenshotDelay: screenshotDelay,
 			startTime,
 			// Don't include additionalData here as we'll handle the merge manually
 		});

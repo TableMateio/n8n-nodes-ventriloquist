@@ -486,20 +486,32 @@ export async function takeScreenshot(
 	logger: ILogger,
 ): Promise<string | null> {
 	if (!page) {
-		logger.warn("Cannot take screenshot: page is null");
+		logger.warn("[takeScreenshot] Cannot take screenshot: page is null");
 		return null;
 	}
 
 	try {
+		const pageUrl = await page.url();
+		logger.info(`[takeScreenshot] Attempting to capture screenshot of page: ${pageUrl}`);
+
 		const screenshot = await page.screenshot({
 			encoding: "base64",
 			fullPage: true,
 			type: "jpeg",
 			quality: 70,
 		});
-		return `data:image/jpeg;base64,${screenshot}`;
+
+		if (screenshot && screenshot.length > 0) {
+			const result = `data:image/jpeg;base64,${screenshot}`;
+			logger.info(`[takeScreenshot] Screenshot captured successfully (${result.length} chars)`);
+			return result;
+		} else {
+			logger.warn(`[takeScreenshot] Screenshot capture failed - this may be due to anti-scraping protection on ${pageUrl}`);
+			return null;
+		}
 	} catch (error) {
-		logger.warn(`Error taking screenshot: ${(error as Error).message}`);
+		logger.error(`[takeScreenshot] Error taking screenshot: ${(error as Error).message}`);
+		logger.error(`[takeScreenshot] Error stack: ${(error as Error).stack}`);
 		return null;
 	}
 }

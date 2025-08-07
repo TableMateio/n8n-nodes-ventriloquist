@@ -19,6 +19,7 @@ export interface ErrorResponseOptions {
   logger?: ILogger;
   takeScreenshot?: boolean;
   screenshotName?: string;
+  screenshotDelay?: number;
   startTime?: number;
   continueOnFail?: boolean;
   additionalData?: IDataObject;
@@ -42,6 +43,7 @@ export async function createErrorResponse(options: ErrorResponseOptions): Promis
     logger,
     takeScreenshot = true,
     screenshotName = 'screenshot',
+    screenshotDelay = 1000,
     startTime,
     additionalData = {},
   } = options;
@@ -74,9 +76,17 @@ export async function createErrorResponse(options: ErrorResponseOptions): Promis
   // Take a screenshot if requested and page is available
   if (takeScreenshot && page && logger) {
     try {
+      // Add delay before screenshot to ensure page stability
+      if (screenshotDelay > 0) {
+        logger.debug(`Adding ${screenshotDelay}ms delay before error screenshot for page stability`);
+        await new Promise(resolve => setTimeout(resolve, screenshotDelay));
+      }
+
       const screenshot = await screenshotUtil(page, logger);
       if (screenshot) {
         errorResponse[screenshotName] = screenshot;
+      } else {
+        errorResponse[screenshotName] = 'Screenshot capture failed - may be due to anti-scraping protection on this page';
       }
     } catch (screenshotError) {
       if (logger) {
@@ -136,12 +146,17 @@ export async function safeTakeScreenshot(
   page: Page | null,
   logger: ILogger
 ): Promise<string | null> {
-  if (!page) return null;
+  if (!page) {
+    logger.warn(`[safeTakeScreenshot] Page is null, cannot capture screenshot`);
+    return null;
+  }
 
   try {
-    return await screenshotUtil(page, logger);
+    const result = await screenshotUtil(page, logger);
+    return result;
   } catch (error) {
-    logger.warn(`Failed to take screenshot: ${(error as Error).message}`);
+    logger.error(`[safeTakeScreenshot] Failed to take screenshot: ${(error as Error).message}`);
+    logger.error(`[safeTakeScreenshot] Error stack: ${(error as Error).stack}`);
     return null;
   }
 }
