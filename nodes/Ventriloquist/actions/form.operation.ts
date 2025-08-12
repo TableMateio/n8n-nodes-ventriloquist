@@ -807,7 +807,7 @@ export async function execute(
 	const outputInputData = this.getNodeParameter(
 		"outputInputData",
 		index,
-		false,
+		true,
 	) as boolean;
 	const useEnterToSubmit = this.getNodeParameter(
 		"useEnterToSubmit",
