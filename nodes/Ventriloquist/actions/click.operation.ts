@@ -139,6 +139,18 @@ export const description: INodeProperties[] = [
 			minValue: 0,
 		},
 	},
+	{
+		displayName: "Output Input Data",
+		name: "outputInputData",
+		type: "boolean",
+		default: true,
+		description: "Whether to include the input data in the output",
+		displayOptions: {
+			show: {
+				operation: ["click"],
+			},
+		},
+	},
 ];
 
 /**
@@ -198,6 +210,11 @@ export async function execute(
 	) as string;
 	const waitSelector = this.getNodeParameter("waitSelector", index, "") as string;
 	const waitDuration = this.getNodeParameter("waitDuration", index, 1000) as number;
+	const outputInputData = this.getNodeParameter(
+		"outputInputData",
+		index,
+		true,
+	) as boolean;
 
 	try {
 		// Use the centralized session management
@@ -408,7 +425,7 @@ export async function execute(
 				startTime,
 				takeScreenshot: captureScreenshot,
 				selector,
-				inputData: items[index].json,
+				inputData: outputInputData ? items[index].json : {},
 			});
 
 			return { json: successResponse };
@@ -435,7 +452,7 @@ export async function execute(
 			logger: this.logger,
 			takeScreenshot: captureScreenshot,
 			startTime,
-			additionalData: items[index].json,
+			additionalData: outputInputData ? items[index].json : {},
 		});
 
 		return { json: errorResponse };
@@ -467,9 +484,7 @@ export async function execute(
 			logger: this.logger,
 			takeScreenshot: captureScreenshot,
 			startTime,
-			additionalData: {
-				...items[index].json, // Pass through input data
-			},
+			additionalData: outputInputData ? items[index].json : {},
 		});
 
 		if (!continueOnFail) {

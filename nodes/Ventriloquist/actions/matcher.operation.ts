@@ -991,7 +991,7 @@ export async function execute(
 		let screenshotData: IDataObject = {};
 		if (takeScreenshotOption && page) {
 			this.logger.info(`[Matcher] Taking screenshot BEFORE matching work begins`);
-			
+
 			try {
 				// For matcher, use the item selector as wait selector
 				const screenshot = await takeScreenshot(page, this.logger, 'element', 5000, actualItemSelector);

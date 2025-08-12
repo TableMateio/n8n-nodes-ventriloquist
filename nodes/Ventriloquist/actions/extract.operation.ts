@@ -1842,10 +1842,10 @@ export async function execute(
 		let screenshotData: IDataObject = {};
 		if (takeScreenshotOption && page) {
 			this.logger.info(`[Extract] Taking screenshot BEFORE extraction work begins`);
-			
+
 			// Use the first extraction item's selector for wait strategy if available
 			const firstSelector = filteredExtractionItems.length > 0 ? filteredExtractionItems[0].selector : undefined;
-			
+
 			try {
 				const screenshot = await takeScreenshot(page, this.logger, waitStrategy, timeout, firstSelector);
 				if (screenshot) {

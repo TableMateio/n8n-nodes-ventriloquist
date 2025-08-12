@@ -67,6 +67,19 @@ export async function robustClick(
             return { success: true };
           }
 
+          // Handle option element within select special case
+          if (element instanceof HTMLOptionElement) {
+            const select = element.parentElement;
+            if (select instanceof HTMLSelectElement) {
+              // Set the select's value to the option's value
+              select.value = element.value;
+              // Dispatch change event on the select element
+              select.dispatchEvent(new Event('change', { bubbles: true }));
+              select.dispatchEvent(new Event('input', { bubbles: true }));
+              return { success: true };
+            }
+          }
+
           // For other elements, try standard click
           if (element instanceof HTMLElement) {
             element.click();
