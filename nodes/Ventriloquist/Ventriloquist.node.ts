@@ -1124,13 +1124,28 @@ export class Ventriloquist implements INodeType {
 			const inputDataString = JSON.stringify(items[i]);
 			const operationParams = this.getNodeParameter('operation', i);
 
-			// For remaining cacheable browser-dependent operations, include current URL in cache key
+			// For cacheable browser-dependent operations, include current URL in cache key
 			// to prevent cached results from wrong page states
 			let browserStateKey = '';
-			if (['extract', 'detect'].includes(operation)) {
+			if (['extract', 'detect', 'form'].includes(operation)) {
 				try {
 					// Try to get current URL from session if available
-					const sessionId = this.getNodeParameter('sessionId', i, '') as string;
+					// Different operations use different parameter names for session ID
+					let sessionId = '';
+					try {
+						sessionId = this.getNodeParameter('explicitSessionId', i, '') as string;
+					} catch {
+						try {
+							sessionId = this.getNodeParameter('sessionId', i, '') as string;
+						} catch {
+							// Try to get session ID from input data
+							try {
+								sessionId = items[i]?.json?.sessionId as string || '';
+							} catch {
+								// No session ID found
+							}
+						}
+					}
 					if (sessionId) {
 						const session = SessionManager.getSession(sessionId);
 						if (session && session.browser) {
@@ -1138,7 +1153,9 @@ export class Ventriloquist implements INodeType {
 								const activePage = await getActivePage(session.browser, this.logger);
 								if (activePage) {
 									const currentUrl = await activePage.url();
-									browserStateKey = `_url:${currentUrl}`;
+									const currentTitle = await activePage.title();
+									// Include both URL and title to better distinguish different pages
+									browserStateKey = `_url:${currentUrl}_title:${currentTitle}`;
 								} else {
 									browserStateKey = '_url:no-active-page';
 								}
