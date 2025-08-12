@@ -163,6 +163,9 @@ export async function fillTextField(
 				const element = document.querySelector(sel);
 				if (element) {
 					(element as HTMLInputElement).value = "";
+					// Dispatch events to notify the form that the field was cleared
+					element.dispatchEvent(new Event("input", { bubbles: true }));
+					element.dispatchEvent(new Event("change", { bubbles: true }));
 				}
 			}, selector);
 		}

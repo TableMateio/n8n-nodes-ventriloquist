@@ -941,8 +941,11 @@ export async function execute(
 						try {
 							const inputElement = field as HTMLInputElement | HTMLTextAreaElement;
 
-							// Simple, safe clearing (no events triggered, just like individual field clearing)
+							// Clear the field and dispatch events to notify the form
 							inputElement.value = '';
+							// Dispatch events to notify the form that the field was cleared
+							inputElement.dispatchEvent(new Event("input", { bubbles: true }));
+							inputElement.dispatchEvent(new Event("change", { bubbles: true }));
 							clearedCount++;
 						} catch (error) {
 							errorCount++;
