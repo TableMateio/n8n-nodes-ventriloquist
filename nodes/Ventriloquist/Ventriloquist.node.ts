@@ -1124,10 +1124,13 @@ export class Ventriloquist implements INodeType {
 			const inputDataString = JSON.stringify(items[i]);
 			const operationParams = this.getNodeParameter('operation', i);
 
+			this.logger.info(`[Cache Debug] Starting cache key generation for operation: ${operation}`);
+
 			// For cacheable browser-dependent operations, include current URL in cache key
 			// to prevent cached results from wrong page states
 			let browserStateKey = '';
 			if (['extract', 'detect', 'form'].includes(operation)) {
+				this.logger.info(`[Cache Debug] Operation ${operation} requires browser state checking`);
 				try {
 					// Try to get current URL from session if available
 					// Different operations use different parameter names for session ID
@@ -1146,22 +1149,32 @@ export class Ventriloquist implements INodeType {
 							}
 						}
 					}
+					this.logger.info(`[Cache Debug] Found sessionId: ${sessionId || 'none'}`);
 					if (sessionId) {
 						const session = SessionManager.getSession(sessionId);
 						if (session && session.browser) {
 							try {
 								const activePage = await getActivePage(session.browser, this.logger);
 								if (activePage) {
-									const currentUrl = await activePage.url();
-									const currentTitle = await activePage.title();
-									// Include both URL and title to better distinguish different pages
-									browserStateKey = `_url:${currentUrl}_title:${currentTitle}`;
+									try {
+										const currentUrl = await activePage.url();
+										const currentTitle = await activePage.title();
+										// Include both URL and title to better distinguish different pages
+										browserStateKey = `_url:${currentUrl}_title:${currentTitle}`;
+										this.logger.info(`[Cache Debug] Browser state detected - URL: ${currentUrl}, Title: ${currentTitle}`);
+									} catch (pageInfoError) {
+										// Context might be destroyed after navigation
+										browserStateKey = '_url:context-destroyed';
+										this.logger.info(`[Cache Debug] Context destroyed while getting page info: ${(pageInfoError as Error).message}`);
+									}
 								} else {
 									browserStateKey = '_url:no-active-page';
+									this.logger.info(`[Cache Debug] No active page found`);
 								}
 							} catch (urlError) {
 								// If we can't get URL, don't include it in cache key
 								browserStateKey = '_url:unknown';
+								this.logger.info(`[Cache Debug] Error getting browser state: ${(urlError as Error).message}`);
 							}
 						} else {
 							browserStateKey = '_url:no-browser';
@@ -1175,12 +1188,26 @@ export class Ventriloquist implements INodeType {
 				}
 			}
 
-			const cacheKey = `${operation}_${Buffer.from(inputDataString + JSON.stringify(operationParams) + browserStateKey).toString('base64').slice(0, 32)}`;
+			// Generate a hash that includes all components but is a reasonable length
+			// Create a proper hash to ensure browser state differences are captured
+			const fullCacheString = inputDataString + JSON.stringify(operationParams) + browserStateKey;
+			const crypto = require('crypto');
+			const hash = crypto.createHash('md5').update(fullCacheString).digest('hex');
+			const cacheKey = `${operation}_${hash.substring(0, 16)}`;
+
+			this.logger.info(`[Cache Debug] Complete browser state key: "${browserStateKey}"`);
+			this.logger.info(`[Cache Debug] Input data string length: ${inputDataString.length}`);
+			this.logger.info(`[Cache Debug] Operation params: ${JSON.stringify(operationParams)}`);
+			this.logger.info(`[Cache Debug] Full cache components: ${inputDataString.substring(0, 100)}... + ${JSON.stringify(operationParams)} + ${browserStateKey}`);
+			this.logger.info(`[Cache Debug] Generated cache key: ${cacheKey}`);
+			this.logger.info(`[Cache Debug] Execution mode: ${executionMode}`);
 
 			// Check if we have cached results for expensive operations (in manual mode only to avoid production issues)
 			// NOTE: Decision operations are excluded from caching because they check dynamic content that can change
 			// even on the same page (e.g., search results, form states, etc.)
 			const shouldCache = executionMode === 'manual' && ['extract', 'detect', 'form'].includes(operation);
+
+			this.logger.info(`[Cache Debug] Should cache: ${shouldCache} (executionMode: ${executionMode}, operation: ${operation})`);
 
 			// Initialize cache as an object if it doesn't exist
 			if (!staticData.cache) {
@@ -1189,7 +1216,7 @@ export class Ventriloquist implements INodeType {
 			const cache = staticData.cache as { [key: string]: INodeExecutionData };
 
 			if (shouldCache && cache[cacheKey]) {
-				this.logger.info(`Using cached result for operation: ${operation}`);
+				this.logger.info(`[Cache Debug] Using cached result for operation: ${operation} with key: ${cacheKey}`);
 				const cachedResult = cache[cacheKey];
 
 				// Add execution duration to cached result
@@ -1524,13 +1551,13 @@ export class Ventriloquist implements INodeType {
 					throw new Error(`The operation "${operation}" is not supported!`);
 				}
 
-								// Cache the result for expensive operations (only in manual mode)
-				if (shouldCache && returnData[0].length > 0) {
-					const resultToCache = returnData[0][returnData[0].length - 1];
+											// Cache the result for expensive operations (only in manual mode)
+			if (shouldCache && returnData[0].length > 0) {
+				const resultToCache = returnData[0][returnData[0].length - 1];
 
-					// Store result in cache with a shallow copy to avoid references
-					cache[cacheKey] = JSON.parse(JSON.stringify(resultToCache));
-					this.logger.info(`Cached result for operation: ${operation}`);
+				// Store result in cache with a shallow copy to avoid references
+				cache[cacheKey] = JSON.parse(JSON.stringify(resultToCache));
+				this.logger.info(`[Cache Debug] Cached result for operation: ${operation} with key: ${cacheKey}`);
 
 					// Clean up old cache entries to prevent memory issues (keep only last 10 entries)
 					const cacheKeys = Object.keys(cache);
