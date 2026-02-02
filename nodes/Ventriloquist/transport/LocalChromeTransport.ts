@@ -2,6 +2,7 @@ import * as puppeteer from 'puppeteer-core';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as http from 'http';
 import { BrowserTransport } from './BrowserTransport';
 import { findChrome } from '../utils/chromeFinder';
 
@@ -20,6 +21,7 @@ export class LocalChromeTransport implements BrowserTransport {
     private stealthMode: boolean,
     private connectionTimeout: number,
     private connectToExisting: boolean = false,
+    private debuggingHost: string = 'localhost',
     private debuggingPort: number = 9222,
     private windowPositioning: boolean = false,
     private windowWidth: number = 1024,
@@ -100,11 +102,40 @@ export class LocalChromeTransport implements BrowserTransport {
     try {
       // If connecting to an existing Chrome instance
       if (this.connectToExisting) {
-        this.logger.info(`Connecting to existing Chrome instance at debugging port: ${this.debuggingPort}`);
+        const browserURL = `http://${this.debuggingHost}:${this.debuggingPort}`;
+        this.logger.info(`Connecting to existing Chrome instance at: ${browserURL}`);
 
-        // Connect to the existing Chrome instance
+        // When connecting from Docker to host Chrome, we need to handle the Host header
+        // Chrome's DevTools Protocol requires Host: localhost for security
+        const isRemoteHost = this.debuggingHost !== 'localhost' && this.debuggingHost !== '127.0.0.1';
+
+        if (isRemoteHost) {
+          this.logger.info('Detected remote debugging host - using custom WebSocket fetch with Host header');
+
+          // Manually fetch the WebSocket endpoint with the correct Host header
+          const wsEndpoint = await this.fetchWebSocketEndpoint(
+            this.debuggingHost,
+            this.debuggingPort
+          );
+
+          this.logger.info(`Got WebSocket endpoint: ${wsEndpoint}`);
+
+          // Connect using the WebSocket endpoint directly
+          const browser = await puppeteer.connect({
+            browserWSEndpoint: wsEndpoint,
+            defaultViewport: {
+              width: this.windowWidth,
+              height: this.windowHeight
+            }
+          });
+
+          this.logger.info('Successfully connected to existing Chrome instance via WebSocket');
+          return browser;
+        }
+
+        // Standard local connection
         const browser = await puppeteer.connect({
-          browserURL: `http://localhost:${this.debuggingPort}`,
+          browserURL,
           defaultViewport: {
             width: this.windowWidth,
             height: this.windowHeight
@@ -386,5 +417,85 @@ export class LocalChromeTransport implements BrowserTransport {
     } catch (error) {
       this.logger.warn(`Failed to apply stealth mode: ${(error as Error).message}`);
     }
+  }
+
+  /**
+   * Fetch the WebSocket endpoint from Chrome DevTools with Host header
+   * This is needed when connecting from Docker to host Chrome, as Chrome
+   * validates the Host header for security and rejects non-localhost requests.
+   */
+  private fetchWebSocketEndpoint(host: string, port: number): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: host,
+        port: port,
+        path: '/json/version',
+        method: 'GET',
+        headers: {
+          // Chrome requires Host: localhost for DevTools Protocol security
+          'Host': 'localhost'
+        }
+      };
+
+      this.logger.info(`Fetching WebSocket endpoint from ${host}:${port}/json/version with Host: localhost header`);
+
+      const req = http.request(options, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          if (res.statusCode !== 200) {
+            reject(new Error(`Failed to get WebSocket endpoint: HTTP ${res.statusCode} - ${data}`));
+            return;
+          }
+
+          try {
+            const json = JSON.parse(data);
+            let wsEndpoint = json.webSocketDebuggerUrl;
+
+            if (!wsEndpoint) {
+              reject(new Error('No webSocketDebuggerUrl in response'));
+              return;
+            }
+
+            this.logger.info(`Original WebSocket URL from Chrome: ${wsEndpoint}`);
+
+            // Parse the WebSocket URL to properly reconstruct it
+            // Chrome returns URLs like: ws://localhost:9222/devtools/browser/xxx
+            // But when using Host: localhost header, it may omit the port
+            const wsUrl = new URL(wsEndpoint);
+
+            // Replace the hostname with the actual debugging host
+            wsUrl.hostname = host;
+
+            // Ensure the port is set correctly (Chrome may omit it when Host header is used)
+            if (!wsUrl.port || wsUrl.port === '80' || wsUrl.port === '443') {
+              wsUrl.port = port.toString();
+            }
+
+            wsEndpoint = wsUrl.toString();
+
+            this.logger.info(`WebSocket endpoint resolved: ${wsEndpoint}`);
+            resolve(wsEndpoint);
+          } catch (e) {
+            reject(new Error(`Failed to parse response: ${(e as Error).message}`));
+          }
+        });
+      });
+
+      req.on('error', (e) => {
+        reject(new Error(`Request failed: ${e.message}`));
+      });
+
+      req.setTimeout(10000, () => {
+        req.destroy();
+        reject(new Error('Request timed out after 10 seconds'));
+      });
+
+      req.end();
+    });
   }
 }

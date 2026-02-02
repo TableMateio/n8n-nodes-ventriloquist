@@ -71,6 +71,20 @@ export class LocalChromeApi implements ICredentialType {
 			required: false,
 		},
 		{
+			displayName: 'Remote Debugging Host',
+			name: 'debuggingHost',
+			type: 'string',
+			default: 'localhost',
+			placeholder: 'localhost or host.docker.internal',
+			description: 'Hostname of the Chrome instance. Use "host.docker.internal" when running n8n in Docker and Chrome on your host machine.',
+			required: false,
+			displayOptions: {
+				show: {
+					connectToExisting: [true],
+				},
+			},
+		},
+		{
 			displayName: 'Remote Debugging Port',
 			name: 'debuggingPort',
 			type: 'number',

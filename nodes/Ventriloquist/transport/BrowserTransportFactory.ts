@@ -150,6 +150,7 @@ export class BrowserTransportFactory {
 
       // Get existing Chrome connection parameters
       const connectToExisting = credentials.connectToExisting === true;
+      const debuggingHost = credentials.debuggingHost as string || 'localhost';
       const debuggingPort = credentials.debuggingPort as number || 9222;
       const maximizeWindow = credentials.maximizeWindow === true;
 
@@ -161,7 +162,7 @@ export class BrowserTransportFactory {
       } else {
         logger.info('Window positioning: disabled (using default position and size)');
       }
-      logger.info(`Connection to existing Chrome: ${connectToExisting ? `enabled (port: ${debuggingPort})` : 'disabled'}`);
+      logger.info(`Connection to existing Chrome: ${connectToExisting ? `enabled (${debuggingHost}:${debuggingPort})` : 'disabled'}`);
       logger.info(`Launch arguments: ${launchArgs.join(' ')}`);
 
       return new LocalChromeTransport(
@@ -173,6 +174,7 @@ export class BrowserTransportFactory {
         stealthMode,
         connectionTimeout,
         connectToExisting,
+        debuggingHost,
         debuggingPort,
         windowPositioning,
         windowWidth,
