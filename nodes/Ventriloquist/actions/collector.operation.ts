@@ -102,6 +102,7 @@ interface ICollectionResult {
 	items: ICollectedItem[];
 	itemsExtracted: number;
 	itemsFiltered: number;
+	containerFound?: boolean;
 	debugInfo?: any;
 }
 
@@ -173,6 +174,18 @@ export const description: INodeProperties[] = [
 		},
 		default: 50,
 		description: "Maximum number of items to collect per page",
+		displayOptions: {
+			show: {
+				operation: ["collector"],
+			},
+		},
+	},
+	{
+		displayName: "Return Item When Zero Found",
+		name: "returnItemWhenZeroFound",
+		type: "boolean",
+		default: true,
+		description: "Whether to return a collection item when no items are found on the page. If disabled, returns empty collection.",
 		displayOptions: {
 			show: {
 				operation: ["collector"],
@@ -1107,6 +1120,9 @@ export async function execute(
 	let totalItemsExtracted = 0;
 	let totalItemsFiltered = 0;
 
+	// Track container found status across all pages
+	let containerFound = true;
+
 	// Track debug information for output
 	let debugInfo: any = null;
 
@@ -1417,9 +1433,20 @@ export async function execute(
 							)
 						);
 
-						// If this is the first page and we can't find the selector, it's an error
+						// If this is the first page and we can't find the selector, mark container as not found
 						if (paginationState.currentPage === startPage) {
-							throw new Error(`Selector not found: ${selectorToWaitFor}`);
+							this.logger.warn(
+								formatOperationLog(
+									'Collector',
+									nodeName,
+									nodeId,
+									index,
+									`Container selector not found on first page: ${selectorToWaitFor}`
+								)
+							);
+							containerFound = false;
+							paginationState.lastPageDetected = true;
+							break;
 						} else {
 							// Otherwise, we've probably reached the end of pagination
 							paginationState.lastPageDetected = true;
@@ -1452,15 +1479,20 @@ export async function execute(
 				index
 			);
 
-			// Extract items and update statistics
-			const pageItems = pageResult.items;
-			totalItemsExtracted += pageResult.itemsExtracted;
-			totalItemsFiltered += pageResult.itemsFiltered;
+		// Extract items and update statistics
+		const pageItems = pageResult.items;
+		totalItemsExtracted += pageResult.itemsExtracted;
+		totalItemsFiltered += pageResult.itemsFiltered;
 
-			// Capture debug info from first page (if available)
-			if (!debugInfo && pageResult.debugInfo) {
-				debugInfo = pageResult.debugInfo;
-			}
+		// Track container found status (if any page has containerFound: false, overall is false)
+		if (pageResult.containerFound === false) {
+			containerFound = false;
+		}
+
+		// Capture debug info from first page (if available)
+		if (!debugInfo && pageResult.debugInfo) {
+			debugInfo = pageResult.debugInfo;
+		}
 
 			// Add items from this page to our collection
 			collectedItems.push(...pageItems);
@@ -2039,6 +2071,8 @@ export async function execute(
 					_collectionDebug: true,
 					_debugType: 'collection',
 					sessionId,
+					itemsFound: collectedItems.length > 0,
+					containerFound,
 					...collectionDebugInfo
 				}
 			});
@@ -2180,6 +2214,8 @@ export async function execute(
 					...(outputInputData && items[index]?.json ? items[index].json : {}),
 					...item,
 					sessionId,
+					itemsFound: true,
+					containerFound,
 					// Individual item debug info can go here if needed
 					...(debugMode && item.itemDebug && { itemDebug: item.itemDebug })
 				}
@@ -2208,13 +2244,18 @@ export async function execute(
 			returnItems.push(itemData);
 		}
 
-		// If no items were collected, return collection info and a message item
-		if (collectedItems.length === 0) {
+		// Check if we should return an item when zero items are found
+		const returnItemWhenZeroFound = this.getNodeParameter('returnItemWhenZeroFound', index, true) as boolean;
+
+		// If no items were collected, optionally return collection info and a message item
+		if (collectedItems.length === 0 && returnItemWhenZeroFound) {
 			let message = 'No items collected';
-			if (totalItemsExtracted > 0 && totalItemsFiltered > 0) {
+			if (!containerFound) {
+				message = 'No items collected - container selector not found on page(s)';
+			} else if (totalItemsExtracted > 0 && totalItemsFiltered > 0) {
 				message = `No items collected - ${totalItemsExtracted} items found but all ${totalItemsFiltered} were filtered out`;
 			} else if (totalItemsExtracted === 0) {
-				message = 'No items collected - no items found on page(s)';
+				message = 'No items collected - container found but no items within';
 			}
 
 			// If debug mode wasn't enabled above, we still need to add collection info
@@ -2227,7 +2268,9 @@ export async function execute(
 						message,
 						sessionId,
 						totalItems: 0,
-						pagesProcessed: paginationState.currentPage
+						pagesProcessed: paginationState.currentPage,
+						itemsFound: false,
+						containerFound
 					}
 				});
 			} else {
@@ -2238,7 +2281,9 @@ export async function execute(
 						_messageItem: true,
 						success: true,
 						message,
-						sessionId
+						sessionId,
+						itemsFound: false,
+						containerFound
 					}
 				});
 			}
@@ -2382,7 +2427,8 @@ async function collectItemsFromPage(
 			return {
 				items: [],
 				itemsExtracted: 0,
-				itemsFiltered: 0
+				itemsFiltered: 0,
+				containerFound: false
 			};
 		}
 
@@ -3537,6 +3583,7 @@ async function collectItemsFromPage(
 		items: filteredItems,
 		itemsExtracted,
 		itemsFiltered,
+		containerFound: true,
 		...(selectorValidationResults && { debugInfo: selectorValidationResults })
 	};
 }

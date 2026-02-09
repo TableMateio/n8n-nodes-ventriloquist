@@ -109,41 +109,71 @@ export class LocalChromeTransport implements BrowserTransport {
         // Chrome's DevTools Protocol requires Host: localhost for security
         const isRemoteHost = this.debuggingHost !== 'localhost' && this.debuggingHost !== '127.0.0.1';
 
-        if (isRemoteHost) {
-          this.logger.info('Detected remote debugging host - using custom WebSocket fetch with Host header');
+        // Retry logic for when Chrome is just starting up
+        const maxRetries = 3;
+        const retryDelayMs = 2000;
 
-          // Manually fetch the WebSocket endpoint with the correct Host header
-          const wsEndpoint = await this.fetchWebSocketEndpoint(
-            this.debuggingHost,
-            this.debuggingPort
-          );
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            if (isRemoteHost) {
+              this.logger.info(`Detected remote debugging host - using custom WebSocket fetch with Host header (attempt ${attempt}/${maxRetries})`);
 
-          this.logger.info(`Got WebSocket endpoint: ${wsEndpoint}`);
+              // Manually fetch the WebSocket endpoint with the correct Host header
+              const wsEndpoint = await this.fetchWebSocketEndpoint(
+                this.debuggingHost,
+                this.debuggingPort
+              );
 
-          // Connect using the WebSocket endpoint directly
-          const browser = await puppeteer.connect({
-            browserWSEndpoint: wsEndpoint,
-            defaultViewport: {
-              width: this.windowWidth,
-              height: this.windowHeight
+              this.logger.info(`Got WebSocket endpoint: ${wsEndpoint}`);
+
+              // Connect using the WebSocket endpoint directly
+              const browser = await puppeteer.connect({
+                browserWSEndpoint: wsEndpoint,
+                defaultViewport: {
+                  width: this.windowWidth,
+                  height: this.windowHeight
+                }
+              });
+
+              this.logger.info('Successfully connected to existing Chrome instance via WebSocket');
+              return browser;
             }
-          });
 
-          this.logger.info('Successfully connected to existing Chrome instance via WebSocket');
-          return browser;
+            // Standard local connection
+            const browser = await puppeteer.connect({
+              browserURL,
+              defaultViewport: {
+                width: this.windowWidth,
+                height: this.windowHeight
+              }
+            });
+
+            this.logger.info('Successfully connected to existing Chrome instance');
+            return browser;
+
+          } catch (connectError) {
+            const errorMsg = (connectError as Error).message;
+
+            // Check if this is a connection-refused type error (Chrome not ready yet)
+            const isConnectionError = errorMsg.includes('ECONNREFUSED') ||
+                                      errorMsg.includes('socket hang up') ||
+                                      errorMsg.includes('Failed to fetch') ||
+                                      errorMsg.includes('Request failed');
+
+            if (isConnectionError && attempt < maxRetries) {
+              this.logger.warn(`Chrome connection attempt ${attempt} failed: ${errorMsg}`);
+              this.logger.info(`Chrome may be starting up. Waiting ${retryDelayMs}ms before retry...`);
+              await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+              continue;
+            }
+
+            // Not a retriable error, or we've exhausted retries
+            throw connectError;
+          }
         }
 
-        // Standard local connection
-        const browser = await puppeteer.connect({
-          browserURL,
-          defaultViewport: {
-            width: this.windowWidth,
-            height: this.windowHeight
-          }
-        });
-
-        this.logger.info('Successfully connected to existing Chrome instance');
-        return browser;
+        // Should never reach here, but TypeScript needs this
+        throw new Error('Failed to connect after all retries');
       }
 
       // Otherwise, launch a new Chrome instance
