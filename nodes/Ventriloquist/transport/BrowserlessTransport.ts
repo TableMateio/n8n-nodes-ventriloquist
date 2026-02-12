@@ -133,6 +133,11 @@ export class BrowserlessTransport implements BrowserTransport {
 		} catch (error) {
 			this.logger.error(`Error connecting to Browserless: ${(error as Error).message}`);
 			throw new Error(`Could not connect to Browserless: ${(error as Error).message}`);
+		} finally {
+			// Clean up rebrowser env vars — n8n is long-running,
+			// env vars must not leak to other workflows
+			delete process.env.REBROWSER_PATCHES_RUNTIME_FIX_MODE;
+			delete process.env.REBROWSER_PATCHES_SOURCE_URL;
 		}
 	}
 

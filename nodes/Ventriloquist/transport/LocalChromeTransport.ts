@@ -103,15 +103,19 @@ export class LocalChromeTransport implements BrowserTransport {
    * Connect to a local Chrome browser
    */
   async connect(): Promise<puppeteer.Browser> {
-    try {
-      // When maximum anti-detection is enabled for existing Chrome connections,
-      // activate rebrowser patches (they work on the Puppeteer CLIENT side)
-      if (this.connectToExisting && this.antiDetectionLevel === 'maximum') {
-        process.env.REBROWSER_PATCHES_RUNTIME_FIX_MODE = 'addBinding';
-        process.env.REBROWSER_PATCHES_SOURCE_URL = 'pptr:internal';
-        this.logger.info('Rebrowser patches activated for existing Chrome connection: Runtime.Enable fix (addBinding mode)');
-      }
+    // Helper to set/clear rebrowser env vars safely around puppeteer calls.
+    // n8n is a long-running process — env vars MUST be cleaned up to avoid
+    // leaking maximum-mode patches into subsequent off/standard workflows.
+    const setRebrowserEnv = () => {
+      process.env.REBROWSER_PATCHES_RUNTIME_FIX_MODE = 'addBinding';
+      process.env.REBROWSER_PATCHES_SOURCE_URL = 'pptr:internal';
+    };
+    const clearRebrowserEnv = () => {
+      delete process.env.REBROWSER_PATCHES_RUNTIME_FIX_MODE;
+      delete process.env.REBROWSER_PATCHES_SOURCE_URL;
+    };
 
+    try {
       // If connecting to an existing Chrome instance
       if (this.connectToExisting) {
         const browserURL = `http://${this.debuggingHost}:${this.debuggingPort}`;
@@ -121,71 +125,81 @@ export class LocalChromeTransport implements BrowserTransport {
         // Chrome's DevTools Protocol requires Host: localhost for security
         const isRemoteHost = this.debuggingHost !== 'localhost' && this.debuggingHost !== '127.0.0.1';
 
+        // Activate rebrowser patches BEFORE any puppeteer.connect() call
+        if (this.antiDetectionLevel === 'maximum') {
+          setRebrowserEnv();
+          this.logger.info('Rebrowser patches activated for existing Chrome connection: Runtime.Enable fix (addBinding mode)');
+        }
+
         // Retry logic for when Chrome is just starting up
         const maxRetries = 3;
         const retryDelayMs = 2000;
 
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          try {
-            if (isRemoteHost) {
-              this.logger.info(`Detected remote debugging host - using custom WebSocket fetch with Host header (attempt ${attempt}/${maxRetries})`);
+        try {
+          for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+              if (isRemoteHost) {
+                this.logger.info(`Detected remote debugging host - using custom WebSocket fetch with Host header (attempt ${attempt}/${maxRetries})`);
 
-              // Manually fetch the WebSocket endpoint with the correct Host header
-              const wsEndpoint = await this.fetchWebSocketEndpoint(
-                this.debuggingHost,
-                this.debuggingPort
-              );
+                // Manually fetch the WebSocket endpoint with the correct Host header
+                const wsEndpoint = await this.fetchWebSocketEndpoint(
+                  this.debuggingHost,
+                  this.debuggingPort
+                );
 
-              this.logger.info(`Got WebSocket endpoint: ${wsEndpoint}`);
+                this.logger.info(`Got WebSocket endpoint: ${wsEndpoint}`);
 
-              // Connect using the WebSocket endpoint directly
+                // Connect using the WebSocket endpoint directly
+                const browser = await puppeteer.connect({
+                  browserWSEndpoint: wsEndpoint,
+                  defaultViewport: {
+                    width: this.windowWidth,
+                    height: this.windowHeight
+                  }
+                });
+
+                this.logger.info('Successfully connected to existing Chrome instance via WebSocket');
+                return browser;
+              }
+
+              // Standard local connection
               const browser = await puppeteer.connect({
-                browserWSEndpoint: wsEndpoint,
+                browserURL,
                 defaultViewport: {
                   width: this.windowWidth,
                   height: this.windowHeight
                 }
               });
 
-              this.logger.info('Successfully connected to existing Chrome instance via WebSocket');
+              this.logger.info('Successfully connected to existing Chrome instance');
               return browser;
-            }
 
-            // Standard local connection
-            const browser = await puppeteer.connect({
-              browserURL,
-              defaultViewport: {
-                width: this.windowWidth,
-                height: this.windowHeight
+            } catch (connectError) {
+              const errorMsg = (connectError as Error).message;
+
+              // Check if this is a connection-refused type error (Chrome not ready yet)
+              const isConnectionError = errorMsg.includes('ECONNREFUSED') ||
+                                        errorMsg.includes('socket hang up') ||
+                                        errorMsg.includes('Failed to fetch') ||
+                                        errorMsg.includes('Request failed');
+
+              if (isConnectionError && attempt < maxRetries) {
+                this.logger.warn(`Chrome connection attempt ${attempt} failed: ${errorMsg}`);
+                this.logger.info(`Chrome may be starting up. Waiting ${retryDelayMs}ms before retry...`);
+                await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+                continue;
               }
-            });
 
-            this.logger.info('Successfully connected to existing Chrome instance');
-            return browser;
-
-          } catch (connectError) {
-            const errorMsg = (connectError as Error).message;
-
-            // Check if this is a connection-refused type error (Chrome not ready yet)
-            const isConnectionError = errorMsg.includes('ECONNREFUSED') ||
-                                      errorMsg.includes('socket hang up') ||
-                                      errorMsg.includes('Failed to fetch') ||
-                                      errorMsg.includes('Request failed');
-
-            if (isConnectionError && attempt < maxRetries) {
-              this.logger.warn(`Chrome connection attempt ${attempt} failed: ${errorMsg}`);
-              this.logger.info(`Chrome may be starting up. Waiting ${retryDelayMs}ms before retry...`);
-              await new Promise(resolve => setTimeout(resolve, retryDelayMs));
-              continue;
+              // Not a retriable error, or we've exhausted retries
+              throw connectError;
             }
-
-            // Not a retriable error, or we've exhausted retries
-            throw connectError;
           }
-        }
 
-        // Should never reach here, but TypeScript needs this
-        throw new Error('Failed to connect after all retries');
+          // Should never reach here, but TypeScript needs this
+          throw new Error('Failed to connect after all retries');
+        } finally {
+          clearRebrowserEnv();
+        }
       }
 
       // Otherwise, launch a new Chrome instance
@@ -239,8 +253,7 @@ export class LocalChromeTransport implements BrowserTransport {
       // When maximum anti-detection is enabled, activate rebrowser patches
       // These MUST be set BEFORE any puppeteer.launch/connect call
       if (this.antiDetectionLevel === 'maximum') {
-        process.env.REBROWSER_PATCHES_RUNTIME_FIX_MODE = 'addBinding';
-        process.env.REBROWSER_PATCHES_SOURCE_URL = 'pptr:internal';
+        setRebrowserEnv();
         this.logger.info('Rebrowser patches activated: Runtime.Enable fix (addBinding mode), source URL masking');
       }
 
@@ -271,20 +284,27 @@ export class LocalChromeTransport implements BrowserTransport {
       this.logger.info(`Key flags for password prevention: ${puppeteerArgs.filter(arg => arg.includes('WebUIDisableLeakDetection') || arg.includes('PasswordLeakDetection')).join(', ')}`);
 
       // Launch the browser
-      const browser = await puppeteer.launch({
-        executablePath: chromeInfo.executablePath,
-        headless: this.headless,
-        args: puppeteerArgs,
-        timeout: this.connectionTimeout,
-        userDataDir: this.userDataDir || this.tempUserDataDir,
-        // Newer versions may not support this, but we can use a cast to any
-        // @ts-ignore - ignoreHTTPSErrors not in type definition but supported by puppeteer
-        ignoreHTTPSErrors: true,
-        defaultViewport: {
-          width: this.windowWidth,
-          height: this.windowHeight
-        }
-      });
+      let browser: puppeteer.Browser;
+      try {
+        browser = await puppeteer.launch({
+          executablePath: chromeInfo.executablePath,
+          headless: this.headless,
+          args: puppeteerArgs,
+          timeout: this.connectionTimeout,
+          userDataDir: this.userDataDir || this.tempUserDataDir,
+          // Newer versions may not support this, but we can use a cast to any
+          // @ts-ignore - ignoreHTTPSErrors not in type definition but supported by puppeteer
+          ignoreHTTPSErrors: true,
+          defaultViewport: {
+            width: this.windowWidth,
+            height: this.windowHeight
+          }
+        });
+      } finally {
+        // Clean up rebrowser env vars immediately after launch —
+        // they only need to be set during the puppeteer.launch() call
+        clearRebrowserEnv();
+      }
 
       // Apply additional stealth measures
       if (this.antiDetectionLevel !== 'off') {
