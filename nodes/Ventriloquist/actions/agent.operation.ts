@@ -9,7 +9,7 @@ import {
 } from "../utils/resultUtils";
 import { mergeInputWithOutput } from '../../../utils/utilities';
 import { SessionManager } from '../utils/sessionManager';
-import type { Page, Browser } from 'puppeteer';
+import type { Page, Browser } from 'puppeteer-core';
 import OpenAI from 'openai';
 
 /**

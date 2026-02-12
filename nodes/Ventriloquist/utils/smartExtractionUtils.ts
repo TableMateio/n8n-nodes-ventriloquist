@@ -3,7 +3,7 @@ import { formatOperationLog } from './resultUtils';
 import { IMiddlewareContext } from './middlewares/middleware';
 import { AIService, IAIExtractionOptions } from './aiService';
 import { logWithDebug } from './loggingUtils';
-import type * as puppeteer from 'puppeteer';
+import type * as puppeteer from 'puppeteer-core';
 import { enhanceFieldsWithRelativeSelectorContent } from './processOpenAISchema';
 
 /**
