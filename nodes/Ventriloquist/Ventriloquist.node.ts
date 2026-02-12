@@ -1,7 +1,4 @@
 import * as puppeteer from 'puppeteer-core';
-import {
-	NodeConnectionType,
-} from 'n8n-workflow';
 import type {
 	IDataObject,
 	IExecuteFunctions,
@@ -41,33 +38,33 @@ const configureDecisionOutputs = (parameters: INodeParameters) => {
 
 	// Check operation always has exactly 2 outputs: success (0) and failure (1)
 	if (operation === 'check') {
-		return [NodeConnectionType.Main, NodeConnectionType.Main];
+		return ['main', 'main'];
 	}
 
 	// Decision operation routing logic
 	if (operation === 'decision') {
 		// Default to single output if not using routing
 		if (parameters.enableRouting !== true) {
-			return [NodeConnectionType.Main];
+			return ['main'];
 		}
 
 		// Get route count, default to 2 if not specified
 		const routeCount = (parameters.routeCount ?? 2) as number;
 		if (routeCount < 1) {
-			return [NodeConnectionType.Main];
+			return ['main'];
 		}
 
 		// Create specific number of outputs
 		const outputs = [];
 		for (let i = 0; i < routeCount; i++) {
-			outputs.push(NodeConnectionType.Main);
+			outputs.push('main');
 		}
 
 		return outputs;
 	}
 
 	// Default to single output for all other operations
-	return [NodeConnectionType.Main];
+	return ['main'];
 };
 
 
@@ -443,7 +440,7 @@ export class Ventriloquist implements INodeType {
 		defaults: {
 			name: 'Ventriloquist',
 		},
-		inputs: [NodeConnectionType.Main],
+		inputs: ['main'],
 		outputs: `={{(${configureDecisionOutputs})($parameter)}}`,
 		credentials: [
 			{

@@ -6,7 +6,7 @@ import type {
 	IDataObject,
 	IRequestOptions,
 } from 'n8n-workflow';
-import { NodeOperationError, NodeConnectionType } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 
 export class Smarty implements INodeType {
 	description: INodeTypeDescription = {
@@ -20,8 +20,8 @@ export class Smarty implements INodeType {
 		defaults: {
 			name: 'Smarty',
 		},
-		inputs: [NodeConnectionType.Main],
-		outputs: [NodeConnectionType.Main],
+		inputs: ['main'],
+		outputs: ['main'],
 		credentials: [
 			{
 				name: 'googleApi',

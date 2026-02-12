@@ -6,7 +6,7 @@ import type {
 	IDataObject,
 	IRequestOptions,
 } from 'n8n-workflow';
-import { NodeOperationError, NodeConnectionType } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 
 // Country code normalization utility
 interface CountryCodeMapping {
@@ -183,8 +183,8 @@ export class DirectMail implements INodeType {
 		defaults: {
 			name: 'Direct Mail',
 		},
-		inputs: [NodeConnectionType.Main],
-		outputs: [NodeConnectionType.Main],
+		inputs: ['main'],
+		outputs: ['main'],
 		credentials: [
 			{
 				name: 'lobApi',

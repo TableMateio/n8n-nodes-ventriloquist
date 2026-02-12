@@ -9,7 +9,7 @@ import type {
 	ILoadOptionsFunctions,
 	INodePropertyOptions,
 } from 'n8n-workflow';
-import { ApplicationError, NodeConnectionType, NodeOperationError } from 'n8n-workflow';
+import { ApplicationError, NodeOperationError } from 'n8n-workflow';
 
 // Helper function to get type validation strictness
 const getTypeValidationStrictness = (version: number) => {
@@ -59,7 +59,7 @@ export class RouterV3 implements INodeType {
 				name: 'Router',
 				color: '#506000',
 			},
-			inputs: [NodeConnectionType.Main],
+			inputs: ['main'],
 			outputs: `={{(${configuredOutputs})($parameter)}}`,
 			properties: [
 				{
