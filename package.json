@@ -20,7 +20,7 @@
 	},
 	"main": "index.js",
 	"scripts": {
-		"build": "tsc -p tsconfig.build.json; gulp build:icons",
+		"build": "tsc -p tsconfig.build.json && gulp build:icons",
 		"dev": "tsc --watch",
 		"format": "prettier nodes credentials --write",
 		"lint": "eslint nodes credentials package.json --ignore-pattern nodes/Ventriloquist/actions/decision.operation.ts",
@@ -71,7 +71,7 @@
 		"typescript": "^5.5.3"
 	},
 	"peerDependencies": {
-		"n8n-workflow": "*"
+		"n8n-workflow": "~2.5.0"
 	},
 	"dependencies": {
 		"luxon": "^3.4.4",
