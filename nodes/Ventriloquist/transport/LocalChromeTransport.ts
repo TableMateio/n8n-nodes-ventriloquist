@@ -5,6 +5,10 @@ import * as fs from 'fs';
 import * as http from 'http';
 import { BrowserTransport } from './BrowserTransport';
 import { findChrome } from '../utils/chromeFinder';
+import type { AntiDetectionLevel } from './BrowserTransportFactory';
+
+/** Current Chrome UA — used as launch flag to avoid detectable CDP Emulation.setUserAgentOverride */
+export const CURRENT_CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
 
 /**
  * Transport for local Chrome browser
@@ -18,7 +22,7 @@ export class LocalChromeTransport implements BrowserTransport {
     private userDataDir: string,
     private headless: boolean,
     private launchArgs: string[],
-    private stealthMode: boolean,
+    private antiDetectionLevel: AntiDetectionLevel,
     private connectionTimeout: number,
     private connectToExisting: boolean = false,
     private debuggingHost: string = 'localhost',
@@ -100,6 +104,14 @@ export class LocalChromeTransport implements BrowserTransport {
    */
   async connect(): Promise<puppeteer.Browser> {
     try {
+      // When maximum anti-detection is enabled for existing Chrome connections,
+      // activate rebrowser patches (they work on the Puppeteer CLIENT side)
+      if (this.connectToExisting && this.antiDetectionLevel === 'maximum') {
+        process.env.REBROWSER_PATCHES_RUNTIME_FIX_MODE = 'addBinding';
+        process.env.REBROWSER_PATCHES_SOURCE_URL = 'pptr:internal';
+        this.logger.info('Rebrowser patches activated for existing Chrome connection: Runtime.Enable fix (addBinding mode)');
+      }
+
       // If connecting to an existing Chrome instance
       if (this.connectToExisting) {
         const browserURL = `http://${this.debuggingHost}:${this.debuggingPort}`;
@@ -210,13 +222,26 @@ export class LocalChromeTransport implements BrowserTransport {
         this.logger.info(`Setting window position and size: ${windowPositionArg} ${windowSizeArg}`);
       }
 
-      // Apply stealth mode settings if enabled
-      if (this.stealthMode) {
+      // Apply stealth launch flags when anti-detection is enabled
+      if (this.antiDetectionLevel !== 'off') {
         puppeteerArgs.push(
           '--disable-blink-features=AutomationControlled',
           '--disable-features=IsolateOrigins,site-per-process',
           '--disable-site-isolation-trials'
         );
+
+        // Set UA via launch flag instead of CDP Emulation.setUserAgentOverride (which is detectable)
+        if (!puppeteerArgs.some(arg => arg.startsWith('--user-agent'))) {
+          puppeteerArgs.push(`--user-agent=${CURRENT_CHROME_UA}`);
+        }
+      }
+
+      // When maximum anti-detection is enabled, activate rebrowser patches
+      // These MUST be set BEFORE any puppeteer.launch/connect call
+      if (this.antiDetectionLevel === 'maximum') {
+        process.env.REBROWSER_PATCHES_RUNTIME_FIX_MODE = 'addBinding';
+        process.env.REBROWSER_PATCHES_SOURCE_URL = 'pptr:internal';
+        this.logger.info('Rebrowser patches activated: Runtime.Enable fix (addBinding mode), source URL masking');
       }
 
             // Add the SPECIFIC flags recommended by Chrome expert
@@ -262,7 +287,7 @@ export class LocalChromeTransport implements BrowserTransport {
       });
 
       // Apply additional stealth measures
-      if (this.stealthMode) {
+      if (this.antiDetectionLevel !== 'off') {
         this.logger.info('Applying stealth mode optimizations for all new pages');
 
         // Listen for new pages and apply stealth measures
@@ -303,7 +328,7 @@ export class LocalChromeTransport implements BrowserTransport {
     page.setDefaultTimeout(this.connectionTimeout);
 
     // Apply stealth mode if enabled
-    if (this.stealthMode) {
+    if (this.antiDetectionLevel !== 'off') {
       await this.applyStealthMode(page);
     }
 
@@ -378,11 +403,12 @@ export class LocalChromeTransport implements BrowserTransport {
    * Apply stealth mode to a page to avoid detection
    */
   private async applyStealthMode(page: puppeteer.Page): Promise<void> {
+    if (this.antiDetectionLevel === 'off') return;
+
     try {
-      // Override user agent to make it look more like a real browser
-      await page.setUserAgent(
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      );
+      // UA is set via --user-agent launch flag (not detectable) for new Chrome instances.
+      // For connectToExisting, the real Chrome already has a legitimate UA — don't override.
+      // REMOVED: page.setUserAgent() — calls Emulation.setUserAgentOverride CDP command which is detectable.
 
       // Override navigator.webdriver property and other browser fingerprinting
       await page.evaluateOnNewDocument(() => {
