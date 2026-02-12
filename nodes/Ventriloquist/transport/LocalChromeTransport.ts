@@ -125,10 +125,14 @@ export class LocalChromeTransport implements BrowserTransport {
         // Chrome's DevTools Protocol requires Host: localhost for security
         const isRemoteHost = this.debuggingHost !== 'localhost' && this.debuggingHost !== '127.0.0.1';
 
-        // Activate rebrowser patches BEFORE any puppeteer.connect() call
-        if (this.antiDetectionLevel === 'maximum') {
+        // Activate rebrowser patches BEFORE any puppeteer.connect() call.
+        // Rebrowser patches suppress Runtime.Enable and mask Runtime.callFunctionOn —
+        // these are the PRIMARY detection vectors for Cloudflare Turnstile.
+        // Enable for both standard and maximum (standard = rebrowser only,
+        // maximum = rebrowser + stealth injection for launched Chrome).
+        if (this.antiDetectionLevel !== 'off') {
           setRebrowserEnv();
-          this.logger.info('Rebrowser patches activated for existing Chrome connection: Runtime.Enable fix (addBinding mode)');
+          this.logger.info(`Rebrowser patches activated (${this.antiDetectionLevel}): Runtime.Enable fix (addBinding mode)`);
         }
 
         // Retry logic for when Chrome is just starting up
@@ -250,11 +254,11 @@ export class LocalChromeTransport implements BrowserTransport {
         }
       }
 
-      // When maximum anti-detection is enabled, activate rebrowser patches
-      // These MUST be set BEFORE any puppeteer.launch/connect call
-      if (this.antiDetectionLevel === 'maximum') {
+      // Activate rebrowser patches BEFORE puppeteer.launch() — these suppress
+      // Runtime.Enable and mask Runtime.callFunctionOn, the primary CDP detection vectors.
+      if (this.antiDetectionLevel !== 'off') {
         setRebrowserEnv();
-        this.logger.info('Rebrowser patches activated: Runtime.Enable fix (addBinding mode), source URL masking');
+        this.logger.info(`Rebrowser patches activated (${this.antiDetectionLevel}): Runtime.Enable fix (addBinding mode), source URL masking`);
       }
 
             // Add the SPECIFIC flags recommended by Chrome expert

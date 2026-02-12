@@ -67,16 +67,16 @@ export class LocalChromeApi implements ICredentialType {
 				{
 					name: 'Standard',
 					value: 'standard',
-					description: 'Basic stealth: webdriver override, plugins mock, launch flags. Same as previous Stealth Mode.',
+					description: 'CDP leak prevention (rebrowser patches) + stealth launch flags. Recommended for most sites including Cloudflare/Turnstile.',
 				},
 				{
 					name: 'Maximum',
 					value: 'maximum',
-					description: 'Full anti-detection: CDP leak prevention, UA via launch flag, all standard measures. Recommended for Cloudflare/Turnstile sites.',
+					description: 'Everything in Standard plus navigator overrides for launched headless Chrome. Not needed for connect-to-existing.',
 				},
 			],
 			default: 'standard',
-			description: 'Level of anti-detection measures to apply. Standard preserves existing behavior. Maximum adds CDP-level patches to defeat Cloudflare Turnstile.',
+			description: 'Level of anti-detection measures. Standard enables rebrowser CDP patches (defeats Cloudflare). Maximum adds navigator overrides for headless Chrome.',
 			required: false,
 		},
 		{

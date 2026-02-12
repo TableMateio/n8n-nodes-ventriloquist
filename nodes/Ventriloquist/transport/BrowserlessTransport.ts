@@ -58,12 +58,12 @@ export class BrowserlessTransport implements BrowserTransport {
 	async connect(): Promise<puppeteer.Browser> {
 		this.logger.info('Connecting to Browserless service...');
 
-		// When maximum anti-detection is enabled, activate rebrowser patches
-		// These work on the Puppeteer CLIENT side — even remote WebSocket connections benefit
-		if (this.antiDetectionLevel === 'maximum') {
+		// Activate rebrowser patches for standard and maximum — these suppress
+		// Runtime.Enable and mask Runtime.callFunctionOn, the primary CDP detection vectors.
+		if (this.antiDetectionLevel !== 'off') {
 			process.env.REBROWSER_PATCHES_RUNTIME_FIX_MODE = 'addBinding';
 			process.env.REBROWSER_PATCHES_SOURCE_URL = 'pptr:internal';
-			this.logger.info('Rebrowser patches activated for Browserless: Runtime.Enable fix (addBinding mode)');
+			this.logger.info(`Rebrowser patches activated (${this.antiDetectionLevel}): Runtime.Enable fix (addBinding mode)`);
 		}
 
 		try {
