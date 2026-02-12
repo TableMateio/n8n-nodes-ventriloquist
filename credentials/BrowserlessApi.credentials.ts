@@ -82,12 +82,36 @@ export class BrowserlessApi implements ICredentialType {
 			required: false,
 		},
 		{
-			displayName: 'Stealth Mode',
-			name: 'stealthMode',
-			type: 'boolean',
-			default: true,
-			description: 'Whether to use stealth mode to avoid bot detection. Recommended for most web scraping tasks.',
+			displayName: 'Anti-Detection Level',
+			name: 'antiDetectionLevel',
+			type: 'options',
+			options: [
+				{
+					name: 'Off',
+					value: 'off',
+					description: 'No anti-detection measures. For trusted internal sites.',
+				},
+				{
+					name: 'Standard',
+					value: 'standard',
+					description: 'Basic stealth: webdriver override, plugins mock, launch flags. Same as previous Stealth Mode.',
+				},
+				{
+					name: 'Maximum',
+					value: 'maximum',
+					description: 'Full anti-detection: CDP leak prevention, all standard measures. Recommended for Cloudflare/Turnstile sites.',
+				},
+			],
+			default: 'standard',
+			description: 'Level of anti-detection measures to apply. Standard preserves existing behavior. Maximum adds CDP-level patches to defeat Cloudflare Turnstile.',
 			required: false,
+		},
+		{
+			// Hidden - kept for backward compatibility with existing credentials
+			displayName: 'Stealth Mode (Deprecated)',
+			name: 'stealthMode',
+			type: 'hidden',
+			default: true,
 		},
 		{
 			displayName: 'Note: Railway Deployments',
