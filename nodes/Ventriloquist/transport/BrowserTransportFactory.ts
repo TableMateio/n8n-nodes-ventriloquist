@@ -7,6 +7,24 @@ import { LocalChromeTransport } from './LocalChromeTransport';
 /**
  * Factory for creating browser transports based on credential type
  */
+export type AntiDetectionLevel = 'off' | 'standard' | 'maximum';
+
+/**
+ * Parse antiDetectionLevel from credentials with backward compatibility for old stealthMode boolean.
+ * New credentials have antiDetectionLevel (off/standard/maximum).
+ * Old credentials only have stealthMode (boolean) — map true→standard, false→off.
+ */
+function parseAntiDetectionLevel(credentials: ICredentialDataDecryptedObject): AntiDetectionLevel {
+  if (credentials.antiDetectionLevel) {
+    return credentials.antiDetectionLevel as AntiDetectionLevel;
+  }
+  // Backward compat: old credentials only have stealthMode boolean
+  if (credentials.stealthMode !== undefined) {
+    return credentials.stealthMode ? 'standard' : 'off';
+  }
+  return 'standard'; // Default
+}
+
 export class BrowserTransportFactory {
   /**
    * Create a browser transport based on credential type
@@ -56,15 +74,15 @@ export class BrowserTransportFactory {
         logger.info(`Creating Browserless transport with direct WebSocket URL: ${logSafeUrl}`);
         logger.info(`Session parameters present: ${hasSessionId ? 'YES' : 'NO'}`);
 
-        // Added stealth mode handling - users often want this for Browserless
-        const stealthMode = credentials.stealthMode !== undefined ? credentials.stealthMode as boolean : true;
+        const antiDetectionLevel = parseAntiDetectionLevel(credentials);
         const requestTimeout = credentials.connectionTimeout ? credentials.connectionTimeout as number : 120000;
+        logger.info(`Anti-detection level: ${antiDetectionLevel}`);
 
         return new BrowserlessTransport(
           logger,
           '', // Empty API key - it's already in the WebSocket URL
           '', // Empty base URL - we're using direct WebSocket
-          stealthMode,
+          antiDetectionLevel,
           requestTimeout,
           processedEndpoint, // Use the processed endpoint
         );
@@ -92,17 +110,18 @@ export class BrowserTransportFactory {
         logger.info(`Detected deployment type: ${isRailwayDeployment ? 'Railway' : 'Standard Browserless'}`);
         logger.info(`Using Browserless base URL: ${baseUrl}`);
 
-        const stealthMode = credentials.stealthMode !== undefined ? credentials.stealthMode as boolean : true;
+        const antiDetectionLevel = parseAntiDetectionLevel(credentials);
         const requestTimeout = credentials.connectionTimeout ? credentials.connectionTimeout as number : 120000;
 
         logger.info(`Creating Browserless transport with base URL: ${baseUrl}`);
+        logger.info(`Anti-detection level: ${antiDetectionLevel}`);
 
         // Keep transport creation simpler - don't prefix URL if not needed
         return new BrowserlessTransport(
           logger,
           apiKey,
           baseUrl,
-          stealthMode,
+          antiDetectionLevel,
           requestTimeout,
         );
       }
@@ -135,7 +154,7 @@ export class BrowserTransportFactory {
       const userDataDir = credentials.userDataDir as string || '';
       const headless = credentials.headless !== false; // Default to true
       const connectionTimeout = credentials.connectionTimeout ? credentials.connectionTimeout as number : 120000;
-      const stealthMode = credentials.stealthMode !== undefined ? credentials.stealthMode as boolean : true;
+      const antiDetectionLevel = parseAntiDetectionLevel(credentials);
 
       // Parse launch arguments
       const launchArgsStr = credentials.launchArgs as string || '--no-sandbox,--disable-setuid-sandbox';
@@ -163,6 +182,7 @@ export class BrowserTransportFactory {
         logger.info('Window positioning: disabled (using default position and size)');
       }
       logger.info(`Connection to existing Chrome: ${connectToExisting ? `enabled (${debuggingHost}:${debuggingPort})` : 'disabled'}`);
+      logger.info(`Anti-detection level: ${antiDetectionLevel}`);
       logger.info(`Launch arguments: ${launchArgs.join(' ')}`);
 
       return new LocalChromeTransport(
@@ -171,7 +191,7 @@ export class BrowserTransportFactory {
         userDataDir,
         headless,
         launchArgs,
-        stealthMode,
+        antiDetectionLevel,
         connectionTimeout,
         connectToExisting,
         debuggingHost,
