@@ -18,6 +18,7 @@ import {
 import { createErrorResponse } from "../utils/errorUtils";
 import { logPageDebugInfo } from "../utils/debugUtils";
 import { EntityMatcherFactory } from "../utils/middlewares/matching/entityMatcherFactory";
+import { CURRENT_CHROME_UA } from "../transport/LocalChromeTransport";
 import {
 	type IEntityMatchResult,
 	type IEntityMatcherExtractionConfig,
@@ -2130,7 +2131,7 @@ export async function execute(
 
 							try {
 								// Set a reasonable user agent
-								await downloadPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+								await downloadPage.setUserAgent(CURRENT_CHROME_UA);
 
 								// Navigate to the image URL (now absolute)
 								const response = await downloadPage.goto(downloadUrl, {

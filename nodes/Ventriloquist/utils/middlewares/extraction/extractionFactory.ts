@@ -10,6 +10,7 @@ import { logWithDebug } from '../../loggingUtils';
 import { TableExtraction } from './TableExtraction';
 import { MultipleExtraction } from './TableExtraction';
 import { extractTextFromHtml } from '../../comparisonUtils';
+import { CURRENT_CHROME_UA } from '../../../transport/LocalChromeTransport';
 
 /**
  * Extraction configuration interface
@@ -1100,7 +1101,7 @@ export class BasicExtraction implements IExtraction {
 
                     try {
                       // Set a reasonable user agent
-                      await downloadPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+                      await downloadPage.setUserAgent(CURRENT_CHROME_UA);
 
                       // Navigate to the image URL
                       const response = await downloadPage.goto(imageUrl, {
