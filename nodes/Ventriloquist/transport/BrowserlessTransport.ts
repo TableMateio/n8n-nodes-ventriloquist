@@ -2,6 +2,8 @@
 import * as puppeteer from 'puppeteer-core';
 import { URL } from 'node:url';
 import { BrowserTransport } from './BrowserTransport';
+import type { AntiDetectionLevel } from './BrowserTransportFactory';
+import { CURRENT_CHROME_UA } from './LocalChromeTransport';
 
 /**
  * Class to handle Browserless browser interactions
@@ -12,7 +14,7 @@ export class BrowserlessTransport implements BrowserTransport {
 	private apiKey: string;
 	private baseUrl: string;
 	private wsEndpoint: string | undefined;
-	private stealthMode: boolean;
+	private antiDetectionLevel: AntiDetectionLevel;
 	private requestTimeout: number;
 	private browser: puppeteer.Browser | null = null;
 
@@ -21,7 +23,7 @@ export class BrowserlessTransport implements BrowserTransport {
 	 * @param logger - Logger instance
 	 * @param apiKey - Browserless API token (called TOKEN in Railway)
 	 * @param baseUrl - Browserless base URL (cloud or custom deployment URL)
-	 * @param stealthMode - Whether to use stealth mode
+	 * @param antiDetectionLevel - Anti-detection level (off/standard/maximum)
 	 * @param requestTimeout - Request timeout in milliseconds (for navigation, operations)
 	 * @param wsEndpoint - Optional direct WebSocket endpoint
 	 */
@@ -29,7 +31,7 @@ export class BrowserlessTransport implements BrowserTransport {
 		logger: any,
 		apiKey: string,
 		baseUrl = 'https://browserless.io',
-		stealthMode = true,
+		antiDetectionLevel: AntiDetectionLevel = 'standard',
 		requestTimeout = 120000,
 		wsEndpoint?: string,
 	) {
@@ -37,7 +39,7 @@ export class BrowserlessTransport implements BrowserTransport {
 		this.apiKey = apiKey;
 		this.baseUrl = baseUrl.replace(/\/$/, ''); // Remove trailing slash if present
 		this.wsEndpoint = wsEndpoint;
-		this.stealthMode = stealthMode;
+		this.antiDetectionLevel = antiDetectionLevel;
 		this.requestTimeout = requestTimeout;
 
 		// Log all connection parameters (mask sensitive data)
@@ -45,7 +47,7 @@ export class BrowserlessTransport implements BrowserTransport {
 - Base URL: ${this.baseUrl}
 - API Key: ${this.apiKey ? '***' : 'None'}
 - Direct WS Endpoint: ${this.wsEndpoint ? this.wsEndpoint.replace(/token=([^&]+)/, 'token=***') : 'None'}
-- Stealth Mode: ${this.stealthMode}
+- Anti-Detection Level: ${this.antiDetectionLevel}
 - Request Timeout: ${this.requestTimeout}ms`);
 	}
 
@@ -55,6 +57,14 @@ export class BrowserlessTransport implements BrowserTransport {
 	 */
 	async connect(): Promise<puppeteer.Browser> {
 		this.logger.info('Connecting to Browserless service...');
+
+		// When maximum anti-detection is enabled, activate rebrowser patches
+		// These work on the Puppeteer CLIENT side — even remote WebSocket connections benefit
+		if (this.antiDetectionLevel === 'maximum') {
+			process.env.REBROWSER_PATCHES_RUNTIME_FIX_MODE = 'addBinding';
+			process.env.REBROWSER_PATCHES_SOURCE_URL = 'pptr:internal';
+			this.logger.info('Rebrowser patches activated for Browserless: Runtime.Enable fix (addBinding mode)');
+		}
 
 		try {
 			// Special handling for direct WebSocket endpoints
@@ -352,47 +362,83 @@ export class BrowserlessTransport implements BrowserTransport {
 	 * @param page - The Puppeteer page to configure
 	 */
 	private async configurePageForScraping(page: puppeteer.Page): Promise<void> {
-		if (this.stealthMode) {
-			this.logger.info('Configuring page with stealth mode evasion techniques');
-
-			// Apply common evasion techniques
-			await page.evaluateOnNewDocument(() => {
-				// Safely handle webdriver property - check if it can be redefined
-				try {
-					if ('webdriver' in navigator) {
-						// Try to delete first, then redefine
-						delete (navigator as any).webdriver;
-					}
-					Object.defineProperty(navigator, 'webdriver', {
-						get: () => false,
-						configurable: true,
-					});
-				} catch (e) {
-					// If we can't redefine it, try to just set it directly
-					try {
-						(navigator as any).webdriver = false;
-					} catch (e2) {
-						// Ignore if we can't override at all - some sites lock this down
-						console.log('Could not override webdriver property');
-					}
-				}
-
-				// Override the permissions API (using Object.defineProperty since it's read-only)
-				if (window.Notification) {
-					// Mock the permissions API status while keeping it read-only
-					Object.defineProperty(window.Notification, 'permission', {
-						get: () => 'default',
-					});
-				}
-
-				// Overwrite languages
-				Object.defineProperty(navigator, 'languages', {
-					get: () => ['en-US', 'en'],
-				});
-			});
-		} else {
-			this.logger.info('Stealth mode disabled, skipping evasion techniques');
+		if (this.antiDetectionLevel === 'off') {
+			this.logger.info('Anti-detection disabled, skipping evasion techniques');
+			return;
 		}
+
+		this.logger.info(`Configuring page with anti-detection (level: ${this.antiDetectionLevel})`);
+
+		// For standard level only: set UA via CDP (can't use launch flags on remote browser).
+		// For maximum: skip UA override to avoid detectable Emulation.setUserAgentOverride CDP call.
+		if (this.antiDetectionLevel === 'standard') {
+			await page.setUserAgent(CURRENT_CHROME_UA);
+		}
+
+		// Apply stealth JS injections (aligned with LocalChromeTransport.applyStealthMode)
+		await page.evaluateOnNewDocument(() => {
+			// Safely handle webdriver property
+			try {
+				if ('webdriver' in navigator) {
+					delete (navigator as any).webdriver;
+				}
+				Object.defineProperty(navigator, 'webdriver', {
+					get: () => false,
+					configurable: true,
+				});
+			} catch (e) {
+				try {
+					(navigator as any).webdriver = false;
+				} catch (e2) {
+					console.log('Could not override webdriver property');
+				}
+			}
+
+			// Modify plugins array (aligned with LocalChrome)
+			Object.defineProperty(navigator, 'plugins', {
+				get: () => [
+					{
+						description: "Portable Document Format",
+						filename: "internal-pdf-viewer",
+						name: "Chrome PDF Plugin"
+					},
+					{
+						description: "PDF Viewer",
+						filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai",
+						name: "Chrome PDF Viewer"
+					},
+					{
+						description: "PDF Viewer",
+						filename: "pdf",
+						name: "PDF Viewer"
+					}
+				],
+			});
+
+			// Overwrite languages
+			Object.defineProperty(navigator, 'languages', {
+				get: () => ['en-US', 'en'],
+			});
+
+			// Add chrome property to window if it doesn't exist (aligned with LocalChrome)
+			// @ts-ignore
+			if (typeof window.chrome === 'undefined') {
+				// @ts-ignore
+				window.chrome = {
+					app: {
+						isInstalled: false,
+					},
+					runtime: {},
+				};
+			}
+
+			// Override the permissions API
+			if (window.Notification) {
+				Object.defineProperty(window.Notification, 'permission', {
+					get: () => 'default',
+				});
+			}
+		});
 	}
 
 	/**
