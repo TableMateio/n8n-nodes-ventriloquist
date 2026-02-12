@@ -425,12 +425,23 @@ export class LocalChromeTransport implements BrowserTransport {
   private async applyStealthMode(page: puppeteer.Page): Promise<void> {
     if (this.antiDetectionLevel === 'off') return;
 
+    // When connecting to a real Chrome instance, skip all stealth injections.
+    // Real Chrome already has legitimate navigator.webdriver (undefined), real plugins,
+    // real languages, and real window.chrome. Injecting overrides via
+    // Page.addScriptToEvaluateOnNewDocument is itself a detectable CDP call that
+    // Cloudflare Turnstile watches for. The rebrowser patches handle Runtime.Enable
+    // suppression — that's sufficient for a real browser.
+    if (this.connectToExisting) {
+      this.logger.info('Skipping stealth injection — connected to real Chrome (already has native fingerprints)');
+      return;
+    }
+
     try {
       // UA is set via --user-agent launch flag (not detectable) for new Chrome instances.
-      // For connectToExisting, the real Chrome already has a legitimate UA — don't override.
       // REMOVED: page.setUserAgent() — calls Emulation.setUserAgentOverride CDP command which is detectable.
 
       // Override navigator.webdriver property and other browser fingerprinting
+      // Only needed for Puppeteer-launched Chrome which has webdriver=true by default
       await page.evaluateOnNewDocument(() => {
         // Safely handle webdriver property - check if it can be redefined
         try {
