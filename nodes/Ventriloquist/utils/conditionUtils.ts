@@ -199,10 +199,38 @@ export async function evaluateCondition(
 				}
 
 								case 'expression': {
-					const jsExpression = condition.jsExpression as string;
+					const rawJsExpression = condition.jsExpression;
 
 					thisNode.logger.info(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
-						`[DEBUG] Evaluating expression condition: "${jsExpression}"`));
+						`[DEBUG] Evaluating expression condition: "${rawJsExpression}" (type: ${typeof rawJsExpression})`));
+
+					// CRITICAL: n8n resolves {{ }} expressions BEFORE the node code runs.
+					// For type:"string" fields inside collections, n8n may return the resolved
+					// value as its native type (boolean, number) rather than coercing to string.
+					// e.g. {{ true }} becomes boolean true, not string "true".
+					// We must handle non-string resolved values as direct truthiness results.
+					if (typeof rawJsExpression !== 'string') {
+						// n8n already resolved the expression to a non-string value (boolean, number, etc.)
+						// Use it directly as a truthiness check
+						const success = !!rawJsExpression;
+
+						thisNode.logger.info(formatOperationLog('ConditionUtils', thisNode.getNode().name, thisNode.getNode().id, index,
+							`[DEBUG] Expression was pre-resolved by n8n to ${typeof rawJsExpression}: ${rawJsExpression}, success: ${success}`));
+
+						result = {
+							success,
+							actualValue: String(rawJsExpression),
+							details: {
+								conditionType,
+								expression: String(rawJsExpression),
+								isN8nExpression: true,
+								preResolved: true
+							}
+						};
+						break;
+					}
+
+					const jsExpression = rawJsExpression as string;
 
 					// Check if this is an n8n expression (wrapped in {{ }}) or raw JavaScript
 					const isN8nExpression = jsExpression.trim().startsWith('{{') && jsExpression.trim().endsWith('}}');
