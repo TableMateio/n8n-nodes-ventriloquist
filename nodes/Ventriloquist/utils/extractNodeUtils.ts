@@ -111,6 +111,7 @@ export interface IExtractItem {
     supportedFormats?: string[];
     downloadTimeout?: number;
     outputFormat?: string;
+    directUrl?: string;
   };
   aiFormatting?: {
     enabled: boolean;

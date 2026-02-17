@@ -993,6 +993,19 @@ export const description: INodeProperties[] = [
 								},
 							},
 							{
+								displayName: "Direct URL",
+								name: "directUrl",
+								type: "string",
+								default: "",
+								placeholder: "https://example.com/file.pdf",
+								description: "When set, bypasses DOM selector lookup and directly downloads binary from this URL using page context (preserves cookies for Cloudflare-protected URLs)",
+								displayOptions: {
+									show: {
+										extractionMode: ["binary", "both"],
+									},
+								},
+							},
+							{
 								displayName: "Download Timeout",
 								name: "downloadTimeout",
 								type: "number",
@@ -1738,6 +1751,7 @@ export async function execute(
 					supportedFormats?: string[];
 					downloadTimeout?: number;
 					outputFormat?: string;
+					directUrl?: string;
 				} | undefined,
 				// Add AI formatting options if enabled
 				aiFormatting: schema === "manual" || schema === "auto" ? aiFormatting : undefined,

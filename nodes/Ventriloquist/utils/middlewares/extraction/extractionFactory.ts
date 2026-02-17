@@ -197,8 +197,12 @@ export class BasicExtraction implements IExtraction {
         }
       }
 
-      // Wait for selector if configured
-      if (this.config.waitForSelector) {
+      // Skip selector wait if using directUrl for image extraction
+      const hasDirectUrl = this.config.extractionType === 'image' &&
+        this.config.imageOptions?.directUrl;
+
+      // Wait for selector if configured (unless directUrl bypasses it)
+      if (this.config.waitForSelector && !hasDirectUrl) {
         logger.debug(`${logPrefix} Waiting for selector: ${this.config.selector}`);
         try {
           await this.page.waitForSelector(this.config.selector, {
@@ -991,8 +995,71 @@ export class BasicExtraction implements IExtraction {
             supportedFormats: ['jpg', 'png', 'gif', 'webp'],
             downloadTimeout: 30000,
             outputFormat: 'single',
+            directUrl: '',
             ...this.config.imageOptions
           };
+
+          // If directUrl is provided, skip DOM element lookup and use the URL directly.
+          // This enables binary downloads from Cloudflare-protected URLs by fetching
+          // from within the current page context (same-origin, cookies included).
+          if (imageOptions.directUrl) {
+            logger.info(`${logPrefix} Using directUrl for binary download: ${imageOptions.directUrl}`);
+            const directImageUrl = imageOptions.directUrl;
+            const directResult: any = { url: directImageUrl };
+
+            if (imageOptions.extractionMode === 'binary' || imageOptions.extractionMode === 'both') {
+              try {
+                const fetchResult = await this.page.evaluate(async (url: string) => {
+                  try {
+                    const resp = await fetch(url, { credentials: 'include' });
+                    if (!resp.ok) {
+                      return { error: `HTTP ${resp.status} ${resp.statusText}`, status: resp.status };
+                    }
+                    const contentType = resp.headers.get('content-type') || 'application/octet-stream';
+                    const arrayBuffer = await resp.arrayBuffer();
+                    const uint8Array = new Uint8Array(arrayBuffer);
+                    let binary = '';
+                    const chunkSize = 8192;
+                    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                      const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
+                      binary += String.fromCharCode.apply(null, Array.from(chunk));
+                    }
+                    const base64 = btoa(binary);
+                    return { base64, contentType, size: uint8Array.length };
+                  } catch (err: any) {
+                    return { error: err.message || String(err) };
+                  }
+                }, directImageUrl);
+
+                if (fetchResult && 'error' in fetchResult) {
+                  logger.warn(`${logPrefix} directUrl fetch failed: ${fetchResult.error}`);
+                  data = null;
+                } else if (fetchResult && 'base64' in fetchResult) {
+                  const { base64: base64Data, contentType, size } = fetchResult;
+                  logger.info(`${logPrefix} directUrl download success: ${size} bytes, type: ${contentType}`);
+                  if (imageOptions.extractionMode === 'binary') {
+                    directResult.data = base64Data;
+                    directResult.contentType = contentType;
+                    directResult.size = size;
+                  } else {
+                    directResult.binaryData = base64Data;
+                    directResult.contentType = contentType;
+                    directResult.size = size;
+                  }
+                  data = directResult;
+                } else {
+                  data = null;
+                }
+              } catch (downloadError) {
+                logger.warn(`${logPrefix} directUrl download error: ${(downloadError as Error).message}`);
+                data = null;
+              }
+            } else {
+              data = directResult;
+            }
+            rawContent = directImageUrl;
+            break;
+          }
 
           const imageElements = await this.page.$$(this.config.selector);
 
@@ -1096,48 +1163,55 @@ export class BasicExtraction implements IExtraction {
                   try {
                     logger.info(`${logPrefix} Downloading image binary data from: ${imageUrl}`);
 
-                    // Create a new page for downloading to avoid interfering with the main page
-                    const downloadPage = await this.page.browser().newPage();
-
-                    try {
-                      // Set a reasonable user agent
-                      await downloadPage.setUserAgent(CURRENT_CHROME_UA);
-
-                      // Navigate to the image URL
-                      const response = await downloadPage.goto(imageUrl, {
-                        waitUntil: 'networkidle0',
-                        timeout: imageOptions.downloadTimeout
-                      });
-
-                      if (response && response.ok()) {
-                        // Get the image as buffer
-                        const buffer = await response.buffer();
-
-                        // Convert to base64
-                        const base64Data = buffer.toString('base64');
-
-                        // Get content type
-                        const contentType = response.headers()['content-type'] || 'image/unknown';
-
-                        logger.info(`${logPrefix} Successfully downloaded image: ${buffer.length} bytes, type: ${contentType}`);
-
-                        if (imageOptions.extractionMode === 'binary') {
-                          result.data = base64Data;
-                          result.contentType = contentType;
-                          result.size = buffer.length;
-                        } else {
-                          result.binaryData = base64Data;
-                          result.contentType = contentType;
-                          result.size = buffer.length;
+                    // Use page.evaluate(fetch()) to download within the page context.
+                    // This inherits all cookies (including Cloudflare tokens), unlike
+                    // browser.newPage() which creates a fresh page without cookies.
+                    const fetchResult = await this.page.evaluate(async (url: string) => {
+                      try {
+                        const resp = await fetch(url, { credentials: 'include' });
+                        if (!resp.ok) {
+                          return { error: `HTTP ${resp.status} ${resp.statusText}`, status: resp.status };
                         }
-                      } else {
-                        logger.warn(`${logPrefix} Failed to download image, HTTP status: ${response?.status()}`);
-                        if (imageOptions.extractionMode === 'binary') {
-                          return null;
+                        const contentType = resp.headers.get('content-type') || 'application/octet-stream';
+                        const arrayBuffer = await resp.arrayBuffer();
+                        const uint8Array = new Uint8Array(arrayBuffer);
+                        // Convert to base64 in chunks to avoid call stack limits
+                        let binary = '';
+                        const chunkSize = 8192;
+                        for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                          const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
+                          binary += String.fromCharCode.apply(null, Array.from(chunk));
                         }
+                        const base64 = btoa(binary);
+                        return { base64, contentType, size: uint8Array.length };
+                      } catch (err: any) {
+                        return { error: err.message || String(err) };
                       }
-                    } finally {
-                      await downloadPage.close();
+                    }, imageUrl);
+
+                    if (fetchResult && 'error' in fetchResult) {
+                      logger.warn(`${logPrefix} Failed to download via page fetch: ${fetchResult.error}`);
+                      if (imageOptions.extractionMode === 'binary') {
+                        return null;
+                      }
+                    } else if (fetchResult && 'base64' in fetchResult) {
+                      const { base64: base64Data, contentType, size } = fetchResult;
+                      logger.info(`${logPrefix} Successfully downloaded via page fetch: ${size} bytes, type: ${contentType}`);
+
+                      if (imageOptions.extractionMode === 'binary') {
+                        result.data = base64Data;
+                        result.contentType = contentType;
+                        result.size = size;
+                      } else {
+                        result.binaryData = base64Data;
+                        result.contentType = contentType;
+                        result.size = size;
+                      }
+                    } else {
+                      logger.warn(`${logPrefix} Page fetch returned unexpected result`);
+                      if (imageOptions.extractionMode === 'binary') {
+                        return null;
+                      }
                     }
                   } catch (downloadError) {
                     logger.warn(`${logPrefix} Error downloading image: ${(downloadError as Error).message}`);

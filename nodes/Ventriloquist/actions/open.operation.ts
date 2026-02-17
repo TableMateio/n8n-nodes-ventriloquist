@@ -195,6 +195,13 @@ export const description: INodeProperties[] = [
 		description: "Whether to capture a screenshot of the page after opening",
 	},
 	{
+		displayName: "Session ID (Reuse Existing)",
+		name: "explicitSessionId",
+		type: "string",
+		default: "",
+		description: "If provided, reuses an existing browser session instead of creating a new one. The existing session's page will be navigated to the new URL, preserving cookies and state.",
+	},
+	{
 		displayName: "Output Input Data",
 		name: "outputInputData",
 		type: "boolean",
@@ -254,6 +261,11 @@ export async function execute(
 		index,
 		false,
 	) as boolean;
+	const explicitSessionId = this.getNodeParameter(
+		"explicitSessionId",
+		index,
+		"",
+	) as string;
 
 	this.logger.info(
 		`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Opening URL: ${url}`,
@@ -285,7 +297,28 @@ export async function execute(
 	let brightDataSessionId = "";
 
 	try {
-		// Create a new session - Open always creates a new session
+		// Check if we should reuse an existing session
+		const existingSession = explicitSessionId ? SessionManager.getSession(explicitSessionId) : null;
+
+		if (existingSession && existingSession.browser?.isConnected()) {
+			// Reuse existing session - navigate the existing page to the new URL
+			// This preserves cookies (including Cloudflare tokens) from the original session
+			browser = existingSession.browser;
+			sessionId = explicitSessionId;
+
+			this.logger.info(
+				`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Reusing existing session: ${sessionId}`
+			);
+
+			// Get the active page from the existing session
+			const pages = await browser.pages();
+			page = pages.length > 0 ? pages[pages.length - 1] : await browser.newPage();
+
+			this.logger.info(
+				`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigating existing page to: ${url}`
+			);
+		} else {
+		// Create a new session
 		try {
 			// For local Chrome, we need to create the browser first
 			if (credentialType === 'localChromeApi') {
@@ -345,6 +378,27 @@ export async function execute(
 				? await browser.createBrowserContext()
 				: browser.defaultBrowserContext();
 			page = await context.newPage();
+
+		} catch (sessionError) {
+			// More specific error handling for session creation
+			this.logger.error(
+				`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Session creation error: ${(sessionError as Error).message}`,
+			);
+
+			// Verify credentials and connection settings for better error reporting
+			if ((sessionError as Error).message.includes("WebSocket endpoint")) {
+				throw new Error(
+					`Invalid WebSocket endpoint configuration: ${(sessionError as Error).message}. Please check your Browserless credentials configuration.`,
+				);
+			}
+			if ((sessionError as Error).message.includes("token")) {
+				throw new Error(
+					`Authentication error: ${(sessionError as Error).message}. Please check your API token in credentials.`,
+				);
+			}
+			throw sessionError;
+		}
+		} // end else (new session)
 
 			// Enable debugging if requested
 			if (enableDebug) {
@@ -508,25 +562,6 @@ export async function execute(
 				// For other post-navigation errors, rethrow to be handled by the outer catch block
 				throw postNavError;
 			}
-		} catch (sessionError) {
-			// More specific error handling for session creation
-			this.logger.error(
-				`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Session creation error: ${(sessionError as Error).message}`,
-			);
-
-			// Verify credentials and connection settings for better error reporting
-			if ((sessionError as Error).message.includes("WebSocket endpoint")) {
-				throw new Error(
-					`Invalid WebSocket endpoint configuration: ${(sessionError as Error).message}. Please check your Browserless credentials configuration.`,
-				);
-			}
-			if ((sessionError as Error).message.includes("token")) {
-				throw new Error(
-					`Authentication error: ${(sessionError as Error).message}. Please check your API token in credentials.`,
-				);
-			}
-			throw sessionError;
-		}
 	} catch (error) {
 		// Handle navigation and general errors
 		this.logger.error(

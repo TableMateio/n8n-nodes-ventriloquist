@@ -2124,77 +2124,72 @@ export async function execute(
 						this.logger.info(formatOperationLog('Collector', nodeName, nodeId, index,
 							`Downloading binary data for item ${itemIndex}, field "${fieldName}": ${downloadUrl}`));
 
-						// Create a new page for downloading to avoid interfering with the main page
-						const browser = SessionManager.getSession(sessionId)?.browser;
-						if (browser && browser.isConnected()) {
-							const downloadPage = await browser.newPage();
-
-							try {
-								// Set a reasonable user agent
-								await downloadPage.setUserAgent(CURRENT_CHROME_UA);
-
-								// Navigate to the image URL (now absolute)
-								const response = await downloadPage.goto(downloadUrl, {
-									waitUntil: 'networkidle0',
-									timeout: fieldValue.downloadTimeout
-								});
-
-								if (response && response.ok()) {
-									// Get the image as buffer
-									const buffer = await response.buffer();
-
-									// Convert to base64
-									const base64Data = buffer.toString('base64');
-
-									// Get content type
-									const contentType = response.headers()['content-type'] || 'image/unknown';
-
-									// Create unique key for this binary item
-									const binaryKey = `item_${itemIndex}_${fieldName}`;
-									const fileName = `${binaryKey}_${Date.now()}.${getFileExtensionFromContentType(contentType)}`;
-
-									// Add to global binary data
-									globalBinaryData[binaryKey] = {
-										data: base64Data,
-										mimeType: contentType,
-										fileName: fileName,
-										fileSize: buffer.length
-									};
-									hasBinaryData = true;
-
-									this.logger.info(formatOperationLog('Collector', nodeName, nodeId, index,
-										`Successfully downloaded binary data for "${fieldName}": ${fileName} (${contentType}, ${buffer.length} bytes)`));
-
-									// Update the item field to only include metadata (remove binary data)
-									if (fieldValue.extractionMode === 'binary') {
-										// For binary-only mode, replace with metadata object
-										item[fieldName] = {
-											url: downloadUrl,
-											contentType: contentType,
-											size: buffer.length,
-											binaryKey: binaryKey
-										};
-									} else {
-										// For 'both' mode, update existing object
-										item[fieldName] = {
-											url: downloadUrl,
-											contentType: contentType,
-											size: buffer.length,
-											binaryKey: binaryKey
-										};
+						// Use page.evaluate(fetch()) to download within the page context.
+						// This inherits all cookies (including Cloudflare tokens), unlike
+						// browser.newPage() which creates a fresh page without cookies.
+						if (page) {
+							const fetchResult = await page.evaluate(async (url: string) => {
+								try {
+									const resp = await fetch(url, { credentials: 'include' });
+									if (!resp.ok) {
+										return { error: `HTTP ${resp.status} ${resp.statusText}`, status: resp.status };
 									}
-								} else {
-									this.logger.warn(formatOperationLog('Collector', nodeName, nodeId, index,
-										`Failed to download image for "${fieldName}", HTTP status: ${response?.status()}`));
-									// Fall back to URL-only mode (use absolute URL)
-									item[fieldName] = downloadUrl;
+									const contentType = resp.headers.get('content-type') || 'application/octet-stream';
+									const arrayBuffer = await resp.arrayBuffer();
+									const uint8Array = new Uint8Array(arrayBuffer);
+									// Convert to base64 in chunks to avoid call stack limits
+									let binary = '';
+									const chunkSize = 8192;
+									for (let i = 0; i < uint8Array.length; i += chunkSize) {
+										const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
+										binary += String.fromCharCode.apply(null, Array.from(chunk));
+									}
+									const base64 = btoa(binary);
+									return { base64, contentType, size: uint8Array.length };
+								} catch (err: any) {
+									return { error: err.message || String(err) };
 								}
-							} finally {
-								await downloadPage.close();
+							}, downloadUrl);
+
+							if (fetchResult && 'error' in fetchResult) {
+								this.logger.warn(formatOperationLog('Collector', nodeName, nodeId, index,
+									`Failed to download via page fetch for "${fieldName}": ${fetchResult.error}`));
+								// Fall back to URL-only mode
+								item[fieldName] = downloadUrl;
+							} else if (fetchResult && 'base64' in fetchResult) {
+								const { base64: base64Data, contentType, size } = fetchResult;
+
+								// Create unique key for this binary item
+								const binaryKey = `item_${itemIndex}_${fieldName}`;
+								const fileName = `${binaryKey}_${Date.now()}.${getFileExtensionFromContentType(contentType)}`;
+
+								// Add to global binary data
+								globalBinaryData[binaryKey] = {
+									data: base64Data,
+									mimeType: contentType,
+									fileName: fileName,
+									fileSize: size
+								};
+								hasBinaryData = true;
+
+								this.logger.info(formatOperationLog('Collector', nodeName, nodeId, index,
+									`Successfully downloaded binary data for "${fieldName}": ${fileName} (${contentType}, ${size} bytes)`));
+
+								// Update the item field to only include metadata
+								item[fieldName] = {
+									url: downloadUrl,
+									contentType: contentType,
+									size: size,
+									binaryKey: binaryKey
+								};
+							} else {
+								this.logger.warn(formatOperationLog('Collector', nodeName, nodeId, index,
+									`Page fetch returned unexpected result for "${fieldName}"`));
+								item[fieldName] = downloadUrl;
 							}
 						} else {
 							this.logger.warn(formatOperationLog('Collector', nodeName, nodeId, index,
-								`Browser session not available for binary download of "${fieldName}"`));
+								`Page not available for binary download of "${fieldName}"`));
 							// Fall back to URL-only mode (use absolute URL)
 							item[fieldName] = downloadUrl;
 						}
