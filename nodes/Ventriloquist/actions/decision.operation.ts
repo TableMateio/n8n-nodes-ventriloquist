@@ -3445,6 +3445,7 @@ export async function execute(
 											freshPage = await getActivePage(
 												currentSession.browser,
 												this.logger,
+												sessionId,
 											);
 										} else {
 											this.logger.warn(
@@ -3800,6 +3801,7 @@ export async function execute(
 											freshPage = await getActivePage(
 												session.browser,
 												this.logger,
+												sessionId,
 											);
 										}
 										if (freshPage) {
@@ -5341,6 +5343,63 @@ export async function execute(
 									// Screenshot already captured upfront if requested
 
 									// Return the result immediately after successful action
+									// Use routing if enabled (same pattern as click action)
+									if (enableRouting && routeIndex >= 0) {
+										const routeCount = this.getNodeParameter(
+											"routeCount",
+											index,
+											2,
+										) as number;
+
+										const routes: INodeExecutionData[][] = Array(routeCount)
+											.fill(null)
+											.map(() => []);
+
+										resultData.actionDetails = {
+											selectorFound: true,
+											actionType: actionPerformed,
+											actionSuccess: true,
+										} as IDataObject;
+
+										if (routeIndex < routeCount) {
+											const routeOutputData = createOutputData(resultData);
+											routes[routeIndex].push(routeOutputData);
+											this.logger.info(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`Fill action: sending to route ${routeIndex + 1} (of ${routeCount})`,
+												),
+											);
+										} else {
+											const fallbackOutputData: INodeExecutionData = {
+												json: {
+													...(outputInputData ? item.json : {}),
+													...resultData
+												},
+												pairedItem: { item: index },
+											};
+											if (outputInputData && item.binary) {
+												fallbackOutputData.binary = item.binary;
+											}
+											routes[0].push(fallbackOutputData);
+											this.logger.warn(
+												formatOperationLog(
+													"Decision",
+													nodeName,
+													nodeId,
+													index,
+													`Fill action: routeIndex ${routeIndex} out of bounds (routeCount=${routeCount}), using route 1`,
+												),
+											);
+										}
+
+										return routes;
+									}
+
+									// Non-routing fallback
 									const outputData: INodeExecutionData = {
 										json: {
 											...(outputInputData ? item.json : {}),
@@ -5382,7 +5441,52 @@ export async function execute(
 										resultData.error = (error as Error).message;
 										resultData.executionDuration = Date.now() - startTime;
 
-										// Exit the decision node with the error result
+										// Exit the decision node with the error result — use routing if enabled
+										if (enableRouting && routeIndex >= 0) {
+											const routeCount = this.getNodeParameter(
+												"routeCount",
+												index,
+												2,
+											) as number;
+
+											const routes: INodeExecutionData[][] = Array(routeCount)
+												.fill(null)
+												.map(() => []);
+
+											if (routeIndex < routeCount) {
+												const routeOutputData: INodeExecutionData = {
+													json: {
+														...(outputInputData ? item.json : {}),
+														...resultData
+													},
+													pairedItem: { item: index },
+												};
+												if (outputInputData && item.binary) {
+													routeOutputData.binary = item.binary;
+												}
+												routes[routeIndex].push(routeOutputData);
+												this.logger.info(
+													formatOperationLog(
+														"Decision",
+														nodeName,
+														nodeId,
+														index,
+														`Fill action error: sending to route ${routeIndex + 1} despite error (continueOnFail=true)`,
+													),
+												);
+											} else {
+												routes[0].push({
+													json: {
+														...(outputInputData ? item.json : {}),
+														...resultData
+													},
+													pairedItem: { item: index },
+												});
+											}
+
+											return routes;
+										}
+
 										const outputData: INodeExecutionData = {
 											json: {
 												...(outputInputData ? item.json : {}),
