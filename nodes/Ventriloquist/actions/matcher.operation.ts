@@ -38,6 +38,7 @@ import type { Page } from 'puppeteer-core';
 import {
 	smartWaitForSelector,
 	detectElement,
+	matchStrings,
 	IDetectionOptions,
 	IDetectionResult
 } from '../utils/detectionUtils';
@@ -216,24 +217,6 @@ export const description: INodeProperties[] = [
 			},
 		},
 	},
-	{
-		displayName: "AI Confidence Threshold",
-		name: "aiConfidenceThreshold",
-		type: "number",
-		typeOptions: {
-			minValue: 0,
-			maxValue: 1,
-			numberPrecision: 2,
-		},
-		default: 0.5,
-		description: "Minimum confidence score (0-1) from Claude to accept as a match. Below this, the result is treated as no match.",
-		displayOptions: {
-			show: {
-				operation: ["matcher"],
-				matchingMethod: ["aiMatch"],
-			},
-		},
-	},
 
 	// ==================== 2. MATCH CONFIGURATION ====================
 	{
@@ -326,6 +309,65 @@ export const description: INodeProperties[] = [
 			show: {
 				operation: ["matcher"],
 				waitForSelectors: [true],
+			},
+		},
+	},
+	{
+		displayName: "No-Results Match Mode",
+		name: "noResultsMatchMode",
+		type: "options",
+		options: [
+			{
+				name: "Element Exists",
+				value: "elementExists",
+				description: "Match if the no-results element is present in the DOM (default)",
+			},
+			{
+				name: "Text Contains",
+				value: "textContains",
+				description: "Match if the element's text contains the specified value",
+			},
+			{
+				name: "Text Equals",
+				value: "textEquals",
+				description: "Match if the element's text exactly equals the specified value",
+			},
+		],
+		default: "elementExists",
+		description: "How to determine if the no-results element indicates no results were found",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				waitForSelectors: [true],
+			},
+		},
+	},
+	{
+		displayName: "No-Results Text Value",
+		name: "noResultsTextValue",
+		type: "string",
+		default: "",
+		placeholder: "No documents found",
+		description: "Text to compare against the no-results element content",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				waitForSelectors: [true],
+				noResultsMatchMode: ["textContains", "textEquals"],
+			},
+		},
+	},
+	{
+		displayName: "Case Sensitive",
+		name: "noResultsCaseSensitive",
+		type: "boolean",
+		default: false,
+		description: "Whether the text comparison should be case-sensitive",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				waitForSelectors: [true],
+				noResultsMatchMode: ["textContains", "textEquals"],
 			},
 		},
 	},
@@ -923,6 +965,9 @@ export async function execute(
 		const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
 		const timeout = this.getNodeParameter('timeout', index, 10000) as number;
 		const noResultsSelector = this.getNodeParameter('noResultsSelector', index, '') as string;
+		const noResultsMatchMode = this.getNodeParameter('noResultsMatchMode', index, 'elementExists') as string;
+		const noResultsTextValue = this.getNodeParameter('noResultsTextValue', index, '') as string;
+		const noResultsCaseSensitive = this.getNodeParameter('noResultsCaseSensitive', index, false) as boolean;
 		const matchMode = this.getNodeParameter('matchMode', index, 'best') as string;
 		const actionOnMatch = this.getNodeParameter('actionOnMatch', index, 'none') as string;
 		const performanceMode = this.getNodeParameter('performanceMode', index, 'balanced') as string;
@@ -959,17 +1004,46 @@ export async function execute(
 					if (winner === 'results') {
 						container = true;
 					} else if (winner === 'noResults') {
-						container = false;
-						noResultsDetected = true;
-						this.logger.info(
-							formatOperationLog(
-								'Matcher',
-								nodeName,
-								nodeId,
-								index,
-								`No-results selector detected early: ${noResultsSelector} (saved up to ${timeout}ms)`
-							)
-						);
+						// Element found — now check match mode
+						if (noResultsMatchMode === 'elementExists') {
+							// Element presence alone is sufficient
+							container = false;
+							noResultsDetected = true;
+						} else {
+							// Text matching: extract text and compare
+							const elementText = await page.evaluate((sel: string) => {
+								const el = document.querySelector(sel);
+								return el ? (el.textContent || '').trim() : '';
+							}, noResultsSelector);
+
+							const matchType = noResultsMatchMode === 'textContains' ? 'contains' : 'exact';
+							const textMatches = matchStrings(elementText, noResultsTextValue, matchType, noResultsCaseSensitive);
+
+							if (textMatches) {
+								container = false;
+								noResultsDetected = true;
+							} else {
+								// Element exists but text doesn't match — wait for results instead
+								this.logger.info(
+									formatOperationLog('Matcher', nodeName, nodeId, index,
+										`No-results element found but text didn't match (mode=${noResultsMatchMode}, expected="${noResultsTextValue}", got="${elementText.substring(0, 100)}") — waiting for results`
+									)
+								);
+								try {
+									await page.waitForSelector(itemSelector, { timeout });
+									container = true;
+								} catch {
+									container = false;
+								}
+							}
+						}
+						if (noResultsDetected) {
+							this.logger.info(
+								formatOperationLog('Matcher', nodeName, nodeId, index,
+									`No-results detected early (mode=${noResultsMatchMode}): ${noResultsSelector} (saved up to ${timeout}ms)`
+								)
+							);
+						}
 					} else {
 						// Both timed out
 						container = false;
@@ -1214,7 +1288,6 @@ export async function execute(
 
 			const aiModel = this.getNodeParameter('aiModel', index, 'claude-opus-4-20250514') as string;
 			const aiMatchContext = this.getNodeParameter('aiMatchContext', index, '') as string;
-			const aiConfidenceThreshold = this.getNodeParameter('aiConfidenceThreshold', index, 0.5) as number;
 			const comparisons = matchResult.comparisons || [];
 
 			if (comparisons.length > 0) {
@@ -1241,12 +1314,11 @@ export async function execute(
 						referenceEntity: sourceEntity,
 						candidates,
 						matchContext: aiMatchContext || undefined,
-						confidenceThreshold: aiConfidenceThreshold,
 						logger: this.logger,
 					});
 
 					// Override the algorithmic selection with Claude's decision
-					if (aiResult.matchIndex !== null) {
+					if (aiResult.isMatch && aiResult.matchIndex !== null) {
 						// Deselect all algorithmic picks
 						for (const comp of comparisons) {
 							comp.selected = false;
@@ -1258,16 +1330,17 @@ export async function execute(
 						);
 						if (aiPick) {
 							aiPick.selected = true;
+							aiPick.isMatch = true;
 							aiPick.overallSimilarity = aiResult.confidence;
 							aiPick.similarities = {
 								...aiPick.similarities,
-								'AI Confidence': aiResult.confidence,
+								'AI Match': aiResult.confidence,
 							};
 							matchResult.selectedMatch = aiPick;
 							matchResult.matches = [aiPick];
 							matchResult.success = true;
 							this.logger.info(
-								`[Matcher][AI] Claude selected candidate ${aiResult.matchIndex} with confidence ${aiResult.confidence}`
+								`[Matcher][AI] Claude selected candidate ${aiResult.matchIndex} (isMatch=true) — ${aiResult.reasoning}`
 							);
 						}
 					} else {
@@ -1278,7 +1351,7 @@ export async function execute(
 						matchResult.selectedMatch = undefined;
 						matchResult.matches = [];
 						matchResult.success = true; // Operation succeeded, just no match found
-						this.logger.info(`[Matcher][AI] Claude found no match: ${aiResult.reasoning}`);
+						this.logger.info(`[Matcher][AI] Claude found no match (isMatch=false) — ${aiResult.reasoning}`);
 					}
 				} catch (aiError) {
 					this.logger.error(`[Matcher][AI] Claude matching failed: ${(aiError as Error).message}`);
@@ -1360,11 +1433,11 @@ export async function execute(
 
 		if (aiResult) {
 			selectedReason = matchResult.selectedMatch
-				? `AI Match (${aiResult.model}): confidence ${aiResult.confidence.toFixed(2)} — ${aiResult.reasoning}`
-				: `AI Match: no match found — ${aiResult.reasoning}`;
+				? `AI Match (${aiResult.model}): isMatch=true — ${aiResult.reasoning}`
+				: `AI Match: isMatch=false — ${aiResult.reasoning}`;
 			scoringFactors = [
 				`AI model: ${aiResult.model}`,
-				`Confidence: ${aiResult.confidence.toFixed(2)}`,
+				`Decision: ${aiResult.isMatch ? 'MATCH' : 'NO MATCH'}`,
 				'Full candidate context analysis',
 				'Name, location, age, and domain-specific reasoning',
 			];
@@ -1414,6 +1487,7 @@ export async function execute(
 			...(aiResult ? {
 				aiAssisted: true,
 				aiResult: {
+					isMatch: aiResult.isMatch,
 					matchIndex: aiResult.matchIndex,
 					confidence: aiResult.confidence,
 					reasoning: aiResult.reasoning,
