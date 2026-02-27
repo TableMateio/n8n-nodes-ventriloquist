@@ -47,6 +47,11 @@ import {
 	createEntityMatcher,
 	type IEntityMatcherConfig
 } from "../utils/middlewares/matching/entityMatcherFactory";
+import {
+	invokeClaudeMatching,
+	type IClaudeMatchCandidate,
+	type IClaudeMatchResult,
+} from '../utils/claudeMatchingService';
 
 // Add this interface near the top of the file with the other interfaces
 interface IContainerInfo {
@@ -139,6 +144,97 @@ export const description: INodeProperties[] = [
 		},
 	},
 
+	// ==================== 1.5. MATCHING METHOD ====================
+	{
+		displayName: "Matching Method",
+		name: "matchingMethod",
+		type: "options",
+		options: [
+			{
+				name: "Algorithmic",
+				value: "algorithmic",
+				description: "Use similarity algorithms to compare candidates (existing behavior)",
+			},
+			{
+				name: "AI Match (Claude)",
+				value: "aiMatch",
+				description: "Send all candidates to Claude for intelligent matching with full context",
+			},
+		],
+		default: "algorithmic",
+		description: "How to evaluate and select the best match from candidates",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+			},
+		},
+	},
+	{
+		displayName: "AI Model",
+		name: "aiModel",
+		type: "options",
+		options: [
+			{
+				name: "Claude Opus 4",
+				value: "claude-opus-4-20250514",
+				description: "Highest accuracy — best for complex disambiguation",
+			},
+			{
+				name: "Claude Sonnet 4.5",
+				value: "claude-sonnet-4-5-20250514",
+				description: "Best balance of speed and accuracy",
+			},
+			{
+				name: "Claude Haiku 3.5",
+				value: "claude-haiku-3-5-20241022",
+				description: "Fastest and cheapest — good for simple matches",
+			},
+		],
+		default: "claude-opus-4-20250514",
+		description: "Claude model to use for AI matching",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				matchingMethod: ["aiMatch"],
+			},
+		},
+	},
+	{
+		displayName: "Match Context",
+		name: "aiMatchContext",
+		type: "string",
+		typeOptions: {
+			rows: 4,
+		},
+		default: "",
+		placeholder: "These are property owner records from tax foreclosure proceedings. Consider name, age, geographic proximity, and county when evaluating matches.",
+		description: "Optional domain-specific context to help Claude make better matching decisions",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				matchingMethod: ["aiMatch"],
+			},
+		},
+	},
+	{
+		displayName: "AI Confidence Threshold",
+		name: "aiConfidenceThreshold",
+		type: "number",
+		typeOptions: {
+			minValue: 0,
+			maxValue: 1,
+			numberPrecision: 2,
+		},
+		default: 0.5,
+		description: "Minimum confidence score (0-1) from Claude to accept as a match. Below this, the result is treated as no match.",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				matchingMethod: ["aiMatch"],
+			},
+		},
+	},
+
 	// ==================== 2. MATCH CONFIGURATION ====================
 	{
 		displayName: "Selection Method",
@@ -211,6 +307,21 @@ export const description: INodeProperties[] = [
 		type: "number",
 		default: 10000,
 		description: "How long to wait for selectors in milliseconds",
+		displayOptions: {
+			show: {
+				operation: ["matcher"],
+				waitForSelectors: [true],
+			},
+		},
+	},
+
+	{
+		displayName: "No-Results Selector",
+		name: "noResultsSelector",
+		type: "string",
+		default: "",
+		placeholder: "#no_results, .empty-state",
+		description: "CSS selector for a 'no results' indicator. When set, races against the item selector — if this element appears first, the node returns immediately with containerFound=0 and noResultsDetected=true instead of waiting for the full timeout.",
 		displayOptions: {
 			show: {
 				operation: ["matcher"],
@@ -710,6 +821,7 @@ export async function execute(
 	index: number,
 	workflowId: string,
 	websocketEndpoint: string,
+	anthropicApiKey?: string,
 ): Promise<INodeExecutionData> {
 	// Get operation start time for performance logging
 	const startTime = Date.now();
@@ -810,6 +922,7 @@ export async function execute(
 
 		const waitForSelectors = this.getNodeParameter('waitForSelectors', index, true) as boolean;
 		const timeout = this.getNodeParameter('timeout', index, 10000) as number;
+		const noResultsSelector = this.getNodeParameter('noResultsSelector', index, '') as string;
 		const matchMode = this.getNodeParameter('matchMode', index, 'best') as string;
 		const actionOnMatch = this.getNodeParameter('actionOnMatch', index, 'none') as string;
 		const performanceMode = this.getNodeParameter('performanceMode', index, 'balanced') as string;
@@ -829,12 +942,45 @@ export async function execute(
 			actualItemSelector = itemSelector;
 
 			// Check if container exists and wait for it if needed
+			let noResultsDetected = false;
+
 			if (waitForSelectors) {
-				try {
-					await page.waitForSelector(itemSelector, { timeout });
-					container = true;
-				} catch (error) {
-					container = false;
+				if (noResultsSelector) {
+					// Race: item container vs no-results indicator — whichever appears first wins
+					const resultsPromise = page.waitForSelector(itemSelector, { timeout })
+						.then(() => 'results' as const)
+						.catch(() => 'timeout' as const);
+					const noResultsPromise = page.waitForSelector(noResultsSelector, { timeout })
+						.then(() => 'noResults' as const)
+						.catch(() => 'timeout' as const);
+
+					const winner = await Promise.race([resultsPromise, noResultsPromise]);
+
+					if (winner === 'results') {
+						container = true;
+					} else if (winner === 'noResults') {
+						container = false;
+						noResultsDetected = true;
+						this.logger.info(
+							formatOperationLog(
+								'Matcher',
+								nodeName,
+								nodeId,
+								index,
+								`No-results selector detected early: ${noResultsSelector} (saved up to ${timeout}ms)`
+							)
+						);
+					} else {
+						// Both timed out
+						container = false;
+					}
+				} else {
+					try {
+						await page.waitForSelector(itemSelector, { timeout });
+						container = true;
+					} catch (error) {
+						container = false;
+					}
 				}
 			} else {
 				container = await page.evaluate((selector: string) => {
@@ -843,27 +989,33 @@ export async function execute(
 			}
 
 			if (!container) {
+				const message = noResultsDetected
+					? `No results found (detected via ${noResultsSelector})`
+					: `Container selector not found: ${itemSelector}`;
 				this.logger.warn(
 					formatOperationLog(
 						'Matcher',
 						nodeName,
 						nodeId,
 						index,
-						`Container selector not found: ${itemSelector}`
+						message
 					)
 				);
-				const error = new NodeOperationError(this.getNode(), `Container selector not found: ${itemSelector}`);
+				const error = new NodeOperationError(this.getNode(), message);
 				const debugInfo: IDataObject = {
 					containerSelector: itemSelector,
 					itemSelector: actualItemSelector,
 					waitForSelectors,
-					timeout
+					timeout,
+					noResultsSelector: noResultsSelector || undefined,
+					noResultsDetected,
 				};
 				return {
 					json: {
 						...(outputInputData && item.json ? item.json : {}),
 						success: 0,
 						containerFound: 0,
+						noResultsDetected,
 						error,
 						debug: debugInfo,
 						matches: [],
@@ -1008,7 +1160,32 @@ export async function execute(
 			}
 		}
 
-		// Create and execute entity matcher
+		// Get matching method (algorithmic or AI)
+		const matchingMethod = this.getNodeParameter('matchingMethod', index, 'algorithmic') as string;
+
+		// ── Pre-extract full text for AI matching ──────────────────────────
+		// MUST happen BEFORE entityMatcher.execute() because the matcher's
+		// click action (actionOnMatch: "click") navigates the page away,
+		// destroying the execution context. If we tried to page.evaluate()
+		// after the click, we'd get "Execution context was destroyed."
+		let preExtractedTexts: string[] = [];
+		if (matchingMethod === 'aiMatch' && anthropicApiKey) {
+			try {
+				preExtractedTexts = await page.evaluate((selector: string, method: string) => {
+					const container = document.querySelector(selector);
+					if (!container) return [] as string[];
+					const items = method === 'containerItems'
+						? Array.from(container.children)
+						: Array.from(document.querySelectorAll(selector));
+					return items.map(el => (el as HTMLElement).innerText || el.textContent || '');
+				}, actualItemSelector, selectionMethod);
+				this.logger.info(`[Matcher][AI] Pre-extracted full text from ${preExtractedTexts.length} candidates`);
+			} catch (preExtractError) {
+				this.logger.warn(`[Matcher][AI] Pre-extraction of full text failed: ${(preExtractError as Error).message} — will use structured fields only`);
+			}
+		}
+
+		// Create and execute entity matcher (always runs — handles extraction from DOM)
 		const entityMatcher = createEntityMatcher(
 			page,
 			matcherConfig,
@@ -1022,6 +1199,97 @@ export async function execute(
 		);
 
 		const matchResult = await entityMatcher.execute();
+
+		// ── AI Match Override ──────────────────────────────────────────────
+		// If AI matching is enabled, send all candidates to Claude and
+		// override the algorithmic selection with Claude's decision.
+		// The extraction + comparison pipeline still runs first to get
+		// structured field data from the DOM.
+		let aiResult: IClaudeMatchResult | undefined;
+
+		if (matchingMethod === 'aiMatch') {
+			if (!anthropicApiKey) {
+				this.logger.warn('[Matcher][AI] AI Match enabled but no Anthropic API key found — falling back to algorithmic matching');
+			} else {
+
+			const aiModel = this.getNodeParameter('aiModel', index, 'claude-opus-4-20250514') as string;
+			const aiMatchContext = this.getNodeParameter('aiMatchContext', index, '') as string;
+			const aiConfidenceThreshold = this.getNodeParameter('aiConfidenceThreshold', index, 0.5) as number;
+			const comparisons = matchResult.comparisons || [];
+
+			if (comparisons.length > 0) {
+				this.logger.info(`[Matcher][AI] Sending ${comparisons.length} candidates to ${aiModel}`);
+
+				// Use pre-extracted full text (captured before entityMatcher.execute()
+				// navigated the page via click action). Falls back gracefully to
+				// empty strings if pre-extraction failed or had fewer items.
+				const fullTexts = preExtractedTexts;
+
+				// Build candidate list for Claude
+				const candidates: IClaudeMatchCandidate[] = comparisons.map(
+					(comp: IEntityMatchResult, idx: number) => ({
+						index: comp.index,
+						fields: comp.fields || {},
+						fullText: fullTexts[idx] || '',
+					})
+				);
+
+				try {
+					aiResult = await invokeClaudeMatching({
+						apiKey: anthropicApiKey,
+						model: aiModel,
+						referenceEntity: sourceEntity,
+						candidates,
+						matchContext: aiMatchContext || undefined,
+						confidenceThreshold: aiConfidenceThreshold,
+						logger: this.logger,
+					});
+
+					// Override the algorithmic selection with Claude's decision
+					if (aiResult.matchIndex !== null) {
+						// Deselect all algorithmic picks
+						for (const comp of comparisons) {
+							comp.selected = false;
+						}
+
+						// Find the candidate Claude picked
+						const aiPick = comparisons.find(
+							(c: IEntityMatchResult) => c.index === aiResult!.matchIndex
+						);
+						if (aiPick) {
+							aiPick.selected = true;
+							aiPick.overallSimilarity = aiResult.confidence;
+							aiPick.similarities = {
+								...aiPick.similarities,
+								'AI Confidence': aiResult.confidence,
+							};
+							matchResult.selectedMatch = aiPick;
+							matchResult.matches = [aiPick];
+							matchResult.success = true;
+							this.logger.info(
+								`[Matcher][AI] Claude selected candidate ${aiResult.matchIndex} with confidence ${aiResult.confidence}`
+							);
+						}
+					} else {
+						// Claude says no match — clear any algorithmic selection
+						for (const comp of comparisons) {
+							comp.selected = false;
+						}
+						matchResult.selectedMatch = undefined;
+						matchResult.matches = [];
+						matchResult.success = true; // Operation succeeded, just no match found
+						this.logger.info(`[Matcher][AI] Claude found no match: ${aiResult.reasoning}`);
+					}
+				} catch (aiError) {
+					this.logger.error(`[Matcher][AI] Claude matching failed: ${(aiError as Error).message}`);
+					// Fall through to algorithmic results if AI fails
+					this.logger.warn(`[Matcher][AI] Falling back to algorithmic results`);
+				}
+			} else {
+				this.logger.info(`[Matcher][AI] No candidates extracted — skipping AI matching`);
+			}
+			} // end if (anthropicApiKey)
+		}
 
 		// Log the match result
 		if (matchResult.success) {
@@ -1086,7 +1354,33 @@ export async function execute(
 
 						// Screenshot was already captured before matching work began
 
-		const resultData = {
+		// Build selectedReason and scoringFactors based on matching method
+		let selectedReason: string;
+		let scoringFactors: string[];
+
+		if (aiResult) {
+			selectedReason = matchResult.selectedMatch
+				? `AI Match (${aiResult.model}): confidence ${aiResult.confidence.toFixed(2)} — ${aiResult.reasoning}`
+				: `AI Match: no match found — ${aiResult.reasoning}`;
+			scoringFactors = [
+				`AI model: ${aiResult.model}`,
+				`Confidence: ${aiResult.confidence.toFixed(2)}`,
+				'Full candidate context analysis',
+				'Name, location, age, and domain-specific reasoning',
+			];
+		} else {
+			selectedReason = matchResult.selectedMatch
+				? `Best overall similarity (${matchResult.selectedMatch.overallSimilarity.toFixed(4)}) with information richness ${(matchResult.selectedMatch.informationRichness || 0).toFixed(4)}`
+				: 'No match selected';
+			scoringFactors = [
+				'Overall similarity score (primary factor)',
+				'Information richness (secondary factor, breaks ties)',
+				'Matching of key identifiers and numeric values',
+				'Word overlap and sequence matching',
+			];
+		}
+
+		const resultData: IDataObject = {
 			...matchResult,
 			// For backward compatibility, keep the matches array, but filtered for best match mode
 			matches,
@@ -1113,16 +1407,22 @@ export async function execute(
 				richestMatch: matchResult.comparisons?.sort((a: IEntityMatchResult, b: IEntityMatchResult) =>
 					(b.informationRichness || 0) - (a.informationRichness || 0)
 				)[0] || null,
-				selectedReason: matchResult.selectedMatch ?
-					`Best overall similarity (${matchResult.selectedMatch.overallSimilarity.toFixed(4)}) with information richness ${(matchResult.selectedMatch.informationRichness || 0).toFixed(4)}` :
-					'No match selected',
-				scoringFactors: [
-					'Overall similarity score (primary factor)',
-					'Information richness (secondary factor, breaks ties)',
-					'Matching of key identifiers and numeric values',
-					'Word overlap and sequence matching'
-				]
+				selectedReason,
+				scoringFactors,
 			},
+			// AI result (only present when AI matching was used)
+			...(aiResult ? {
+				aiAssisted: true,
+				aiResult: {
+					matchIndex: aiResult.matchIndex,
+					confidence: aiResult.confidence,
+					reasoning: aiResult.reasoning,
+					duplicates: aiResult.duplicates,
+					flags: aiResult.flags,
+					model: aiResult.model,
+					usage: aiResult.usage,
+				},
+			} : {}),
 			// Include the sessionId in the output
 			sessionId,
 			duration: Date.now() - startTime,
