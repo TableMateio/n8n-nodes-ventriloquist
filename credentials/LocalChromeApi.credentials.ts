@@ -25,7 +25,7 @@ export class LocalChromeApi implements ICredentialType {
 			name: 'headless',
 			type: 'boolean',
 			default: true,
-			description: 'Whether to run Chrome without a visible UI (headless mode)',
+			description: 'When using Connect to Existing Instance, this switches which Chrome instance to connect to: headless (invisible) or headed (visible). Each must be running on its own debugging port.',
 			required: false,
 		},
 		{
@@ -109,15 +109,29 @@ export class LocalChromeApi implements ICredentialType {
 			},
 		},
 		{
-			displayName: 'Remote Debugging Port',
+			displayName: 'Remote Debugging Port (Headed)',
 			name: 'debuggingPort',
 			type: 'number',
 			default: 9222,
-			description: 'Port number of existing Chrome instance with remote debugging enabled. Chrome must be started with --remote-debugging-port=9222',
+			description: 'Port for the headed (visible) Chrome instance. Used when Headless Mode is off. Chrome must be started with --remote-debugging-port=9222',
 			required: false,
 			displayOptions: {
 				show: {
 					connectToExisting: [true],
+				},
+			},
+		},
+		{
+			displayName: 'Remote Debugging Port (Headless)',
+			name: 'headlessDebuggingPort',
+			type: 'number',
+			default: 9225,
+			description: 'Port for the headless Chrome instance. Used when Headless Mode is on. A separate headless Chrome must be running on this port (or proxied via socat).',
+			required: false,
+			displayOptions: {
+				show: {
+					connectToExisting: [true],
+					headless: [true],
 				},
 			},
 		},
@@ -214,7 +228,7 @@ export class LocalChromeApi implements ICredentialType {
 			displayName: 'Note: Existing Chrome',
 			name: 'existingChromeNote',
 			type: 'notice',
-			default: 'To connect to an existing Chrome instance, start Chrome with: chrome --remote-debugging-port=9222 --user-data-dir=/path/to/data',
+			default: 'Dual Chrome setup: run a headed Chrome on one port and a headless Chrome on another. Toggle Headless Mode to switch between them. From Docker, use socat to proxy each port.',
 			displayOptions: {
 				show: {
 					connectToExisting: [true],

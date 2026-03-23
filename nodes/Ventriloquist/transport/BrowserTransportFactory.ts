@@ -170,10 +170,16 @@ export class BrowserTransportFactory {
       // Get existing Chrome connection parameters
       const connectToExisting = credentials.connectToExisting === true;
       const debuggingHost = credentials.debuggingHost as string || 'localhost';
-      const debuggingPort = credentials.debuggingPort as number || 9222;
+      const headedPort = credentials.debuggingPort as number || 9222;
+      const headlessPort = credentials.headlessDebuggingPort as number || 9225;
+      // When connecting to existing Chrome, switch port based on headless toggle
+      const debuggingPort = (connectToExisting && headless) ? headlessPort : headedPort;
       const maximizeWindow = credentials.maximizeWindow === true;
 
       logger.info(`Creating Local Chrome transport with headless: ${headless}`);
+      if (connectToExisting) {
+        logger.info(`Headless mode: ${headless} → using port ${debuggingPort} (headed=${headedPort}, headless=${headlessPort})`);
+      }
       if (maximizeWindow) {
         logger.info('Window will be maximized');
       } else if (windowPositioning) {
