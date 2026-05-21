@@ -1394,7 +1394,7 @@ export async function execute(
 		if (!page) {
 			const currentSession = SessionManager.getSession(sessionId);
 			if (currentSession?.browser?.isConnected()) {
-				page = await getActivePage(currentSession.browser, this.logger);
+				page = await getActivePage(currentSession.browser, this.logger, sessionId);
 			} else {
 				throw new Error(
 					"Failed to get session or browser is disconnected after getOrCreatePageSession",
@@ -1892,15 +1892,44 @@ export async function execute(
 			openAiApiKey
 		);
 
-		// Log the raw results from processExtractionItems for deep inspection
-		console.log('!!!!!! extract.operation.ts - BEFORE REDUCE - extractionResults: !!!!!!', extractionResults);
-		extractionResults.forEach((item: IExtractItem, idx: number) => {
-			console.log(`!!!!!! ITEM ${idx} [${item.name}] - extractedData (first 100 chars): !!!!!`, typeof item.extractedData === 'string' ? item.extractedData.substring(0,100) : item.extractedData);
-			console.log(`!!!!!! ITEM ${idx} [${item.name}] - rawData (first 100 chars): !!!!!`, typeof item.rawData === 'string' ? item.rawData.substring(0,100) : item.rawData);
+		// Build extraction diagnostics (always included in output)
+		const extractionDiagnostics: IDataObject = {};
+		let anyFailed = false;
+		extractionResults.forEach((item: IExtractItem) => {
+			if (item.diagnostic) {
+				extractionDiagnostics[item.name] = item.diagnostic;
+				if (item.diagnostic.error) anyFailed = true;
+			}
 		});
+
+		// Capture page URL and title for redirect/auth detection
+		let pageUrl = '';
+		let pageTitle = '';
+		try {
+			if (page) {
+				pageUrl = await page.url();
+				pageTitle = await page.title();
+			}
+		} catch (e) {
+			// Page may be closed or navigated away
+			pageUrl = 'unknown (page not accessible)';
+			pageTitle = 'unknown';
+		}
+
+		// Log diagnostics summary
+		if (anyFailed) {
+			this.logger.warn(
+				formatOperationLog('extraction', nodeName, nodeId, index,
+					`Extraction diagnostics: ${Object.keys(extractionDiagnostics).length} items, failures detected. Page URL: ${pageUrl}, Title: ${pageTitle}`)
+			);
+		}
 
 		// Store all extraction results
 		const extractionResultsData: IDataObject = {
+			// Always include diagnostics
+			extractionDiagnostics,
+			pageUrl,
+			pageTitle,
 			// Only include extractedData array in debug mode
 			...(debugMode ? {
 				extractedData: extractionResults.map(item => ({
@@ -2305,6 +2334,7 @@ export async function execute(
 			pageForResponse = await getActivePage(
 				currentSession.browser,
 				this.logger,
+				sessionId,
 			);
 		}
 

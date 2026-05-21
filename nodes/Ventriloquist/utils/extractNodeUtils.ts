@@ -48,6 +48,16 @@ export interface IExtractionNodeOptions {
 /**
  * Interface for extract item configuration
  */
+export interface IExtractionDiagnostic {
+  name: string;
+  selector: string;
+  selectorFound: boolean;
+  rawContentLength: number;
+  aiCalled: boolean;
+  aiError: string | null;
+  error: string | null;
+}
+
 export interface IExtractItem {
   id: string;
   name: string;
@@ -55,6 +65,7 @@ export interface IExtractItem {
   extractedData?: any;
   rawData?: any;
   schema?: any;
+  diagnostic?: IExtractionDiagnostic;
   selector?: string;
   attribute?: string;
   regex?: string;
@@ -1160,6 +1171,17 @@ export async function processExtractionItems(
             // Store extracted data
             extractionItem.extractedData = result.data;
 
+            // Store diagnostic info
+            extractionItem.diagnostic = {
+              name: extractionItem.name,
+              selector: extractionItem.selector || '',
+              selectorFound: true,
+              rawContentLength: typeof result.rawContent === 'string' ? result.rawContent.length : 0,
+              aiCalled: !!(extractionItem.aiFormatting?.enabled && extractionItem.hasOpenAiApiKey),
+              aiError: null,
+              error: null,
+            };
+
             // If we have a schema from the extraction, store it
             if (result.schema) {
               logger.debug(
@@ -1176,17 +1198,31 @@ export async function processExtractionItems(
               extractionItem.schema = result.schema;
             }
           } else {
+            const errorMsg = result.error?.message || 'Unknown error';
             logger.warn(
               formatOperationLog(
                 'extraction',
                 nodeName,
                 nodeId,
                 i,
-                `Extraction failed for [${extractionItem.name}]: ${result.error?.message || 'Unknown error'}`,
+                `Extraction failed for [${extractionItem.name}]: ${errorMsg}`,
                 'extractNodeUtils',
                 'processExtractionItems'
               )
             );
+
+            // Store diagnostic info for failed extraction
+            const isSelectorError = errorMsg.includes('Selector not found') || errorMsg.includes('selector');
+            const isAiError = errorMsg.includes('AI') || errorMsg.includes('OpenAI') || errorMsg.includes('api');
+            extractionItem.diagnostic = {
+              name: extractionItem.name,
+              selector: extractionItem.selector || '',
+              selectorFound: !isSelectorError,
+              rawContentLength: 0,
+              aiCalled: isAiError,
+              aiError: isAiError ? errorMsg : null,
+              error: errorMsg,
+            };
 
             // Log detailed error in debug mode
             if (isDebugMode && result.error) {
@@ -1203,30 +1239,50 @@ export async function processExtractionItems(
             }
           }
         } catch (error) {
+          const errorMsg = (error as Error).message;
           logger.warn(
             formatOperationLog(
               'extraction',
               nodeName,
               nodeId,
               i,
-              `Error executing extraction: ${(error as Error).message}`,
+              `Error executing extraction: ${errorMsg}`,
               'extractNodeUtils',
               'processExtractionItems'
             )
           );
+          extractionItem.diagnostic = {
+            name: extractionItem.name,
+            selector: extractionItem.selector || '',
+            selectorFound: false,
+            rawContentLength: 0,
+            aiCalled: false,
+            aiError: null,
+            error: `Extraction exception: ${errorMsg}`,
+          };
         }
       } catch (error) {
+        const errorMsg = (error as Error).message;
         logger.warn(
           formatOperationLog(
             'extraction',
             nodeName,
             nodeId,
             i,
-            `Error processing extraction item: ${(error as Error).message}`,
+            `Error processing extraction item: ${errorMsg}`,
             'extractNodeUtils',
             'processExtractionItems'
           )
         );
+        extractionItem.diagnostic = {
+          name: extractionItem.name,
+          selector: extractionItem.selector || '',
+          selectorFound: false,
+          rawContentLength: 0,
+          aiCalled: false,
+          aiError: null,
+          error: `Processing exception: ${errorMsg}`,
+        };
       }
     } else {
       logger.warn(
@@ -1240,6 +1296,15 @@ export async function processExtractionItems(
           'processExtractionItems'
         )
       );
+      extractionItem.diagnostic = {
+        name: extractionItem.name,
+        selector: extractionItem.selector || '',
+        selectorFound: false,
+        rawContentLength: 0,
+        aiCalled: false,
+        aiError: null,
+        error: 'No puppeteer page available',
+      };
     }
 
     typedExtractionItems.push(extractionItem);

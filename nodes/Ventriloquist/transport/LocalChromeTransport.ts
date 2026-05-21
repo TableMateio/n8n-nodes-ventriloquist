@@ -156,6 +156,7 @@ export class LocalChromeTransport implements BrowserTransport {
                 // Connect using the WebSocket endpoint directly
                 const browser = await puppeteer.connect({
                   browserWSEndpoint: wsEndpoint,
+                  protocolTimeout: 60_000, // 60s — fail faster than 180s default when Chrome hangs
                   defaultViewport: {
                     width: this.windowWidth,
                     height: this.windowHeight
@@ -169,6 +170,7 @@ export class LocalChromeTransport implements BrowserTransport {
               // Standard local connection
               const browser = await puppeteer.connect({
                 browserURL,
+                protocolTimeout: 60_000, // 60s — fail faster than 180s default when Chrome hangs
                 defaultViewport: {
                   width: this.windowWidth,
                   height: this.windowHeight

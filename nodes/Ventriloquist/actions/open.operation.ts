@@ -310,9 +310,22 @@ export async function execute(
 				`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Reusing existing session: ${sessionId}`
 			);
 
-			// Get the active page from the existing session
-			const pages = await browser.pages();
-			page = pages.length > 0 ? pages[pages.length - 1] : await browser.newPage();
+			// Get the session's tracked page first (for tab isolation), fall back to browser.pages()
+			const trackedPage = SessionManager.getSessionPage(explicitSessionId);
+			if (trackedPage) {
+				page = trackedPage;
+				this.logger.info(
+					`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Using tracked page for session: ${sessionId}`
+				);
+			} else {
+				const pages = await browser.pages();
+				page = pages.length > 0 ? pages[pages.length - 1] : await browser.newPage();
+				// Track the page so subsequent operations find the right tab
+				SessionManager.setSessionPage(sessionId, page);
+				this.logger.info(
+					`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] No tracked page, using last page and storing it`
+				);
+			}
 
 			this.logger.info(
 				`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Navigating existing page to: ${url}`
@@ -378,6 +391,14 @@ export async function execute(
 				? await browser.createBrowserContext()
 				: browser.defaultBrowserContext();
 			page = await context.newPage();
+
+			// Track this page in the session for tab isolation.
+			// For Local Chrome, all sessions share the same Chrome process —
+			// without this, downstream operations could pick a tab from another workflow.
+			SessionManager.setSessionPage(sessionId, page);
+			this.logger.info(
+				`[Ventriloquist][${nodeName}#${index}][Open][${nodeId}] Tracked page in session ${sessionId} for tab isolation`
+			);
 
 		} catch (sessionError) {
 			// More specific error handling for session creation

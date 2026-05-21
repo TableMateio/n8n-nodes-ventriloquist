@@ -18,6 +18,7 @@ export interface ILogger {
 export interface IBrowserSession {
 	browser: Browser;
 	// pages: Map<string, Page>; // Removed pages map
+	activePage?: Page; // The page created/owned by this session (for tab isolation)
 	lastUsed: Date;
 	workflowId?: string; // Optional for backwards compatibility
 	credentialType?: string;
@@ -426,22 +427,37 @@ export namespace SessionManager {
 			throw new Error("Failed to get or create a browser session/sessionId");
 		}
 
-		// --- Crucially, we no longer guarantee returning a page object ---
-		// The caller must now use the browser object to get the page(s) it needs.
-		// We can try to get the 'last' page as a convenience, but it might be null.
-		try {
-			const pages = await browser.pages();
-			if (pages.length > 0) {
-				page = pages[pages.length - 1]; // Provide the last page if available
-				logger.info(`${logPrefix} Found last page: ${await page.url()}`);
-			} else {
-				logger.info(`${logPrefix} No pages currently open in the browser.`);
+		// --- Try to get the session's tracked page first (for tab isolation) ---
+		// For Local Chrome, browser.pages() returns ALL tabs across ALL sessions.
+		// The tracked page ensures each session uses its own tab, not another workflow's.
+		const trackedPage = getSessionPage(sessionId);
+		if (trackedPage) {
+			try {
+				const trackedUrl = trackedPage.url();
+				logger.info(`${logPrefix} Using tracked page for session ${sessionId}: ${trackedUrl}`);
+				page = trackedPage;
+			} catch (trackedError) {
+				logger.warn(`${logPrefix} Tracked page for session ${sessionId} is stale, falling back to browser.pages()`);
+				page = null;
 			}
-		} catch (pageError) {
-			logger.warn(
-				`${logPrefix} Error getting pages from browser: ${(pageError as Error).message}`,
-			);
-			page = null; // Ensure page is null if error occurs
+		}
+
+		// Fallback: if no tracked page, try browser.pages() (original behavior)
+		if (!page) {
+			try {
+				const pages = await browser.pages();
+				if (pages.length > 0) {
+					page = pages[pages.length - 1]; // Provide the last page if available
+					logger.info(`${logPrefix} Fallback: found last page: ${await page.url()}`);
+				} else {
+					logger.info(`${logPrefix} No pages currently open in the browser.`);
+				}
+			} catch (pageError) {
+				logger.warn(
+					`${logPrefix} Error getting pages from browser: ${(pageError as Error).message}`,
+				);
+				page = null; // Ensure page is null if error occurs
+			}
 		}
 
 		logger.info(
@@ -735,6 +751,19 @@ export namespace SessionManager {
 	}
 
 	/**
+	 * Remove a session from tracking WITHOUT closing the browser.
+	 * Used by "Close Tab" mode — closes the tab but leaves Chrome running.
+	 * Safe for Local Chrome where browser.close() would kill the whole process.
+	 */
+	export function removeSession(sessionId: string): boolean {
+		const session = sessions.get(sessionId);
+		if (!session) return false;
+		session.activePage = undefined;
+		sessions.delete(sessionId);
+		return true;
+	}
+
+	/**
 	 * Get all active sessions (for debugging/monitoring)
 	 */
 	export function getAllSessions(): {
@@ -771,6 +800,40 @@ export namespace SessionManager {
 			return true; // Connection is active
 		} catch (error) {
 			return false; // Connection is lost
+		}
+	}
+
+	/**
+	 * Store the active page for a session.
+	 * This enables tab isolation for Local Chrome where all sessions share
+	 * the same Chrome process — without this, browser.pages() returns ALL
+	 * tabs and downstream operations could pick a tab from another workflow.
+	 */
+	export function setSessionPage(sessionId: string, page: Page): void {
+		const session = sessions.get(sessionId);
+		if (session) {
+			session.activePage = page;
+		}
+	}
+
+	/**
+	 * Get the tracked active page for a session.
+	 * Returns null if the page doesn't exist, is closed, or the session is unknown.
+	 */
+	export function getSessionPage(sessionId: string): Page | null {
+		const session = sessions.get(sessionId);
+		if (!session?.activePage) return null;
+
+		// Verify the page is still open
+		try {
+			if (session.activePage.isClosed()) {
+				session.activePage = undefined;
+				return null;
+			}
+			return session.activePage;
+		} catch {
+			session.activePage = undefined;
+			return null;
 		}
 	}
 }

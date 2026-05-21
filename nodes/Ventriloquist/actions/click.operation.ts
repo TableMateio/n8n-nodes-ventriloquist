@@ -237,7 +237,7 @@ export async function execute(
 		if (!page) {
 			const currentSession = SessionManager.getSession(sessionId);
 			if (currentSession?.browser?.isConnected()) {
-				page = await getActivePage(currentSession.browser, this.logger);
+				page = await getActivePage(currentSession.browser, this.logger, sessionId);
 			} else {
 				throw new Error(
 					"Failed to get session or browser is disconnected after getOrCreatePageSession",
@@ -409,7 +409,7 @@ export async function execute(
 		let finalPage: Page | null = null;
 		const currentSession = SessionManager.getSession(sessionId);
 		if (currentSession?.browser?.isConnected()) {
-			finalPage = await getActivePage(currentSession.browser, this.logger);
+			finalPage = await getActivePage(currentSession.browser, this.logger, sessionId);
 		}
 		// Use finalPage for response/screenshot creation, fallback to original 'page' if needed
 		const pageForResponse = finalPage || page;
@@ -463,7 +463,7 @@ export async function execute(
 			try {
 				const currentSession = SessionManager.getSession(sessionId);
 				if (currentSession?.browser?.isConnected()) {
-					errorPage = await getActivePage(currentSession.browser, this.logger);
+					errorPage = await getActivePage(currentSession.browser, this.logger, sessionId);
 				}
 			} catch (getPageError) {
 				this.logger.warn(

@@ -40,6 +40,7 @@ export class BrightDataBrowser implements BrowserTransport {
 			// Connect to the browser using the WebSocket endpoint
 			const browser = await puppeteer.connect({
 				browserWSEndpoint: this.websocketEndpoint,
+				protocolTimeout: 60_000, // 60s — fail faster than 180s default when Chrome hangs
 			});
 
 			return browser;
@@ -51,6 +52,7 @@ export class BrightDataBrowser implements BrowserTransport {
 				// Try connecting with authentication
 				const browser = await puppeteer.connect({
 					browserWSEndpoint: this.websocketEndpoint,
+					protocolTimeout: 60_000, // 60s — fail faster than 180s default when Chrome hangs
 					headers: {
 						Authorization: `Basic ${Buffer.from(`user:${this.password}`).toString('base64')}`,
 					},

@@ -433,7 +433,7 @@ export class Ventriloquist implements INodeType {
 		displayName: 'Ventriloquist',
 		name: 'ventriloquist',
 		icon: 'file:ventriloquist.svg',
-		group: ['browser'],
+		group: ['transform'],
 		version: [1],
 		subtitle: '={{ $parameter.operation }}',
 		description: 'Automate browser interactions using Bright Data, Browserless, or local Chrome',
@@ -476,6 +476,15 @@ export class Ventriloquist implements INodeType {
 				displayOptions: {
 					show: {
 						operation: ['extract', 'search', 'agent'],
+					},
+				},
+			},
+			{
+				name: 'anthropicApi',
+				required: false,
+				displayOptions: {
+					show: {
+						operation: ['matcher'],
 					},
 				},
 			},
@@ -1109,6 +1118,30 @@ export class Ventriloquist implements INodeType {
 			}
 		}
 
+		// Get Anthropic credentials if matcher is using AI matching
+		let anthropicApiKey = "";
+		let anthropicCredentialError = "";
+		if (operation === 'matcher') {
+			// Use first item index for parameter check (matchingMethod is the same across all items)
+			const firstItemIndex = items.length > 0 ? 0 : 0;
+			const matchingMethod = this.getNodeParameter('matchingMethod', firstItemIndex, 'algorithmic') as string;
+			if (matchingMethod === 'aiMatch') {
+				try {
+					const anthropicCredentials = await this.getCredentials('anthropicApi');
+					if (anthropicCredentials && anthropicCredentials.apiKey) {
+						anthropicApiKey = anthropicCredentials.apiKey as string;
+						this.logger.info(`Anthropic credentials loaded successfully (key length: ${anthropicApiKey.length})`);
+					} else {
+						anthropicCredentialError = 'AI Match is enabled but Anthropic API key was not found in credentials — falling back to algorithmic matching';
+						this.logger.error(anthropicCredentialError);
+					}
+				} catch (error) {
+					anthropicCredentialError = `AI Match is enabled but Anthropic credentials failed to load: ${(error as Error).message} — falling back to algorithmic matching`;
+					this.logger.error(anthropicCredentialError);
+				}
+			}
+		}
+
 		// Process all items
 		for (let i = 0; i < items.length; i++) {
 			const operation = this.getNodeParameter('operation', i) as string;
@@ -1151,7 +1184,7 @@ export class Ventriloquist implements INodeType {
 						const session = SessionManager.getSession(sessionId);
 						if (session && session.browser) {
 							try {
-								const activePage = await getActivePage(session.browser, this.logger);
+								const activePage = await getActivePage(session.browser, this.logger, sessionId);
 								if (activePage) {
 									try {
 										const currentUrl = await activePage.url();
@@ -1502,7 +1535,14 @@ export class Ventriloquist implements INodeType {
 						i,
 						workflowId,
 						websocketEndpoint,
+						anthropicApiKey || undefined,
 					);
+
+					// If AI credentials failed, inject warning into output so downstream nodes can detect it
+					if (anthropicCredentialError && result.json) {
+						result.json.aiCredentialError = anthropicCredentialError;
+						result.json.aiSkipped = true;
+					}
 
 					// Add execution duration to the result
 					if (result.json) {

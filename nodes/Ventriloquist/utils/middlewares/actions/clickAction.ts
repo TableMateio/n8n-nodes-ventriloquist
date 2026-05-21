@@ -43,6 +43,64 @@ export interface IClickActionResult {
 }
 
 /**
+ * Pre-click preparation: scroll element into view, validate visibility, detect overlays.
+ * Returns diagnostic info but does NOT prevent the click — caller decides what to do.
+ */
+async function prepareElementForClick(
+	page: Page,
+	selector: string,
+	logger: ILogger,
+	logPrefix: string,
+): Promise<{ ready: boolean; diagnostics: string }> {
+	try {
+		const result = await page.evaluate((sel: string) => {
+			const element = document.querySelector(sel);
+			if (!element) return { ready: false, diagnostics: 'Element not found in DOM' };
+
+			// Scroll into view
+			element.scrollIntoView({ block: 'center', behavior: 'instant' });
+
+			// Check bounding box
+			const rect = element.getBoundingClientRect();
+			if (rect.width === 0 && rect.height === 0) {
+				return { ready: false, diagnostics: 'Element has zero dimensions (not visible)' };
+			}
+
+			// Check CSS visibility
+			const style = window.getComputedStyle(element);
+			if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+				return { ready: false, diagnostics: `Element hidden via CSS (display:${style.display}, visibility:${style.visibility}, opacity:${style.opacity})` };
+			}
+
+			// Check for overlay
+			const centerX = rect.left + rect.width / 2;
+			const centerY = rect.top + rect.height / 2;
+			const topElement = document.elementFromPoint(centerX, centerY);
+			if (topElement && topElement !== element && !element.contains(topElement) && !topElement.closest(sel)) {
+				const tag = topElement.tagName.toLowerCase();
+				const cls = topElement.className ? `.${String(topElement.className).split(' ')[0]}` : '';
+				return { ready: false, diagnostics: `Element blocked by overlay (${tag}${cls} at ${Math.round(centerX)},${Math.round(centerY)})` };
+			}
+
+			return { ready: true, diagnostics: 'Element visible and unblocked' };
+		}, selector);
+
+		if (!result.ready) {
+			logger.warn(`${logPrefix} Pre-click check: ${result.diagnostics}`);
+		}
+
+		// Small pause after scroll to let layout settle
+		await new Promise(resolve => setTimeout(resolve, 150));
+
+		return result;
+	} catch (err) {
+		const msg = `Pre-click check failed: ${(err as Error).message}`;
+		logger.warn(`${logPrefix} ${msg}`);
+		return { ready: false, diagnostics: msg };
+	}
+}
+
+/**
  * Execute a click action using provided page
  * This version accepts page directly and doesn't use SessionManager for page management
  */
@@ -140,6 +198,9 @@ export async function executeClickAction(
 							error: new Error(`Element not found: ${selector}`),
 						};
 					}
+
+					// Pre-click: scroll into view and validate
+					await prepareElementForClick(page, selector, logger, logPrefix);
 
 					// Click the element and wait for the promise
 					logger.info(`${logPrefix} Clicking element: ${selector}...`);
@@ -535,6 +596,9 @@ export async function executeClickAction(
 				}
 
 				try {
+					// Pre-click: scroll into view and validate
+					await prepareElementForClick(page, selector, logger, logPrefix);
+
 					// CRUCIAL CHANGE: Initiate click without awaiting it, to avoid getting stuck if page navigation destroys context
 					logger.info(
 						formatOperationLog(
@@ -774,6 +838,9 @@ export async function executeClickAction(
 				}
 
 				try {
+					// Pre-click: scroll into view and validate
+					await prepareElementForClick(page, selector, logger, logPrefix);
+
 					// Set up navigation promise
 					const navigationPromise = page.waitForNavigation({
 						waitUntil: [waitUntil],
@@ -891,6 +958,9 @@ export async function executeClickAction(
 						error: new Error(`Element not found: ${selector}`),
 					};
 				}
+
+				// Pre-click: scroll into view and validate
+				await prepareElementForClick(page, selector, logger, logPrefix);
 
 				// Just click - no timeout manipulation needed for noWait
 				await element.click(); // Await click here for noWait case

@@ -279,6 +279,13 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
             return [];
         }
 
+        // Enforce maxItems limit on extracted elements
+        const maxItems = config.maxItems || itemElements.length;
+        if (itemElements.length > maxItems) {
+            logger.info(`${logPrefix} Limiting extraction from ${itemElements.length} to ${maxItems} items (maxItems setting)`);
+            itemElements = itemElements.slice(0, maxItems);
+        }
+
         // Extract data from item elements
         const items: IExtractedItem[] = [];
 
@@ -660,7 +667,16 @@ export class EntityMatcherExtractionMiddleware implements IMiddleware<IEntityMat
             text = await page.evaluate(el => el.textContent || '', element);
         }
 
-        return text.trim();
+        // Normalize whitespace: collapse tabs/newlines/spaces into readable form
+        // Preserve single newlines as field separators but collapse runs of whitespace
+        text = text
+            .replace(/\t+/g, ' ')           // tabs → space
+            .replace(/[ \xA0]+/g, ' ')       // consecutive spaces → single space
+            .replace(/ *\n */g, '\n')        // trim spaces around newlines
+            .replace(/\n{3,}/g, '\n\n')      // collapse 3+ newlines to 2
+            .trim();
+
+        return text;
     }
 
     /**

@@ -13,7 +13,7 @@ export class Smarty implements INodeType {
 		displayName: 'Smarty',
 		name: 'smarty',
 		icon: 'file:smarty.svg',
-		group: ['utility'],
+		group: ['transform'],
 		version: [1],
 		subtitle: '={{$parameter["operation"]}}',
 		description: 'Verify a US address using Google Geocoding API with FREE USPS mail safety validation',

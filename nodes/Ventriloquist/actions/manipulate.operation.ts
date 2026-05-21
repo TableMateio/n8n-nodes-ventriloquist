@@ -1333,7 +1333,7 @@ export async function execute(
 			throw new Error(`Invalid or disconnected browser session: ${effectiveSessionId}`);
 		}
 
-		page = await getActivePage(session.browser, logger);
+		page = await getActivePage(session.browser, logger, effectiveSessionId);
 		if (!page) {
 			throw new Error(`No active page found for session: ${effectiveSessionId}`);
 		}

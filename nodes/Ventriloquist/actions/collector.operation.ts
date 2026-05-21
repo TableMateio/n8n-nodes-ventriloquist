@@ -341,7 +341,7 @@ export const description: INodeProperties[] = [
 						type: "string",
 						default: "",
 						placeholder: ".title, .price, span.description",
-						description: "CSS selector for the field within each item",
+						description: "CSS selector for the field within each item. Leave empty to extract from the item element itself (self-referential).",
 					},
 					{
 						displayName: "Extraction Type",
@@ -1114,7 +1114,7 @@ export async function execute(
 		visitedUrls: new Set<string>(),
 		consecutiveEmptyPages: 0,
 		urlRepeatCount: new Map<string, number>(),
-		maxUrlRepeats: 2 // Allow each URL to be seen maximum 2 times before flagging as cycling
+		maxUrlRepeats: 100 // Patched: single-page-app viewers (IQS Image Viewer) keep the same URL across pages; high value avoids false-positive cycling detection
 	};
 
 		// Track filtering statistics
@@ -1386,7 +1386,7 @@ export async function execute(
 			visitedUrls: new Set<string>(),
 			consecutiveEmptyPages: 0,
 			urlRepeatCount: new Map<string, number>(),
-			maxUrlRepeats: 2 // Allow each URL to be seen maximum 2 times before flagging as cycling
+			maxUrlRepeats: 100 // Patched: single-page-app viewers (IQS Image Viewer) keep the same URL across pages; high value avoids false-positive cycling detection
 		};
 
 		// Process pages until we reach the maximum or detect the last page
@@ -1851,7 +1851,7 @@ export async function execute(
 
 				// Safety mechanism: If we see the same URL too many times, stop pagination
 				// This runs regardless of the selected last page detection method
-				const maxSafeRepeats = 3; // Maximum safe repeats of the same URL
+				const maxSafeRepeats = 100; // Patched: single-page-app viewers (IQS) reuse one URL per doc
 				if (newRepeatCount > maxSafeRepeats) {
 					this.logger.warn(
 						formatOperationLog(
@@ -1867,8 +1867,12 @@ export async function execute(
 				}
 
 				// Safety mechanism: If we've visited too many pages compared to unique URLs
-				// This helps catch cycling where the URLs include changing parameters
-				if (paginationState.currentPage > 20 && paginationState.visitedUrls.size < paginationState.currentPage / 4) {
+				// This helps catch cycling where the URLs include changing parameters.
+				// Patched: SKIP this check entirely for single-URL SPA viewers (IQS Image Viewer
+				// keeps the same URL across every page). Without the `visitedUrls.size > 1`
+				// guard, this fired at page 21 of any IQS doc (currentPage > 20 AND 1 < 21/4).
+				// `maxSafeRepeats: 100` below is still the safety net for actual cycling.
+				if (paginationState.visitedUrls.size > 1 && paginationState.currentPage > 20 && paginationState.visitedUrls.size < paginationState.currentPage / 4) {
 					this.logger.warn(
 						formatOperationLog(
 							'Collector',
@@ -2247,11 +2251,11 @@ export async function execute(
 		if (collectedItems.length === 0 && returnItemWhenZeroFound) {
 			let message = 'No items collected';
 			if (!containerFound) {
-				message = 'No items collected - container selector not found on page(s)';
-			} else if (totalItemsExtracted > 0 && totalItemsFiltered > 0) {
-				message = `No items collected - ${totalItemsExtracted} items found but all ${totalItemsFiltered} were filtered out`;
-			} else if (totalItemsExtracted === 0) {
-				message = 'No items collected - container found but no items within';
+				message = 'No items collected - selector not found on page(s)';
+			} else if (totalItemsFiltered > 0 && totalItemsExtracted === 0) {
+				message = `No items collected - ${totalItemsFiltered} items matched selector but all were filtered out by filter criteria`;
+			} else if (totalItemsExtracted === 0 && totalItemsFiltered === 0) {
+				message = 'No items collected - selector found on page but matched 0 elements';
 			}
 
 			// If debug mode wasn't enabled above, we still need to add collection info
@@ -2586,7 +2590,17 @@ async function collectItemsFromPage(
 					const firstItem = itemElements[0];
 					for (const field of selectors.additionalFields) {
 						const fieldSelector = field.selector as string;
-						if (fieldSelector && fieldSelector.trim() !== '') {
+						if (!fieldSelector || fieldSelector.trim() === '') {
+							// Self-referential: empty selector means extract from item itself
+							results.additionalFields.push({
+								name: field.name,
+								selector: '(self)',
+								found: true,
+								count: 1,
+								targetElementTag: firstItem.tagName || null,
+								sampleText: firstItem.textContent?.substring(0, 50) || null
+							});
+						} else {
 							const fieldElements = firstItem.querySelectorAll(fieldSelector);
 							results.additionalFields.push({
 								name: field.name,
@@ -2986,20 +3000,25 @@ async function collectItemsFromPage(
 						const extractionType = field.extractionType as string || 'text';
 						const attributeName = field.attributeName as string;
 
-						if (!fieldName || !fieldSelector || fieldSelector.trim() === '') {
-							debugLog(`Item #${idx}: Skipping field with missing name or empty selector`);
+						if (!fieldName) {
+							debugLog(`Item #${idx}: Skipping field with missing name`);
 							continue;
 						}
 
-						debugLog(`Item #${idx}: Processing field "${fieldName}" with selector "${fieldSelector}"`);
+						debugLog(`Item #${idx}: Processing field "${fieldName}" with selector "${fieldSelector || '(self)'}"`);
 
 						// Find the element
 						let fieldElement = null;
 						try {
+							// Self-referential extraction: empty selector means extract from the item element itself
+							if (!fieldSelector || fieldSelector.trim() === '') {
+								fieldElement = element;
+								debugLog(`Item #${idx}: Using item element itself for field "${fieldName}" (self-referential, no selector)`);
+							}
 							// Check if the selector has nth-of-type/nth-child at the end (like "a:nth-of-type(2)")
 							// vs in the middle (like "td:nth-of-type(3) a")
-							const endNthMatch = fieldSelector.match(/^(.+?):nth-(?:of-type|child)\((\d+)\)$/);
-							if (endNthMatch) {
+							else if (fieldSelector.match(/^(.+?):nth-(?:of-type|child)\((\d+)\)$/)) {
+								const endNthMatch = fieldSelector.match(/^(.+?):nth-(?:of-type|child)\((\d+)\)$/);
 								// Pattern: "a:nth-of-type(2)" - get all "a" elements and take the nth one
 								const baseSelector = endNthMatch[1];
 								const elementIndex = parseInt(endNthMatch[2]) - 1; // Convert to 0-based index
@@ -3296,7 +3315,15 @@ async function collectItemsFromPage(
 								itemValue = '';
 							}
 						} else {
-							debugLog(`Item #${idx}: No selector or fieldName provided for criterion ${criterionIdx}`);
+							// No selector or fieldName — this criterion is empty/unconfigured, skip it
+							debugLog(`Item #${idx}: No selector or fieldName provided for criterion ${criterionIdx}, skipping (auto-pass)`);
+							return true;
+						}
+
+						// If condition is undefined/empty, this criterion is unconfigured — auto-pass
+						if (!condition || condition === 'undefined') {
+							debugLog(`Item #${idx}: Condition is empty/undefined for criterion ${criterionIdx}, skipping (auto-pass)`);
+							return true;
 						}
 
 						let conditionResult = false;

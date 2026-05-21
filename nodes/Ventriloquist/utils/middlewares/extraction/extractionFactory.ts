@@ -55,6 +55,7 @@ export interface IExtractionConfig {
     supportedFormats?: string[];
     downloadTimeout?: number;
     outputFormat?: string;
+    directUrl?: string;
   };
   // Additional properties for Smart extraction
   smartOptions?: {

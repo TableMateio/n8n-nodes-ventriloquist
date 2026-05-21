@@ -87,6 +87,9 @@ export async function executeFillAction(
         humanLike: useHumanDelays,
         pressEnter
       } : {}),
+      ...(fieldType === 'password' ? {
+        clearField,
+      } : {}),
       ...(fieldType === 'checkbox' ? {
         checked
       } : {}),

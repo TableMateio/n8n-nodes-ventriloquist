@@ -1,7 +1,7 @@
 import type { Browser, Page } from "puppeteer-core";
 import type { IDataObject, Logger as ILogger } from "n8n-workflow";
 import { formatOperationLog } from "./resultUtils";
-// import { SessionManager } from './sessionManager';
+import { SessionManager } from './sessionManager';
 
 /**
  * Interface for reconnection result
@@ -478,16 +478,24 @@ export function detectUrlChange(
 
 /**
  * Attempts to find the currently active page within a browser session.
- * Assumes the last page in the list is the active one.
- * Performs basic validation (exists, not closed, responsive).
+ *
+ * If a sessionId is provided, checks the session's tracked page first.
+ * This is critical for Local Chrome where all sessions share the same
+ * Chrome process — without this, browser.pages() returns ALL tabs and
+ * we'd pick a tab from another workflow.
+ *
+ * Falls back to the last non-blank page in browser.pages() if no tracked
+ * page is available (backward-compatible with existing callers).
  *
  * @param browser - The Puppeteer Browser instance.
  * @param logger - Logger instance.
+ * @param sessionId - Optional session ID to look up tracked page.
  * @returns The validated Page object or null if no active page found.
  */
 export async function getActivePage(
 	browser: Browser,
 	logger: ILogger,
+	sessionId?: string,
 ): Promise<Page | null> {
 	const logPrefix = "[sessionUtils][getActivePage]";
 	if (!browser || !browser.isConnected()) {
@@ -495,6 +503,32 @@ export async function getActivePage(
 		return null;
 	}
 
+	// --- Tab isolation: prefer the session's tracked page ---
+	if (sessionId) {
+		const trackedPage = SessionManager.getSessionPage(sessionId);
+		if (trackedPage && !trackedPage.isClosed()) {
+			try {
+				const trackedUrl = trackedPage.url();
+				// Quick responsiveness check
+				await trackedPage.evaluate(() => true, { timeout: 1000 });
+				logger.info(`${logPrefix} Using tracked page for session ${sessionId}: ${trackedUrl}`);
+				return trackedPage;
+			} catch (evalError) {
+				const errorMsg = (evalError as Error).message;
+				// Context destroyed is recoverable — the page object is still valid
+				// after navigation, we just can't evaluate JS temporarily
+				if (errorMsg.includes("context was destroyed") || errorMsg.includes("Target closed")) {
+					logger.info(`${logPrefix} Tracked page context destroyed (likely redirect) — returning it anyway for session ${sessionId}`);
+					return trackedPage;
+				}
+				logger.warn(`${logPrefix} Tracked page for session ${sessionId} not responsive: ${errorMsg}, falling back`);
+			}
+		} else if (trackedPage) {
+			logger.info(`${logPrefix} Tracked page for session ${sessionId} is closed, falling back`);
+		}
+	}
+
+	// --- Fallback: original behavior (pick last non-blank page) ---
 	try {
 		let pages = await browser.pages();
 		logger.info(`${logPrefix} Found ${pages.length} pages initially.`);

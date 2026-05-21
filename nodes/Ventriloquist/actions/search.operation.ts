@@ -33,7 +33,7 @@ export const description: INodeProperties[] = [
 		displayName: "Location",
 		name: "location",
 		type: "string",
-		default: "Norwalk, Connecticut, USA",
+		default: "Norwalk, Connecticut, US",
 		placeholder: "City, State, Country",
 		description: "Location context for the search (affects local results and timezone)",
 		displayOptions: {
@@ -124,7 +124,7 @@ export async function execute(
 
 	// Get operation parameters
 	const searchInstructions = this.getNodeParameter("searchInstructions", index, "") as string;
-	const location = this.getNodeParameter("location", index, "Norwalk, Connecticut, USA") as string;
+	const location = this.getNodeParameter("location", index, "Norwalk, Connecticut, US") as string;
 	const maxTokens = this.getNodeParameter("maxTokens", index, 4000) as number;
 	const temperature = this.getNodeParameter("temperature", index, 0.3) as number;
 	const continueOnFail = this.getNodeParameter("continueOnFail", index, true) as boolean;
@@ -169,7 +169,7 @@ export async function execute(
 					approximate: {
 						city: location.split(',')[0]?.trim() || "Norwalk",
 						region: location.split(',')[1]?.trim() || "Connecticut",
-						country: location.split(',')[2]?.trim() || "USA",
+						country: location.split(',')[2]?.trim() || "US",
 						timezone: "America/New_York", // Default timezone for Connecticut
 					},
 				},

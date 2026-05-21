@@ -1199,6 +1199,53 @@ export async function execute(
 			}
 		}
 
+		// Pre-submit verification: re-check all text fields after a settle delay
+		// Westlaw (and similar sites) have autocomplete/typeahead that can modify
+		// field values AFTER page.type() returns but before the form submits
+		if (submitFormAfterFill) {
+			await new Promise(resolve => setTimeout(resolve, 300)); // let autocomplete settle
+
+			for (const field of formFields) {
+				const fType = (field.fieldType as string) || "text";
+				const fSelector = field.selector as string;
+				const fValue = field.value as string;
+
+				if ((fType === "text" || fType === "textarea" || !fType) && fValue && fSelector) {
+					try {
+						const currentVal = await page.evaluate((sel: string) => {
+							const el = document.querySelector(sel);
+							if (el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+								return el.value;
+							}
+							return null;
+						}, fSelector);
+
+						if (currentVal !== null && currentVal !== fValue) {
+							this.logger.warn(
+								`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Pre-submit verification: "${fSelector}" has "${currentVal}" but expected "${fValue}" — correcting`,
+							);
+							await page.evaluate(
+								(sel: string, val: string) => {
+									const el = document.querySelector(sel);
+									if (el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+										el.value = val;
+										el.dispatchEvent(new Event("input", { bubbles: true }));
+										el.dispatchEvent(new Event("change", { bubbles: true }));
+									}
+								},
+								fSelector,
+								fValue,
+							);
+						}
+					} catch (verifyErr) {
+						this.logger.warn(
+							`[Ventriloquist][${nodeName}#${index}][Form][${nodeId}] Pre-submit verification failed for ${fSelector}: ${(verifyErr as Error).message}`,
+						);
+					}
+				}
+			}
+		}
+
 		// Submit the form if requested
 		let formSubmissionResult: IDataObject = {};
 
@@ -1403,7 +1450,7 @@ export async function execute(
 				// Try to get a fresh page reference
 				const currentSession = SessionManager.getSession(sessionId);
 				if (currentSession?.browser?.isConnected()) {
-					const freshPage = await getActivePage(currentSession.browser, this.logger);
+					const freshPage = await getActivePage(currentSession.browser, this.logger, sessionId);
 					if (freshPage) {
 						page = freshPage;
 						this.logger.info(
@@ -1488,6 +1535,7 @@ export async function execute(
 					pageForScreenshot = await getActivePage(
 						currentSession.browser,
 						this.logger,
+						sessionId,
 					);
 				}
 			}

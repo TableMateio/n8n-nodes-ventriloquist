@@ -95,7 +95,7 @@ export async function executeAction(
 		}
 		browser = session.browser;
 
-		page = await getActivePage(browser, logger);
+		page = await getActivePage(browser, logger, sessionId);
 		if (!page) {
 			throw new Error(`No active page found for session: ${sessionId}`);
 		}

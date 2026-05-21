@@ -183,8 +183,83 @@ export async function fillTextField(
 				});
 			}
 		} else {
-			// Direct input without character delays
-			await page.type(selector, value, { delay: 0 });
+			// Use a small per-character delay to prevent keystroke swallowing.
+			// delay:0 fires all keypress events in one microtask — page handlers
+			// can miss the final keystroke if they process input asynchronously.
+			await page.type(selector, value, { delay: 10 });
+		}
+
+		// Let the browser's event loop settle before reading back the value.
+		// Autocomplete and search-as-you-type handlers often debounce input events,
+		// so reading immediately after page.type() returns can see stale state.
+		await new Promise(resolve => setTimeout(resolve, 150));
+
+		// Verify the typed value matches — page.type() can drop the last character
+		// due to race conditions with page event handlers (autocomplete, search-as-you-type)
+		const actualValue = await page.evaluate((sel: string) => {
+			const el = document.querySelector(sel);
+			if (el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+				return el.value;
+			}
+			return null;
+		}, selector);
+
+		if (actualValue !== null && actualValue !== value) {
+			logger.warn(
+				`Form fill verification failed: expected "${value}" but field contains "${actualValue}" — correcting via DOM`,
+			);
+			await page.evaluate(
+				(sel: string, val: string) => {
+					const el = document.querySelector(sel);
+					if (el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+						// Focus the field first so React/Angular change detection fires
+						el.focus();
+						el.value = val;
+						el.dispatchEvent(new Event("input", { bubbles: true }));
+						el.dispatchEvent(new Event("change", { bubbles: true }));
+					}
+				},
+				selector,
+				value,
+			);
+
+			// Second verification after correction — catch late autocomplete overrides
+			await new Promise(resolve => setTimeout(resolve, 200));
+			const secondCheck = await page.evaluate((sel: string) => {
+				const el = document.querySelector(sel);
+				if (el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+					return el.value;
+				}
+				return null;
+			}, selector);
+
+			if (secondCheck !== null && secondCheck !== value) {
+				logger.warn(
+					`Form fill second check failed: expected "${value}" but field contains "${secondCheck}" — forcing via nativeInputValueSetter`,
+				);
+				// Nuclear option: use the native setter to bypass framework interceptors
+				await page.evaluate(
+					(sel: string, val: string) => {
+						const el = document.querySelector(sel);
+						if (el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+							const nativeSetter = Object.getOwnPropertyDescriptor(
+								window.HTMLInputElement.prototype, 'value',
+							)?.set || Object.getOwnPropertyDescriptor(
+								window.HTMLTextAreaElement.prototype, 'value',
+							)?.set;
+							if (nativeSetter) {
+								nativeSetter.call(el, val);
+							} else {
+								el.value = val;
+							}
+							el.dispatchEvent(new Event('input', { bubbles: true }));
+							el.dispatchEvent(new Event('change', { bubbles: true }));
+						}
+					},
+					selector,
+					value,
+				);
+			}
 		}
 
 		// Press Enter if requested
@@ -881,20 +956,21 @@ export async function handlePasswordField(
 	logger: ILogger,
 ): Promise<boolean> {
 	try {
-		// Clear field if requested
-		if (options.clearField) {
-			logger.debug(`Clearing password field: ${selector}`);
-			await page.evaluate((sel: string) => {
-				const element = document.querySelector(sel);
-				if (element) {
-					(element as HTMLInputElement).value = "";
-				}
-			}, selector);
-		}
-
-		// Type the password (mask in logs for security)
+		// Set password via atomic DOM value setting — bypasses Chrome autofill entirely
+		// (page.type() types character-by-character, giving Chrome time to re-autofill)
 		logger.info(`Filling password field: ${selector} (value masked)`);
-		await page.type(selector, value);
+		await page.evaluate((sel: string, val: string) => {
+			const element = document.querySelector(sel) as HTMLInputElement;
+			if (element) {
+				// Focus the field first
+				element.focus();
+				// Set value atomically — Chrome autofill can't interfere
+				element.value = val;
+				// Dispatch events so the page recognizes the value change
+				element.dispatchEvent(new Event("input", { bubbles: true }));
+				element.dispatchEvent(new Event("change", { bubbles: true }));
+			}
+		}, selector, value);
 
 		// Handle clone field if present (for password toggle visibility)
 		if (options.hasCloneField && options.cloneSelector) {

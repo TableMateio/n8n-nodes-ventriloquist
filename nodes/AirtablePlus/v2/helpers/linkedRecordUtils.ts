@@ -420,7 +420,7 @@ export async function fillEmptyFields(
 		const { allFields } = await getTableSchema.call(this, base, tableId);
 
 		// Create a set of all field names
-		const allFieldNames = new Set(allFields.map(field => field.name as string));
+		const allFieldNames = new Set<string>(allFields.map(field => field.name as string));
 
 		// Fill in missing fields for each record
 		return records.map(record => {

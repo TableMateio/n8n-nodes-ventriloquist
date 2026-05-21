@@ -51,6 +51,7 @@ import {
 import {
 	invokeClaudeMatching,
 	type IClaudeMatchCandidate,
+	type IClaudeFieldMeta,
 	type IClaudeMatchResult,
 } from '../utils/claudeMatchingService';
 
@@ -176,22 +177,22 @@ export const description: INodeProperties[] = [
 		type: "options",
 		options: [
 			{
-				name: "Claude Opus 4",
-				value: "claude-opus-4-20250514",
+				name: "Claude Sonnet 4.6",
+				value: "claude-sonnet-4-6",
+				description: "Best balance of speed and accuracy (recommended)",
+			},
+			{
+				name: "Claude Opus 4.6",
+				value: "claude-opus-4-6",
 				description: "Highest accuracy — best for complex disambiguation",
 			},
 			{
-				name: "Claude Sonnet 4.5",
-				value: "claude-sonnet-4-5-20250514",
-				description: "Best balance of speed and accuracy",
-			},
-			{
-				name: "Claude Haiku 3.5",
-				value: "claude-haiku-3-5-20241022",
+				name: "Claude Haiku 4.5",
+				value: "claude-haiku-4-5-20251001",
 				description: "Fastest and cheapest — good for simple matches",
 			},
 		],
-		default: "claude-opus-4-20250514",
+		default: "claude-sonnet-4-6",
 		description: "Claude model to use for AI matching",
 		displayOptions: {
 			show: {
@@ -1186,6 +1187,20 @@ export async function execute(
 			this.logger.info(`[Matcher] Created default field comparison for all criteria`);
 		}
 
+		// Get matching method (algorithmic or AI) — must be read before deferClickForAI check
+		const matchingMethod = this.getNodeParameter('matchingMethod', index, 'algorithmic') as string;
+
+		// When using AI matching, defer the click until AFTER the AI decision.
+		// The algorithmic matcher clicks immediately during execute(), which
+		// navigates the browser away. If the AI then overrides and says "no match",
+		// the browser is already on the wrong page and the workflow breaks.
+		const deferClickForAI = matchingMethod === 'aiMatch' && !!anthropicApiKey && actionOnMatch === 'click';
+		const effectiveAction = deferClickForAI ? 'none' : actionOnMatch;
+
+		if (deferClickForAI) {
+			this.logger.info('[Matcher][AI] Deferring click action until after AI decision');
+		}
+
 		// Create entity matcher configuration
 		const matcherConfig: IEntityMatcherConfig = {
 			resultsSelector: actualItemSelector,
@@ -1199,11 +1214,11 @@ export async function execute(
 			debugMode: enableDetailedLogs,
 			sourceEntity: sourceEntity || {}, // Pass the actual source entity
 			fieldComparisons: fieldComparisons || [],
-			// Add action configuration
-			action: actionOnMatch as 'click' | 'extract' | 'none',
+			// Add action configuration — suppressed to 'none' when AI match defers click
+			action: effectiveAction as 'click' | 'extract' | 'none',
 			actionSelector: this.getNodeParameter('actionSelector', index, '') as string,
 			waitAfterAction: this.getNodeParameter('waitAfterAction', index, true) as boolean,
-			waitTime: this.getNodeParameter('waitTime', index, 2000) as number,
+			waitTime: this.getNodeParameter('waitTimeout', index, 30000) as number,
 			waitSelector: this.getNodeParameter('waitSelector', index, '') as string
 		};
 
@@ -1234,9 +1249,6 @@ export async function execute(
 			}
 		}
 
-		// Get matching method (algorithmic or AI)
-		const matchingMethod = this.getNodeParameter('matchingMethod', index, 'algorithmic') as string;
-
 		// ── Pre-extract full text for AI matching ──────────────────────────
 		// MUST happen BEFORE entityMatcher.execute() because the matcher's
 		// click action (actionOnMatch: "click") navigates the page away,
@@ -1245,15 +1257,18 @@ export async function execute(
 		let preExtractedTexts: string[] = [];
 		if (matchingMethod === 'aiMatch' && anthropicApiKey) {
 			try {
-				preExtractedTexts = await page.evaluate((selector: string, method: string) => {
+				preExtractedTexts = await page.evaluate((selector: string, method: string, limit: number) => {
 					const container = document.querySelector(selector);
 					if (!container) return [] as string[];
-					const items = method === 'containerItems'
+					let items = method === 'containerItems'
 						? Array.from(container.children)
 						: Array.from(document.querySelectorAll(selector));
+					if (limit > 0 && items.length > limit) {
+						items = items.slice(0, limit);
+					}
 					return items.map(el => (el as HTMLElement).innerText || el.textContent || '');
-				}, actualItemSelector, selectionMethod);
-				this.logger.info(`[Matcher][AI] Pre-extracted full text from ${preExtractedTexts.length} candidates`);
+				}, actualItemSelector, selectionMethod, maxItems);
+				this.logger.info(`[Matcher][AI] Pre-extracted full text from ${preExtractedTexts.length} candidates (maxItems: ${maxItems})`);
 			} catch (preExtractError) {
 				this.logger.warn(`[Matcher][AI] Pre-extraction of full text failed: ${(preExtractError as Error).message} — will use structured fields only`);
 			}
@@ -1286,12 +1301,27 @@ export async function execute(
 				this.logger.warn('[Matcher][AI] AI Match enabled but no Anthropic API key found — falling back to algorithmic matching');
 			} else {
 
-			const aiModel = this.getNodeParameter('aiModel', index, 'claude-opus-4-20250514') as string;
-			const aiMatchContext = this.getNodeParameter('aiMatchContext', index, '') as string;
+			const aiModel = this.getNodeParameter('aiModel', index, 'claude-sonnet-4-6') as string;
+			let aiMatchContext = '';
+			try {
+				aiMatchContext = this.getNodeParameter('aiMatchContext', index, '') as string;
+			} catch (exprError) {
+				// Expression in aiMatchContext may fail if referenced nodes haven't executed
+				// (e.g., on retry loops where upstream nodes are skipped). Continue with
+				// empty context — AI matching still works, just without domain instructions.
+				this.logger.warn(`[Matcher][AI] Failed to resolve aiMatchContext expression: ${(exprError as Error).message} — continuing without match context`);
+			}
 			const comparisons = matchResult.comparisons || [];
 
 			if (comparisons.length > 0) {
-				this.logger.info(`[Matcher][AI] Sending ${comparisons.length} candidates to ${aiModel}`);
+				// Enforce maxItems limit on candidates sent to AI (safety cap)
+				const limitedComparisons = comparisons.length > maxItems
+					? comparisons.slice(0, maxItems)
+					: comparisons;
+				if (comparisons.length > maxItems) {
+					this.logger.info(`[Matcher][AI] Limiting AI candidates from ${comparisons.length} to ${maxItems} (maxItems setting)`);
+				}
+				this.logger.info(`[Matcher][AI] Sending ${limitedComparisons.length} candidates to ${aiModel}`);
 
 				// Use pre-extracted full text (captured before entityMatcher.execute()
 				// navigated the page via click action). Falls back gracefully to
@@ -1299,13 +1329,21 @@ export async function execute(
 				const fullTexts = preExtractedTexts;
 
 				// Build candidate list for Claude
-				const candidates: IClaudeMatchCandidate[] = comparisons.map(
+				const candidates: IClaudeMatchCandidate[] = limitedComparisons.map(
 					(comp: IEntityMatchResult, idx: number) => ({
 						index: comp.index,
 						fields: comp.fields || {},
 						fullText: fullTexts[idx] || '',
 					})
 				);
+
+				// Build field metadata from the parsed fieldComparisons
+				const fieldMeta: IClaudeFieldMeta[] = fieldComparisons.map((fc: any) => ({
+					name: fc.field as string,
+					weight: fc.weight as number,
+					threshold: fc.threshold as number,
+					mustMatch: fc.mustMatch as boolean,
+				}));
 
 				try {
 					aiResult = await invokeClaudeMatching({
@@ -1314,6 +1352,7 @@ export async function execute(
 						referenceEntity: sourceEntity,
 						candidates,
 						matchContext: aiMatchContext || undefined,
+						fieldMeta: fieldMeta.length > 0 ? fieldMeta : undefined,
 						logger: this.logger,
 					});
 
@@ -1342,6 +1381,131 @@ export async function execute(
 							this.logger.info(
 								`[Matcher][AI] Claude selected candidate ${aiResult.matchIndex} (isMatch=true) — ${aiResult.reasoning}`
 							);
+
+							// ── Deferred click: perform the click NOW, after AI confirmed ──
+							if (deferClickForAI) {
+								try {
+									const actionSelector = this.getNodeParameter('actionSelector', index, '') as string;
+									const waitAfterAction = this.getNodeParameter('waitAfterAction', index, true) as boolean;
+									const waitForMode = this.getNodeParameter('waitFor', index, 'element') as string;
+									const waitSelector = this.getNodeParameter('waitSelector', index, '') as string;
+									const waitTime = this.getNodeParameter('waitTimeout', index, 30000) as number;
+
+									const childSelector = selectionMethod === 'containerItems' ? '> *' : '';
+									const fullSelector = childSelector
+										? `${actualItemSelector} ${childSelector}`
+										: actualItemSelector;
+									const elements = await page.$$(fullSelector);
+
+									if (aiResult!.matchIndex! < elements.length) {
+										const element = elements[aiResult!.matchIndex!];
+										let elementToClick = element;
+
+										if (actionSelector) {
+											const sub = await element.$(actionSelector);
+											if (sub) {
+												elementToClick = sub;
+											} else {
+												this.logger.warn(`[Matcher][AI] Action selector "${actionSelector}" not found in element — clicking element directly`);
+											}
+										}
+
+										// Pre-click: scroll parent container into view, then hover to reveal action buttons
+										try {
+											await page.evaluate((el: Element) => {
+												el.scrollIntoView({ block: 'center', behavior: 'instant' });
+											}, element);
+											await new Promise(resolve => setTimeout(resolve, 100));
+
+											// Hover over the parent container — many UIs reveal action buttons on hover
+											await element.hover().catch(() => {});
+											await new Promise(resolve => setTimeout(resolve, 200));
+
+											// Now scroll the actual click target into view
+											if (elementToClick !== element) {
+												await page.evaluate((el: Element) => {
+													el.scrollIntoView({ block: 'center', behavior: 'instant' });
+												}, elementToClick);
+												await new Promise(resolve => setTimeout(resolve, 150));
+											}
+										} catch (scrollErr) {
+											this.logger.warn(`[Matcher][AI] scrollIntoView failed: ${(scrollErr as Error).message}`);
+										}
+
+										// Check if element has visible dimensions before clicking
+										let bbox = await elementToClick.boundingBox();
+
+										// If still zero dimensions after hover, re-query the selector
+										// (some UIs re-render the button element on hover)
+										if ((!bbox || bbox.width === 0 || bbox.height === 0) && actionSelector) {
+											this.logger.info(`[Matcher][AI] Button has zero dimensions after hover — re-querying "${actionSelector}"`);
+											const freshSub = await element.$(actionSelector);
+											if (freshSub) {
+												elementToClick = freshSub;
+												bbox = await elementToClick.boundingBox();
+											}
+										}
+
+										if (bbox && bbox.width > 0 && bbox.height > 0) {
+											await elementToClick.click();
+										} else {
+											// Element still has zero dimensions — dispatch full pointer event sequence.
+											// Simple .click() only fires a click event; some frameworks require
+											// the full mousedown→mouseup→click chain with coordinates.
+											this.logger.warn(`[Matcher][AI] Element has zero dimensions (${bbox ? `${bbox.width}x${bbox.height}` : 'no bbox'}) — dispatching full pointer event sequence`);
+											await page.evaluate((el: Element) => {
+												const htmlEl = el as HTMLElement;
+												const rect = htmlEl.getBoundingClientRect();
+												const x = rect.left + rect.width / 2;
+												const y = rect.top + rect.height / 2;
+												const eventInit = {
+													bubbles: true,
+													cancelable: true,
+													view: window,
+													clientX: x,
+													clientY: y,
+												};
+												htmlEl.dispatchEvent(new PointerEvent('pointerdown', eventInit));
+												htmlEl.dispatchEvent(new MouseEvent('mousedown', eventInit));
+												htmlEl.dispatchEvent(new PointerEvent('pointerup', eventInit));
+												htmlEl.dispatchEvent(new MouseEvent('mouseup', eventInit));
+												htmlEl.dispatchEvent(new MouseEvent('click', eventInit));
+											}, elementToClick);
+										}
+										this.logger.info(`[Matcher][AI] Deferred click performed on candidate ${aiResult!.matchIndex}`);
+										matchResult.actionPerformed = true;
+
+										// Post-click wait — mirrors the original performAction behavior
+										// NOTE: The click already succeeded (actionPerformed=true above).
+										// A wait timeout means the page is loading slowly, NOT that the click failed.
+										if (waitAfterAction) {
+											if (waitForMode === 'element' && waitSelector) {
+												// Wait for a specific element to appear (e.g. report page content)
+												this.logger.info(`[Matcher][AI] Waiting for element: ${waitSelector} (timeout: ${waitTime}ms)`);
+												await page.waitForSelector(waitSelector, { timeout: waitTime }).catch(() => {
+													this.logger.warn(`[Matcher][AI] Wait element timed out (${waitTime}ms) — click succeeded, page still loading`);
+												});
+											} else if (waitForMode === 'navigation') {
+												// Wait for navigation to complete
+												this.logger.info(`[Matcher][AI] Waiting for navigation (timeout: ${waitTime}ms)`);
+												await page.waitForNavigation({ timeout: waitTime }).catch(() => {
+													this.logger.warn('[Matcher][AI] Navigation wait timed out — continuing');
+												});
+											} else {
+												// Fixed delay
+												await new Promise(resolve => setTimeout(resolve, waitTime));
+											}
+										}
+									} else {
+										this.logger.error(`[Matcher][AI] Deferred click failed — index ${aiResult!.matchIndex} out of bounds (${elements.length} elements)`);
+									}
+								} catch (clickError) {
+									this.logger.error(`[Matcher][AI] Deferred click error: ${(clickError as Error).message}`);
+									// Propagate click failure into matchResult so downstream nodes can detect it
+									matchResult.actionPerformed = false;
+									matchResult.actionError = (clickError as Error).message;
+								}
+							}
 						}
 					} else {
 						// Claude says no match — clear any algorithmic selection
@@ -1352,6 +1516,9 @@ export async function execute(
 						matchResult.matches = [];
 						matchResult.success = true; // Operation succeeded, just no match found
 						this.logger.info(`[Matcher][AI] Claude found no match (isMatch=false) — ${aiResult.reasoning}`);
+						if (deferClickForAI) {
+							this.logger.info('[Matcher][AI] No click performed (deferred click skipped — AI rejected all candidates)');
+						}
 					}
 				} catch (aiError) {
 					this.logger.error(`[Matcher][AI] Claude matching failed: ${(aiError as Error).message}`);
@@ -1463,6 +1630,9 @@ export async function execute(
 			// Make it clearer if anything was actually matched
 			matchesFound: (matches.length || 0) > 0,
 			matchSelected: !!matchResult.selectedMatch,
+			// Click action result — propagated so downstream nodes can detect click failures
+			actionPerformed: matchResult.actionPerformed ?? false,
+			actionError: matchResult.actionError || null,
 			// Add standardized formatting to match counts
 			matchCount: matches.length || 0,
 			totalCompared: matchResult.totalCompared || matchResult.comparisons?.length || matchResult.itemsFound || 0,

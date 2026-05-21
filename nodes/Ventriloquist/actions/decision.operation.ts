@@ -3140,19 +3140,40 @@ export async function execute(
 										),
 									);
 
-									const actionResult = await executeAction(
-										sessionId,
-										"click" as ActionType,
-										{
-											selector: actionSelector,
-											// Pass the effective wait strategy to the action utility
-											waitAfterAction: effectiveWaitAfterAction,
-											waitTime,
-											waitSelector: group.waitSelector as string,
-										},
-										actionOptions,
-										this.logger,
-									);
+									// Retry click up to 3 times if it fails
+									const maxClickRetries = 3;
+									let actionResult: any;
+									for (let clickAttempt = 1; clickAttempt <= maxClickRetries; clickAttempt++) {
+										actionResult = await executeAction(
+											sessionId,
+											"click" as ActionType,
+											{
+												selector: actionSelector,
+												waitAfterAction: effectiveWaitAfterAction,
+												waitTime,
+												waitSelector: group.waitSelector as string,
+											},
+											actionOptions,
+											this.logger,
+										);
+
+										if (actionResult.success) {
+											if (clickAttempt > 1) {
+												this.logger.info(formatOperationLog("Decision", nodeName, nodeId, index,
+													`[Decision][clickAction] Click succeeded on retry attempt ${clickAttempt}`));
+											}
+											break;
+										}
+
+										if (clickAttempt < maxClickRetries) {
+											this.logger.warn(formatOperationLog("Decision", nodeName, nodeId, index,
+												`[Decision][clickAction] Click attempt ${clickAttempt}/${maxClickRetries} failed: ${actionResult.error || "unknown"} — retrying in 500ms`));
+											await new Promise(resolve => setTimeout(resolve, 500));
+										} else {
+											this.logger.error(formatOperationLog("Decision", nodeName, nodeId, index,
+												`[Decision][clickAction] Click failed after ${maxClickRetries} attempts: ${actionResult.error || "unknown"}`));
+										}
+									}
 
 									// Log the action result with detail
 									this.logger.info(

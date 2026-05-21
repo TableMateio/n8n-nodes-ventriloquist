@@ -119,6 +119,7 @@ export class BrowserlessTransport implements BrowserTransport {
 			// Create connection options
 			const connectionOptions: puppeteer.ConnectOptions = {
 				browserWSEndpoint: wsUrl,
+				protocolTimeout: 60_000, // 60s — fail faster than 180s default when Chrome hangs
 				defaultViewport: {
 					width: 1280,
 					height: 720,
@@ -243,6 +244,7 @@ export class BrowserlessTransport implements BrowserTransport {
 			// Create connection options
 			const connectOptions: puppeteer.ConnectOptions = {
 				browserWSEndpoint: wsUrl,
+				protocolTimeout: 60_000, // 60s — fail faster than 180s default when Chrome hangs
 				defaultViewport: {
 					width: 1280,
 					height: 720,

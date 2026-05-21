@@ -250,7 +250,7 @@ export async function evaluateCondition(
 
 							// Get the input data for evaluation
 							const inputData = thisNode.getInputData();
-							const currentItem = inputData[index] || {};
+							const currentItem = inputData[index] || { json: {} };
 
 							// Create evaluation context
 							const context = {

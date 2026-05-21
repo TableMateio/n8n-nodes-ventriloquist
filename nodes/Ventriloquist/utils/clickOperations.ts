@@ -46,9 +46,71 @@ export async function robustClick(
       // Add small delay before click operations (helps with timing issues)
       await new Promise(resolve => setTimeout(resolve, 100));
 
+      // Pre-click: scroll element into view and validate visibility
+      const preClickCheck = await page.evaluate((sel) => {
+        const element = document.querySelector(sel);
+        if (!element) return { found: false, error: 'Element not found in DOM' };
+
+        // Scroll into view first
+        element.scrollIntoView({ block: 'center', behavior: 'instant' });
+
+        // Check bounding box — zero dimensions means not visible
+        const rect = element.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) {
+          return { found: true, visible: false, error: 'Element has zero dimensions (not visible)' };
+        }
+
+        // Check if element is in viewport after scroll
+        const inViewport = rect.top >= 0 && rect.top < window.innerHeight;
+        if (!inViewport) {
+          return { found: true, visible: false, error: `Element outside viewport (top: ${rect.top}, viewport: ${window.innerHeight})` };
+        }
+
+        // Check computed visibility
+        const style = window.getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+          return { found: true, visible: false, error: `Element hidden via CSS (display: ${style.display}, visibility: ${style.visibility}, opacity: ${style.opacity})` };
+        }
+
+        // Check for overlay — get element at the click point and see if it's our element or an ancestor
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const topElement = document.elementFromPoint(centerX, centerY);
+        if (topElement && topElement !== element && !element.contains(topElement) && !topElement.closest(sel)) {
+          const overlayTag = topElement.tagName.toLowerCase();
+          const overlayClass = topElement.className ? `.${String(topElement.className).split(' ')[0]}` : '';
+          return {
+            found: true,
+            visible: true,
+            blocked: true,
+            error: `Element blocked by overlay (${overlayTag}${overlayClass} at ${Math.round(centerX)},${Math.round(centerY)})`
+          };
+        }
+
+        return { found: true, visible: true, blocked: false };
+      }, selector);
+
+      if (!preClickCheck?.found) {
+        logWarn(`Pre-click check: element not found — ${preClickCheck?.error}`);
+        throw new Error(preClickCheck?.error || 'Element not found');
+      }
+
+      if (preClickCheck && !preClickCheck.visible) {
+        logWarn(`Pre-click check: element not visible — ${preClickCheck.error}`);
+        // Still attempt click after scrollIntoView, but log the warning
+      }
+
+      if (preClickCheck?.blocked) {
+        logWarn(`Pre-click check: element blocked — ${preClickCheck.error}`);
+        // Still attempt click, but log the overlay info for diagnostics
+      }
+
+      // Small pause after scroll to let layout settle
+      await new Promise(resolve => setTimeout(resolve, 150));
+
       const directSuccess = await page.evaluate((sel) => {
         const element = document.querySelector(sel);
-        if (!element) return { success: false, error: 'Element not found' };
+        if (!element) return { success: false, error: 'Element not found after scroll' };
 
         try {
           // Handle checkbox/radio special case
@@ -80,8 +142,9 @@ export async function robustClick(
             }
           }
 
-          // For other elements, try standard click
+          // For other elements, scroll into view again (in case layout shifted) and click
           if (element instanceof HTMLElement) {
+            element.scrollIntoView({ block: 'center', behavior: 'instant' });
             element.click();
             return { success: true };
           }

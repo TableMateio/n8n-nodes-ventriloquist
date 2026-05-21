@@ -18,6 +18,18 @@ export interface IClaudeMatchCandidate {
 	fullText: string;
 }
 
+/** Field comparison metadata passed from matcher configuration */
+export interface IClaudeFieldMeta {
+	/** Field name (e.g. "Name", "Location") */
+	name: string;
+	/** Importance weight (0-1). Higher = more important for matching */
+	weight: number;
+	/** Minimum similarity threshold (0-1) for this field */
+	threshold: number;
+	/** If true, this field MUST match for the candidate to be considered */
+	mustMatch: boolean;
+}
+
 export interface IClaudeMatchConfig {
 	apiKey: string;
 	model: string;
@@ -27,6 +39,8 @@ export interface IClaudeMatchConfig {
 	candidates: IClaudeMatchCandidate[];
 	/** Optional domain-specific context from the user */
 	matchContext?: string;
+	/** Field comparison metadata (weights, thresholds, mustMatch flags) */
+	fieldMeta?: IClaudeFieldMeta[];
 	logger?: ILogger;
 }
 
@@ -57,27 +71,34 @@ const MAX_TOKENS = 1024;
 
 // ── System Prompt ──────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are evaluating which item from a list of candidates best matches a reference entity.
+const SYSTEM_PROMPT = `You are an entity-matching evaluator. You receive a REFERENCE ENTITY, a list of CANDIDATES, and metadata about which fields matter most.
 
-You will receive:
-1. A REFERENCE ENTITY with known attributes (name, address, etc.)
-2. A list of CANDIDATES with their extracted data
-3. Optional CONTEXT about the domain/use case
+FIELD METADATA:
+Each reference field has a weight (0-1) indicating its importance to the match. Fields marked "MUST MATCH" are hard requirements — if a must-match field clearly contradicts, reject the candidate. Weights tell you how much each field should influence your decision: a field with weight 0.7 matters much more than one with weight 0.3.
 
-Your job:
-- Determine which candidate (if any) is the best match for the reference entity
-- Consider ALL available information: names, addresses, ages, locations, counties, relationships, dates, and any other context clues
-- Make a clear YES or NO decision — either a candidate matches or it does not
-- Identify candidates that appear to be duplicates of each other
-- Flag notable observations (near-miss data, data quality issues)
-- If NO candidate is a good match, say so — do not force a match
+HOW TO EVALUATE:
+- Start with the highest-weighted fields. A strong match on a high-weight field (like an exact name match) is a strong signal even if lower-weight fields diverge.
+- Partial matches count. Nicknames, abbreviations, maiden names, name variations, and slight misspellings are common and should be treated as likely matches, not disqualifications.
+- For names: same last name + same or similar first name + matching geographic area = strong match. Middle initials help distinguish family members (father/son often share a first and last name but differ on middle initial).
+- For addresses: the reference address may be a former address (not necessarily where the person lives now). If a candidate lists the reference address among their known locations, that is a STRONG positive signal. But a non-matching address alone does NOT disqualify a candidate.
+- When only one candidate is present and the name matches well, apply a lower bar — the prior probability of a match is higher with fewer candidates.
+- When multiple candidates appear to be the same person (duplicates), prefer the one with the richest data (most addresses, most detail, most recent information).
 
-You MUST respond with ONLY a JSON object (no markdown, no backticks):
+WHAT NOT TO DO:
+- Do not require every field to match. Use the weights.
+- Do not reject a candidate solely because an address doesn't match — people move.
+- Do not reject based on missing data. A blank field is neutral, not negative.
+
+RESPONSE FORMAT:
+Your entire response must be a single JSON object. Nothing else.
+No introduction. No explanation. No conclusion. No markdown. No backticks. No text before or after the JSON.
+The first character of your response must be { and the last must be }.
+
 {
-  "isMatch": <true if a match was found, false if not>,
-  "matchIndex": <number (0-indexed) or null if no good match>,
-  "reasoning": "<brief explanation of your decision>",
-  "duplicates": [[<indices that are the same entity>], ...],
+  "isMatch": true/false,
+  "matchIndex": <0-indexed number or null>,
+  "reasoning": "<brief explanation>",
+  "duplicates": [[<indices of same entity>], ...],
   "flags": ["<notable observation>", ...]
 }`;
 
@@ -86,10 +107,10 @@ You MUST respond with ONLY a JSON object (no markdown, no backticks):
 export async function invokeClaudeMatching(
 	config: IClaudeMatchConfig,
 ): Promise<IClaudeMatchResult> {
-	const { apiKey, model, referenceEntity, candidates, matchContext, logger } = config;
+	const { apiKey, model, referenceEntity, candidates, matchContext, fieldMeta, logger } = config;
 
 	// Build the user prompt
-	const userPrompt = buildUserPrompt(referenceEntity, candidates, matchContext);
+	const userPrompt = buildUserPrompt(referenceEntity, candidates, matchContext, fieldMeta);
 
 	logger?.info(`[ClaudeMatch] Sending ${candidates.length} candidates to ${model}`);
 	logger?.info(`[ClaudeMatch] Reference entity: ${JSON.stringify(referenceEntity)}`);
@@ -135,8 +156,20 @@ export async function invokeClaudeMatching(
 		}
 		parsed = JSON.parse(jsonText);
 	} catch (parseError) {
-		logger?.error(`[ClaudeMatch] Failed to parse response: ${textBlock.text}`);
-		throw new Error(`Failed to parse Claude response as JSON: ${(parseError as Error).message}`);
+		// Claude sometimes wraps JSON in prose — try to extract the JSON object
+		const jsonMatch = textBlock.text.match(/\{[\s\S]*"isMatch"[\s\S]*\}/);
+		if (jsonMatch) {
+			try {
+				parsed = JSON.parse(jsonMatch[0]);
+				logger?.warn(`[ClaudeMatch] Extracted JSON from prose response`);
+			} catch {
+				logger?.error(`[ClaudeMatch] Failed to parse response: ${textBlock.text.substring(0, 500)}`);
+				throw new Error(`Failed to parse Claude response as JSON: ${(parseError as Error).message}`);
+			}
+		} else {
+			logger?.error(`[ClaudeMatch] Failed to parse response: ${textBlock.text.substring(0, 500)}`);
+			throw new Error(`Failed to parse Claude response as JSON: ${(parseError as Error).message}`);
+		}
 	}
 
 	// Determine boolean match from response
@@ -170,14 +203,41 @@ function buildUserPrompt(
 	referenceEntity: Record<string, string>,
 	candidates: IClaudeMatchCandidate[],
 	matchContext?: string,
+	fieldMeta?: IClaudeFieldMeta[],
 ): string {
 	const lines: string[] = [];
 
-	// Reference entity
+	// Build a lookup of field metadata by name (case-insensitive)
+	const metaByName = new Map<string, IClaudeFieldMeta>();
+	if (fieldMeta && fieldMeta.length > 0) {
+		for (const fm of fieldMeta) {
+			metaByName.set(fm.name.toLowerCase(), fm);
+		}
+	}
+
+	// Reference entity with field importance metadata
 	lines.push('REFERENCE ENTITY (the target to match):');
 	for (const [key, value] of Object.entries(referenceEntity)) {
 		if (value && value.trim()) {
-			lines.push(`  ${key}: ${value.trim()}`);
+			const meta = metaByName.get(key.toLowerCase());
+			if (meta) {
+				const parts: string[] = [`weight: ${meta.weight}`];
+				if (meta.mustMatch) parts.push('MUST MATCH');
+				lines.push(`  ${key}: ${value.trim()}  [${parts.join(', ')}]`);
+			} else {
+				lines.push(`  ${key}: ${value.trim()}`);
+			}
+		}
+	}
+
+	// Summary of field importance if metadata is available
+	if (metaByName.size > 0) {
+		lines.push('');
+		lines.push('FIELD IMPORTANCE SUMMARY:');
+		const sorted = [...metaByName.values()].sort((a, b) => b.weight - a.weight);
+		for (const fm of sorted) {
+			const label = fm.mustMatch ? ' (MUST MATCH)' : '';
+			lines.push(`  ${fm.name}: weight ${fm.weight}${label}`);
 		}
 	}
 	lines.push('');
@@ -191,7 +251,7 @@ function buildUserPrompt(
 		if (Object.keys(candidate.fields).length > 0) {
 			for (const [field, value] of Object.entries(candidate.fields)) {
 				if (value && value.trim()) {
-					lines.push(`  ${field}: ${value.trim()}`);
+					lines.push(`  ${field}: ${value.replace(/\s+/g, ' ').trim()}`);
 				}
 			}
 		}
@@ -199,8 +259,7 @@ function buildUserPrompt(
 		// Full text content (provides additional context beyond the configured fields)
 		if (candidate.fullText && candidate.fullText.trim()) {
 			const cleanedText = candidate.fullText.trim()
-				.replace(/\s+/g, ' ')      // collapse whitespace
-				.substring(0, 1000);         // cap at 1000 chars per candidate
+				.replace(/\s+/g, ' ');      // collapse whitespace
 			lines.push(`  [Full Text]: ${cleanedText}`);
 		}
 		lines.push('');

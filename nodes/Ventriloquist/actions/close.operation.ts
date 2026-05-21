@@ -23,6 +23,11 @@ export const description: INodeProperties[] = [
 		type: "options",
 		options: [
 			{
+				name: "Close Tab",
+				value: "tab",
+				description: "Close the tab for a session without killing the browser (safe for Local Chrome)",
+			},
+			{
 				name: "Close Session",
 				value: "session",
 				description: "Close a specific browser session",
@@ -55,7 +60,7 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["close"],
-				closeMode: ["session"],
+				closeMode: ["session", "tab"],
 			},
 		},
 	},
@@ -143,6 +148,122 @@ export async function execute(
 	) as boolean;
 
 	try {
+		if (closeMode === "tab") {
+			// Close just the tab/page — do NOT kill the browser or the session
+			// Safe for Local Chrome where closing the browser kills Chrome entirely
+			let sessionId = "";
+
+			const explicitSessionId = this.getNodeParameter(
+				"explicitSessionId",
+				index,
+				"",
+			) as string;
+			if (explicitSessionId) {
+				sessionId = explicitSessionId;
+			}
+			if (!sessionId && item.json?.sessionId) {
+				sessionId = item.json.sessionId as string;
+			}
+			if (!sessionId && item.json?.pageId) {
+				sessionId = item.json.pageId as string;
+			}
+
+			if (!sessionId) {
+				throw new Error("No session ID provided or found in input");
+			}
+
+			let currentUrl = "unknown";
+			let currentTitle = "unknown";
+			let tabClosed = false;
+
+			const session = SessionManager.getSession(sessionId);
+			if (session) {
+				// Get the tracked page for this session
+				const page = SessionManager.getSessionPage(sessionId);
+				if (page && !page.isClosed()) {
+					try {
+						currentUrl = await page.url();
+						currentTitle = await page.title();
+						this.logger.info(
+							formatOperationLog(
+								"Close",
+								nodeName,
+								nodeId,
+								index,
+								`Closing tab: URL="${currentUrl}", Title="${currentTitle}"`,
+							),
+						);
+						await page.close();
+						tabClosed = true;
+						this.logger.info(
+							formatOperationLog(
+								"Close",
+								nodeName,
+								nodeId,
+								index,
+								`Tab closed for session ${sessionId}. Browser left running.`,
+							),
+						);
+					} catch (pageError) {
+						this.logger.warn(
+							formatOperationLog(
+								"Close",
+								nodeName,
+								nodeId,
+								index,
+								`Error closing tab: ${(pageError as Error).message}`,
+							),
+						);
+					}
+				} else {
+					this.logger.warn(
+						formatOperationLog(
+							"Close",
+							nodeName,
+							nodeId,
+							index,
+							`No active tab found for session ${sessionId} (already closed or missing)`,
+						),
+					);
+				}
+
+				// Remove the session tracking but do NOT close the browser
+				SessionManager.removeSession(sessionId);
+			} else {
+				this.logger.warn(
+					formatOperationLog(
+						"Close",
+						nodeName,
+						nodeId,
+						index,
+						`Session ${sessionId} not found in session manager`,
+					),
+				);
+			}
+
+			createTimingLog("Close", startTime, this.logger, nodeName, nodeId, index);
+
+			const successResponse = await createSuccessResponse({
+				operation: "close",
+				sessionId,
+				page: null,
+				logger: this.logger,
+				startTime,
+				additionalData: {
+					closeMode,
+					url: currentUrl,
+					title: currentTitle,
+					tabClosed,
+					message: tabClosed
+						? `Tab closed for session ${sessionId}. Browser left running.`
+						: `No tab to close for session ${sessionId}.`,
+				},
+				inputData: outputInputData ? item.json : undefined,
+			});
+
+			return { json: successResponse };
+		}
+
 		if (closeMode === "session") {
 			// Close a specific session
 			let sessionId = "";
