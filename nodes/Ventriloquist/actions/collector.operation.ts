@@ -1107,6 +1107,13 @@ export async function execute(
 	const nodeName = this.getNode().name;
 	const nodeId = this.getNode().id;
 	const collectedItems: ICollectedItem[] = [];
+	// Cross-page URL dedupe. Pagination Next-selectors can match on the last page
+	// (e.g. an arrow icon that stays in the DOM, or a disabled "next" button),
+	// causing the collector to re-walk the same results 3-4× before the safety
+	// circuit breaker trips. Track every collected URL and drop repeats so the
+	// final output is always unique.
+	const seenItemUrls = new Set<string>();
+	let duplicateItemsDropped = 0;
 	let paginationState: IPaginationState = {
 		currentPage: 1,
 		hasNextPage: false,
@@ -1481,9 +1488,38 @@ export async function execute(
 			);
 
 		// Extract items and update statistics
-		const pageItems = pageResult.items;
+		const rawPageItems = pageResult.items;
 		totalItemsExtracted += pageResult.itemsExtracted;
 		totalItemsFiltered += pageResult.itemsFiltered;
+
+		// Drop items whose URL was already collected on a previous page. Items
+		// without a URL pass through unchanged (they are deduped at all only when
+		// they carry a usable url field).
+		const pageItems: ICollectedItem[] = [];
+		let pageDuplicatesDropped = 0;
+		for (const candidate of rawPageItems) {
+			const candidateUrl = typeof candidate.url === 'string' ? candidate.url.trim() : '';
+			if (candidateUrl && seenItemUrls.has(candidateUrl)) {
+				pageDuplicatesDropped += 1;
+				continue;
+			}
+			if (candidateUrl) {
+				seenItemUrls.add(candidateUrl);
+			}
+			pageItems.push(candidate);
+		}
+		duplicateItemsDropped += pageDuplicatesDropped;
+		if (pageDuplicatesDropped > 0) {
+			this.logger.info(
+				formatOperationLog(
+					'Collector',
+					nodeName,
+					nodeId,
+					index,
+					`Dedupe: dropped ${pageDuplicatesDropped} duplicate URL${pageDuplicatesDropped === 1 ? '' : 's'} on page ${paginationState.currentPage} (total dropped so far: ${duplicateItemsDropped})`
+				)
+			);
+		}
 
 		// Track container found status (if any page has containerFound: false, overall is false)
 		if (pageResult.containerFound === false) {
@@ -2054,6 +2090,7 @@ export async function execute(
 					totalItems: collectedItems.length,
 					totalItemsExtracted: totalItemsExtracted,
 					totalItemsFiltered: totalItemsFiltered,
+					duplicateItemsDropped: duplicateItemsDropped,
 					pagesProcessed: paginationState.currentPage,
 					maxPagesAllowed: maxPages,
 					lastPageDetected: paginationState.lastPageDetected,
@@ -2297,7 +2334,7 @@ export async function execute(
 				nodeName,
 				nodeId,
 				index,
-				`Operation completed in ${executionTime}ms, collected ${collectedItems.length} items from ${paginationState.currentPage} pages`
+				`Operation completed in ${executionTime}ms, collected ${collectedItems.length} items from ${paginationState.currentPage} pages (deduped ${duplicateItemsDropped} repeat URL${duplicateItemsDropped === 1 ? '' : 's'})`
 			)
 		);
 
