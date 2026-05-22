@@ -29,6 +29,7 @@ import * as checkOperation from './actions/check.operation';
 import * as manipulateOperation from './actions/manipulate.operation';
 import * as searchOperation from './actions/search.operation';
 import * as agentOperation from './actions/agent.operation';
+import * as cookiesOperation from './actions/cookies.operation';
 
 /**
  * Configure outputs for decision and check operations based on operation type and routing parameters
@@ -607,6 +608,12 @@ export class Ventriloquist implements INodeType {
 						description: 'Remove elements or block events on the page',
 						action: 'Manipulate',
 					},
+					{
+						name: 'Cookies',
+						value: 'cookies',
+						description: 'Get, set, delete, or clear browser session cookies',
+						action: 'Cookies',
+					},
 				],
 				default: 'click',
 			},
@@ -984,6 +991,19 @@ export class Ventriloquist implements INodeType {
 				},
 			})),
 
+			// Properties for 'cookies' operation
+			...cookiesOperation.description.map(property => ({
+				...property,
+				displayOptions: {
+					...(property.displayOptions || {}),
+					show: {
+						...(property.displayOptions?.show || {}),
+						resource: ['navigation'],
+						operation: ['cookies'],
+					},
+				},
+			})),
+
 			// Add additionalOptions to hide custom operations
 			{
 				displayName: 'Additional Options',
@@ -1010,7 +1030,7 @@ export class Ventriloquist implements INodeType {
 			// Try to get the operation parameter even without input items
 			try {
 				const operation = this.getNodeParameter('operation', 0) as string;
-				const operationsRequiringInput = ['extract', 'click', 'form', 'detect', 'authenticate', 'decision', 'manipulate', 'search', 'agent'];
+				const operationsRequiringInput = ['extract', 'click', 'form', 'detect', 'authenticate', 'decision', 'manipulate', 'search', 'agent', 'cookies'];
 
 				if (operationsRequiringInput.includes(operation)) {
 					this.logger.info(`No input data received for operation '${operation}' - this might indicate unnecessary re-execution`);
@@ -1571,6 +1591,22 @@ export class Ventriloquist implements INodeType {
 				} else if (operation === 'manipulate') {
 					// Execute manipulate operation
 					const results = await manipulateOperation.execute.call(
+						this,
+						i,
+					);
+
+					// Add execution duration to the results if not already added
+					for (const result of results) {
+						if (result.json && !result.json.executionDuration) {
+							result.json.executionDuration = Date.now() - startTime;
+						}
+					}
+
+					// Add all items to the return data
+					returnData[0].push(...results);
+				} else if (operation === 'cookies') {
+					// Execute cookies operation
+					const results = await cookiesOperation.execute.call(
 						this,
 						i,
 					);
