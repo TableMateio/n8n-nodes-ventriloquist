@@ -1630,8 +1630,13 @@ export async function execute(
 			// Make it clearer if anything was actually matched
 			matchesFound: (matches.length || 0) > 0,
 			matchSelected: !!matchResult.selectedMatch,
-			// Click action result — propagated so downstream nodes can detect click failures
-			actionPerformed: matchResult.actionPerformed ?? false,
+			// Click action result — propagated so downstream nodes can detect click failures.
+			// Normalize to strict boolean: matcher only has one action (click on selected match),
+			// so the downstream contract is "did the action happen?" — yes/no. If something
+			// upstream (or a deeper code path) sets actionPerformed to an action-type string
+			// like "click" or "none", coerce it: any truthy non-"none"/"error" value = true,
+			// everything else = false. Restores the boolean contract every consumer Switch expects.
+			actionPerformed: !!(matchResult.actionPerformed && matchResult.actionPerformed !== 'none' && matchResult.actionPerformed !== 'error'),
 			actionError: matchResult.actionError || null,
 			// Add standardized formatting to match counts
 			matchCount: matches.length || 0,
