@@ -9,10 +9,19 @@ import { SessionManager } from "../utils/sessionManager";
 import { formatOperationLog } from "../utils/resultUtils";
 import { getActivePage } from "../utils/sessionUtils";
 
-type CookieOp = "getAll" | "get" | "set" | "delete" | "clear";
+type CookieOp = "get" | "set" | "delete";
+type CookieTarget = "all" | "one";
+type MatchBy = "name" | "nameAndDomain";
 
 /**
  * Cookies operation description — UI fields shown when operation = 'cookies'
+ *
+ * Top-level shape:
+ *   Cookie Operation: Get | Set | Delete
+ *     - Get / Delete → Target: All | One
+ *       - All  → optional Domain Filter + optional Name Allowlist
+ *       - One  → Match By: Name | Name + Domain  (+ Cookie Name, +/- Match Domain)
+ *     - Set → Cookies input (JSON array or header string) + Default Domain
  */
 export const description: INodeProperties[] = [
 	{
@@ -35,15 +44,10 @@ export const description: INodeProperties[] = [
 		noDataExpression: true,
 		options: [
 			{
-				name: "Get All",
-				value: "getAll",
-				description:
-					"Read all cookies from the current page. Outputs both a cookies array and a pre-formatted sessionCookie header string ready to drop into an HTTP Cookie header.",
-			},
-			{
-				name: "Get One",
+				name: "Get",
 				value: "get",
-				description: "Read a single cookie by name",
+				description:
+					"Read cookies from the current session. Outputs both a cookies array and a pre-formatted sessionCookie header string ready to drop into an HTTP Cookie header.",
 			},
 			{
 				name: "Set",
@@ -54,16 +58,11 @@ export const description: INodeProperties[] = [
 			{
 				name: "Delete",
 				value: "delete",
-				description: "Delete a single cookie by name",
-			},
-			{
-				name: "Clear",
-				value: "clear",
 				description:
-					"Clear all cookies in the session (optionally restricted by domain or name allowlist)",
+					"Delete cookies from the current session (either all in scope, or a single specific cookie)",
 			},
 		],
-		default: "getAll",
+		default: "get",
 		description: "Which cookie operation to perform",
 		displayOptions: {
 			show: {
@@ -72,14 +71,27 @@ export const description: INodeProperties[] = [
 		},
 	},
 
-	// Cookie Name — for Get One and Delete
+	// Target — All vs One (Get and Delete only)
 	{
-		displayName: "Cookie Name",
-		name: "cookieName",
-		type: "string",
-		default: "",
-		placeholder: "CottSqlAuthCookie",
-		description: "Name of the cookie to operate on",
+		displayName: "Target",
+		name: "cookieTarget",
+		type: "options",
+		noDataExpression: true,
+		options: [
+			{
+				name: "All Cookies",
+				value: "all",
+				description:
+					"Operate on every cookie in the session (optionally narrowed by Domain Filter or Name Allowlist below)",
+			},
+			{
+				name: "One Specific Cookie",
+				value: "one",
+				description: "Operate on a single cookie matched by the rules below",
+			},
+		],
+		default: "all",
+		description: "Whether to operate on all cookies or a single specific cookie",
 		displayOptions: {
 			show: {
 				operation: ["cookies"],
@@ -88,7 +100,8 @@ export const description: INodeProperties[] = [
 		},
 	},
 
-	// Domain Filter — for Get All, Clear, and Delete (optional)
+	// ===== Fields for Target = All =====
+
 	{
 		displayName: "Domain Filter",
 		name: "domainFilter",
@@ -96,16 +109,15 @@ export const description: INodeProperties[] = [
 		default: "",
 		placeholder: ".cotthosting.com",
 		description:
-			"Optional domain to restrict the operation to. Cookies whose domain does not match (substring) are skipped. Leave blank for all domains.",
+			"Optional domain substring filter. Cookies whose domain does not include this string are skipped. Leave blank to include all domains.",
 		displayOptions: {
 			show: {
 				operation: ["cookies"],
-				cookieOperation: ["getAll", "clear", "delete"],
+				cookieOperation: ["get", "delete"],
+				cookieTarget: ["all"],
 			},
 		},
 	},
-
-	// Name Allowlist — for Get All and Clear
 	{
 		displayName: "Cookie Names (Allowlist)",
 		name: "cookieNames",
@@ -117,12 +129,78 @@ export const description: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				operation: ["cookies"],
-				cookieOperation: ["getAll", "clear"],
+				cookieOperation: ["get", "delete"],
+				cookieTarget: ["all"],
 			},
 		},
 	},
 
-	// Cookies Input — for Set
+	// ===== Fields for Target = One =====
+
+	{
+		displayName: "Match By",
+		name: "matchBy",
+		type: "options",
+		noDataExpression: true,
+		options: [
+			{
+				name: "Name",
+				value: "name",
+				description:
+					"Match the first cookie with this name. Use when you know the name and don't need to disambiguate between domains.",
+			},
+			{
+				name: "Name + Domain",
+				value: "nameAndDomain",
+				description:
+					"Match a cookie by both name AND domain. Use when multiple cookies share a name across domains and you need to pick the right one.",
+			},
+		],
+		default: "name",
+		description: "How to identify the single cookie to operate on",
+		displayOptions: {
+			show: {
+				operation: ["cookies"],
+				cookieOperation: ["get", "delete"],
+				cookieTarget: ["one"],
+			},
+		},
+	},
+	{
+		displayName: "Cookie Name",
+		name: "cookieName",
+		type: "string",
+		default: "",
+		placeholder: "CottSqlAuthCookie",
+		description: "Name of the cookie to match",
+		displayOptions: {
+			show: {
+				operation: ["cookies"],
+				cookieOperation: ["get", "delete"],
+				cookieTarget: ["one"],
+			},
+		},
+	},
+	{
+		displayName: "Match Domain",
+		name: "matchDomain",
+		type: "string",
+		default: "",
+		placeholder: ".cotthosting.com",
+		description:
+			"Domain (or domain substring) the matched cookie must belong to",
+		displayOptions: {
+			show: {
+				operation: ["cookies"],
+				cookieOperation: ["get", "delete"],
+				cookieTarget: ["one"],
+				matchBy: ["nameAndDomain"],
+			},
+		},
+	},
+
+	// ===== Fields for Set =====
+
 	{
 		displayName: "Cookies Input Format",
 		name: "cookiesInputFormat",
@@ -185,6 +263,7 @@ export const description: INodeProperties[] = [
 		},
 	},
 
+	// ===== Output toggle (all ops) =====
 	{
 		displayName: "Output Input Data",
 		name: "outputInputData",
@@ -227,6 +306,38 @@ function filterCookies(
 		result = result.filter((c) => allowed.has(c.name));
 	}
 	return result;
+}
+
+/**
+ * Find the single cookie a "Target = One" operation should act on.
+ * Returns null if no match.
+ */
+function findOneCookie(
+	cookies: Cookie[],
+	cookieName: string,
+	matchBy: MatchBy,
+	matchDomain: string,
+): Cookie | null {
+	if (!cookieName) {
+		throw new Error("Cookie Name is required when Target = 'One Specific Cookie'");
+	}
+	if (matchBy === "nameAndDomain") {
+		if (!matchDomain) {
+			throw new Error(
+				"Match Domain is required when Match By = 'Name + Domain'",
+			);
+		}
+		const needle = matchDomain.toLowerCase();
+		return (
+			cookies.find(
+				(c) =>
+					c.name === cookieName &&
+					(c.domain || "").toLowerCase().includes(needle),
+			) || null
+		);
+	}
+	// matchBy === "name"
+	return cookies.find((c) => c.name === cookieName) || null;
 }
 
 /**
@@ -278,7 +389,7 @@ export async function execute(
 	const cookieOperation = this.getNodeParameter(
 		"cookieOperation",
 		index,
-		"getAll",
+		"get",
 	) as CookieOp;
 	const outputInputData = this.getNodeParameter(
 		"outputInputData",
@@ -325,33 +436,89 @@ export async function execute(
 		outputInputData && item?.json ? { ...item.json } : {};
 
 	try {
-		if (cookieOperation === "getAll") {
-			const domainFilter = this.getNodeParameter(
-				"domainFilter",
+		// ---------- GET ----------
+		if (cookieOperation === "get") {
+			const cookieTarget = this.getNodeParameter(
+				"cookieTarget",
 				index,
-				"",
-			) as string;
-			const cookieNamesRaw = this.getNodeParameter(
-				"cookieNames",
-				index,
-				"",
-			) as string;
-			const nameAllowlist = cookieNamesRaw
-				? cookieNamesRaw.split(",").map((s) => s.trim()).filter(Boolean)
-				: [];
-
+				"all",
+			) as CookieTarget;
 			const allCookies = await page.cookies();
-			const filtered = filterCookies(allCookies, domainFilter, nameAllowlist);
-			const sessionCookie = formatCookieHeader(filtered);
 
-			logger.info(
-				formatOperationLog(
-					"Cookies",
-					nodeName,
-					nodeId,
+			if (cookieTarget === "all") {
+				const domainFilter = this.getNodeParameter(
+					"domainFilter",
 					index,
-					`getAll: ${allCookies.length} total, ${filtered.length} after filter`,
-				),
+					"",
+				) as string;
+				const cookieNamesRaw = this.getNodeParameter(
+					"cookieNames",
+					index,
+					"",
+				) as string;
+				const nameAllowlist = cookieNamesRaw
+					? cookieNamesRaw.split(",").map((s) => s.trim()).filter(Boolean)
+					: [];
+
+				const filtered = filterCookies(
+					allCookies,
+					domainFilter,
+					nameAllowlist,
+				);
+				const sessionCookie = formatCookieHeader(filtered);
+
+				logger.info(
+					formatOperationLog(
+						"Cookies",
+						nodeName,
+						nodeId,
+						index,
+						`get all: ${allCookies.length} total, ${filtered.length} after filter`,
+					),
+				);
+
+				return [
+					{
+						json: {
+							...baseJson,
+							sessionId: effectiveSessionId,
+							success: true,
+							operation: "cookies",
+							cookieOperation: "get",
+							cookieTarget: "all",
+							cookies: filtered as unknown as IDataObject[],
+							sessionCookie,
+							cookieCount: filtered.length,
+							totalCookieCount: allCookies.length,
+							executionDuration: Date.now() - startTime,
+						},
+						pairedItem: { item: index },
+					},
+				];
+			}
+
+			// cookieTarget === "one"
+			const cookieName = this.getNodeParameter(
+				"cookieName",
+				index,
+				"",
+			) as string;
+			const matchBy = this.getNodeParameter(
+				"matchBy",
+				index,
+				"name",
+			) as MatchBy;
+			const matchDomain = this.getNodeParameter(
+				"matchDomain",
+				index,
+				"",
+			) as string;
+
+			const found = findOneCookie(
+				allCookies,
+				cookieName,
+				matchBy,
+				matchDomain,
 			);
 
 			return [
@@ -361,39 +528,9 @@ export async function execute(
 						sessionId: effectiveSessionId,
 						success: true,
 						operation: "cookies",
-						cookieOperation: "getAll",
-						cookies: filtered as unknown as IDataObject[],
-						sessionCookie,
-						cookieCount: filtered.length,
-						totalCookieCount: allCookies.length,
-						executionDuration: Date.now() - startTime,
-					},
-					pairedItem: { item: index },
-				},
-			];
-		}
-
-		if (cookieOperation === "get") {
-			const cookieName = this.getNodeParameter(
-				"cookieName",
-				index,
-				"",
-			) as string;
-			if (!cookieName) {
-				throw new Error("Cookie Name is required for the 'Get One' operation");
-			}
-
-			const allCookies = await page.cookies();
-			const found = allCookies.find((c) => c.name === cookieName) || null;
-
-			return [
-				{
-					json: {
-						...baseJson,
-						sessionId: effectiveSessionId,
-						success: true,
-						operation: "cookies",
 						cookieOperation: "get",
+						cookieTarget: "one",
+						matchBy,
 						cookieName,
 						cookie: found as unknown as IDataObject | null,
 						found: found !== null,
@@ -405,6 +542,7 @@ export async function execute(
 			];
 		}
 
+		// ---------- SET ----------
 		if (cookieOperation === "set") {
 			const format = this.getNodeParameter(
 				"cookiesInputFormat",
@@ -508,75 +646,55 @@ export async function execute(
 			];
 		}
 
+		// ---------- DELETE ----------
 		if (cookieOperation === "delete") {
-			const cookieName = this.getNodeParameter(
-				"cookieName",
+			const cookieTarget = this.getNodeParameter(
+				"cookieTarget",
 				index,
-				"",
-			) as string;
-			const domainFilter = this.getNodeParameter(
-				"domainFilter",
-				index,
-				"",
-			) as string;
-			if (!cookieName) {
-				throw new Error("Cookie Name is required for the 'Delete' operation");
-			}
-
+				"all",
+			) as CookieTarget;
 			const allCookies = await page.cookies();
-			const targets = allCookies.filter((c) => {
-				if (c.name !== cookieName) return false;
-				if (
-					domainFilter &&
-					!(c.domain || "").toLowerCase().includes(domainFilter.toLowerCase())
-				) {
-					return false;
-				}
-				return true;
-			});
+			let targets: Cookie[] = [];
 
-			for (const c of targets) {
-				await page.deleteCookie({
-					name: c.name,
-					domain: c.domain,
-					path: c.path,
-				});
+			if (cookieTarget === "all") {
+				const domainFilter = this.getNodeParameter(
+					"domainFilter",
+					index,
+					"",
+				) as string;
+				const cookieNamesRaw = this.getNodeParameter(
+					"cookieNames",
+					index,
+					"",
+				) as string;
+				const nameAllowlist = cookieNamesRaw
+					? cookieNamesRaw.split(",").map((s) => s.trim()).filter(Boolean)
+					: [];
+				targets = filterCookies(allCookies, domainFilter, nameAllowlist);
+			} else {
+				const cookieName = this.getNodeParameter(
+					"cookieName",
+					index,
+					"",
+				) as string;
+				const matchBy = this.getNodeParameter(
+					"matchBy",
+					index,
+					"name",
+				) as MatchBy;
+				const matchDomain = this.getNodeParameter(
+					"matchDomain",
+					index,
+					"",
+				) as string;
+				const found = findOneCookie(
+					allCookies,
+					cookieName,
+					matchBy,
+					matchDomain,
+				);
+				targets = found ? [found] : [];
 			}
-
-			return [
-				{
-					json: {
-						...baseJson,
-						sessionId: effectiveSessionId,
-						success: true,
-						operation: "cookies",
-						cookieOperation: "delete",
-						cookieName,
-						deletedCount: targets.length,
-						executionDuration: Date.now() - startTime,
-					},
-					pairedItem: { item: index },
-				},
-			];
-		}
-
-		if (cookieOperation === "clear") {
-			const domainFilter = this.getNodeParameter(
-				"domainFilter",
-				index,
-				"",
-			) as string;
-			const cookieNamesRaw = this.getNodeParameter(
-				"cookieNames",
-				index,
-				"",
-			) as string;
-			const nameAllowlist = cookieNamesRaw
-				? cookieNamesRaw.split(",").map((s) => s.trim()).filter(Boolean)
-				: [];
-
-			const allCookies = await page.cookies();
-			const targets = filterCookies(allCookies, domainFilter, nameAllowlist);
 
 			for (const c of targets) {
 				await page.deleteCookie({
@@ -592,7 +710,7 @@ export async function execute(
 					nodeName,
 					nodeId,
 					index,
-					`clear: ${targets.length}/${allCookies.length} cookies deleted`,
+					`delete (${cookieTarget}): ${targets.length}/${allCookies.length} cookies deleted`,
 				),
 			);
 
@@ -603,8 +721,9 @@ export async function execute(
 						sessionId: effectiveSessionId,
 						success: true,
 						operation: "cookies",
-						cookieOperation: "clear",
-						clearedCount: targets.length,
+						cookieOperation: "delete",
+						cookieTarget,
+						deletedCount: targets.length,
 						totalCookieCount: allCookies.length,
 						executionDuration: Date.now() - startTime,
 					},
